@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(go run:*)",
+      "Bash(go mod tidy:*)",
+      "Bash(go build:*)",
+      "Bash(./mp:*)",
+      "Bash(/Users/mattjewell/Code/monkeypuzzle/mp init:*)",
+      "Bash(go vet:*)",
+      "Bash(cat:*)",
+      "Bash(go test:*)",
+      "Bash(git add:*)"
+    ]
+  }
+}

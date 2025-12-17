@@ -1,0 +1,42 @@
+# Binaries
+/mp
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary
+*.test
+
+# Output of go coverage
+*.out
+
+# Go workspace
+go.work
+go.work.sum
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local development
+.env
+.env.local
+
+# Monkeypuzzle local config (for testing)
+.monkeypuzzle/
+
+# Temp files
+*.tmp
+*.bak
+
+# Debug
+__debug_bin*
