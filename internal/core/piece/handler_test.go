@@ -333,21 +333,25 @@ func TestHandler_MergePiece_Success(t *testing.T) {
 	// IsMainAhead: merge-base and rev-list
 	mockExec.AddResponse("git", []string{"merge-base", "main", "piece-1"}, []byte("abc123\n"), nil)
 	mockExec.AddResponse("git", []string{"rev-list", "--count", "abc123..main"}, []byte("0\n"), nil) // main is not ahead
-	// Checkout and merge
+	// GetCommitMessages for squash commit message
+	mockExec.AddResponse("git", []string{"log", "--format=%s", "main..piece-1"}, []byte("feat: add feature\nfix: bug fix\n"), nil)
+	// Checkout, squash merge, and commit
 	mockExec.AddResponse("git", []string{"checkout", "main"}, nil, nil)
-	mockExec.AddResponse("git", []string{"merge", "piece-1"}, nil, nil)
+	mockExec.AddResponse("git", []string{"merge", "--squash", "piece-1"}, nil, nil)
+	commitMsg := "feat: piece-1\n\nSquashed commits:\n- feat: add feature\n- fix: bug fix\n"
+	mockExec.AddResponse("git", []string{"commit", "-m", commitMsg}, nil, nil)
 
 	err := handler.MergePiece("/pieces/piece-1", "main")
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
 
-	// Verify git checkout and merge were called
+	// Verify git checkout and squash merge were called
 	if !mockExec.WasCalled("git", "checkout", "main") {
 		t.Error("expected git checkout main to be called")
 	}
-	if !mockExec.WasCalled("git", "merge", "piece-1") {
-		t.Error("expected git merge piece-1 to be called")
+	if !mockExec.WasCalled("git", "merge", "--squash", "piece-1") {
+		t.Error("expected git merge --squash piece-1 to be called")
 	}
 
 	// Verify success message
