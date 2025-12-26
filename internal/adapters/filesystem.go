@@ -29,7 +29,38 @@ func NewOSFS(root string) *OSFS {
 
 func (f *OSFS) path(name string) string {
 	if f.root != "" && !filepath.IsAbs(name) {
-		return filepath.Join(f.root, name)
+		// Clean the path first to resolve any .. components
+		cleaned := filepath.Clean(name)
+
+		// If cleaning resulted in an absolute path, it means the original path
+		// contained enough .. to escape to root (e.g., ../../../etc becomes /etc)
+		// Reject it immediately
+		if filepath.IsAbs(cleaned) {
+			// Path escapes root, return a path that will cause safe failure
+			return filepath.Join(f.root, ".invalid-path-traversal-detected")
+		}
+
+		// Join with root to get the full path
+		fullPath := filepath.Join(f.root, cleaned)
+
+		// Ensure the resolved path is within root to prevent path traversal
+		// Compute relative path from root - if it contains "..", the path escaped
+		rel, err := filepath.Rel(f.root, fullPath)
+		if err != nil {
+			// If we can't compute relative path, the path is invalid
+			// Return a path guaranteed to fail safely (non-existent path within root)
+			return filepath.Join(f.root, ".invalid-path-traversal-detected")
+		}
+
+		// Check if the relative path tries to escape root (starts with ..)
+		// Note: filepath.Rel can return paths starting with .. if the target is outside root
+		if strings.HasPrefix(rel, "..") {
+			// Path escapes root, return a path that will cause safe failure
+			// This path is guaranteed to be within root but won't exist
+			return filepath.Join(f.root, ".invalid-path-traversal-detected")
+		}
+
+		return fullPath
 	}
 	return name
 }
@@ -118,6 +149,10 @@ func (f *MemoryFS) ReadFile(name string) ([]byte, error) {
 	defer f.mu.RUnlock()
 
 	name = filepath.Clean(name)
+	// Normalize path to match how paths are stored (without leading slash for absolute paths)
+	if filepath.IsAbs(name) && len(name) > 1 {
+		name = name[1:] // Remove leading slash to match storage format
+	}
 	file, ok := f.files[name]
 	if !ok {
 		return nil, os.ErrNotExist
@@ -130,6 +165,11 @@ func (f *MemoryFS) Stat(name string) (fs.FileInfo, error) {
 	defer f.mu.RUnlock()
 
 	name = filepath.Clean(name)
+	// Normalize path to match how MkdirAll stores it (without leading slash for absolute paths)
+	// MkdirAll splits by separator and rebuilds, which removes leading slash
+	if filepath.IsAbs(name) && len(name) > 1 {
+		name = name[1:] // Remove leading slash to match MkdirAll storage
+	}
 
 	if file, ok := f.files[name]; ok {
 		return &memFileInfo{name: filepath.Base(name), file: file, isDir: false}, nil
@@ -147,6 +187,10 @@ func (f *MemoryFS) Remove(name string) error {
 	defer f.mu.Unlock()
 
 	name = filepath.Clean(name)
+	// Normalize path to match how paths are stored (without leading slash for absolute paths)
+	if filepath.IsAbs(name) && len(name) > 1 {
+		name = name[1:] // Remove leading slash to match storage format
+	}
 	if _, ok := f.files[name]; ok {
 		delete(f.files, name)
 		return nil
@@ -203,9 +247,9 @@ type memFileInfo struct {
 	isDir bool
 }
 
-func (fi *memFileInfo) Name() string       { return fi.name }
-func (fi *memFileInfo) IsDir() bool        { return fi.isDir }
-func (fi *memFileInfo) Mode() os.FileMode  {
+func (fi *memFileInfo) Name() string { return fi.name }
+func (fi *memFileInfo) IsDir() bool  { return fi.isDir }
+func (fi *memFileInfo) Mode() os.FileMode {
 	if fi.isDir {
 		return os.ModeDir | 0755
 	}
