@@ -136,6 +136,10 @@ func (f *MemoryFS) WriteFile(name string, data []byte, perm os.FileMode) error {
 	defer f.mu.Unlock()
 
 	name = filepath.Clean(name)
+	// Normalize path to match how ReadFile/Stat look up paths
+	if filepath.IsAbs(name) && len(name) > 1 {
+		name = name[1:] // Remove leading slash to match lookup format
+	}
 	f.files[name] = &memFile{
 		data:    append([]byte(nil), data...), // copy data
 		mode:    perm,
@@ -207,6 +211,10 @@ func (f *MemoryFS) Symlink(oldname, newname string) error {
 	defer f.mu.Unlock()
 
 	newname = filepath.Clean(newname)
+	// Normalize path to match how ReadFile/Stat look up paths
+	if filepath.IsAbs(newname) && len(newname) > 1 {
+		newname = newname[1:] // Remove leading slash to match lookup format
+	}
 	// In memory filesystem, we just record the symlink as a file with special content
 	// For testing purposes, we store the target path
 	f.files[newname] = &memFile{
