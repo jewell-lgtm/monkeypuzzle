@@ -3,7 +3,6 @@ package init
 import (
 	"encoding/json"
 	"path/filepath"
-	"strings"
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
 )
@@ -121,31 +120,9 @@ func (h *Handler) Run(input Input) error {
 	return nil
 }
 
-// ensureGitignore adds worktree-specific files to .gitignore
+// ensureGitignore creates .monkeypuzzle/.gitignore with worktree-specific entries
 func (h *Handler) ensureGitignore() error {
-	gitignorePath := ".gitignore"
-	entry := ".monkeypuzzle/current-issue.json"
-
-	// Read existing .gitignore
-	content, err := h.deps.FS.ReadFile(gitignorePath)
-	if err != nil {
-		// File doesn't exist, create new
-		content = []byte{}
-	}
-
-	// Check if entry already exists
-	if strings.Contains(string(content), entry) {
-		return nil
-	}
-
-	// Append entry with comment
-	var newContent []byte
-	if len(content) > 0 && !strings.HasSuffix(string(content), "\n") {
-		newContent = append(content, '\n')
-	} else {
-		newContent = content
-	}
-	newContent = append(newContent, []byte("\n# Monkeypuzzle worktree state\n"+entry+"\n")...)
-
-	return h.deps.FS.WriteFile(gitignorePath, newContent, DefaultFilePerm)
+	gitignorePath := filepath.Join(DirName, ".gitignore")
+	content := "# Worktree-specific state (not tracked)\ncurrent-issue.json\n"
+	return h.deps.FS.WriteFile(gitignorePath, []byte(content), DefaultFilePerm)
 }

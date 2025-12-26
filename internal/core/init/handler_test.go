@@ -227,8 +227,8 @@ func TestValidate(t *testing.T) {
 	}
 }
 
-// Integration test: mp init adds current-issue.json to .gitignore
-func TestHandler_Run_AddsToGitignore(t *testing.T) {
+// Integration test: mp init creates .monkeypuzzle/.gitignore
+func TestHandler_Run_CreatesNestedGitignore(t *testing.T) {
 	fs := adapters.NewMemoryFS()
 	out := adapters.NewBufferOutput()
 	deps := core.Deps{FS: fs, Output: out}
@@ -245,79 +245,14 @@ func TestHandler_Run_AddsToGitignore(t *testing.T) {
 		t.Fatalf("expected no error, got %v", err)
 	}
 
-	// Check .gitignore contains current-issue.json
-	data, err := fs.ReadFile(".gitignore")
+	// Check .monkeypuzzle/.gitignore was created
+	data, err := fs.ReadFile(".monkeypuzzle/.gitignore")
 	if err != nil {
-		t.Fatalf(".gitignore not created: %v", err)
+		t.Fatalf(".monkeypuzzle/.gitignore not created: %v", err)
 	}
 
 	content := string(data)
-	if !strings.Contains(content, ".monkeypuzzle/current-issue.json") {
-		t.Errorf("expected .gitignore to contain current-issue.json entry, got: %s", content)
-	}
-}
-
-func TestHandler_Run_AppendsToExistingGitignore(t *testing.T) {
-	fs := adapters.NewMemoryFS()
-	out := adapters.NewBufferOutput()
-	deps := core.Deps{FS: fs, Output: out}
-
-	// Create existing .gitignore
-	fs.WriteFile(".gitignore", []byte("node_modules/\n.env\n"), 0644)
-
-	handler := initcmd.NewHandler(deps)
-	input := initcmd.Input{
-		Name:          "test-project",
-		IssueProvider: "markdown",
-		PRProvider:    "github",
-	}
-
-	err := handler.Run(input)
-	if err != nil {
-		t.Fatalf("expected no error, got %v", err)
-	}
-
-	data, _ := fs.ReadFile(".gitignore")
-	content := string(data)
-
-	// Should preserve existing content
-	if !strings.Contains(content, "node_modules/") {
-		t.Error("expected existing .gitignore content to be preserved")
-	}
-
-	// Should add new entry
-	if !strings.Contains(content, ".monkeypuzzle/current-issue.json") {
-		t.Error("expected current-issue.json to be added")
-	}
-}
-
-func TestHandler_Run_SkipsIfAlreadyInGitignore(t *testing.T) {
-	fs := adapters.NewMemoryFS()
-	out := adapters.NewBufferOutput()
-	deps := core.Deps{FS: fs, Output: out}
-
-	// Create .gitignore that already has the entry
-	existing := "node_modules/\n.monkeypuzzle/current-issue.json\n"
-	fs.WriteFile(".gitignore", []byte(existing), 0644)
-
-	handler := initcmd.NewHandler(deps)
-	input := initcmd.Input{
-		Name:          "test-project",
-		IssueProvider: "markdown",
-		PRProvider:    "github",
-	}
-
-	err := handler.Run(input)
-	if err != nil {
-		t.Fatalf("expected no error, got %v", err)
-	}
-
-	data, _ := fs.ReadFile(".gitignore")
-	content := string(data)
-
-	// Should not duplicate
-	count := strings.Count(content, ".monkeypuzzle/current-issue.json")
-	if count != 1 {
-		t.Errorf("expected exactly 1 occurrence, got %d in: %s", count, content)
+	if !strings.Contains(content, "current-issue.json") {
+		t.Errorf("expected .gitignore to contain current-issue.json, got: %s", content)
 	}
 }
