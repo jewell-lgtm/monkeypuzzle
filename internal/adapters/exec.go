@@ -45,11 +45,24 @@ func (e *OSExec) RunWithDir(dir, name string, args ...string) ([]byte, error) {
 	return output, nil
 }
 
+// RunWithEnv executes a command in the specified directory with environment variables
+func (e *OSExec) RunWithEnv(dir string, env []string, name string, args ...string) ([]byte, error) {
+	cmd := exec.Command(name, args...)
+	cmd.Dir = dir
+	cmd.Env = env
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return output, err
+	}
+	return output, nil
+}
+
 // CallRecord represents a recorded command call
 type CallRecord struct {
 	Name string
 	Args []string
 	Dir  string
+	Env  []string
 }
 
 // MockExec implements core.Exec for testing, recording calls and returning configurable outputs
@@ -114,6 +127,30 @@ func (m *MockExec) RunWithDir(dir, name string, args ...string) ([]byte, error) 
 		Name: name,
 		Args: args,
 		Dir:  dir,
+	})
+
+	key := strings.Join(args, " ")
+	if resp, ok := m.responses[name][key]; ok {
+		return resp.output, resp.err
+	}
+
+	// Default: return error indicating no response configured
+	return nil, fmt.Errorf("no response configured for %s %s (dir: %s)", name, key, dir)
+}
+
+// RunWithEnv executes a command with environment variables and returns configured output or an error
+func (m *MockExec) RunWithEnv(dir string, env []string, name string, args ...string) ([]byte, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if dir != "" {
+		dir, _ = filepath.Abs(dir)
+	}
+	m.calls = append(m.calls, CallRecord{
+		Name: name,
+		Args: args,
+		Dir:  dir,
+		Env:  env,
 	})
 
 	key := strings.Join(args, " ")

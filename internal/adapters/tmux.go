@@ -36,3 +36,12 @@ func (t *Tmux) AttachSession(sessionName string) error {
 	return nil
 }
 
+// KillSession terminates a tmux session.
+func (t *Tmux) KillSession(sessionName string) error {
+	_, err := t.exec.Run("tmux", "kill-session", "-t", sessionName)
+	if err != nil {
+		return fmt.Errorf("failed to kill tmux session: %w", err)
+	}
+	return nil
+}
+

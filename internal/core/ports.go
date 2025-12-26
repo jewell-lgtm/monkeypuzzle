@@ -41,6 +41,7 @@ type Output interface {
 type Exec interface {
 	Run(name string, args ...string) ([]byte, error)
 	RunWithDir(dir, name string, args ...string) ([]byte, error)
+	RunWithEnv(dir string, env []string, name string, args ...string) ([]byte, error)
 }
 
 // Deps holds all injectable dependencies for handlers

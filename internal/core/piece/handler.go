@@ -19,17 +19,19 @@ const (
 
 // Handler executes piece-related commands
 type Handler struct {
-	deps core.Deps
-	git  *adapters.Git
-	tmux *adapters.Tmux
+	deps  core.Deps
+	git   *adapters.Git
+	tmux  *adapters.Tmux
+	hooks *HookRunner
 }
 
 // NewHandler creates a new piece handler with dependencies
 func NewHandler(deps core.Deps) *Handler {
 	return &Handler{
-		deps: deps,
-		git:  adapters.NewGit(deps.Exec),
-		tmux: adapters.NewTmux(deps.Exec),
+		deps:  deps,
+		git:   adapters.NewGit(deps.Exec),
+		tmux:  adapters.NewTmux(deps.Exec),
+		hooks: NewHookRunner(deps),
 	}
 }
 
@@ -98,18 +100,34 @@ func (h *Handler) CreatePiece(monkeypuzzleSourceDir string, pieceName string) (P
 
 	// Create tmux session
 	sessionName := fmt.Sprintf("mp-piece-%s", pieceName)
+	tmuxCreated := false
 	if err := h.tmux.NewSession(sessionName, worktreePath); err != nil {
 		// If tmux fails, log but don't fail the operation
 		h.deps.Output.Write(core.Message{
 			Type:    core.MsgWarning,
 			Content: fmt.Sprintf("Failed to create tmux session: %v", err),
 		})
+	} else {
+		tmuxCreated = true
 	}
 
 	info := PieceInfo{
 		Name:         pieceName,
 		WorktreePath: worktreePath,
 		SessionName:  sessionName,
+	}
+
+	// Run on-piece-create hook
+	hookCtx := HookContext{
+		PieceName:    pieceName,
+		WorktreePath: worktreePath,
+		RepoRoot:     repoRoot,
+		SessionName:  sessionName,
+	}
+	if err := h.hooks.RunHook(repoRoot, HookOnPieceCreate, hookCtx); err != nil {
+		// Cleanup: remove worktree and tmux session on hook failure
+		h.cleanupPiece(repoRoot, worktreePath, sessionName, tmuxCreated)
+		return PieceInfo{}, fmt.Errorf("on-piece-create hook failed: %w", err)
 	}
 
 	h.deps.Output.Write(core.Message{
@@ -119,6 +137,28 @@ func (h *Handler) CreatePiece(monkeypuzzleSourceDir string, pieceName string) (P
 	})
 
 	return info, nil
+}
+
+// cleanupPiece removes a partially created piece (worktree and tmux session).
+// Errors during cleanup are logged as warnings but not returned.
+func (h *Handler) cleanupPiece(repoRoot, worktreePath, sessionName string, tmuxCreated bool) {
+	// Kill tmux session if it was created
+	if tmuxCreated {
+		if err := h.tmux.KillSession(sessionName); err != nil {
+			h.deps.Output.Write(core.Message{
+				Type:    core.MsgWarning,
+				Content: fmt.Sprintf("Failed to cleanup tmux session: %v", err),
+			})
+		}
+	}
+
+	// Remove worktree
+	if err := h.git.WorktreeRemove(repoRoot, worktreePath); err != nil {
+		h.deps.Output.Write(core.Message{
+			Type:    core.MsgWarning,
+			Content: fmt.Sprintf("Failed to cleanup worktree: %v", err),
+		})
+	}
 }
 
 // Status detects if we're currently in a piece worktree or main repo
@@ -214,9 +254,27 @@ func (h *Handler) UpdatePiece(workDir, mainBranch string) error {
 		return fmt.Errorf("failed to get current branch: %w", err)
 	}
 
+	// Build hook context
+	hookCtx := HookContext{
+		PieceName:    status.PieceName,
+		WorktreePath: status.WorktreePath,
+		RepoRoot:     status.RepoRoot,
+		MainBranch:   mainBranch,
+	}
+
+	// Run before-piece-update hook
+	if err := h.hooks.RunHook(status.RepoRoot, HookBeforePieceUpdate, hookCtx); err != nil {
+		return fmt.Errorf("before-piece-update hook failed: %w", err)
+	}
+
 	// Merge the main branch
 	if err := h.git.Merge(workDir, mainBranch); err != nil {
 		return err
+	}
+
+	// Run after-piece-update hook
+	if err := h.hooks.RunHook(status.RepoRoot, HookAfterPieceUpdate, hookCtx); err != nil {
+		return fmt.Errorf("after-piece-update hook failed: %w", err)
 	}
 
 	h.deps.Output.Write(core.Message{
@@ -252,6 +310,19 @@ func (h *Handler) MergePiece(workDir, mainBranch string) error {
 		return fmt.Errorf("failed to get main repo root: %w", err)
 	}
 
+	// Build hook context
+	hookCtx := HookContext{
+		PieceName:    status.PieceName,
+		WorktreePath: status.WorktreePath,
+		RepoRoot:     mainRepoRoot,
+		MainBranch:   mainBranch,
+	}
+
+	// Run before-piece-merge hook
+	if err := h.hooks.RunHook(mainRepoRoot, HookBeforePieceMerge, hookCtx); err != nil {
+		return fmt.Errorf("before-piece-merge hook failed: %w", err)
+	}
+
 	// Check if main has commits not in the piece branch
 	isAhead, err := h.git.IsMainAhead(mainRepoRoot, mainBranch, pieceBranch)
 	if err != nil {
@@ -270,6 +341,11 @@ func (h *Handler) MergePiece(workDir, mainBranch string) error {
 	// Merge the piece branch into main
 	if err := h.git.Merge(mainRepoRoot, pieceBranch); err != nil {
 		return fmt.Errorf("failed to merge piece branch into main: %w", err)
+	}
+
+	// Run after-piece-merge hook
+	if err := h.hooks.RunHook(mainRepoRoot, HookAfterPieceMerge, hookCtx); err != nil {
+		return fmt.Errorf("after-piece-merge hook failed: %w", err)
 	}
 
 	h.deps.Output.Write(core.Message{

@@ -1,6 +1,7 @@
 package piece_test
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -241,7 +242,7 @@ func TestHandler_CreatePiece_NameAlreadyExists(t *testing.T) {
 	// This matches what getPiecesDir() returns
 	piecesDir := "/test-data/monkeypuzzle/pieces"
 	existingPiecePath := filepath.Join(piecesDir, "existing-piece")
-	
+
 	// Create the pieces directory structure first
 	_ = fs.MkdirAll(piecesDir, 0755)
 	// Then create the existing piece directory
@@ -402,5 +403,174 @@ func TestHandler_MergePiece_NotInWorktree(t *testing.T) {
 
 	if !strings.Contains(err.Error(), "not in a piece worktree") {
 		t.Errorf("expected error about not being in worktree, got: %v", err)
+	}
+}
+
+// ============================================================================
+// Hook Integration Tests
+// ============================================================================
+
+func TestHandler_UpdatePiece_BeforeHookFails(t *testing.T) {
+	fs := adapters.NewMemoryFS()
+	out := adapters.NewBufferOutput()
+	mockExec := adapters.NewMockExec()
+	deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
+	handler := piece.NewHandler(deps)
+
+	// Setup mock responses for worktree status
+	gitDir := "/repo/.git/worktrees/piece-1"
+	worktreePath := "/pieces/piece-1"
+	repoRoot := "/repo"
+	mockExec.AddResponse("git", []string{"rev-parse", "--git-dir"}, []byte(gitDir+"\n"), nil)
+	mockExec.AddResponse("git", []string{"rev-parse", "--show-toplevel"}, []byte(worktreePath+"\n"), nil)
+	mockExec.AddResponse("git", []string{"rev-parse", "--abbrev-ref", "HEAD"}, []byte("piece-1\n"), nil)
+
+	// Create before-piece-update hook that fails
+	hookPath := "repo/.monkeypuzzle/hooks/before-piece-update.sh"
+	_ = fs.MkdirAll("repo/.monkeypuzzle/hooks", 0755)
+	_ = fs.WriteFile(hookPath, []byte("#!/bin/bash\nexit 1"), 0755)
+
+	// Mock the hook to fail
+	fullHookPath := filepath.Join(repoRoot, ".monkeypuzzle/hooks", "before-piece-update.sh")
+	mockExec.AddResponse("bash", []string{fullHookPath}, []byte("hook failed"), fmt.Errorf("exit status 1"))
+
+	err := handler.UpdatePiece("/pieces/piece-1", "main")
+
+	if err == nil {
+		t.Fatal("expected error when before hook fails")
+	}
+
+	if !strings.Contains(err.Error(), "before-piece-update hook failed") {
+		t.Errorf("expected error about hook failure, got: %v", err)
+	}
+
+	// Verify git merge was NOT called (hook should abort before merge)
+	if mockExec.WasCalled("git", "merge", "main") {
+		t.Error("git merge should not be called when before hook fails")
+	}
+}
+
+func TestHandler_MergePiece_BeforeHookFails(t *testing.T) {
+	fs := adapters.NewMemoryFS()
+	out := adapters.NewBufferOutput()
+	mockExec := adapters.NewMockExec()
+	deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
+	handler := piece.NewHandler(deps)
+
+	// Setup mock responses for worktree status
+	gitDir := "/repo/.git/worktrees/piece-1"
+	worktreePath := "/pieces/piece-1"
+	repoRoot := "/repo"
+	mockExec.AddResponse("git", []string{"rev-parse", "--git-dir"}, []byte(gitDir+"\n"), nil)
+	mockExec.AddResponse("git", []string{"rev-parse", "--show-toplevel"}, []byte(worktreePath+"\n"), nil)
+	mockExec.AddResponse("git", []string{"rev-parse", "--abbrev-ref", "HEAD"}, []byte("piece-1\n"), nil)
+
+	// Create before-piece-merge hook that fails
+	hookPath := "repo/.monkeypuzzle/hooks/before-piece-merge.sh"
+	_ = fs.MkdirAll("repo/.monkeypuzzle/hooks", 0755)
+	_ = fs.WriteFile(hookPath, []byte("#!/bin/bash\nexit 1"), 0755)
+
+	// Mock the hook to fail
+	fullHookPath := filepath.Join(repoRoot, ".monkeypuzzle/hooks", "before-piece-merge.sh")
+	mockExec.AddResponse("bash", []string{fullHookPath}, []byte("hook failed"), fmt.Errorf("exit status 1"))
+
+	err := handler.MergePiece("/pieces/piece-1", "main")
+
+	if err == nil {
+		t.Fatal("expected error when before hook fails")
+	}
+
+	if !strings.Contains(err.Error(), "before-piece-merge hook failed") {
+		t.Errorf("expected error about hook failure, got: %v", err)
+	}
+
+	// Verify checkout was NOT called (hook should abort before safety checks)
+	if mockExec.WasCalled("git", "checkout", "main") {
+		t.Error("git checkout should not be called when before hook fails")
+	}
+}
+
+func TestHandler_UpdatePiece_NoHooks_Success(t *testing.T) {
+	fs := adapters.NewMemoryFS()
+	out := adapters.NewBufferOutput()
+	mockExec := adapters.NewMockExec()
+	deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
+	handler := piece.NewHandler(deps)
+
+	// Setup mock responses for worktree status
+	gitDir := "/repo/.git/worktrees/piece-1"
+	worktreePath := "/pieces/piece-1"
+	mockExec.AddResponse("git", []string{"rev-parse", "--git-dir"}, []byte(gitDir+"\n"), nil)
+	mockExec.AddResponse("git", []string{"rev-parse", "--show-toplevel"}, []byte(worktreePath+"\n"), nil)
+
+	// Setup mock responses for update
+	mockExec.AddResponse("git", []string{"rev-parse", "--abbrev-ref", "HEAD"}, []byte("piece-1\n"), nil)
+	mockExec.AddResponse("git", []string{"merge", "main"}, nil, nil)
+
+	// No hooks directory exists - should work fine
+	err := handler.UpdatePiece("/pieces/piece-1", "main")
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	// Verify git merge was called
+	if !mockExec.WasCalled("git", "merge", "main") {
+		t.Error("expected git merge main to be called")
+	}
+}
+
+func TestHandler_CreatePiece_OnPieceCreateHookFails_CleansUp(t *testing.T) {
+	// Set XDG_DATA_HOME to a test directory
+	t.Setenv("XDG_DATA_HOME", "/test-data")
+
+	fs := adapters.NewMemoryFS()
+	out := adapters.NewBufferOutput()
+	mockExec := adapters.NewMockExec()
+	deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
+	handler := piece.NewHandler(deps)
+
+	// Setup mock responses
+	repoRoot := "/repo"
+	pieceName := "test-piece"
+	worktreePath := "/test-data/monkeypuzzle/pieces/" + pieceName
+	sessionName := "mp-piece-" + pieceName
+
+	mockExec.AddResponse("git", []string{"rev-parse", "--show-toplevel"}, []byte(repoRoot+"\n"), nil)
+	mockExec.AddResponse("git", []string{"worktree", "add", worktreePath}, nil, nil)
+	mockExec.AddResponse("tmux", []string{"new-session", "-d", "-s", sessionName, "-c", worktreePath}, nil, nil)
+
+	// Create the hook file so RunHook will try to execute it
+	hookPath := "repo/.monkeypuzzle/hooks/" + piece.HookOnPieceCreate
+	_ = fs.MkdirAll("repo/.monkeypuzzle/hooks", 0755)
+	_ = fs.WriteFile(hookPath, []byte("#!/bin/bash\nexit 1"), 0755)
+
+	// Mock the hook to fail
+	fullHookPath := filepath.Join(repoRoot, ".monkeypuzzle/hooks", piece.HookOnPieceCreate)
+	mockExec.AddResponse("bash", []string{fullHookPath}, []byte("hook failed"), fmt.Errorf("exit status 1"))
+
+	// Mock cleanup commands
+	mockExec.AddResponse("tmux", []string{"kill-session", "-t", sessionName}, nil, nil)
+	mockExec.AddResponse("git", []string{"worktree", "remove", worktreePath}, nil, nil)
+
+	// Execute
+	_, err := handler.CreatePiece("/monkeypuzzle", pieceName)
+
+	// Verify the operation failed
+	if err == nil {
+		t.Fatal("expected error when hook fails")
+	}
+
+	if !strings.Contains(err.Error(), "on-piece-create hook failed") {
+		t.Errorf("expected error about hook failure, got: %v", err)
+	}
+
+	// Verify cleanup was called - tmux kill-session
+	if !mockExec.WasCalled("tmux", "kill-session", "-t", sessionName) {
+		t.Error("expected tmux kill-session to be called for cleanup")
+	}
+
+	// Verify cleanup was called - git worktree remove
+	if !mockExec.WasCalled("git", "worktree", "remove", worktreePath) {
+		t.Error("expected git worktree remove to be called for cleanup")
 	}
 }
