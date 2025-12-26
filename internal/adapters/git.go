@@ -146,3 +146,39 @@ func (g *Git) Checkout(workDir, branch string) error {
 	}
 	return nil
 }
+
+// MergeSquash performs a squash merge of the specified branch into the current branch.
+// This stages all changes but does not commit - caller must commit with desired message.
+func (g *Git) MergeSquash(workDir, branch string) error {
+	_, err := g.exec.RunWithDir(workDir, "git", "merge", "--squash", branch)
+	if err != nil {
+		return fmt.Errorf("failed to squash merge branch %s in %s: %w", branch, workDir, err)
+	}
+	return nil
+}
+
+// Commit creates a commit with the specified message
+func (g *Git) Commit(workDir, message string) error {
+	_, err := g.exec.RunWithDir(workDir, "git", "commit", "-m", message)
+	if err != nil {
+		return fmt.Errorf("failed to commit in %s: %w", workDir, err)
+	}
+	return nil
+}
+
+// GetCommitMessages returns commit messages from branch that are not in base
+func (g *Git) GetCommitMessages(workDir, base, branch string) ([]string, error) {
+	output, err := g.exec.RunWithDir(workDir, "git", "log", "--format=%s", base+".."+branch)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get commit messages: %w", err)
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	var messages []string
+	for _, line := range lines {
+		if line != "" {
+			messages = append(messages, line)
+		}
+	}
+	return messages, nil
+}

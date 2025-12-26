@@ -406,8 +406,8 @@ func (h *Handler) UpdatePiece(workDir, mainBranch string) error {
 	return nil
 }
 
-// MergePiece merges the piece branch back into main
-// Fails if main has commits that are not in the piece worktree
+// MergePiece squash-merges the piece branch back into main as a single commit.
+// Fails if main has commits that are not in the piece worktree.
 func (h *Handler) MergePiece(workDir, mainBranch string) error {
 	// Check if we're in a piece worktree
 	status, err := h.Status(workDir)
@@ -454,14 +454,28 @@ func (h *Handler) MergePiece(workDir, mainBranch string) error {
 		return fmt.Errorf("cannot merge: main branch has commits not in piece worktree. Run 'mp piece update' first")
 	}
 
+	// Get commit messages from piece branch for the squash commit message
+	commitMsgs, err := h.git.GetCommitMessages(mainRepoRoot, mainBranch, pieceBranch)
+	if err != nil {
+		return fmt.Errorf("failed to get commit messages: %w", err)
+	}
+
+	// Build squash commit message
+	commitMsg := h.buildSquashCommitMessage(status.PieceName, commitMsgs)
+
 	// Switch to main branch
 	if err := h.git.Checkout(mainRepoRoot, mainBranch); err != nil {
 		return fmt.Errorf("failed to checkout main branch: %w", err)
 	}
 
-	// Merge the piece branch into main
-	if err := h.git.Merge(mainRepoRoot, pieceBranch); err != nil {
-		return fmt.Errorf("failed to merge piece branch into main: %w", err)
+	// Squash merge the piece branch into main
+	if err := h.git.MergeSquash(mainRepoRoot, pieceBranch); err != nil {
+		return fmt.Errorf("failed to squash merge piece branch into main: %w", err)
+	}
+
+	// Commit the squashed changes
+	if err := h.git.Commit(mainRepoRoot, commitMsg); err != nil {
+		return fmt.Errorf("failed to commit squashed changes: %w", err)
 	}
 
 	// Run after-piece-merge hook
@@ -471,10 +485,25 @@ func (h *Handler) MergePiece(workDir, mainBranch string) error {
 
 	h.deps.Output.Write(core.Message{
 		Type:    core.MsgSuccess,
-		Content: fmt.Sprintf("Merged %s into %s", pieceBranch, mainBranch),
+		Content: fmt.Sprintf("Squash merged %s into %s", pieceBranch, mainBranch),
 	})
 
 	return nil
+}
+
+// buildSquashCommitMessage creates a commit message for squash merge
+func (h *Handler) buildSquashCommitMessage(pieceName string, commitMsgs []string) string {
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("feat: %s\n", pieceName))
+
+	if len(commitMsgs) > 0 {
+		b.WriteString("\nSquashed commits:\n")
+		for _, msg := range commitMsgs {
+			b.WriteString(fmt.Sprintf("- %s\n", msg))
+		}
+	}
+
+	return b.String()
 }
 
 // getPiecesDir returns the directory for storing pieces, using XDG_DATA_HOME
