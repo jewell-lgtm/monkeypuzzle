@@ -4,10 +4,16 @@
 
 ### Prerequisites
 
-- Go 1.24+
+- Go 1.24+ (use [asdf](https://asdf-vm.com/) for version management)
 - Git
 
 ### Clone and build
+
+```bash
+# Install Go via asdf (recommended)
+asdf plugin add golang
+asdf install
+```
 
 ```bash
 git clone https://github.com/jewell-lgtm/monkeypuzzle.git
