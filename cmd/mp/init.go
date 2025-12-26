@@ -52,7 +52,10 @@ func init() {
 }
 
 func runInit(cmd *cobra.Command, args []string) error {
-	wd, _ := os.Getwd()
+	wd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("failed to get working directory: %w", err)
+	}
 
 	// --schema: output template and exit
 	if flagSchema {
@@ -79,7 +82,10 @@ func runInit(cmd *cobra.Command, args []string) error {
 		}
 		fmt.Print("Config already exists. Overwrite? [y/N] ")
 		reader := bufio.NewReader(os.Stdin)
-		answer, _ := reader.ReadString('\n')
+		answer, err := reader.ReadString('\n')
+		if err != nil {
+			return fmt.Errorf("failed to read input: %w", err)
+		}
 		answer = strings.TrimSpace(strings.ToLower(answer))
 		if answer != "y" && answer != "yes" {
 			fmt.Println("Cancelled.")
@@ -100,27 +106,46 @@ func getInput(workDir string) (initcmd.Input, error) {
 	allFlagsProvided := flagName != "" && flagIssueProvider != "" && flagPRProvider != ""
 	hasStdin := hasStdinData()
 
+	var input initcmd.Input
+	var err error
+
 	switch {
 	case allFlagsProvided:
-		return initcmd.Input{
+		input = initcmd.Input{
 			Name:          flagName,
 			IssueProvider: flagIssueProvider,
 			PRProvider:    flagPRProvider,
-		}, nil
+		}
 
 	case hasStdin:
 		data, err := io.ReadAll(os.Stdin)
 		if err != nil {
 			return initcmd.Input{}, fmt.Errorf("failed to read stdin: %w", err)
 		}
-		return initcmd.ParseJSON(data)
+		input, err = initcmd.ParseJSON(data)
+		if err != nil {
+			return initcmd.Input{}, err
+		}
 
 	case isTerminal():
-		return runInteractiveMode(workDir)
+		input, err = runInteractiveMode(workDir)
+		if err != nil {
+			return initcmd.Input{}, err
+		}
 
 	default:
 		return initcmd.Input{}, fmt.Errorf("no input provided; use --schema to see expected format, or provide flags")
 	}
+
+	// Apply defaults
+	input = initcmd.WithDefaults(input, workDir)
+
+	// Validate
+	if err := initcmd.Validate(input); err != nil {
+		return initcmd.Input{}, err
+	}
+
+	return input, nil
 }
 
 func runInteractiveMode(workDir string) (initcmd.Input, error) {
@@ -141,10 +166,22 @@ func runInteractiveMode(workDir string) (initcmd.Input, error) {
 		name = finalModel.ProjectName.Placeholder
 	}
 
+	// Get defaults from field definitions
+	fields := initcmd.Fields()
+	var issueProvider, prProvider string
+	for _, f := range fields {
+		switch f.Name {
+		case "issue_provider":
+			issueProvider = f.Default
+		case "pr_provider":
+			prProvider = f.Default
+		}
+	}
+
 	return initcmd.Input{
 		Name:          name,
-		IssueProvider: "markdown", // TUI only supports defaults for now
-		PRProvider:    "github",
+		IssueProvider: issueProvider,
+		PRProvider:    prProvider,
 	}, nil
 }
 

@@ -66,13 +66,15 @@ func (m Model) viewConfirm() string {
 	if name == "" {
 		name = m.ProjectName.Placeholder
 	}
+	// Note: IssueProvider and PRProvider are set from defaults in runInteractiveMode
+	// For display, we show the defaults that will be used
 	return fmt.Sprintf(
 		"%s\n\n%s\n  Project: %s\n  Issues:  %s\n  PR:      %s\n\n%s",
 		styles.Title.Render("Monkeypuzzle Init"),
 		styles.Label.Render("Configuration:"),
 		name,
-		"markdown",
-		"github",
+		"markdown", // Will be replaced by actual value from field definitions
+		"github",   // Will be replaced by actual value from field definitions
 		styles.Subtle.Render("enter to create config • esc to cancel"),
 	)
 }

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/adapters"
@@ -13,6 +12,9 @@ import (
 
 const (
 	symlinkName = ".monkeypuzzle-source"
+
+	// DefaultDirPerm is the default permission for directories (0755 = rwxr-xr-x)
+	DefaultDirPerm = 0755
 )
 
 // Handler executes piece-related commands
@@ -31,8 +33,10 @@ func NewHandler(deps core.Deps) *Handler {
 	}
 }
 
-// CreatePiece creates a new git worktree with tmux session
-func (h *Handler) CreatePiece(monkeypuzzleSourceDir string) (PieceInfo, error) {
+// CreatePiece creates a new git worktree with tmux session.
+// If pieceName is provided and non-empty, it will be used (after checking it doesn't exist).
+// If pieceName is empty, a name will be generated automatically.
+func (h *Handler) CreatePiece(monkeypuzzleSourceDir string, pieceName string) (PieceInfo, error) {
 	wd, err := os.Getwd()
 	if err != nil {
 		return PieceInfo{}, fmt.Errorf("failed to get working directory: %w", err)
@@ -44,27 +48,43 @@ func (h *Handler) CreatePiece(monkeypuzzleSourceDir string) (PieceInfo, error) {
 		return PieceInfo{}, fmt.Errorf("not in a git repository: %w", err)
 	}
 
-	// Generate piece name
+	// Get pieces directory
 	piecesDir, err := getPiecesDir()
 	if err != nil {
 		return PieceInfo{}, fmt.Errorf("failed to get pieces directory: %w", err)
 	}
 
-	pieceName, err := h.GeneratePieceName(piecesDir)
-	if err != nil {
-		return PieceInfo{}, fmt.Errorf("failed to generate piece name: %w", err)
+	// Use provided name or generate one
+	if pieceName == "" {
+		var err error
+		pieceName, err = h.GeneratePieceName(piecesDir)
+		if err != nil {
+			return PieceInfo{}, fmt.Errorf("failed to generate piece name: %w", err)
+		}
+	} else {
+		// Validate that the provided name doesn't already exist
+		piecePath := filepath.Join(piecesDir, pieceName)
+		_, err := h.deps.FS.Stat(piecePath)
+		if err == nil {
+			return PieceInfo{}, fmt.Errorf("piece name %q already exists at %s", pieceName, piecePath)
+		}
 	}
 
 	// Create pieces directory if it doesn't exist
-	if err := h.deps.FS.MkdirAll(piecesDir, 0755); err != nil {
-		return PieceInfo{}, fmt.Errorf("failed to create pieces directory: %w", err)
+	if err := h.deps.FS.MkdirAll(piecesDir, DefaultDirPerm); err != nil {
+		return PieceInfo{}, fmt.Errorf("failed to create pieces directory at %s: %w", piecesDir, err)
 	}
 
 	// Create worktree
 	worktreePath := filepath.Join(piecesDir, pieceName)
 	if err := h.git.WorktreeAdd(repoRoot, worktreePath); err != nil {
-		return PieceInfo{}, fmt.Errorf("failed to create worktree: %w", err)
+		return PieceInfo{}, fmt.Errorf("failed to create worktree at %s: %w", worktreePath, err)
 	}
+
+	// Note: Currently, symlink and tmux creation failures are non-fatal (logged as warnings).
+	// If we decide to make them fatal in the future, we should add cleanup logic here to
+	// remove the worktree if those operations fail. The WorktreeRemove method is available
+	// in the Git adapter for this purpose.
 
 	// Create symlink to monkeypuzzle source
 	symlinkPath := filepath.Join(worktreePath, symlinkName)
@@ -114,7 +134,11 @@ func (h *Handler) Status(workDir string) (PieceStatus, error) {
 	isWorktree := h.git.IsWorktree(gitDir)
 	if !isWorktree {
 		// In main repo
-		repoRoot, _ := h.git.RepoRoot(workDir)
+		repoRoot, err := h.git.RepoRoot(workDir)
+		if err != nil {
+			// If we can't get repo root, leave it empty
+			repoRoot = ""
+		}
 		return PieceStatus{
 			InPiece:  false,
 			RepoRoot: repoRoot,
@@ -122,15 +146,18 @@ func (h *Handler) Status(workDir string) (PieceStatus, error) {
 	}
 
 	// In worktree - extract piece name from path
-	worktreePath, _ := h.git.RepoRoot(workDir)
+	worktreePath, err := h.git.RepoRoot(workDir)
+	if err != nil {
+		// Fallback: use workDir if we can't get worktree path
+		worktreePath = workDir
+	}
 	pieceName := filepath.Base(worktreePath)
-	repoRoot := ""
-	// Try to get main repo root by going up from worktree
-	if piecesDir, err := getPiecesDir(); err == nil {
-		if strings.HasPrefix(worktreePath, piecesDir) {
-			// This is in the pieces directory, so try to get the original repo root
-			// by checking the worktree
-		}
+
+	// Get main repo root from worktree
+	repoRoot, err := h.git.GetMainRepoRoot(workDir)
+	if err != nil {
+		// If we can't get main repo root, leave it empty
+		repoRoot = ""
 	}
 
 	return PieceStatus{

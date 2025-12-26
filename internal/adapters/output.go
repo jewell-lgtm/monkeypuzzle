@@ -60,7 +60,10 @@ func (o *JSONOutput) Write(msg core.Message) {
 	if msg.Data != nil {
 		out["data"] = msg.Data
 	}
-	o.enc.Encode(out)
+	if err := o.enc.Encode(out); err != nil {
+		// Fallback to simple error message if encoding fails
+		fmt.Fprintf(o.w, "{\"error\":\"failed to encode message\",\"message\":%q}\n", msg.Content)
+	}
 }
 
 // BufferOutput collects messages for testing

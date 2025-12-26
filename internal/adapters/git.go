@@ -22,12 +22,22 @@ func NewGit(exec core.Exec) *Git {
 func (g *Git) WorktreeAdd(repoRoot, worktreePath string) error {
 	_, err := g.exec.RunWithDir(repoRoot, "git", "worktree", "add", worktreePath)
 	if err != nil {
-		return fmt.Errorf("failed to create worktree: %w", err)
+		return fmt.Errorf("failed to create worktree at %s from repo %s: %w", worktreePath, repoRoot, err)
 	}
 	return nil
 }
 
-// RevParseGitDir runs git rev-parse --git-dir to get the git directory
+// WorktreeRemove removes a git worktree
+func (g *Git) WorktreeRemove(repoRoot, worktreePath string) error {
+	_, err := g.exec.RunWithDir(repoRoot, "git", "worktree", "remove", worktreePath)
+	if err != nil {
+		return fmt.Errorf("failed to remove worktree at %s from repo %s: %w", worktreePath, repoRoot, err)
+	}
+	return nil
+}
+
+// RevParseGitDir runs git rev-parse --git-dir to get the git directory.
+// Returns the absolute path to the .git directory or worktree gitdir.
 func (g *Git) RevParseGitDir(workDir string) (string, error) {
 	output, err := g.exec.RunWithDir(workDir, "git", "rev-parse", "--git-dir")
 	if err != nil {
@@ -51,7 +61,8 @@ func (g *Git) IsWorktree(gitDir string) bool {
 	return strings.Contains(absGitDir, "worktrees") || filepath.Base(filepath.Dir(absGitDir)) == "worktrees"
 }
 
-// RepoRoot runs git rev-parse --show-toplevel to get the repository root
+// RepoRoot runs git rev-parse --show-toplevel to get the repository root.
+// Returns the absolute path to the top-level directory of the git repository.
 func (g *Git) RepoRoot(workDir string) (string, error) {
 	output, err := g.exec.RunWithDir(workDir, "git", "rev-parse", "--show-toplevel")
 	if err != nil {
@@ -62,7 +73,8 @@ func (g *Git) RepoRoot(workDir string) (string, error) {
 	return repoRoot, nil
 }
 
-// CurrentBranch gets the current branch name
+// CurrentBranch gets the current branch name.
+// Returns the short name of the current branch (e.g., "main", "piece-1").
 func (g *Git) CurrentBranch(workDir string) (string, error) {
 	output, err := g.exec.RunWithDir(workDir, "git", "rev-parse", "--abbrev-ref", "HEAD")
 	if err != nil {
@@ -76,7 +88,7 @@ func (g *Git) CurrentBranch(workDir string) (string, error) {
 func (g *Git) Merge(workDir, branch string) error {
 	_, err := g.exec.RunWithDir(workDir, "git", "merge", branch)
 	if err != nil {
-		return fmt.Errorf("failed to merge branch %s: %w", branch, err)
+		return fmt.Errorf("failed to merge branch %s in %s: %w", branch, workDir, err)
 	}
 	return nil
 }
@@ -102,8 +114,9 @@ func (g *Git) IsMainAhead(workDir, mainBranch, pieceBranch string) (bool, error)
 	return count != "0", nil
 }
 
-// GetMainRepoRoot gets the main repository root from a worktree
-// For worktrees, we need to find the main repo by looking at the gitdir
+// GetMainRepoRoot gets the main repository root from a worktree.
+// For worktrees, this finds the main repo by examining the gitdir structure.
+// For regular repositories, it returns the same as RepoRoot.
 func (g *Git) GetMainRepoRoot(workDir string) (string, error) {
 	gitDir, err := g.RevParseGitDir(workDir)
 	if err != nil {
@@ -129,7 +142,7 @@ func (g *Git) GetMainRepoRoot(workDir string) (string, error) {
 func (g *Git) Checkout(workDir, branch string) error {
 	_, err := g.exec.RunWithDir(workDir, "git", "checkout", branch)
 	if err != nil {
-		return fmt.Errorf("failed to checkout branch %s: %w", branch, err)
+		return fmt.Errorf("failed to checkout branch %s in %s: %w", branch, workDir, err)
 	}
 	return nil
 }

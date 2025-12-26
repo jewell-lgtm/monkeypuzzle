@@ -16,7 +16,8 @@ func NewTmux(exec core.Exec) *Tmux {
 	return &Tmux{exec: exec}
 }
 
-// NewSession creates a new detached tmux session in the specified directory
+// NewSession creates a new detached tmux session in the specified directory.
+// The session is created in detached mode (-d) so it can be attached to later.
 func (t *Tmux) NewSession(sessionName, workDir string) error {
 	_, err := t.exec.Run("tmux", "new-session", "-d", "-s", sessionName, "-c", workDir)
 	if err != nil {
@@ -25,7 +26,8 @@ func (t *Tmux) NewSession(sessionName, workDir string) error {
 	return nil
 }
 
-// AttachSession attaches to an existing tmux session
+// AttachSession attaches to an existing tmux session.
+// This will block until the session is detached or terminated.
 func (t *Tmux) AttachSession(sessionName string) error {
 	_, err := t.exec.Run("tmux", "attach-session", "-t", sessionName)
 	if err != nil {

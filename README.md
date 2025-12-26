@@ -31,6 +31,8 @@ mp init --schema
 
 ## Commands
 
+See [docs/commands.md](docs/commands.md) for full reference.
+
 ### `mp init`
 
 Initialize monkeypuzzle in current directory. Creates `.monkeypuzzle/` directory with configuration.
@@ -63,6 +65,27 @@ Initialize monkeypuzzle in current directory. Creates `.monkeypuzzle/` directory
   "pr_provider": "github"
 }
 ```
+
+### `mp piece`
+
+Manage isolated git worktrees ("pieces") for atomic feature development.
+
+| Command | Description |
+|---------|-------------|
+| `mp piece` | Show current piece status |
+| `mp piece new` | Create new piece (worktree + tmux session) |
+| `mp piece update` | Merge main into current piece |
+| `mp piece merge` | Merge piece back to main |
+
+**Workflow:**
+```bash
+mp piece new                  # Create isolated worktree
+# ... work on feature ...
+mp piece update               # Sync with main if needed
+mp piece merge                # Merge back to main when done
+```
+
+See [docs/workflow.md](docs/workflow.md) for full stacked branch workflow.
 
 ## Configuration
 
@@ -111,27 +134,14 @@ Config file: `.monkeypuzzle/monkeypuzzle.json`
 
 ## Architecture
 
-Monkeypuzzle uses a clean architecture with dependency injection for testability:
+Clean architecture with dependency injection. See [docs/architecture.md](docs/architecture.md) for details.
 
 ```
 internal/
-├── core/
-│   ├── ports.go           # Interfaces (FS, Output)
-│   └── init/
-│       ├── input.go       # Input validation + schema generation
-│       ├── handler.go     # Business logic
-│       └── handler_test.go
-├── adapters/
-│   ├── filesystem.go      # OS + Memory filesystem implementations
-│   └── output.go          # Text + JSON + Buffer output implementations
-└── tui/init/              # Bubble Tea interactive UI
+├── core/          # Business logic + interfaces (ports)
+├── adapters/      # FS, Output, Exec, Git, Tmux implementations
+└── tui/           # Bubble Tea interactive UI
 ```
-
-**Key patterns:**
-
-- **Single source of truth**: Field definitions drive both validation and schema generation
-- **Dependency injection**: Handlers accept `core.Deps{FS, Output}` for testability
-- **Adapter pattern**: Swap implementations (real FS vs memory FS) without changing business logic
 
 ## Development
 
@@ -180,4 +190,4 @@ MIT License - see [LICENSE](LICENSE)
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md)
+See [docs/contributing.md](docs/contributing.md)

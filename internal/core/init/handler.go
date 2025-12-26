@@ -10,6 +10,11 @@ import (
 const (
 	DirName    = ".monkeypuzzle"
 	ConfigFile = "monkeypuzzle.json"
+	
+	// DefaultDirPerm is the default permission for directories (0755 = rwxr-xr-x)
+	DefaultDirPerm = 0755
+	// DefaultFilePerm is the default permission for files (0644 = rw-r--r--)
+	DefaultFilePerm = 0644
 )
 
 // Config is the output config structure written to monkeypuzzle.json
@@ -52,19 +57,22 @@ func (h *Handler) ConfigExists() bool {
 
 // Run executes the init command with validated input
 func (h *Handler) Run(input Input) error {
+	// Sanitize project name (remove invalid filesystem characters)
+	input.Name = SanitizeProjectName(input.Name)
+	
 	// Validate input
 	if err := Validate(input); err != nil {
 		return err
 	}
 
 	// Create directories
-	if err := h.deps.FS.MkdirAll(DirName, 0755); err != nil {
+	if err := h.deps.FS.MkdirAll(DirName, DefaultDirPerm); err != nil {
 		return err
 	}
 
 	issuesDir := filepath.Join(DirName, "issues")
 	if input.IssueProvider == "markdown" {
-		if err := h.deps.FS.MkdirAll(issuesDir, 0755); err != nil {
+		if err := h.deps.FS.MkdirAll(issuesDir, DefaultDirPerm); err != nil {
 			return err
 		}
 	}
@@ -94,7 +102,7 @@ func (h *Handler) Run(input Input) error {
 	}
 
 	configPath := filepath.Join(DirName, ConfigFile)
-	if err := h.deps.FS.WriteFile(configPath, data, 0644); err != nil {
+	if err := h.deps.FS.WriteFile(configPath, data, DefaultFilePerm); err != nil {
 		return err
 	}
 

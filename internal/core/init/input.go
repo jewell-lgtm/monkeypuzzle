@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"strings"
+	"unicode"
 )
 
 // Field defines a single input field with validation rules
@@ -73,10 +75,20 @@ func Validate(input Input) error {
 
 	for _, f := range fields {
 		val := getFieldValue(input, f.Name)
+		// Trim whitespace and check for empty strings
+		val = strings.TrimSpace(val)
 
 		if f.Required && val == "" {
 			errs = append(errs, fmt.Sprintf("%s is required", f.Name))
 			continue
+		}
+
+		// Special validation for project name - check for filesystem-unsafe characters
+		if f.Name == "name" && val != "" {
+			if sanitized := SanitizeProjectName(val); sanitized != val {
+				errs = append(errs, fmt.Sprintf("%s contains invalid characters", f.Name))
+				continue
+			}
 		}
 
 		if len(f.ValidValues) > 0 && val != "" {
@@ -99,8 +111,35 @@ func Validate(input Input) error {
 	return nil
 }
 
+// SanitizeProjectName removes or replaces filesystem-unsafe characters from project names.
+// It removes characters that are invalid in filenames on most filesystems.
+func SanitizeProjectName(name string) string {
+	// Characters that are invalid in filenames on most filesystems
+	invalidChars := []rune{'/', '\\', ':', '*', '?', '"', '<', '>', '|', '\x00'}
+	
+	var result strings.Builder
+	for _, r := range name {
+		isInvalid := false
+		for _, invalid := range invalidChars {
+			if r == invalid {
+				isInvalid = true
+				break
+			}
+		}
+		if !isInvalid && !unicode.IsControl(r) {
+			result.WriteRune(r)
+		}
+	}
+	return result.String()
+}
+
 // WithDefaults returns input with defaults applied for empty fields
+// Also trims whitespace from all fields
 func WithDefaults(input Input, workDir string) Input {
+	input.Name = strings.TrimSpace(input.Name)
+	input.IssueProvider = strings.TrimSpace(input.IssueProvider)
+	input.PRProvider = strings.TrimSpace(input.PRProvider)
+	
 	if input.Name == "" {
 		input.Name = filepath.Base(workDir)
 	}

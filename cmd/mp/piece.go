@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -43,8 +44,10 @@ var pieceMergeCmd = &cobra.Command{
 }
 
 var flagMainBranch string
+var flagPieceName string
 
 func init() {
+	pieceNewCmd.Flags().StringVar(&flagPieceName, "name", "", "Optional piece name (default: auto-generated)")
 	pieceUpdateCmd.Flags().StringVar(&flagMainBranch, "main-branch", "main", "Main branch name to merge (default: main)")
 	pieceMergeCmd.Flags().StringVar(&flagMainBranch, "main-branch", "main", "Main branch name to merge into (default: main)")
 	pieceCmd.AddCommand(pieceNewCmd)
@@ -113,7 +116,7 @@ func runPieceNew(cmd *cobra.Command, args []string) error {
 	}
 	handler := piececmd.NewHandler(deps)
 
-	info, err := handler.CreatePiece(monkeypuzzleSourceDir)
+	info, err := handler.CreatePiece(monkeypuzzleSourceDir, flagPieceName)
 	if err != nil {
 		return err
 	}
@@ -209,15 +212,6 @@ func findMonkeypuzzleSource(startDir string) (string, error) {
 
 func containsMonkeypuzzleModule(content string) bool {
 	// Check for monkeypuzzle module name in go.mod
-	return containsSubstring(content, "module github.com/jewell-lgtm/monkeypuzzle") ||
-		containsSubstring(content, "module monkeypuzzle")
-}
-
-func containsSubstring(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
+	return strings.Contains(content, "module github.com/jewell-lgtm/monkeypuzzle") ||
+		strings.Contains(content, "module monkeypuzzle")
 }
