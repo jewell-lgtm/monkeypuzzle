@@ -39,12 +39,12 @@ Initialize monkeypuzzle in current directory. Creates `.monkeypuzzle/` directory
 
 **Modes:**
 
-| Mode | Usage | Description |
-|------|-------|-------------|
-| Interactive | `mp init` | TUI wizard for humans |
-| Stdin JSON | `echo '{"name":"x",...}' \| mp init` | Pipe JSON config |
-| Flags | `mp init --name x --issue-provider markdown --pr-provider github` | All flags provided |
-| Schema | `mp init --schema` | Output JSON template |
+| Mode        | Usage                                                             | Description           |
+| ----------- | ----------------------------------------------------------------- | --------------------- |
+| Interactive | `mp init`                                                         | TUI wizard for humans |
+| Stdin JSON  | `echo '{"name":"x",...}' \| mp init`                              | Pipe JSON config      |
+| Flags       | `mp init --name x --issue-provider markdown --pr-provider github` | All flags provided    |
+| Schema      | `mp init --schema`                                                | Output JSON template  |
 
 **Flags:**
 
@@ -70,14 +70,15 @@ Initialize monkeypuzzle in current directory. Creates `.monkeypuzzle/` directory
 
 Manage isolated git worktrees ("pieces") for atomic feature development.
 
-| Command | Description |
-|---------|-------------|
-| `mp piece` | Show current piece status |
-| `mp piece new` | Create new piece (worktree + tmux session) |
-| `mp piece update` | Merge main into current piece |
-| `mp piece merge` | Merge piece back to main |
+| Command           | Description                                |
+| ----------------- | ------------------------------------------ |
+| `mp piece`        | Show current piece status                  |
+| `mp piece new`    | Create new piece (worktree + tmux session) |
+| `mp piece update` | Merge main into current piece              |
+| `mp piece merge`  | Merge piece back to main                   |
 
 **Workflow:**
+
 ```bash
 mp piece new                  # Create isolated worktree
 # ... work on feature ...
@@ -115,21 +116,56 @@ Config file: `.monkeypuzzle/monkeypuzzle.json`
 ```
 .monkeypuzzle/
 ├── monkeypuzzle.json    # Main configuration
-└── issues/              # Markdown issue files (if using markdown provider)
+├── issues/              # Markdown issue files (if using markdown provider)
+└── hooks/               # Optional hook scripts
 ```
+
+### Hooks
+
+Monkeypuzzle supports hooks that execute at key points during piece operations. Create executable shell scripts in `.monkeypuzzle/hooks/`:
+
+| Hook                     | When                                              |
+| ------------------------ | ------------------------------------------------- |
+| `on-piece-create.sh`     | After piece worktree and tmux session are created |
+| `before-piece-update.sh` | Before merging main into piece                    |
+| `after-piece-update.sh`  | After successful merge into piece                 |
+| `before-piece-merge.sh`  | Before merging piece into main                    |
+| `after-piece-merge.sh`   | After successful merge into main                  |
+
+**Environment Variables:**
+
+Hooks receive context via environment variables:
+
+- `MP_PIECE_NAME` - Name of the piece
+- `MP_WORKTREE_PATH` - Absolute path to the worktree
+- `MP_REPO_ROOT` - Absolute path to main repository
+- `MP_MAIN_BRANCH` - Main branch name (merge/update hooks)
+- `MP_SESSION_NAME` - Tmux session name (create hooks)
+
+**Example hook (`.monkeypuzzle/hooks/before-piece-merge.sh`):**
+
+```bash
+#!/bin/bash
+echo "Running tests before merge..."
+cd "$MP_WORKTREE_PATH"
+go test ./... || exit 1
+echo "Tests passed!"
+```
+
+Hooks must be executable (`chmod +x`) and exit with code 0 for the operation to continue. Non-zero exit aborts the operation.
 
 ## Providers
 
 ### Issue Providers
 
-| Provider | Description |
-|----------|-------------|
+| Provider   | Description                                                |
+| ---------- | ---------------------------------------------------------- |
 | `markdown` | Issues stored as markdown files in `.monkeypuzzle/issues/` |
 
 ### PR Providers
 
-| Provider | Description |
-|----------|-------------|
+| Provider | Description                |
+| -------- | -------------------------- |
 | `github` | PR management via `gh` CLI |
 
 ## Architecture

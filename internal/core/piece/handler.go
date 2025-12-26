@@ -1,6 +1,7 @@
 package piece
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/adapters"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
+	initcmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/init"
 )
 
 const (
@@ -137,6 +139,124 @@ func (h *Handler) CreatePiece(monkeypuzzleSourceDir string, pieceName string) (P
 	})
 
 	return info, nil
+}
+
+// CurrentIssueMarker represents the current issue marker file structure
+type CurrentIssueMarker struct {
+	IssuePath string `json:"issue_path"` // Relative path from repo root
+	IssueName string `json:"issue_name"` // Display name from issue
+	PieceName string `json:"piece_name"` // Sanitized piece name
+}
+
+// CreatePieceFromIssue creates a new piece from a markdown issue file.
+// It extracts the issue name, sanitizes it for use as a piece name, creates the piece,
+// and writes a marker file in the worktree to track the current issue.
+func (h *Handler) CreatePieceFromIssue(monkeypuzzleSourceDir, issuePath string) (PieceInfo, error) {
+	wd, err := os.Getwd()
+	if err != nil {
+		return PieceInfo{}, fmt.Errorf("failed to get working directory: %w", err)
+	}
+
+	// Detect git repo root
+	repoRoot, err := h.git.RepoRoot(wd)
+	if err != nil {
+		return PieceInfo{}, fmt.Errorf("not in a git repository: %w", err)
+	}
+
+	// Read monkeypuzzle config to find issues directory
+	cfg, err := ReadConfig(repoRoot, h.deps.FS)
+	if err != nil {
+		return PieceInfo{}, fmt.Errorf("failed to read monkeypuzzle config: %w", err)
+	}
+
+	// Validate issue provider is markdown
+	if cfg.Issues.Provider != "markdown" {
+		return PieceInfo{}, fmt.Errorf("issue provider must be 'markdown', got: %s", cfg.Issues.Provider)
+	}
+
+	// Get and validate issues directory from config
+	issuesDir, ok := cfg.Issues.Config["directory"]
+	if !ok || issuesDir == "" {
+		return PieceInfo{}, fmt.Errorf("issues directory not found in config")
+	}
+
+	// Resolve issue path (absolute or relative to repo root)
+	// ResolveIssuePath already verifies the file exists
+	absIssuePath, err := ResolveIssuePath(repoRoot, issuePath, h.deps.FS)
+	if err != nil {
+		return PieceInfo{}, err
+	}
+
+	// Validate that the issue file is within the configured issues directory
+	// This prevents path traversal and ensures issues are in the correct location
+	absIssuesDir := filepath.Join(repoRoot, issuesDir)
+	absIssuesDir = filepath.Clean(absIssuesDir)
+	relPath, err := filepath.Rel(absIssuesDir, absIssuePath)
+	if err != nil || strings.HasPrefix(relPath, "..") {
+		return PieceInfo{}, fmt.Errorf("issue file must be within the issues directory %q, got: %s", issuesDir, issuePath)
+	}
+
+	// Extract issue name
+	issueName, err := ExtractIssueName(absIssuePath, h.deps.FS)
+	if err != nil {
+		return PieceInfo{}, fmt.Errorf("failed to extract issue name: %w", err)
+	}
+
+	// Sanitize issue name for piece name
+	pieceName := SanitizePieceName(issueName)
+
+	// Create the piece using the sanitized name
+	info, err := h.CreatePiece(monkeypuzzleSourceDir, pieceName)
+	if err != nil {
+		return PieceInfo{}, err
+	}
+
+	// Calculate relative issue path from repo root
+	// Note: filepath.Rel can fail on Windows if paths are on different drives
+	relIssuePath, err := filepath.Rel(repoRoot, absIssuePath)
+	if err != nil {
+		// If we can't compute relative path (e.g., different drives on Windows),
+		// use the original path provided by the user
+		relIssuePath = issuePath
+	}
+
+	// Write current issue marker file in worktree
+	marker := CurrentIssueMarker{
+		IssuePath: relIssuePath,
+		IssueName: issueName,
+		PieceName: pieceName,
+	}
+	if err := h.writeCurrentIssueMarker(info.WorktreePath, marker); err != nil {
+		// Log warning but don't fail the operation
+		h.deps.Output.Write(core.Message{
+			Type:    core.MsgWarning,
+			Content: fmt.Sprintf("Failed to write current issue marker: %v", err),
+		})
+	}
+
+	return info, nil
+}
+
+// writeCurrentIssueMarker writes the current issue marker file to the worktree.
+func (h *Handler) writeCurrentIssueMarker(worktreePath string, marker CurrentIssueMarker) error {
+	// Create .monkeypuzzle directory in worktree if it doesn't exist
+	mpDir := filepath.Join(worktreePath, initcmd.DirName)
+	if err := h.deps.FS.MkdirAll(mpDir, DefaultDirPerm); err != nil {
+		return fmt.Errorf("failed to create .monkeypuzzle directory: %w", err)
+	}
+
+	// Write marker file
+	markerPath := filepath.Join(mpDir, "current-issue.json")
+	data, err := json.MarshalIndent(marker, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal marker: %w", err)
+	}
+
+	if err := h.deps.FS.WriteFile(markerPath, data, initcmd.DefaultFilePerm); err != nil {
+		return fmt.Errorf("failed to write marker file: %w", err)
+	}
+
+	return nil
 }
 
 // cleanupPiece removes a partially created piece (worktree and tmux session).
