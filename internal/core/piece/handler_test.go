@@ -610,8 +610,8 @@ func TestHandler_CreatePieceFromIssue_WithFrontmatter(t *testing.T) {
   },
   "pr": {"provider": "github", "config": {}}
 }`
-	fs.MkdirAll(filepath.Join(repoRoot, ".monkeypuzzle"), 0755)
-	fs.WriteFile(filepath.Join(repoRoot, ".monkeypuzzle/monkeypuzzle.json"), []byte(configData), 0644)
+	_ = fs.MkdirAll(filepath.Join(repoRoot, ".monkeypuzzle"), 0755)
+	_ = fs.WriteFile(filepath.Join(repoRoot, ".monkeypuzzle/monkeypuzzle.json"), []byte(configData), 0644)
 
 	// Create issue file with frontmatter
 	issueContent := `---
@@ -621,8 +621,8 @@ title: My Awesome Feature
 # Description
 Content here.
 `
-	fs.MkdirAll(filepath.Dir(absIssuePath), 0755)
-	fs.WriteFile(absIssuePath, []byte(issueContent), 0644)
+	_ = fs.MkdirAll(filepath.Dir(absIssuePath), 0755)
+	_ = fs.WriteFile(absIssuePath, []byte(issueContent), 0644)
 
 	// Setup mocks
 	worktreePath := "/test-data/monkeypuzzle/pieces/" + pieceName
@@ -689,16 +689,16 @@ func TestHandler_CreatePieceFromIssue_WithH1(t *testing.T) {
   },
   "pr": {"provider": "github", "config": {}}
 }`
-	fs.MkdirAll(filepath.Join(repoRoot, ".monkeypuzzle"), 0755)
-	fs.WriteFile(filepath.Join(repoRoot, ".monkeypuzzle/monkeypuzzle.json"), []byte(configData), 0644)
+	_ = fs.MkdirAll(filepath.Join(repoRoot, ".monkeypuzzle"), 0755)
+	_ = fs.WriteFile(filepath.Join(repoRoot, ".monkeypuzzle/monkeypuzzle.json"), []byte(configData), 0644)
 
 	// Create issue file with H1
 	issueContent := `# My Feature
 
 Content here.
 `
-	fs.MkdirAll(filepath.Dir(absIssuePath), 0755)
-	fs.WriteFile(absIssuePath, []byte(issueContent), 0644)
+	_ = fs.MkdirAll(filepath.Dir(absIssuePath), 0755)
+	_ = fs.WriteFile(absIssuePath, []byte(issueContent), 0644)
 
 	// Setup mocks
 	worktreePath := "/test-data/monkeypuzzle/pieces/" + pieceName
@@ -745,8 +745,8 @@ func TestHandler_CreatePieceFromIssue_SanitizesName(t *testing.T) {
   },
   "pr": {"provider": "github", "config": {}}
 }`
-	fs.MkdirAll(filepath.Join(repoRoot, ".monkeypuzzle"), 0755)
-	fs.WriteFile(filepath.Join(repoRoot, ".monkeypuzzle/monkeypuzzle.json"), []byte(configData), 0644)
+	_ = fs.MkdirAll(filepath.Join(repoRoot, ".monkeypuzzle"), 0755)
+	_ = fs.WriteFile(filepath.Join(repoRoot, ".monkeypuzzle/monkeypuzzle.json"), []byte(configData), 0644)
 
 	// Create issue file with special characters in title
 	issueContent := `---
@@ -755,8 +755,8 @@ title: My Awesome Feature (v2.0)!
 
 Content here.
 `
-	fs.MkdirAll(filepath.Dir(absIssuePath), 0755)
-	fs.WriteFile(absIssuePath, []byte(issueContent), 0644)
+	_ = fs.MkdirAll(filepath.Dir(absIssuePath), 0755)
+	_ = fs.WriteFile(absIssuePath, []byte(issueContent), 0644)
 
 	// Setup mocks
 	worktreePath := "/test-data/monkeypuzzle/pieces/" + pieceName
@@ -797,8 +797,8 @@ func TestHandler_CreatePieceFromIssue_InvalidIssuePath(t *testing.T) {
   },
   "pr": {"provider": "github", "config": {}}
 }`
-	fs.MkdirAll(filepath.Join(repoRoot, ".monkeypuzzle"), 0755)
-	fs.WriteFile(filepath.Join(repoRoot, ".monkeypuzzle/monkeypuzzle.json"), []byte(configData), 0644)
+	_ = fs.MkdirAll(filepath.Join(repoRoot, ".monkeypuzzle"), 0755)
+	_ = fs.WriteFile(filepath.Join(repoRoot, ".monkeypuzzle/monkeypuzzle.json"), []byte(configData), 0644)
 
 	_, err := handler.CreatePieceFromIssue("/monkeypuzzle", ".monkeypuzzle/issues/nonexistent.md")
 	if err == nil {
@@ -851,8 +851,8 @@ func TestHandler_CreatePieceFromIssue_InvalidProvider(t *testing.T) {
   },
   "pr": {"provider": "github", "config": {}}
 }`
-	fs.MkdirAll(filepath.Join(repoRoot, ".monkeypuzzle"), 0755)
-	fs.WriteFile(filepath.Join(repoRoot, ".monkeypuzzle/monkeypuzzle.json"), []byte(configData), 0644)
+	_ = fs.MkdirAll(filepath.Join(repoRoot, ".monkeypuzzle"), 0755)
+	_ = fs.WriteFile(filepath.Join(repoRoot, ".monkeypuzzle/monkeypuzzle.json"), []byte(configData), 0644)
 
 	_, err := handler.CreatePieceFromIssue("/monkeypuzzle", ".monkeypuzzle/issues/test.md")
 	if err == nil {
@@ -884,14 +884,14 @@ func TestHandler_CreatePieceFromIssue_OutsideIssuesDirectory(t *testing.T) {
   },
   "pr": {"provider": "github", "config": {}}
 }`
-	fs.MkdirAll(filepath.Join(repoRoot, ".monkeypuzzle"), 0755)
-	fs.WriteFile(filepath.Join(repoRoot, ".monkeypuzzle/monkeypuzzle.json"), []byte(configData), 0644)
+	_ = fs.MkdirAll(filepath.Join(repoRoot, ".monkeypuzzle"), 0755)
+	_ = fs.WriteFile(filepath.Join(repoRoot, ".monkeypuzzle/monkeypuzzle.json"), []byte(configData), 0644)
 
 	// Create issue file outside the issues directory
 	issuePath := "other-dir/issue.md"
 	absIssuePath := filepath.Join(repoRoot, issuePath)
-	fs.MkdirAll(filepath.Dir(absIssuePath), 0755)
-	fs.WriteFile(absIssuePath, []byte("# Issue\n"), 0644)
+	_ = fs.MkdirAll(filepath.Dir(absIssuePath), 0755)
+	_ = fs.WriteFile(absIssuePath, []byte("# Issue\n"), 0644)
 
 	_, err := handler.CreatePieceFromIssue("/monkeypuzzle", issuePath)
 	if err == nil {

@@ -23,7 +23,7 @@ status: open
 
 This is a great feature.
 `
-	fs.WriteFile(issuePath, []byte(content), 0644)
+	_ = fs.WriteFile(issuePath, []byte(content), 0644)
 
 	name, err := piece.ExtractIssueName(issuePath, fs)
 	if err != nil {
@@ -46,7 +46,7 @@ status: open
 
 # Description
 `
-	fs.WriteFile(issuePath, []byte(content), 0644)
+	_ = fs.WriteFile(issuePath, []byte(content), 0644)
 
 	name, err := piece.ExtractIssueName(issuePath, fs)
 	if err != nil {
@@ -66,7 +66,7 @@ func TestExtractIssueName_FromH1(t *testing.T) {
 
 This is a great feature.
 `
-	fs.WriteFile(issuePath, []byte(content), 0644)
+	_ = fs.WriteFile(issuePath, []byte(content), 0644)
 
 	name, err := piece.ExtractIssueName(issuePath, fs)
 	if err != nil {
@@ -86,7 +86,7 @@ func TestExtractIssueName_FromH1_WithWhitespace(t *testing.T) {
 
 This is a great feature.
 `
-	fs.WriteFile(issuePath, []byte(content), 0644)
+	_ = fs.WriteFile(issuePath, []byte(content), 0644)
 
 	name, err := piece.ExtractIssueName(issuePath, fs)
 	if err != nil {
@@ -105,7 +105,7 @@ func TestExtractIssueName_FromFilename(t *testing.T) {
 	content := `This is a great feature.
 No frontmatter or H1.
 `
-	fs.WriteFile(issuePath, []byte(content), 0644)
+	_ = fs.WriteFile(issuePath, []byte(content), 0644)
 
 	name, err := piece.ExtractIssueName(issuePath, fs)
 	if err != nil {
@@ -129,7 +129,7 @@ title: Frontmatter Title
 
 Content here.
 `
-	fs.WriteFile(issuePath, []byte(content), 0644)
+	_ = fs.WriteFile(issuePath, []byte(content), 0644)
 
 	name, err := piece.ExtractIssueName(issuePath, fs)
 	if err != nil {
@@ -149,7 +149,7 @@ func TestExtractIssueName_Priority_H1OverFilename(t *testing.T) {
 
 Content here.
 `
-	fs.WriteFile(issuePath, []byte(content), 0644)
+	_ = fs.WriteFile(issuePath, []byte(content), 0644)
 
 	name, err := piece.ExtractIssueName(issuePath, fs)
 	if err != nil {
@@ -169,7 +169,7 @@ func TestExtractIssueName_NoFrontmatterOrH1_UsesFilename(t *testing.T) {
 No frontmatter.
 No H1 heading.
 `
-	fs.WriteFile(issuePath, []byte(content), 0644)
+	_ = fs.WriteFile(issuePath, []byte(content), 0644)
 
 	name, err := piece.ExtractIssueName(issuePath, fs)
 	if err != nil {
@@ -285,8 +285,8 @@ func TestReadConfig(t *testing.T) {
 	}
 
 	configPath := filepath.Join(repoRoot, initcmd.DirName, initcmd.ConfigFile)
-	fs.MkdirAll(filepath.Join(repoRoot, initcmd.DirName), 0755)
-	fs.WriteFile(configPath, data, 0644)
+	_ = fs.MkdirAll(filepath.Join(repoRoot, initcmd.DirName), 0755)
+	_ = fs.WriteFile(configPath, data, 0644)
 
 	// Read config
 	readCfg, err := piece.ReadConfig(repoRoot, fs)
@@ -331,7 +331,7 @@ func TestResolveIssuePath_Absolute(t *testing.T) {
 	repoRoot := "/repo"
 	absPath := "/absolute/path/to/issue.md"
 
-	fs.WriteFile(absPath, []byte("content"), 0644)
+	_ = fs.WriteFile(absPath, []byte("content"), 0644)
 
 	resolved, err := piece.ResolveIssuePath(repoRoot, absPath, fs)
 	if err != nil {
@@ -349,8 +349,8 @@ func TestResolveIssuePath_Relative(t *testing.T) {
 	relPath := ".monkeypuzzle/issues/test.md"
 	absPath := filepath.Join(repoRoot, relPath)
 
-	fs.MkdirAll(filepath.Dir(absPath), 0755)
-	fs.WriteFile(absPath, []byte("content"), 0644)
+	_ = fs.MkdirAll(filepath.Dir(absPath), 0755)
+	_ = fs.WriteFile(absPath, []byte("content"), 0644)
 
 	resolved, err := piece.ResolveIssuePath(repoRoot, relPath, fs)
 	if err != nil {

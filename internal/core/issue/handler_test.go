@@ -26,8 +26,8 @@ func setupConfig(t *testing.T, fs *adapters.MemoryFS) {
 		},
 	}
 	data, _ := json.Marshal(cfg)
-	fs.MkdirAll(".monkeypuzzle", 0755)
-	fs.WriteFile(".monkeypuzzle/monkeypuzzle.json", data, 0644)
+	_ = fs.MkdirAll(".monkeypuzzle", 0755)
+	_ = fs.WriteFile(".monkeypuzzle/monkeypuzzle.json", data, 0644)
 }
 
 func TestHandler_Run_CreatesIssueFile(t *testing.T) {
