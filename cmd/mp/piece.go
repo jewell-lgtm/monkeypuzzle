@@ -45,9 +45,11 @@ var pieceMergeCmd = &cobra.Command{
 
 var flagMainBranch string
 var flagPieceName string
+var flagIssuePath string
 
 func init() {
 	pieceNewCmd.Flags().StringVar(&flagPieceName, "name", "", "Optional piece name (default: auto-generated)")
+	pieceNewCmd.Flags().StringVar(&flagIssuePath, "issue", "", "Create piece from issue file (e.g., .monkeypuzzle/issues/foo.md)")
 	pieceUpdateCmd.Flags().StringVar(&flagMainBranch, "main-branch", "main", "Main branch name to merge (default: main)")
 	pieceMergeCmd.Flags().StringVar(&flagMainBranch, "main-branch", "main", "Main branch name to merge into (default: main)")
 	pieceCmd.AddCommand(pieceNewCmd)
@@ -116,7 +118,23 @@ func runPieceNew(cmd *cobra.Command, args []string) error {
 	}
 	handler := piececmd.NewHandler(deps)
 
-	info, err := handler.CreatePiece(monkeypuzzleSourceDir, flagPieceName)
+	var info piececmd.PieceInfo
+
+	// Check if --issue flag is set
+	if flagIssuePath != "" {
+		// Validate that --name is not also set (they're mutually exclusive)
+		if flagPieceName != "" {
+			return fmt.Errorf("cannot use both --name and --issue flags together")
+		}
+		// Validate that issue path is not empty
+		if strings.TrimSpace(flagIssuePath) == "" {
+			return fmt.Errorf("--issue flag requires a non-empty path")
+		}
+		info, err = handler.CreatePieceFromIssue(monkeypuzzleSourceDir, flagIssuePath)
+	} else {
+		info, err = handler.CreatePiece(monkeypuzzleSourceDir, flagPieceName)
+	}
+
 	if err != nil {
 		return err
 	}

@@ -1,6 +1,7 @@
 package piece_test
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -572,5 +573,328 @@ func TestHandler_CreatePiece_OnPieceCreateHookFails_CleansUp(t *testing.T) {
 	// Verify cleanup was called - git worktree remove
 	if !mockExec.WasCalled("git", "worktree", "remove", worktreePath) {
 		t.Error("expected git worktree remove to be called for cleanup")
+	}
+}
+
+// ============================================================================
+// CreatePieceFromIssue Tests
+// ============================================================================
+
+func TestHandler_CreatePieceFromIssue_WithFrontmatter(t *testing.T) {
+	// Set XDG_DATA_HOME to a test directory
+	t.Setenv("XDG_DATA_HOME", "/test-data")
+
+	fs := adapters.NewMemoryFS()
+	out := adapters.NewBufferOutput()
+	mockExec := adapters.NewMockExec()
+	deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
+	handler := piece.NewHandler(deps)
+
+	// Setup repo structure
+	repoRoot := "/repo"
+	issuePath := ".monkeypuzzle/issues/my-feature.md"
+	absIssuePath := filepath.Join(repoRoot, issuePath)
+	pieceName := "my-awesome-feature"
+
+	// Create config
+	configData := `{
+  "version": "1",
+  "project": {"name": "test-project"},
+  "issues": {
+    "provider": "markdown",
+    "config": {"directory": ".monkeypuzzle/issues"}
+  },
+  "pr": {"provider": "github", "config": {}}
+}`
+	fs.MkdirAll(filepath.Join(repoRoot, ".monkeypuzzle"), 0755)
+	fs.WriteFile(filepath.Join(repoRoot, ".monkeypuzzle/monkeypuzzle.json"), []byte(configData), 0644)
+
+	// Create issue file with frontmatter
+	issueContent := `---
+title: My Awesome Feature
+---
+
+# Description
+Content here.
+`
+	fs.MkdirAll(filepath.Dir(absIssuePath), 0755)
+	fs.WriteFile(absIssuePath, []byte(issueContent), 0644)
+
+	// Setup mocks
+	worktreePath := "/test-data/monkeypuzzle/pieces/" + pieceName
+	sessionName := "mp-piece-" + pieceName
+
+	mockExec.AddResponse("git", []string{"rev-parse", "--show-toplevel"}, []byte(repoRoot+"\n"), nil)
+	mockExec.AddResponse("git", []string{"worktree", "add", worktreePath}, nil, nil)
+	mockExec.AddResponse("tmux", []string{"new-session", "-d", "-s", sessionName, "-c", worktreePath}, nil, nil)
+
+	// Execute
+	info, err := handler.CreatePieceFromIssue("/monkeypuzzle", issuePath)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	if info.Name != pieceName {
+		t.Errorf("expected piece name %q, got %q", pieceName, info.Name)
+	}
+
+	// Verify marker file was created
+	markerPath := filepath.Join(worktreePath, ".monkeypuzzle/current-issue.json")
+	markerData, err := fs.ReadFile(markerPath)
+	if err != nil {
+		t.Fatalf("marker file not created: %v", err)
+	}
+
+	var marker piece.CurrentIssueMarker
+	if err := json.Unmarshal(markerData, &marker); err != nil {
+		t.Fatalf("failed to unmarshal marker: %v", err)
+	}
+
+	if marker.IssueName != "My Awesome Feature" {
+		t.Errorf("expected issue name 'My Awesome Feature', got %q", marker.IssueName)
+	}
+
+	if marker.PieceName != pieceName {
+		t.Errorf("expected piece name %q, got %q", pieceName, marker.PieceName)
+	}
+}
+
+func TestHandler_CreatePieceFromIssue_WithH1(t *testing.T) {
+	// Set XDG_DATA_HOME to a test directory
+	t.Setenv("XDG_DATA_HOME", "/test-data")
+
+	fs := adapters.NewMemoryFS()
+	out := adapters.NewBufferOutput()
+	mockExec := adapters.NewMockExec()
+	deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
+	handler := piece.NewHandler(deps)
+
+	// Setup repo structure
+	repoRoot := "/repo"
+	issuePath := ".monkeypuzzle/issues/my-feature.md"
+	absIssuePath := filepath.Join(repoRoot, issuePath)
+	pieceName := "my-feature"
+
+	// Create config
+	configData := `{
+  "version": "1",
+  "project": {"name": "test-project"},
+  "issues": {
+    "provider": "markdown",
+    "config": {"directory": ".monkeypuzzle/issues"}
+  },
+  "pr": {"provider": "github", "config": {}}
+}`
+	fs.MkdirAll(filepath.Join(repoRoot, ".monkeypuzzle"), 0755)
+	fs.WriteFile(filepath.Join(repoRoot, ".monkeypuzzle/monkeypuzzle.json"), []byte(configData), 0644)
+
+	// Create issue file with H1
+	issueContent := `# My Feature
+
+Content here.
+`
+	fs.MkdirAll(filepath.Dir(absIssuePath), 0755)
+	fs.WriteFile(absIssuePath, []byte(issueContent), 0644)
+
+	// Setup mocks
+	worktreePath := "/test-data/monkeypuzzle/pieces/" + pieceName
+	sessionName := "mp-piece-" + pieceName
+
+	mockExec.AddResponse("git", []string{"rev-parse", "--show-toplevel"}, []byte(repoRoot+"\n"), nil)
+	mockExec.AddResponse("git", []string{"worktree", "add", worktreePath}, nil, nil)
+	mockExec.AddResponse("tmux", []string{"new-session", "-d", "-s", sessionName, "-c", worktreePath}, nil, nil)
+
+	// Execute
+	info, err := handler.CreatePieceFromIssue("/monkeypuzzle", issuePath)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	if info.Name != pieceName {
+		t.Errorf("expected piece name %q, got %q", pieceName, info.Name)
+	}
+}
+
+func TestHandler_CreatePieceFromIssue_SanitizesName(t *testing.T) {
+	// Set XDG_DATA_HOME to a test directory
+	t.Setenv("XDG_DATA_HOME", "/test-data")
+
+	fs := adapters.NewMemoryFS()
+	out := adapters.NewBufferOutput()
+	mockExec := adapters.NewMockExec()
+	deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
+	handler := piece.NewHandler(deps)
+
+	// Setup repo structure
+	repoRoot := "/repo"
+	issuePath := ".monkeypuzzle/issues/my-feature.md"
+	absIssuePath := filepath.Join(repoRoot, issuePath)
+	pieceName := "my-awesome-feature-v2-0"
+
+	// Create config
+	configData := `{
+  "version": "1",
+  "project": {"name": "test-project"},
+  "issues": {
+    "provider": "markdown",
+    "config": {"directory": ".monkeypuzzle/issues"}
+  },
+  "pr": {"provider": "github", "config": {}}
+}`
+	fs.MkdirAll(filepath.Join(repoRoot, ".monkeypuzzle"), 0755)
+	fs.WriteFile(filepath.Join(repoRoot, ".monkeypuzzle/monkeypuzzle.json"), []byte(configData), 0644)
+
+	// Create issue file with special characters in title
+	issueContent := `---
+title: My Awesome Feature (v2.0)!
+---
+
+Content here.
+`
+	fs.MkdirAll(filepath.Dir(absIssuePath), 0755)
+	fs.WriteFile(absIssuePath, []byte(issueContent), 0644)
+
+	// Setup mocks
+	worktreePath := "/test-data/monkeypuzzle/pieces/" + pieceName
+	sessionName := "mp-piece-" + pieceName
+
+	mockExec.AddResponse("git", []string{"rev-parse", "--show-toplevel"}, []byte(repoRoot+"\n"), nil)
+	mockExec.AddResponse("git", []string{"worktree", "add", worktreePath}, nil, nil)
+	mockExec.AddResponse("tmux", []string{"new-session", "-d", "-s", sessionName, "-c", worktreePath}, nil, nil)
+
+	// Execute
+	info, err := handler.CreatePieceFromIssue("/monkeypuzzle", issuePath)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	if info.Name != pieceName {
+		t.Errorf("expected piece name %q, got %q", pieceName, info.Name)
+	}
+}
+
+func TestHandler_CreatePieceFromIssue_InvalidIssuePath(t *testing.T) {
+	fs := adapters.NewMemoryFS()
+	out := adapters.NewBufferOutput()
+	mockExec := adapters.NewMockExec()
+	deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
+	handler := piece.NewHandler(deps)
+
+	repoRoot := "/repo"
+	mockExec.AddResponse("git", []string{"rev-parse", "--show-toplevel"}, []byte(repoRoot+"\n"), nil)
+
+	// Create config but no issue file
+	configData := `{
+  "version": "1",
+  "project": {"name": "test-project"},
+  "issues": {
+    "provider": "markdown",
+    "config": {"directory": ".monkeypuzzle/issues"}
+  },
+  "pr": {"provider": "github", "config": {}}
+}`
+	fs.MkdirAll(filepath.Join(repoRoot, ".monkeypuzzle"), 0755)
+	fs.WriteFile(filepath.Join(repoRoot, ".monkeypuzzle/monkeypuzzle.json"), []byte(configData), 0644)
+
+	_, err := handler.CreatePieceFromIssue("/monkeypuzzle", ".monkeypuzzle/issues/nonexistent.md")
+	if err == nil {
+		t.Fatal("expected error when issue file doesn't exist")
+	}
+
+	if !strings.Contains(err.Error(), "issue file not found") {
+		t.Errorf("expected error about issue file not found, got: %v", err)
+	}
+}
+
+func TestHandler_CreatePieceFromIssue_MissingConfig(t *testing.T) {
+	fs := adapters.NewMemoryFS()
+	out := adapters.NewBufferOutput()
+	mockExec := adapters.NewMockExec()
+	deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
+	handler := piece.NewHandler(deps)
+
+	repoRoot := "/repo"
+	mockExec.AddResponse("git", []string{"rev-parse", "--show-toplevel"}, []byte(repoRoot+"\n"), nil)
+
+	// No config file
+	_, err := handler.CreatePieceFromIssue("/monkeypuzzle", ".monkeypuzzle/issues/test.md")
+	if err == nil {
+		t.Fatal("expected error when config file doesn't exist")
+	}
+
+	if !strings.Contains(err.Error(), "config") {
+		t.Errorf("expected error about config, got: %v", err)
+	}
+}
+
+func TestHandler_CreatePieceFromIssue_InvalidProvider(t *testing.T) {
+	fs := adapters.NewMemoryFS()
+	out := adapters.NewBufferOutput()
+	mockExec := adapters.NewMockExec()
+	deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
+	handler := piece.NewHandler(deps)
+
+	repoRoot := "/repo"
+	mockExec.AddResponse("git", []string{"rev-parse", "--show-toplevel"}, []byte(repoRoot+"\n"), nil)
+
+	// Create config with invalid provider
+	configData := `{
+  "version": "1",
+  "project": {"name": "test-project"},
+  "issues": {
+    "provider": "github",
+    "config": {}
+  },
+  "pr": {"provider": "github", "config": {}}
+}`
+	fs.MkdirAll(filepath.Join(repoRoot, ".monkeypuzzle"), 0755)
+	fs.WriteFile(filepath.Join(repoRoot, ".monkeypuzzle/monkeypuzzle.json"), []byte(configData), 0644)
+
+	_, err := handler.CreatePieceFromIssue("/monkeypuzzle", ".monkeypuzzle/issues/test.md")
+	if err == nil {
+		t.Fatal("expected error when issue provider is not markdown")
+	}
+
+	if !strings.Contains(err.Error(), "markdown") {
+		t.Errorf("expected error about markdown provider, got: %v", err)
+	}
+}
+
+func TestHandler_CreatePieceFromIssue_OutsideIssuesDirectory(t *testing.T) {
+	fs := adapters.NewMemoryFS()
+	out := adapters.NewBufferOutput()
+	mockExec := adapters.NewMockExec()
+	deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
+	handler := piece.NewHandler(deps)
+
+	repoRoot := "/repo"
+	mockExec.AddResponse("git", []string{"rev-parse", "--show-toplevel"}, []byte(repoRoot+"\n"), nil)
+
+	// Create config
+	configData := `{
+  "version": "1",
+  "project": {"name": "test-project"},
+  "issues": {
+    "provider": "markdown",
+    "config": {"directory": ".monkeypuzzle/issues"}
+  },
+  "pr": {"provider": "github", "config": {}}
+}`
+	fs.MkdirAll(filepath.Join(repoRoot, ".monkeypuzzle"), 0755)
+	fs.WriteFile(filepath.Join(repoRoot, ".monkeypuzzle/monkeypuzzle.json"), []byte(configData), 0644)
+
+	// Create issue file outside the issues directory
+	issuePath := "other-dir/issue.md"
+	absIssuePath := filepath.Join(repoRoot, issuePath)
+	fs.MkdirAll(filepath.Dir(absIssuePath), 0755)
+	fs.WriteFile(absIssuePath, []byte("# Issue\n"), 0644)
+
+	_, err := handler.CreatePieceFromIssue("/monkeypuzzle", issuePath)
+	if err == nil {
+		t.Fatal("expected error when issue file is outside issues directory")
+	}
+
+	if !strings.Contains(err.Error(), "within the issues directory") {
+		t.Errorf("expected error about issues directory, got: %v", err)
 	}
 }

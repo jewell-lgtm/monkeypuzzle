@@ -3,6 +3,7 @@
 package piece_test
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -352,6 +353,459 @@ echo "before-update ran for $MP_PIECE_NAME" > "` + hookOutputFile + `"
 
 	if !strings.Contains(string(content), "before-update ran for test-piece") {
 		t.Errorf("unexpected hook output: %s", string(content))
+	}
+}
+
+func TestIntegration_CreatePieceFromIssue_WithFrontmatter(t *testing.T) {
+	// Skip if git is not available
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	// Set XDG_DATA_HOME to a temp directory
+	tmpDataHome, err := os.MkdirTemp("", "mp-data-*")
+	if err != nil {
+		t.Fatalf("failed to create temp data dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDataHome)
+	t.Setenv("XDG_DATA_HOME", tmpDataHome)
+
+	// Create temp directory for test repo
+	tmpDir, err := os.MkdirTemp("", "mp-integration-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Initialize a git repo
+	cmd := exec.Command("git", "init")
+	cmd.Dir = tmpDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init failed: %v\n%s", err, out)
+	}
+
+	// Configure git for the test
+	cmd = exec.Command("git", "config", "user.email", "test@example.com")
+	cmd.Dir = tmpDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git config email failed: %v\n%s", err, out)
+	}
+
+	cmd = exec.Command("git", "config", "user.name", "Test User")
+	cmd.Dir = tmpDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git config name failed: %v\n%s", err, out)
+	}
+
+	// Create initial commit
+	testFile := filepath.Join(tmpDir, "test.txt")
+	if err := os.WriteFile(testFile, []byte("initial"), 0644); err != nil {
+		t.Fatalf("failed to write test file: %v", err)
+	}
+
+	cmd = exec.Command("git", "add", ".")
+	cmd.Dir = tmpDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git add failed: %v\n%s", err, out)
+	}
+
+	cmd = exec.Command("git", "commit", "-m", "initial commit")
+	cmd.Dir = tmpDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git commit failed: %v\n%s", err, out)
+	}
+
+	// Create main branch
+	cmd = exec.Command("git", "branch", "-M", "main")
+	cmd.Dir = tmpDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git branch failed: %v\n%s", err, out)
+	}
+
+	// Create monkeypuzzle config
+	mpDir := filepath.Join(tmpDir, ".monkeypuzzle")
+	if err := os.MkdirAll(mpDir, 0755); err != nil {
+		t.Fatalf("failed to create .monkeypuzzle dir: %v", err)
+	}
+
+	configData := `{
+  "version": "1",
+  "project": {"name": "test-project"},
+  "issues": {
+    "provider": "markdown",
+    "config": {"directory": ".monkeypuzzle/issues"}
+  },
+  "pr": {"provider": "github", "config": {}}
+}`
+	configPath := filepath.Join(mpDir, "monkeypuzzle.json")
+	if err := os.WriteFile(configPath, []byte(configData), 0644); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+
+	// Create issue file with frontmatter
+	issuesDir := filepath.Join(mpDir, "issues")
+	if err := os.MkdirAll(issuesDir, 0755); err != nil {
+		t.Fatalf("failed to create issues dir: %v", err)
+	}
+
+	issueContent := `---
+title: My Awesome Feature
+status: open
+---
+
+# Description
+
+This is a great feature.
+`
+	issuePath := filepath.Join(issuesDir, "my-feature.md")
+	if err := os.WriteFile(issuePath, []byte(issueContent), 0644); err != nil {
+		t.Fatalf("failed to write issue file: %v", err)
+	}
+
+	// Change to repo directory
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get working directory: %v", err)
+	}
+	defer os.Chdir(oldWd)
+
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("failed to change directory: %v", err)
+	}
+
+	// Create piece from issue
+	deps := core.Deps{
+		FS:     adapters.NewOSFS(""),
+		Output: adapters.NewBufferOutput(),
+		Exec:   adapters.NewOSExec(),
+	}
+	handler := piece.NewHandler(deps)
+
+	relIssuePath := ".monkeypuzzle/issues/my-feature.md"
+	info, err := handler.CreatePieceFromIssue(tmpDir, relIssuePath)
+	if err != nil {
+		t.Fatalf("CreatePieceFromIssue failed: %v", err)
+	}
+
+	// Verify piece name is sanitized
+	expectedName := "my-awesome-feature"
+	if info.Name != expectedName {
+		t.Errorf("expected piece name %q, got %q", expectedName, info.Name)
+	}
+
+	// Verify marker file exists
+	markerPath := filepath.Join(info.WorktreePath, ".monkeypuzzle", "current-issue.json")
+	markerData, err := os.ReadFile(markerPath)
+	if err != nil {
+		t.Fatalf("marker file not found: %v", err)
+	}
+
+	var marker piece.CurrentIssueMarker
+	if err := json.Unmarshal(markerData, &marker); err != nil {
+		t.Fatalf("failed to unmarshal marker: %v", err)
+	}
+
+	if marker.IssueName != "My Awesome Feature" {
+		t.Errorf("expected issue name 'My Awesome Feature', got %q", marker.IssueName)
+	}
+
+	if marker.PieceName != expectedName {
+		t.Errorf("expected piece name %q, got %q", expectedName, marker.PieceName)
+	}
+}
+
+func TestIntegration_CreatePieceFromIssue_WithH1Heading(t *testing.T) {
+	// Skip if git is not available
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	// Set XDG_DATA_HOME to a temp directory
+	tmpDataHome, err := os.MkdirTemp("", "mp-data-*")
+	if err != nil {
+		t.Fatalf("failed to create temp data dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDataHome)
+	t.Setenv("XDG_DATA_HOME", tmpDataHome)
+
+	// Create temp directory for test repo
+	tmpDir, err := os.MkdirTemp("", "mp-integration-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Initialize git repo (same setup as above)
+	setupGitRepo(t, tmpDir)
+
+	// Create monkeypuzzle config
+	setupMonkeypuzzleConfig(t, tmpDir)
+
+	// Create issue file with H1 (no frontmatter)
+	issuesDir := filepath.Join(tmpDir, ".monkeypuzzle", "issues")
+	if err := os.MkdirAll(issuesDir, 0755); err != nil {
+		t.Fatalf("failed to create issues dir: %v", err)
+	}
+
+	issueContent := `# My Feature
+
+This is a great feature.
+`
+	issuePath := filepath.Join(issuesDir, "my-feature.md")
+	if err := os.WriteFile(issuePath, []byte(issueContent), 0644); err != nil {
+		t.Fatalf("failed to write issue file: %v", err)
+	}
+
+	// Change to repo directory
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get working directory: %v", err)
+	}
+	defer os.Chdir(oldWd)
+
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("failed to change directory: %v", err)
+	}
+
+	// Create piece from issue
+	deps := core.Deps{
+		FS:     adapters.NewOSFS(""),
+		Output: adapters.NewBufferOutput(),
+		Exec:   adapters.NewOSExec(),
+	}
+	handler := piece.NewHandler(deps)
+
+	relIssuePath := ".monkeypuzzle/issues/my-feature.md"
+	info, err := handler.CreatePieceFromIssue(tmpDir, relIssuePath)
+	if err != nil {
+		t.Fatalf("CreatePieceFromIssue failed: %v", err)
+	}
+
+	// Verify piece name is from H1
+	expectedName := "my-feature"
+	if info.Name != expectedName {
+		t.Errorf("expected piece name %q, got %q", expectedName, info.Name)
+	}
+}
+
+func TestIntegration_CreatePieceFromIssue_WithFilenameFallback(t *testing.T) {
+	// Skip if git is not available
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	// Set XDG_DATA_HOME to a temp directory
+	tmpDataHome, err := os.MkdirTemp("", "mp-data-*")
+	if err != nil {
+		t.Fatalf("failed to create temp data dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDataHome)
+	t.Setenv("XDG_DATA_HOME", tmpDataHome)
+
+	// Create temp directory for test repo
+	tmpDir, err := os.MkdirTemp("", "mp-integration-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Initialize git repo
+	setupGitRepo(t, tmpDir)
+
+	// Create monkeypuzzle config
+	setupMonkeypuzzleConfig(t, tmpDir)
+
+	// Create issue file with no frontmatter or H1
+	issuesDir := filepath.Join(tmpDir, ".monkeypuzzle", "issues")
+	if err := os.MkdirAll(issuesDir, 0755); err != nil {
+		t.Fatalf("failed to create issues dir: %v", err)
+	}
+
+	issueContent := `Just some content.
+No frontmatter.
+No H1 heading.
+`
+	issuePath := filepath.Join(issuesDir, "my-feature.md")
+	if err := os.WriteFile(issuePath, []byte(issueContent), 0644); err != nil {
+		t.Fatalf("failed to write issue file: %v", err)
+	}
+
+	// Change to repo directory
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get working directory: %v", err)
+	}
+	defer os.Chdir(oldWd)
+
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("failed to change directory: %v", err)
+	}
+
+	// Create piece from issue
+	deps := core.Deps{
+		FS:     adapters.NewOSFS(""),
+		Output: adapters.NewBufferOutput(),
+		Exec:   adapters.NewOSExec(),
+	}
+	handler := piece.NewHandler(deps)
+
+	relIssuePath := ".monkeypuzzle/issues/my-feature.md"
+	info, err := handler.CreatePieceFromIssue(tmpDir, relIssuePath)
+	if err != nil {
+		t.Fatalf("CreatePieceFromIssue failed: %v", err)
+	}
+
+	// Verify piece name is from filename
+	expectedName := "my-feature"
+	if info.Name != expectedName {
+		t.Errorf("expected piece name %q, got %q", expectedName, info.Name)
+	}
+}
+
+func TestIntegration_CreatePieceFromIssue_SanitizesName(t *testing.T) {
+	// Skip if git is not available
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	// Set XDG_DATA_HOME to a temp directory
+	tmpDataHome, err := os.MkdirTemp("", "mp-data-*")
+	if err != nil {
+		t.Fatalf("failed to create temp data dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDataHome)
+	t.Setenv("XDG_DATA_HOME", tmpDataHome)
+
+	// Create temp directory for test repo
+	tmpDir, err := os.MkdirTemp("", "mp-integration-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Initialize git repo
+	setupGitRepo(t, tmpDir)
+
+	// Create monkeypuzzle config
+	setupMonkeypuzzleConfig(t, tmpDir)
+
+	// Create issue file with special characters in title
+	issuesDir := filepath.Join(tmpDir, ".monkeypuzzle", "issues")
+	if err := os.MkdirAll(issuesDir, 0755); err != nil {
+		t.Fatalf("failed to create issues dir: %v", err)
+	}
+
+	issueContent := `---
+title: My Awesome Feature (v2.0)!
+---
+
+Content here.
+`
+	issuePath := filepath.Join(issuesDir, "my-feature.md")
+	if err := os.WriteFile(issuePath, []byte(issueContent), 0644); err != nil {
+		t.Fatalf("failed to write issue file: %v", err)
+	}
+
+	// Change to repo directory
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get working directory: %v", err)
+	}
+	defer os.Chdir(oldWd)
+
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("failed to change directory: %v", err)
+	}
+
+	// Create piece from issue
+	deps := core.Deps{
+		FS:     adapters.NewOSFS(""),
+		Output: adapters.NewBufferOutput(),
+		Exec:   adapters.NewOSExec(),
+	}
+	handler := piece.NewHandler(deps)
+
+	relIssuePath := ".monkeypuzzle/issues/my-feature.md"
+	info, err := handler.CreatePieceFromIssue(tmpDir, relIssuePath)
+	if err != nil {
+		t.Fatalf("CreatePieceFromIssue failed: %v", err)
+	}
+
+	// Verify piece name is sanitized
+	expectedName := "my-awesome-feature-v2-0"
+	if info.Name != expectedName {
+		t.Errorf("expected piece name %q, got %q", expectedName, info.Name)
+	}
+}
+
+// Helper functions for integration tests
+
+func setupGitRepo(t *testing.T, tmpDir string) {
+	// Initialize a git repo
+	cmd := exec.Command("git", "init")
+	cmd.Dir = tmpDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init failed: %v\n%s", err, out)
+	}
+
+	// Configure git for the test
+	cmd = exec.Command("git", "config", "user.email", "test@example.com")
+	cmd.Dir = tmpDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git config email failed: %v\n%s", err, out)
+	}
+
+	cmd = exec.Command("git", "config", "user.name", "Test User")
+	cmd.Dir = tmpDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git config name failed: %v\n%s", err, out)
+	}
+
+	// Create initial commit
+	testFile := filepath.Join(tmpDir, "test.txt")
+	if err := os.WriteFile(testFile, []byte("initial"), 0644); err != nil {
+		t.Fatalf("failed to write test file: %v", err)
+	}
+
+	cmd = exec.Command("git", "add", ".")
+	cmd.Dir = tmpDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git add failed: %v\n%s", err, out)
+	}
+
+	cmd = exec.Command("git", "commit", "-m", "initial commit")
+	cmd.Dir = tmpDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git commit failed: %v\n%s", err, out)
+	}
+
+	// Create main branch
+	cmd = exec.Command("git", "branch", "-M", "main")
+	cmd.Dir = tmpDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git branch failed: %v\n%s", err, out)
+	}
+}
+
+func setupMonkeypuzzleConfig(t *testing.T, tmpDir string) {
+	// Create monkeypuzzle config
+	mpDir := filepath.Join(tmpDir, ".monkeypuzzle")
+	if err := os.MkdirAll(mpDir, 0755); err != nil {
+		t.Fatalf("failed to create .monkeypuzzle dir: %v", err)
+	}
+
+	configData := `{
+  "version": "1",
+  "project": {"name": "test-project"},
+  "issues": {
+    "provider": "markdown",
+    "config": {"directory": ".monkeypuzzle/issues"}
+  },
+  "pr": {"provider": "github", "config": {}}
+}`
+	configPath := filepath.Join(mpDir, "monkeypuzzle.json")
+	if err := os.WriteFile(configPath, []byte(configData), 0644); err != nil {
+		t.Fatalf("failed to write config: %v", err)
 	}
 }
 
