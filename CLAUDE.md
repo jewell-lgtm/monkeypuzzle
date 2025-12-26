@@ -46,6 +46,19 @@ Valid providers defined in `internal/core/init/input.go`:
 
 Add new providers by updating `ValidValues` in field definitions.
 
+## Hooks System
+
+Hooks are executable shell scripts in `.monkeypuzzle/hooks/` that run during piece operations:
+- `on-piece-create.sh` - After piece creation
+- `before-piece-update.sh` / `after-piece-update.sh` - Around `mp piece update`
+- `before-piece-merge.sh` / `after-piece-merge.sh` - Around `mp piece merge`
+
+Hooks receive context via `MP_*` environment variables. Non-zero exit aborts the operation.
+
+Key files:
+- `internal/core/piece/hooks.go` - HookRunner implementation
+- `internal/core/piece/hooks_test.go` - Unit tests
+
 ## Testing
 
 ```bash

@@ -130,6 +130,50 @@ tmux list-sessions          # See all piece sessions
 tmux attach -t mp-piece-... # Attach to specific piece
 ```
 
+## Hooks
+
+Monkeypuzzle supports hooks to run custom scripts during piece operations. Create executable scripts in `.monkeypuzzle/hooks/`:
+
+### Pre-merge validation
+
+Run tests before allowing merge to main:
+
+```bash
+# .monkeypuzzle/hooks/before-piece-merge.sh
+#!/bin/bash
+cd "$MP_WORKTREE_PATH"
+echo "Running tests..."
+go test ./... || exit 1
+echo "Linting..."
+go vet ./... || exit 1
+```
+
+### Post-create setup
+
+Run setup after creating a new piece:
+
+```bash
+# .monkeypuzzle/hooks/on-piece-create.sh
+#!/bin/bash
+cd "$MP_WORKTREE_PATH"
+echo "Installing dependencies..."
+go mod download
+```
+
+### Notifications
+
+Send notifications after merges:
+
+```bash
+# .monkeypuzzle/hooks/after-piece-merge.sh
+#!/bin/bash
+echo "Piece $MP_PIECE_NAME merged to $MP_MAIN_BRANCH" | slack-notify
+```
+
+See [docs/commands.md](commands.md) for full hooks reference.
+
+---
+
 ## Troubleshooting
 
 ### "Main branch is ahead"

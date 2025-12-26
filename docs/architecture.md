@@ -20,7 +20,8 @@ monkeypuzzle/
 │   │   └── piece/       # Piece command logic
 │   │       ├── input.go
 │   │       ├── handler.go
-│   │       └── handler_test.go
+│   │       ├── handler_test.go
+│   │       └── hooks.go     # Hook runner for piece operations
 │   ├── adapters/        # Interface implementations
 │   │   ├── filesystem.go   # OSFS, MemoryFS
 │   │   ├── output.go       # TextOutput, JSONOutput, BufferOutput
@@ -55,6 +56,7 @@ type Output interface {
 type Exec interface {
     Run(name string, args ...string) ([]byte, error)
     RunWithDir(dir, name string, args ...string) ([]byte, error)
+    RunWithEnv(dir string, env []string, name string, args ...string) ([]byte, error)
 }
 ```
 
@@ -154,6 +156,17 @@ git.Merge(workDir, branch)
 ```go
 tmux := adapters.NewTmux(deps.Exec)
 tmux.NewSession(sessionName, workDir)
+tmux.KillSession(sessionName)
+```
+
+**HookRunner** - Executes shell scripts with environment variables:
+```go
+hooks := piece.NewHookRunner(deps)
+hooks.RunHook(repoRoot, piece.HookOnPieceCreate, piece.HookContext{
+    PieceName:    "my-piece",
+    WorktreePath: "/path/to/worktree",
+    RepoRoot:     "/path/to/repo",
+})
 ```
 
 ## Input Pattern

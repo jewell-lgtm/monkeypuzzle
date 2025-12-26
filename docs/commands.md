@@ -103,13 +103,22 @@ Create a new piece (git worktree + tmux session).
 mp piece new
 ```
 
+### Flags
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--name` | Custom piece name | Auto-generated |
+
 ### What it does
 
 1. Detects current git repository root
-2. Generates piece name: `piece-YYYYMMDD-HHMMSS`
+2. Generates piece name: `piece-YYYYMMDD-HHMMSS` (or uses `--name`)
 3. Creates git worktree at `~/.local/share/monkeypuzzle/pieces/<piece-name>`
 4. Creates symlink `.monkeypuzzle-source` to source monkeypuzzle config
 5. Creates tmux session `mp-piece-<piece-name>` (if tmux available)
+6. Runs `on-piece-create.sh` hook (if exists)
+
+If the hook fails, the worktree and tmux session are cleaned up automatically.
 
 ### Output
 
@@ -155,8 +164,12 @@ mp piece update --main-branch develop  # Merge from 'develop'
 ### What it does
 
 1. Verifies you're in a piece worktree
-2. Merges specified branch into current piece branch
-3. Reports success/failure
+2. Runs `before-piece-update.sh` hook (if exists)
+3. Merges specified branch into current piece branch
+4. Runs `after-piece-update.sh` hook (if exists)
+5. Reports success/failure
+
+If any hook fails, the operation is aborted.
 
 ---
 
@@ -185,14 +198,63 @@ mp piece merge --main-branch develop  # Merge to 'develop'
 ### What it does
 
 1. Verifies you're in a piece worktree
-2. Checks main branch isn't ahead (safety check)
-3. Switches to main branch in main repository
-4. Merges piece branch into main
-5. Reports success/failure
+2. Runs `before-piece-merge.sh` hook (if exists)
+3. Checks main branch isn't ahead (safety check)
+4. Switches to main branch in main repository
+5. Merges piece branch into main
+6. Runs `after-piece-merge.sh` hook (if exists)
+7. Reports success/failure
+
+If any hook fails, the operation is aborted.
 
 ### Safety check
 
 If main has commits not in the piece, merge fails. Run `mp piece update` first to incorporate those changes.
+
+---
+
+## Hooks
+
+Hooks are executable shell scripts in `.monkeypuzzle/hooks/` that run at key points during piece operations.
+
+### Available Hooks
+
+| Hook | Trigger |
+|------|---------|
+| `on-piece-create.sh` | After piece creation |
+| `before-piece-update.sh` | Before `mp piece update` |
+| `after-piece-update.sh` | After successful update |
+| `before-piece-merge.sh` | Before `mp piece merge` |
+| `after-piece-merge.sh` | After successful merge |
+
+### Environment Variables
+
+All hooks receive these environment variables:
+
+| Variable | Description |
+|----------|-------------|
+| `MP_PIECE_NAME` | Name of the piece |
+| `MP_WORKTREE_PATH` | Absolute path to worktree |
+| `MP_REPO_ROOT` | Absolute path to main repo |
+| `MP_MAIN_BRANCH` | Main branch name (merge/update) |
+| `MP_SESSION_NAME` | Tmux session name (create) |
+
+### Behavior
+
+- Hooks must be executable (`chmod +x`)
+- Non-zero exit code aborts the operation
+- Missing hooks are silently skipped
+- Hook output is displayed to the user
+
+### Example
+
+`.monkeypuzzle/hooks/before-piece-merge.sh`:
+```bash
+#!/bin/bash
+cd "$MP_WORKTREE_PATH"
+echo "Running pre-merge checks for $MP_PIECE_NAME..."
+go test ./... || exit 1
+```
 
 ---
 
