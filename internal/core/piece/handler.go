@@ -200,6 +200,59 @@ func (h *Handler) UpdatePiece(workDir, mainBranch string) error {
 	return nil
 }
 
+// MergePiece merges the piece branch back into main
+// Fails if main has commits that are not in the piece worktree
+func (h *Handler) MergePiece(workDir, mainBranch string) error {
+	// Check if we're in a piece worktree
+	status, err := h.Status(workDir)
+	if err != nil {
+		return fmt.Errorf("failed to get piece status: %w", err)
+	}
+
+	if !status.InPiece {
+		return fmt.Errorf("not in a piece worktree")
+	}
+
+	// Get current branch (piece branch)
+	pieceBranch, err := h.git.CurrentBranch(workDir)
+	if err != nil {
+		return fmt.Errorf("failed to get current branch: %w", err)
+	}
+
+	// Get main repo root
+	mainRepoRoot, err := h.git.GetMainRepoRoot(workDir)
+	if err != nil {
+		return fmt.Errorf("failed to get main repo root: %w", err)
+	}
+
+	// Check if main has commits not in the piece branch
+	isAhead, err := h.git.IsMainAhead(mainRepoRoot, mainBranch, pieceBranch)
+	if err != nil {
+		return fmt.Errorf("failed to check if main is ahead: %w", err)
+	}
+
+	if isAhead {
+		return fmt.Errorf("cannot merge: main branch has commits not in piece worktree. Run 'mp piece update' first")
+	}
+
+	// Switch to main branch
+	if err := h.git.Checkout(mainRepoRoot, mainBranch); err != nil {
+		return fmt.Errorf("failed to checkout main branch: %w", err)
+	}
+
+	// Merge the piece branch into main
+	if err := h.git.Merge(mainRepoRoot, pieceBranch); err != nil {
+		return fmt.Errorf("failed to merge piece branch into main: %w", err)
+	}
+
+	h.deps.Output.Write(core.Message{
+		Type:    core.MsgSuccess,
+		Content: fmt.Sprintf("Merged %s into %s", pieceBranch, mainBranch),
+	})
+
+	return nil
+}
+
 // getPiecesDir returns the directory for storing pieces, using XDG_DATA_HOME
 func getPiecesDir() (string, error) {
 	dataHome := os.Getenv("XDG_DATA_HOME")

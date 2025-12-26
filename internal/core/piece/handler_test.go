@@ -239,3 +239,95 @@ func TestHandler_UpdatePiece_NotInWorktree(t *testing.T) {
 		t.Errorf("expected error about not being in worktree, got: %v", err)
 	}
 }
+
+func TestHandler_MergePiece_Success(t *testing.T) {
+	fs := adapters.NewMemoryFS()
+	out := adapters.NewBufferOutput()
+	mockExec := adapters.NewMockExec()
+	deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
+	handler := piece.NewHandler(deps)
+
+	// Setup mock responses for worktree status
+	gitDir := "/repo/.git/worktrees/piece-1"
+	worktreePath := "/pieces/piece-1"
+	mockExec.AddResponse("git", []string{"rev-parse", "--git-dir"}, []byte(gitDir+"\n"), nil)
+	mockExec.AddResponse("git", []string{"rev-parse", "--show-toplevel"}, []byte(worktreePath+"\n"), nil)
+
+	// Setup mock responses for merge piece
+	mockExec.AddResponse("git", []string{"rev-parse", "--abbrev-ref", "HEAD"}, []byte("piece-1\n"), nil)
+	// IsMainAhead: merge-base and rev-list
+	mockExec.AddResponse("git", []string{"merge-base", "main", "piece-1"}, []byte("abc123\n"), nil)
+	mockExec.AddResponse("git", []string{"rev-list", "--count", "abc123..main"}, []byte("0\n"), nil) // main is not ahead
+	// Checkout and merge
+	mockExec.AddResponse("git", []string{"checkout", "main"}, nil, nil)
+	mockExec.AddResponse("git", []string{"merge", "piece-1"}, nil, nil)
+
+	err := handler.MergePiece("/pieces/piece-1", "main")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	// Verify git checkout and merge were called
+	if !mockExec.WasCalled("git", "checkout", "main") {
+		t.Error("expected git checkout main to be called")
+	}
+	if !mockExec.WasCalled("git", "merge", "piece-1") {
+		t.Error("expected git merge piece-1 to be called")
+	}
+
+	// Verify success message
+	if !out.HasSuccess() {
+		t.Error("expected success message")
+	}
+}
+
+func TestHandler_MergePiece_MainAhead(t *testing.T) {
+	fs := adapters.NewMemoryFS()
+	out := adapters.NewBufferOutput()
+	mockExec := adapters.NewMockExec()
+	deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
+	handler := piece.NewHandler(deps)
+
+	// Setup mock responses for worktree status
+	gitDir := "/repo/.git/worktrees/piece-1"
+	worktreePath := "/pieces/piece-1"
+	mockExec.AddResponse("git", []string{"rev-parse", "--git-dir"}, []byte(gitDir+"\n"), nil)
+	mockExec.AddResponse("git", []string{"rev-parse", "--show-toplevel"}, []byte(worktreePath+"\n"), nil)
+
+	// Setup mock responses - main is ahead
+	mockExec.AddResponse("git", []string{"rev-parse", "--abbrev-ref", "HEAD"}, []byte("piece-1\n"), nil)
+	// IsMainAhead: merge-base and rev-list
+	mockExec.AddResponse("git", []string{"merge-base", "main", "piece-1"}, []byte("abc123\n"), nil)
+	mockExec.AddResponse("git", []string{"rev-list", "--count", "abc123..main"}, []byte("2\n"), nil) // main has 2 commits ahead
+
+	err := handler.MergePiece("/pieces/piece-1", "main")
+	if err == nil {
+		t.Fatal("expected error when main is ahead")
+	}
+
+	if !strings.Contains(err.Error(), "cannot merge") || !strings.Contains(err.Error(), "commits not in piece worktree") {
+		t.Errorf("expected error about main being ahead, got: %v", err)
+	}
+}
+
+func TestHandler_MergePiece_NotInWorktree(t *testing.T) {
+	fs := adapters.NewMemoryFS()
+	out := adapters.NewBufferOutput()
+	mockExec := adapters.NewMockExec()
+	deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
+	handler := piece.NewHandler(deps)
+
+	// Setup mock responses for main repo (not worktree)
+	gitDir := "/repo/.git"
+	mockExec.AddResponse("git", []string{"rev-parse", "--git-dir"}, []byte(gitDir+"\n"), nil)
+	mockExec.AddResponse("git", []string{"rev-parse", "--show-toplevel"}, []byte("/repo\n"), nil)
+
+	err := handler.MergePiece("/repo", "main")
+	if err == nil {
+		t.Fatal("expected error when not in worktree")
+	}
+
+	if !strings.Contains(err.Error(), "not in a piece worktree") {
+		t.Errorf("expected error about not being in worktree, got: %v", err)
+	}
+}

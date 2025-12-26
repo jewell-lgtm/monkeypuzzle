@@ -80,3 +80,56 @@ func (g *Git) Merge(workDir, branch string) error {
 	}
 	return nil
 }
+
+// IsMainAhead checks if main branch has commits that are not in the piece branch
+// Returns true if main is ahead (has commits not in piece), false otherwise
+func (g *Git) IsMainAhead(workDir, mainBranch, pieceBranch string) (bool, error) {
+	// Get the merge-base between main and piece branch
+	output, err := g.exec.RunWithDir(workDir, "git", "merge-base", mainBranch, pieceBranch)
+	if err != nil {
+		return false, fmt.Errorf("failed to find merge-base: %w", err)
+	}
+	mergeBase := strings.TrimSpace(string(output))
+
+	// Check if main has commits ahead of the merge-base
+	output, err = g.exec.RunWithDir(workDir, "git", "rev-list", "--count", mergeBase+".."+mainBranch)
+	if err != nil {
+		return false, fmt.Errorf("failed to count commits: %w", err)
+	}
+
+	count := strings.TrimSpace(string(output))
+	// If count > 0, main is ahead
+	return count != "0", nil
+}
+
+// GetMainRepoRoot gets the main repository root from a worktree
+// For worktrees, we need to find the main repo by looking at the gitdir
+func (g *Git) GetMainRepoRoot(workDir string) (string, error) {
+	gitDir, err := g.RevParseGitDir(workDir)
+	if err != nil {
+		return "", err
+	}
+
+	// If it's a worktree, the gitdir will be in .git/worktrees/<name>
+	// The main repo root is the parent of .git
+	if g.IsWorktree(gitDir) {
+		// For worktrees, gitDir is something like /repo/.git/worktrees/piece-1
+		// We need to go up to /repo/.git, then to /repo
+		mainGitDir := filepath.Dir(filepath.Dir(gitDir))
+		mainRepoRoot := filepath.Dir(mainGitDir)
+		mainRepoRoot, _ = filepath.Abs(mainRepoRoot)
+		return mainRepoRoot, nil
+	}
+
+	// Not a worktree, just return the repo root
+	return g.RepoRoot(workDir)
+}
+
+// Checkout switches to the specified branch
+func (g *Git) Checkout(workDir, branch string) error {
+	_, err := g.exec.RunWithDir(workDir, "git", "checkout", branch)
+	if err != nil {
+		return fmt.Errorf("failed to checkout branch %s: %w", branch, err)
+	}
+	return nil
+}

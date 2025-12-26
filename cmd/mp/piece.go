@@ -35,12 +35,21 @@ var pieceUpdateCmd = &cobra.Command{
 	RunE:  runPieceUpdate,
 }
 
+var pieceMergeCmd = &cobra.Command{
+	Use:   "merge",
+	Short: "Merge piece back into main branch",
+	Long:  `Merges the piece branch back into main. Fails if main has commits not in the piece worktree. Must be run from within a piece worktree.`,
+	RunE:  runPieceMerge,
+}
+
 var flagMainBranch string
 
 func init() {
 	pieceUpdateCmd.Flags().StringVar(&flagMainBranch, "main-branch", "main", "Main branch name to merge (default: main)")
+	pieceMergeCmd.Flags().StringVar(&flagMainBranch, "main-branch", "main", "Main branch name to merge into (default: main)")
 	pieceCmd.AddCommand(pieceNewCmd)
 	pieceCmd.AddCommand(pieceUpdateCmd)
+	pieceCmd.AddCommand(pieceMergeCmd)
 	rootCmd.AddCommand(pieceCmd)
 }
 
@@ -139,6 +148,32 @@ func runPieceUpdate(cmd *cobra.Command, args []string) error {
 	handler := piececmd.NewHandler(deps)
 
 	if err := handler.UpdatePiece(wd, mainBranch); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func runPieceMerge(cmd *cobra.Command, args []string) error {
+	wd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("failed to get working directory: %w", err)
+	}
+
+	// Default to "main" if not specified
+	mainBranch := flagMainBranch
+	if mainBranch == "" {
+		mainBranch = "main"
+	}
+
+	deps := core.Deps{
+		FS:     adapters.NewOSFS(""),
+		Output: adapters.NewTextOutput(os.Stderr),
+		Exec:   adapters.NewOSExec(),
+	}
+	handler := piececmd.NewHandler(deps)
+
+	if err := handler.MergePiece(wd, mainBranch); err != nil {
 		return err
 	}
 
