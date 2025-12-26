@@ -36,11 +36,10 @@ temp/
 *.tmp
 *.log
 
-# Docker files themselves
+# Docker files themselves (keep entrypoint for COPY)
 Dockerfile
 docker-compose.yml
 .dockerignore
-docker-entrypoint.sh
 
 # CI/CD
 .github/

@@ -63,13 +63,14 @@ ARG USERNAME=developer
 ARG USER_UID=1000
 ARG USER_GID=1000
 
-RUN groupadd --gid ${USER_GID} ${USERNAME} && \
-    useradd --uid ${USER_UID} --gid ${USER_GID} --shell /bin/bash --create-home ${USERNAME} && \
+RUN (groupadd --gid ${USER_GID} ${USERNAME} 2>/dev/null || true) && \
+    useradd --uid ${USER_UID} --gid ${USER_GID} --shell /bin/bash --create-home ${USERNAME} 2>/dev/null || \
+    usermod -l ${USERNAME} -d /home/${USERNAME} -m $(id -nu ${USER_UID}) && \
     # Allow user to use sudo without password (useful for some operations)
     echo "${USERNAME} ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers && \
     # Create go workspace directory
     mkdir -p ${GOPATH} && \
-    chown -R ${USERNAME}:${USERNAME} ${GOPATH}
+    chown -R ${USER_UID}:${USER_GID} ${GOPATH}
 
 # Set working directory
 WORKDIR /workspace
