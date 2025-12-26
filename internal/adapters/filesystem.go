@@ -54,6 +54,10 @@ func (f *OSFS) Remove(name string) error {
 	return os.Remove(f.path(name))
 }
 
+func (f *OSFS) Symlink(oldname, newname string) error {
+	return os.Symlink(oldname, f.path(newname))
+}
+
 // MemoryFS implements core.FS using an in-memory filesystem for testing
 type MemoryFS struct {
 	mu    sync.RWMutex
@@ -152,6 +156,21 @@ func (f *MemoryFS) Remove(name string) error {
 		return nil
 	}
 	return os.ErrNotExist
+}
+
+func (f *MemoryFS) Symlink(oldname, newname string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	newname = filepath.Clean(newname)
+	// In memory filesystem, we just record the symlink as a file with special content
+	// For testing purposes, we store the target path
+	f.files[newname] = &memFile{
+		data:    []byte(oldname),
+		mode:    os.ModeSymlink,
+		modTime: time.Now(),
+	}
+	return nil
 }
 
 // Files returns all files in the memory filesystem (for test assertions)

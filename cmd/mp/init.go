@@ -68,6 +68,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	deps := core.Deps{
 		FS:     adapters.NewOSFS(""),
 		Output: adapters.NewTextOutput(os.Stderr),
+		Exec:   adapters.NewOSExec(),
 	}
 	handler := initcmd.NewHandler(deps)
 

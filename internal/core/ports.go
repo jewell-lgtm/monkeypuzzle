@@ -12,6 +12,7 @@ type FS interface {
 	ReadFile(name string) ([]byte, error)
 	Stat(name string) (fs.FileInfo, error)
 	Remove(name string) error
+	Symlink(oldname, newname string) error
 }
 
 // MessageType categorizes output messages
@@ -36,8 +37,15 @@ type Output interface {
 	Write(msg Message)
 }
 
+// Exec abstracts command execution for testability
+type Exec interface {
+	Run(name string, args ...string) ([]byte, error)
+	RunWithDir(dir, name string, args ...string) ([]byte, error)
+}
+
 // Deps holds all injectable dependencies for handlers
 type Deps struct {
 	FS     FS
 	Output Output
+	Exec   Exec
 }
