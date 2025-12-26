@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/adapters"
-	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
 	initcmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/init"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core/piece"
 )
