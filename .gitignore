@@ -34,8 +34,9 @@ Thumbs.db
 .env
 .env.local
 
-# Monkeypuzzle local config (for testing)
-.monkeypuzzle/
+# Monkeypuzzle local config (keep hooks tracked)
+.monkeypuzzle/monkeypuzzle.json
+.monkeypuzzle/current-issue.json
 
 # Temp files
 *.tmp
