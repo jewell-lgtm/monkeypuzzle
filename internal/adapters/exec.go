@@ -192,4 +192,3 @@ func (m *MockExec) ClearCalls() {
 	defer m.mu.Unlock()
 	m.calls = make([]CallRecord, 0)
 }
-

@@ -7,6 +7,7 @@ Monkeypuzzle enables a "stacked branch" workflow using git worktrees, allowing i
 ### Pieces
 
 A **piece** is an isolated git worktree for developing a single atomic change. Each piece:
+
 - Lives in its own directory (`~/.local/share/monkeypuzzle/pieces/`)
 - Has its own branch
 - Can be worked on independently
@@ -15,6 +16,7 @@ A **piece** is an isolated git worktree for developing a single atomic change. E
 ### Why worktrees?
 
 Git worktrees allow multiple working directories from the same repository:
+
 - Switch between features without stashing
 - Run tests in one piece while coding in another
 - Isolate experimental changes
@@ -36,6 +38,7 @@ mp piece new
 ```
 
 This creates:
+
 - New worktree at `~/.local/share/monkeypuzzle/pieces/piece-YYYYMMDD-HHMMSS`
 - New git branch
 - Tmux session (if available)
@@ -72,6 +75,7 @@ mp piece merge
 ```
 
 This:
+
 1. Checks main isn't ahead (safety)
 2. Switches to main in the main repo
 3. Merges piece branch into main
@@ -121,10 +125,12 @@ git push origin main
 ## Tmux Integration
 
 `mp piece new` creates a tmux session automatically:
+
 - Session name: `mp-piece-<piece-name>`
 - Working directory: piece worktree path
 
 Switch between pieces using tmux:
+
 ```bash
 tmux list-sessions          # See all piece sessions
 tmux attach -t mp-piece-... # Attach to specific piece
@@ -189,10 +195,12 @@ mp piece merge    # Now safe to merge
 ### Finding pieces
 
 Pieces are stored in:
+
 - Linux: `~/.local/share/monkeypuzzle/pieces/`
 - macOS: `~/Library/Application Support/monkeypuzzle/pieces/`
 
 List all pieces:
+
 ```bash
 ls ~/.local/share/monkeypuzzle/pieces/
 ```
@@ -200,6 +208,7 @@ ls ~/.local/share/monkeypuzzle/pieces/
 ### Cleaning up old pieces
 
 After merging, worktrees remain. Clean up manually:
+
 ```bash
 # From main repo
 git worktree remove ~/.local/share/monkeypuzzle/pieces/<piece-name>

@@ -44,4 +44,3 @@ func (t *Tmux) KillSession(sessionName string) error {
 	}
 	return nil
 }
-

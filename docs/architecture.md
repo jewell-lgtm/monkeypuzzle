@@ -95,11 +95,13 @@ func (h *Handler) Run(input Input) error {
 ### Filesystem
 
 **OSFS** - Real filesystem:
+
 ```go
 fs := adapters.NewOSFS("")  // Empty root = absolute paths
 ```
 
 **MemoryFS** - In-memory for tests:
+
 ```go
 fs := adapters.NewMemoryFS()
 fs.Files()  // Returns map of all files
@@ -109,18 +111,21 @@ fs.Dirs()   // Returns slice of directories
 ### Output
 
 **TextOutput** - Human-readable with prefixes:
+
 ```go
 out := adapters.NewTextOutput(os.Stderr)
 // Adds: ✓ (success), ⚠ (warning), ✗ (error)
 ```
 
 **JSONOutput** - Machine-readable:
+
 ```go
 out := adapters.NewJSONOutput(os.Stdout)
 // Outputs structured JSON
 ```
 
 **BufferOutput** - For testing:
+
 ```go
 out := adapters.NewBufferOutput()
 out.HasSuccess()  // Check if success message exists
@@ -130,11 +135,13 @@ out.Last()        // Get last message
 ### Exec
 
 **OSExec** - Real command execution:
+
 ```go
 exec := adapters.NewOSExec()
 ```
 
 **MockExec** - For testing:
+
 ```go
 mock := adapters.NewMockExec()
 mock.AddResponse("git", []string{"status"}, []byte("output"), nil)
@@ -145,6 +152,7 @@ mock.GetCalls()
 ### Composed Adapters
 
 **Git** - Uses Exec internally:
+
 ```go
 git := adapters.NewGit(deps.Exec)
 git.WorktreeAdd(repoRoot, worktreePath)
@@ -153,6 +161,7 @@ git.Merge(workDir, branch)
 ```
 
 **Tmux** - Uses Exec internally:
+
 ```go
 tmux := adapters.NewTmux(deps.Exec)
 tmux.NewSession(sessionName, workDir)
@@ -160,6 +169,7 @@ tmux.KillSession(sessionName)
 ```
 
 **HookRunner** - Executes shell scripts with environment variables:
+
 ```go
 hooks := piece.NewHookRunner(deps)
 hooks.RunHook(repoRoot, piece.HookOnPieceCreate, piece.HookContext{
@@ -252,6 +262,7 @@ func TestHandler(t *testing.T) {
 ```
 
 Benefits:
+
 - No disk I/O
 - No external command execution
 - Deterministic results

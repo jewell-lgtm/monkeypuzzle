@@ -4,12 +4,12 @@
 
 All commands support multiple input modes:
 
-| Mode | When | Usage |
-|------|------|-------|
-| Interactive | TTY detected | Run command with no args |
-| Flags | All required flags provided | `mp <cmd> --flag value` |
-| Stdin JSON | Piped input | `echo '{}' \| mp <cmd>` |
-| Schema | `--schema` flag | `mp <cmd> --schema` |
+| Mode        | When                        | Usage                    |
+| ----------- | --------------------------- | ------------------------ |
+| Interactive | TTY detected                | Run command with no args |
+| Flags       | All required flags provided | `mp <cmd> --flag value`  |
+| Stdin JSON  | Piped input                 | `echo '{}' \| mp <cmd>`  |
+| Schema      | `--schema` flag             | `mp <cmd> --schema`      |
 
 Output goes to stderr (human-readable) while stdout is reserved for JSON (machine-readable).
 
@@ -30,13 +30,13 @@ mp init --schema               # Output schema
 
 ### Flags
 
-| Flag | Description | Default |
-|------|-------------|---------|
-| `--name` | Project name | Directory name |
-| `--issue-provider` | Issue provider | `markdown` |
-| `--pr-provider` | PR provider | `github` |
-| `--schema` | Output JSON schema and exit | - |
-| `-y, --yes` | Overwrite existing config | `false` |
+| Flag               | Description                 | Default        |
+| ------------------ | --------------------------- | -------------- |
+| `--name`           | Project name                | Directory name |
+| `--issue-provider` | Issue provider              | `markdown`     |
+| `--pr-provider`    | PR provider                 | `github`       |
+| `--schema`         | Output JSON schema and exit | -              |
+| `-y, --yes`        | Overwrite existing config   | `false`        |
 
 ### JSON Schema
 
@@ -51,6 +51,7 @@ mp init --schema               # Output schema
 ### Output
 
 Creates `.monkeypuzzle/` directory:
+
 ```
 .monkeypuzzle/
 ├── monkeypuzzle.json    # Configuration
@@ -60,9 +61,11 @@ Creates `.monkeypuzzle/` directory:
 ### Providers
 
 **Issue Providers:**
+
 - `markdown` - Issues as markdown files in `.monkeypuzzle/issues/`
 
 **PR Providers:**
+
 - `github` - PR management via `gh` CLI
 
 ---
@@ -80,6 +83,7 @@ mp piece
 ### Output
 
 JSON to stdout:
+
 ```json
 {
   "in_piece": true,
@@ -105,8 +109,8 @@ mp piece new
 
 ### Flags
 
-| Flag | Description | Default |
-|------|-------------|---------|
+| Flag     | Description       | Default        |
+| -------- | ----------------- | -------------- |
 | `--name` | Custom piece name | Auto-generated |
 
 ### What it does
@@ -123,6 +127,7 @@ If the hook fails, the worktree and tmux session are cleaned up automatically.
 ### Output
 
 JSON to stdout:
+
 ```json
 {
   "name": "piece-20241226-143022",
@@ -134,6 +139,7 @@ JSON to stdout:
 ### Piece storage
 
 Pieces stored in XDG data directory:
+
 - Linux: `~/.local/share/monkeypuzzle/pieces/`
 - macOS: `~/Library/Application Support/monkeypuzzle/pieces/`
 - `$XDG_DATA_HOME/monkeypuzzle/pieces/` if set
@@ -153,9 +159,9 @@ mp piece update --main-branch develop  # Merge from 'develop'
 
 ### Flags
 
-| Flag | Description | Default |
-|------|-------------|---------|
-| `--main-branch` | Branch to merge from | `main` |
+| Flag            | Description          | Default |
+| --------------- | -------------------- | ------- |
+| `--main-branch` | Branch to merge from | `main`  |
 
 ### Requirements
 
@@ -186,9 +192,9 @@ mp piece merge --main-branch develop  # Merge to 'develop'
 
 ### Flags
 
-| Flag | Description | Default |
-|------|-------------|---------|
-| `--main-branch` | Branch to merge into | `main` |
+| Flag            | Description          | Default |
+| --------------- | -------------------- | ------- |
+| `--main-branch` | Branch to merge into | `main`  |
 
 ### Requirements
 
@@ -219,25 +225,25 @@ Hooks are executable shell scripts in `.monkeypuzzle/hooks/` that run at key poi
 
 ### Available Hooks
 
-| Hook | Trigger |
-|------|---------|
-| `on-piece-create.sh` | After piece creation |
+| Hook                     | Trigger                  |
+| ------------------------ | ------------------------ |
+| `on-piece-create.sh`     | After piece creation     |
 | `before-piece-update.sh` | Before `mp piece update` |
-| `after-piece-update.sh` | After successful update |
-| `before-piece-merge.sh` | Before `mp piece merge` |
-| `after-piece-merge.sh` | After successful merge |
+| `after-piece-update.sh`  | After successful update  |
+| `before-piece-merge.sh`  | Before `mp piece merge`  |
+| `after-piece-merge.sh`   | After successful merge   |
 
 ### Environment Variables
 
 All hooks receive these environment variables:
 
-| Variable | Description |
-|----------|-------------|
-| `MP_PIECE_NAME` | Name of the piece |
-| `MP_WORKTREE_PATH` | Absolute path to worktree |
-| `MP_REPO_ROOT` | Absolute path to main repo |
-| `MP_MAIN_BRANCH` | Main branch name (merge/update) |
-| `MP_SESSION_NAME` | Tmux session name (create) |
+| Variable           | Description                     |
+| ------------------ | ------------------------------- |
+| `MP_PIECE_NAME`    | Name of the piece               |
+| `MP_WORKTREE_PATH` | Absolute path to worktree       |
+| `MP_REPO_ROOT`     | Absolute path to main repo      |
+| `MP_MAIN_BRANCH`   | Main branch name (merge/update) |
+| `MP_SESSION_NAME`  | Tmux session name (create)      |
 
 ### Behavior
 
@@ -249,6 +255,7 @@ All hooks receive these environment variables:
 ### Example
 
 `.monkeypuzzle/hooks/before-piece-merge.sh`:
+
 ```bash
 #!/bin/bash
 cd "$MP_WORKTREE_PATH"

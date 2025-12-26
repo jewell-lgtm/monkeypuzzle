@@ -33,6 +33,7 @@ Clean architecture with dependency injection:
 ## CLI Modes
 
 All commands should support:
+
 1. **Interactive** (default with TTY) - Bubble Tea TUI
 2. **Stdin JSON** - `echo '{}' | mp <cmd>`
 3. **Flags** - `mp <cmd> --flag value`
@@ -41,6 +42,7 @@ All commands should support:
 ## Providers
 
 Valid providers defined in `internal/core/init/input.go`:
+
 - Issue: `markdown`
 - PR: `github`
 
@@ -49,6 +51,7 @@ Add new providers by updating `ValidValues` in field definitions.
 ## Hooks System
 
 Hooks are executable shell scripts in `.monkeypuzzle/hooks/` that run during piece operations:
+
 - `on-piece-create.sh` - After piece creation
 - `before-piece-update.sh` / `after-piece-update.sh` - Around `mp piece update`
 - `before-piece-merge.sh` / `after-piece-merge.sh` - Around `mp piece merge`
@@ -56,6 +59,7 @@ Hooks are executable shell scripts in `.monkeypuzzle/hooks/` that run during pie
 Hooks receive context via `MP_*` environment variables. Non-zero exit aborts the operation.
 
 Key files:
+
 - `internal/core/piece/hooks.go` - HookRunner implementation
 - `internal/core/piece/hooks_test.go` - Unit tests
 
