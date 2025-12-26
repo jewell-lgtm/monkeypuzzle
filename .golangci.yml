@@ -1,0 +1,15 @@
+linters-settings:
+  errcheck:
+    exclude-functions:
+      # Common test setup functions that always succeed with MemoryFS
+      - (github.com/jewell-lgtm/monkeypuzzle/internal/adapters.MemoryFS).MkdirAll
+      - (github.com/jewell-lgtm/monkeypuzzle/internal/adapters.MemoryFS).WriteFile
+      - (*github.com/jewell-lgtm/monkeypuzzle/internal/adapters.MemoryFS).MkdirAll
+      - (*github.com/jewell-lgtm/monkeypuzzle/internal/adapters.MemoryFS).WriteFile
+
+issues:
+  exclude-rules:
+    # Disable errcheck in test files - test setup rarely needs error handling
+    - path: _test\.go
+      linters:
+        - errcheck
