@@ -1,0 +1,16 @@
+{
+  "version": "1",
+  "project": {
+    "name": "monkeypuzzle"
+  },
+  "issues": {
+    "provider": "markdown",
+    "config": {
+      "directory": "issues"
+    }
+  },
+  "pr": {
+    "provider": "github",
+    "config": {}
+  }
+}
