@@ -181,23 +181,45 @@ internal/
 
 ## Development
 
-### Prerequisites
+### Docker Development Environment (Recommended)
+
+For reproducible development and bug reporting, use the Docker environment:
+
+```bash
+# Build the image
+docker build -t monkeypuzzle-dev .
+
+# Run with source code mounted
+docker run -it --rm \
+  -v "$(pwd):/workspace" \
+  -w /workspace \
+  monkeypuzzle-dev
+```
+
+This provides a clean Ubuntu environment with all dependencies pre-installed. See [docs/docker-development.md](docs/docker-development.md) for complete documentation.
+
+### Local Development
+
+#### Prerequisites
 
 - Go 1.24+
+- git (for `mp piece` command)
+- tmux (for `mp piece` command)
+- gh CLI (for GitHub PR provider)
 
-### Build
+#### Build
 
 ```bash
 go build -o mp .
 ```
 
-### Test
+#### Test
 
 ```bash
 go test ./...
 ```
 
-### Lint
+#### Lint
 
 ```bash
 go vet ./...

@@ -1,0 +1,35 @@
+# docker-compose.yml - Convenience configuration for Docker development
+#
+# Usage:
+#   docker-compose run --rm dev bash
+#   docker-compose run --rm dev mp init --schema
+#   docker-compose run --rm dev go test ./...
+#
+# This provides a simpler interface than raw docker commands.
+
+version: '3.8'
+
+services:
+  dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: monkeypuzzle-dev
+    volumes:
+      # Mount source code for live development
+      - .:/workspace
+      # Optional: Cache Go modules for faster builds
+      - go-mod-cache:/go/pkg/mod
+    working_dir: /workspace
+    stdin_open: true
+    tty: true
+    # Preserve environment variables (useful for proxies, etc.)
+    environment:
+      - TERM=${TERM:-xterm-256color}
+    # Optional: Use host user ID to avoid permission issues
+    # Uncomment and adjust if needed:
+    # user: "${UID:-1000}:${GID:-1000}"
+
+volumes:
+  go-mod-cache:
+    driver: local
