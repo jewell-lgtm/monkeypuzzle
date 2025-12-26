@@ -72,7 +72,7 @@ func TestHandler_Run_CreatesIssuesDirectory(t *testing.T) {
 	dirs := fs.Dirs()
 	hasIssuesDir := false
 	for _, d := range dirs {
-		if d == ".monkeypuzzle/issues" {
+		if d == "issues" {
 			hasIssuesDir = true
 			break
 		}

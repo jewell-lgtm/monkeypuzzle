@@ -70,7 +70,7 @@ func (h *Handler) Run(input Input) error {
 		return err
 	}
 
-	issuesDir := filepath.Join(DirName, "issues")
+	issuesDir := "issues"
 	if input.IssueProvider == "markdown" {
 		if err := h.deps.FS.MkdirAll(issuesDir, DefaultDirPerm); err != nil {
 			return err

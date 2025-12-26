@@ -62,7 +62,7 @@ Creates `.monkeypuzzle/` directory:
 
 **Issue Providers:**
 
-- `markdown` - Issues as markdown files in `.monkeypuzzle/issues/`
+- `markdown` - Issues as markdown files in `issues/`
 
 **PR Providers:**
 

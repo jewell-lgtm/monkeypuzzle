@@ -43,7 +43,7 @@ func (m Model) viewIssueMethod() string {
 		styles.Title.Render("Monkeypuzzle Init"),
 		styles.Label.Render("Issue/feature management:"),
 		renderOptions([]string{
-			"Markdown files in .monkeypuzzle/issues/",
+			"Markdown files in issues/",
 		}, m.IssueMethod),
 		styles.Subtle.Render("enter to continue • esc to cancel"),
 	)

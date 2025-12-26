@@ -98,7 +98,7 @@ func (h *Handler) getIssuesDirectory() (string, error) {
 	issuesDir, ok := cfg.Issues.Config["directory"]
 	if !ok || issuesDir == "" {
 		// Fallback to default
-		return filepath.Join(initcmd.DirName, "issues"), nil
+		return "issues", nil
 	}
 
 	return issuesDir, nil

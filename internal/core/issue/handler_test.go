@@ -18,7 +18,7 @@ func setupConfig(t *testing.T, fs *adapters.MemoryFS) {
 		Project: initcmd.ProjectConfig{Name: "test"},
 		Issues: initcmd.IssueConfig{
 			Provider: "markdown",
-			Config:   map[string]string{"directory": ".monkeypuzzle/issues"},
+			Config:   map[string]string{"directory": "issues"},
 		},
 		PR: initcmd.PRConfig{
 			Provider: "github",

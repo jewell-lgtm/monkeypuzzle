@@ -49,7 +49,7 @@ var flagIssuePath string
 
 func init() {
 	pieceNewCmd.Flags().StringVar(&flagPieceName, "name", "", "Optional piece name (default: auto-generated)")
-	pieceNewCmd.Flags().StringVar(&flagIssuePath, "issue", "", "Create piece from issue file (e.g., .monkeypuzzle/issues/foo.md)")
+	pieceNewCmd.Flags().StringVar(&flagIssuePath, "issue", "", "Create piece from issue file (e.g., issues/foo.md)")
 	pieceUpdateCmd.Flags().StringVar(&flagMainBranch, "main-branch", "main", "Main branch name to merge (default: main)")
 	pieceMergeCmd.Flags().StringVar(&flagMainBranch, "main-branch", "main", "Main branch name to merge into (default: main)")
 	pieceCmd.AddCommand(pieceNewCmd)

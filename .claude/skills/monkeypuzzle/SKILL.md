@@ -75,7 +75,7 @@ Location: `.monkeypuzzle/monkeypuzzle.json`
   "project": { "name": "project-name" },
   "issues": {
     "provider": "markdown",
-    "config": { "directory": ".monkeypuzzle/issues" }
+    "config": { "directory": "issues" }
   },
   "pr": {
     "provider": "github",
@@ -88,13 +88,14 @@ Location: `.monkeypuzzle/monkeypuzzle.json`
 
 ```
 .monkeypuzzle/
-├── monkeypuzzle.json    # Main config
-└── issues/              # Markdown issue files
+└── monkeypuzzle.json    # Main config
+
+issues/                  # Markdown issue files (tracked in git)
 ```
 
 ## Providers
 
-- `markdown`: Issues as `.monkeypuzzle/issues/*.md`
+- `markdown`: Issues as `issues/*.md`
 - `github`: PRs via `gh` CLI
 
 ## Quick Reference
