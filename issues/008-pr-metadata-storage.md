@@ -1,6 +1,6 @@
 ---
 title: Design and implement PR metadata storage
-status: todo
+status: done
 ---
 
 # Design and implement PR metadata storage
