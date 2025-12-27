@@ -1,6 +1,6 @@
 ---
 title: Implement `mp piece pr create` command
-status: todo
+status: done
 ---
 
 # Implement `mp piece pr create` command

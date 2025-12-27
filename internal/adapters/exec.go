@@ -1,6 +1,7 @@
 package adapters
 
 import (
+	"errors"
 	"fmt"
 	"os/exec"
 	"path/filepath"
@@ -191,4 +192,9 @@ func (m *MockExec) ClearCalls() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.calls = make([]CallRecord, 0)
+}
+
+// MockError creates a simple error for use in mock responses
+func MockError(msg string) error {
+	return errors.New(msg)
 }
