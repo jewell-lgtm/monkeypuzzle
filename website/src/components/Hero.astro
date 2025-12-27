@@ -1,0 +1,68 @@
+---
+---
+
+<section class="min-h-screen flex flex-col items-center justify-center px-4 pt-16">
+  <div class="text-center max-w-3xl mx-auto">
+    <!-- Logo -->
+    <h1 class="text-5xl sm:text-6xl md:text-7xl font-bold tracking-tight mb-6">
+      <span class="bg-gradient-to-r from-accent-400 via-accent-500 to-accent-600 bg-clip-text text-transparent">
+        monkeypuzzle
+      </span>
+    </h1>
+
+    <!-- Tagline -->
+    <p class="text-xl sm:text-2xl text-neutral-400 mb-12">
+      One workflow for humans and AI agents
+    </p>
+
+    <!-- Install Command -->
+    <div class="mb-12">
+      <div class="inline-block bg-neutral-900 border border-neutral-800 rounded-lg p-1">
+        <code class="block px-4 py-3 text-sm sm:text-base text-neutral-300 font-mono">
+          <span class="text-accent-400">git clone</span> github.com/jewell-lgtm/monkeypuzzle && <span class="text-accent-400">make install</span>
+        </code>
+      </div>
+    </div>
+
+    <!-- Terminal Preview -->
+    <div class="max-w-2xl mx-auto">
+      <div class="bg-neutral-900 border border-neutral-800 rounded-lg overflow-hidden shadow-2xl">
+        <!-- Terminal Header -->
+        <div class="flex items-center gap-2 px-4 py-3 border-b border-neutral-800 bg-neutral-900/50">
+          <div class="w-3 h-3 rounded-full bg-red-500/80"></div>
+          <div class="w-3 h-3 rounded-full bg-yellow-500/80"></div>
+          <div class="w-3 h-3 rounded-full bg-green-500/80"></div>
+          <span class="ml-2 text-xs text-neutral-500 font-mono">terminal</span>
+        </div>
+        <!-- Terminal Content -->
+        <div class="p-4 font-mono text-sm text-left space-y-2">
+          <div>
+            <span class="text-accent-400">$</span>
+            <span class="text-neutral-300"> mp piece new --issue issues/add-auth.md</span>
+          </div>
+          <div class="text-neutral-500">
+            <span class="text-green-400">✓</span> Created piece: add-auth
+          </div>
+          <div class="text-neutral-500">
+            <span class="text-green-400">✓</span> Worktree: ~/.local/share/monkeypuzzle/pieces/add-auth
+          </div>
+          <div class="text-neutral-500">
+            <span class="text-green-400">✓</span> Tmux session: mp-piece-add-auth
+          </div>
+          <div class="mt-4">
+            <span class="text-accent-400">$</span>
+            <span class="text-neutral-300"> mp piece pr create</span>
+          </div>
+          <div class="text-neutral-500">
+            <span class="text-green-400">✓</span> Created PR #42
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Subtitle -->
+    <p class="mt-12 text-neutral-500 text-sm">
+      Git worktrees. No stashing. Pure flow.
+    </p>
+  </div>
+</section>

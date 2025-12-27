@@ -1,16 +1,10 @@
 ---
 import Layout from '../layouts/Layout.astro';
+import Nav from '../components/Nav.astro';
+import Hero from '../components/Hero.astro';
 ---
 
 <Layout title="monkeypuzzle">
-  <main class="container mx-auto px-4 py-16">
-    <h1 class="text-4xl font-bold text-center">
-      <span class="bg-gradient-to-r from-accent-400 to-accent-600 bg-clip-text text-transparent">
-        monkeypuzzle
-      </span>
-    </h1>
-    <p class="text-neutral-400 text-center mt-4">
-      One workflow for humans and AI agents
-    </p>
-  </main>
+  <Nav />
+  <Hero />
 </Layout>
