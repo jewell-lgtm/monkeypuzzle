@@ -1,6 +1,6 @@
 ---
 title: Add mp piece commands to Claude Code skill
-status: todo
+status: done
 ---
 
 # Add mp piece commands to Claude Code skill

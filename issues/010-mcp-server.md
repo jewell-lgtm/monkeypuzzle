@@ -1,6 +1,6 @@
 ---
 title: MCP Server for Monkeypuzzle
-status: todo
+status: done
 ---
 
 # MCP Server for Monkeypuzzle
