@@ -89,6 +89,10 @@ func (f *OSFS) Symlink(oldname, newname string) error {
 	return os.Symlink(oldname, f.path(newname))
 }
 
+func (f *OSFS) ReadDir(name string) ([]fs.DirEntry, error) {
+	return os.ReadDir(f.path(name))
+}
+
 // MemoryFS implements core.FS using an in-memory filesystem for testing
 type MemoryFS struct {
 	mu    sync.RWMutex
@@ -225,6 +229,71 @@ func (f *MemoryFS) Symlink(oldname, newname string) error {
 	return nil
 }
 
+func (f *MemoryFS) ReadDir(name string) ([]fs.DirEntry, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+
+	name = filepath.Clean(name)
+	// Normalize path
+	if filepath.IsAbs(name) && len(name) > 1 {
+		name = name[1:]
+	}
+
+	// Check if directory exists
+	if !f.dirs[name] {
+		return nil, os.ErrNotExist
+	}
+
+	// Find all direct children (files and subdirs)
+	var entries []fs.DirEntry
+	seen := make(map[string]bool)
+
+	prefix := name + string(filepath.Separator)
+	if name == "" || name == "." {
+		prefix = ""
+	}
+
+	// Check files
+	for path, file := range f.files {
+		if !strings.HasPrefix(path, prefix) {
+			continue
+		}
+		rel := strings.TrimPrefix(path, prefix)
+		// Only direct children (no separator in relative path)
+		if rel != "" && !strings.Contains(rel, string(filepath.Separator)) {
+			if !seen[rel] {
+				seen[rel] = true
+				entries = append(entries, &memDirEntry{
+					name:  rel,
+					isDir: false,
+					file:  file,
+				})
+			}
+		}
+	}
+
+	// Check subdirectories
+	for dir := range f.dirs {
+		if !strings.HasPrefix(dir, prefix) {
+			continue
+		}
+		rel := strings.TrimPrefix(dir, prefix)
+		// Only direct children
+		if rel != "" && !strings.Contains(rel, string(filepath.Separator)) {
+			if !seen[rel] {
+				seen[rel] = true
+				entries = append(entries, &memDirEntry{
+					name:  rel,
+					isDir: true,
+					file:  nil,
+				})
+			}
+		}
+	}
+
+	return entries, nil
+}
+
 // Files returns all files in the memory filesystem (for test assertions)
 func (f *MemoryFS) Files() map[string][]byte {
 	f.mu.RLock()
@@ -279,3 +348,21 @@ func (fi *memFileInfo) Size() int64 {
 	return 0
 }
 func (fi *memFileInfo) Sys() any { return nil }
+
+type memDirEntry struct {
+	name  string
+	isDir bool
+	file  *memFile
+}
+
+func (de *memDirEntry) Name() string { return de.name }
+func (de *memDirEntry) IsDir() bool  { return de.isDir }
+func (de *memDirEntry) Type() fs.FileMode {
+	if de.isDir {
+		return fs.ModeDir
+	}
+	return 0
+}
+func (de *memDirEntry) Info() (fs.FileInfo, error) {
+	return &memFileInfo{name: de.name, file: de.file, isDir: de.isDir}, nil
+}

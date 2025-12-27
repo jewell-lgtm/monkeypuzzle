@@ -1,6 +1,6 @@
 ---
 title: Update issue status to done when PR is merged
-status: todo
+status: done
 ---
 
 # Update issue status to done when PR is merged

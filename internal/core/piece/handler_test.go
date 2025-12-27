@@ -1131,3 +1131,233 @@ func TestHandler_IsBranchMerged_GHError_FallsBackToGit(t *testing.T) {
 		t.Errorf("expected method 'git', got %q", status.Method)
 	}
 }
+
+// ============================================================================
+// CleanupMergedPieces Tests
+// ============================================================================
+
+func TestHandler_CleanupMergedPieces_NoPieces(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", "/test-data")
+
+	fs := adapters.NewMemoryFS()
+	out := adapters.NewBufferOutput()
+	mockExec := adapters.NewMockExec()
+	deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
+	handler := piece.NewHandler(deps)
+
+	// Pieces directory doesn't exist
+	opts := piece.CleanupOptions{MainBranch: "main"}
+	results, err := handler.CleanupMergedPieces("/repo", opts)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	if len(results) != 0 {
+		t.Errorf("expected 0 results, got %d", len(results))
+	}
+}
+
+func TestHandler_CleanupMergedPieces_DryRun(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", "/test-data")
+
+	fs := adapters.NewMemoryFS()
+	out := adapters.NewBufferOutput()
+	mockExec := adapters.NewMockExec()
+	deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
+	handler := piece.NewHandler(deps)
+
+	piecesDir := "test-data/monkeypuzzle/pieces"
+	pieceName := "merged-piece"
+	worktreePath := filepath.Join(piecesDir, pieceName)
+
+	// Create piece directory
+	_ = fs.MkdirAll(worktreePath, 0755)
+
+	// Mock git commands for the piece
+	fullWorktreePath := "/" + worktreePath
+	mockExec.AddResponse("git", []string{"rev-parse", "--abbrev-ref", "HEAD"}, []byte(pieceName+"\n"), nil)
+
+	// Mock branch check - no PR metadata, use git method
+	mockExec.AddResponse("git", []string{"ls-remote", "--heads", "origin", pieceName}, []byte(""), nil)
+	mockExec.AddResponse("git", []string{"branch", "--merged", "main"}, []byte("  main\n  "+pieceName+"\n"), nil)
+
+	opts := piece.CleanupOptions{
+		MainBranch: "main",
+		DryRun:     true,
+	}
+
+	results, err := handler.CleanupMergedPieces("/repo", opts)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+
+	if results[0].PieceName != pieceName {
+		t.Errorf("expected piece name %q, got %q", pieceName, results[0].PieceName)
+	}
+
+	// Verify worktree was NOT removed (dry-run)
+	if mockExec.WasCalled("git", "worktree", "remove", fullWorktreePath) {
+		t.Error("worktree remove should NOT be called in dry-run mode")
+	}
+
+	// Verify dry-run message was output
+	if !out.HasInfo() {
+		t.Error("expected info message for dry-run")
+	}
+}
+
+func TestHandler_CleanupMergedPieces_WithIssue(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", "/test-data")
+
+	fs := adapters.NewMemoryFS()
+	out := adapters.NewBufferOutput()
+	mockExec := adapters.NewMockExec()
+	deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
+	handler := piece.NewHandler(deps)
+
+	repoRoot := "/repo"
+	piecesDir := "test-data/monkeypuzzle/pieces"
+	pieceName := "issue-piece"
+	worktreePath := filepath.Join(piecesDir, pieceName)
+	fullWorktreePath := "/" + worktreePath
+
+	// Create piece directory with issue marker
+	_ = fs.MkdirAll(fullWorktreePath+"/.monkeypuzzle", 0755)
+	issueMarker := `{"issue_path": "issues/test.md", "issue_name": "Test Issue", "piece_name": "issue-piece"}`
+	_ = fs.WriteFile(fullWorktreePath+"/.monkeypuzzle/current-issue.json", []byte(issueMarker), 0644)
+
+	// Create the issue file
+	issuePath := filepath.Join(repoRoot, "issues/test.md")
+	issueContent := `---
+title: Test Issue
+status: in-progress
+---
+
+# Test Issue
+`
+	_ = fs.MkdirAll(filepath.Join(repoRoot, "issues"), 0755)
+	_ = fs.WriteFile(issuePath, []byte(issueContent), 0644)
+
+	// Mock git commands for the piece
+	mockExec.AddResponse("git", []string{"rev-parse", "--abbrev-ref", "HEAD"}, []byte(pieceName+"\n"), nil)
+	mockExec.AddResponse("git", []string{"ls-remote", "--heads", "origin", pieceName}, []byte(""), nil)
+	mockExec.AddResponse("git", []string{"branch", "--merged", "main"}, []byte("  main\n  "+pieceName+"\n"), nil)
+
+	// Mock worktree removal
+	mockExec.AddResponse("git", []string{"worktree", "remove", fullWorktreePath}, nil, nil)
+
+	// Mock tmux kill (may or may not be called, ignore errors)
+	mockExec.AddResponse("tmux", []string{"kill-session", "-t", "mp-piece-" + pieceName}, nil, nil)
+
+	opts := piece.CleanupOptions{MainBranch: "main"}
+	results, err := handler.CleanupMergedPieces(repoRoot, opts)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+
+	if results[0].IssuePath != "issues/test.md" {
+		t.Errorf("expected issue path 'issues/test.md', got %q", results[0].IssuePath)
+	}
+
+	if !results[0].IssueUpdated {
+		t.Error("expected IssueUpdated to be true")
+	}
+
+	// Verify issue status was updated to done
+	issueData, err := fs.ReadFile(issuePath)
+	if err != nil {
+		t.Fatalf("failed to read issue file: %v", err)
+	}
+	if !strings.Contains(string(issueData), "status: done") {
+		t.Errorf("expected issue status to be 'done', got: %s", string(issueData))
+	}
+}
+
+func TestHandler_CleanupMergedPieces_SkipsUnmerged(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", "/test-data")
+
+	fs := adapters.NewMemoryFS()
+	out := adapters.NewBufferOutput()
+	mockExec := adapters.NewMockExec()
+	deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
+	handler := piece.NewHandler(deps)
+
+	piecesDir := "test-data/monkeypuzzle/pieces"
+	pieceName := "unmerged-piece"
+	worktreePath := filepath.Join(piecesDir, pieceName)
+
+	// Create piece directory
+	_ = fs.MkdirAll(worktreePath, 0755)
+
+	// Mock git commands for the piece
+	mockExec.AddResponse("git", []string{"rev-parse", "--abbrev-ref", "HEAD"}, []byte(pieceName+"\n"), nil)
+
+	// Mock branch check - not merged
+	mockExec.AddResponse("git", []string{"ls-remote", "--heads", "origin", pieceName}, []byte("abc123\trefs/heads/"+pieceName+"\n"), nil)
+	mockExec.AddResponse("git", []string{"branch", "--merged", "main"}, []byte("  main\n"), nil) // piece not in list
+	mockExec.AddResponse("git", []string{"rev-parse", pieceName}, []byte("abc123\n"), nil)
+	mockExec.AddResponse("git", []string{"merge-base", "--is-ancestor", "abc123", "main"}, nil, fmt.Errorf("exit status 1")) // not an ancestor
+
+	opts := piece.CleanupOptions{MainBranch: "main"}
+	results, err := handler.CleanupMergedPieces("/repo", opts)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	if len(results) != 0 {
+		t.Errorf("expected 0 results for unmerged piece, got %d", len(results))
+	}
+}
+
+func TestHandler_CleanupMergedPieces_NoIssueMarker(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", "/test-data")
+
+	fs := adapters.NewMemoryFS()
+	out := adapters.NewBufferOutput()
+	mockExec := adapters.NewMockExec()
+	deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
+	handler := piece.NewHandler(deps)
+
+	piecesDir := "test-data/monkeypuzzle/pieces"
+	pieceName := "no-issue-piece"
+	worktreePath := filepath.Join(piecesDir, pieceName)
+	fullWorktreePath := "/" + worktreePath
+
+	// Create piece directory WITHOUT issue marker
+	_ = fs.MkdirAll(worktreePath, 0755)
+
+	// Mock git commands for the piece
+	mockExec.AddResponse("git", []string{"rev-parse", "--abbrev-ref", "HEAD"}, []byte(pieceName+"\n"), nil)
+	mockExec.AddResponse("git", []string{"ls-remote", "--heads", "origin", pieceName}, []byte(""), nil)
+	mockExec.AddResponse("git", []string{"branch", "--merged", "main"}, []byte("  main\n  "+pieceName+"\n"), nil)
+
+	// Mock worktree removal
+	mockExec.AddResponse("git", []string{"worktree", "remove", fullWorktreePath}, nil, nil)
+	mockExec.AddResponse("tmux", []string{"kill-session", "-t", "mp-piece-" + pieceName}, nil, nil)
+
+	opts := piece.CleanupOptions{MainBranch: "main"}
+	results, err := handler.CleanupMergedPieces("/repo", opts)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+
+	if results[0].IssuePath != "" {
+		t.Errorf("expected empty issue path, got %q", results[0].IssuePath)
+	}
+
+	if results[0].IssueUpdated {
+		t.Error("expected IssueUpdated to be false when no issue marker")
+	}
+}

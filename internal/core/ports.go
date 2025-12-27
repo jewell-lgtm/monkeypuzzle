@@ -13,6 +13,7 @@ type FS interface {
 	Stat(name string) (fs.FileInfo, error)
 	Remove(name string) error
 	Symlink(oldname, newname string) error
+	ReadDir(name string) ([]fs.DirEntry, error)
 }
 
 // MessageType categorizes output messages

@@ -119,6 +119,18 @@ func (o *BufferOutput) HasWarning() bool {
 	return false
 }
 
+// HasInfo returns true if any info message was written
+func (o *BufferOutput) HasInfo() bool {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	for _, m := range o.Messages {
+		if m.Type == core.MsgInfo {
+			return true
+		}
+	}
+	return false
+}
+
 func msgTypeName(t core.MessageType) string {
 	switch t {
 	case core.MsgInfo:

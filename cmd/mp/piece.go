@@ -43,18 +43,31 @@ var pieceMergeCmd = &cobra.Command{
 	RunE:  runPieceMerge,
 }
 
+var pieceCleanupCmd = &cobra.Command{
+	Use:   "cleanup",
+	Short: "Cleanup merged pieces",
+	Long:  `Finds and removes pieces whose branches have been merged. Removes worktrees, kills tmux sessions, and updates issue status to done.`,
+	RunE:  runPieceCleanup,
+}
+
 var flagMainBranch string
 var flagPieceName string
 var flagIssuePath string
+var flagDryRun bool
+var flagForce bool
 
 func init() {
 	pieceNewCmd.Flags().StringVar(&flagPieceName, "name", "", "Optional piece name (default: auto-generated)")
 	pieceNewCmd.Flags().StringVar(&flagIssuePath, "issue", "", "Create piece from issue file (e.g., issues/foo.md)")
 	pieceUpdateCmd.Flags().StringVar(&flagMainBranch, "main-branch", "main", "Main branch name to merge (default: main)")
 	pieceMergeCmd.Flags().StringVar(&flagMainBranch, "main-branch", "main", "Main branch name to merge into (default: main)")
+	pieceCleanupCmd.Flags().StringVar(&flagMainBranch, "main-branch", "main", "Main branch name to check for merged status (default: main)")
+	pieceCleanupCmd.Flags().BoolVar(&flagDryRun, "dry-run", false, "Show what would be cleaned without making changes")
+	pieceCleanupCmd.Flags().BoolVar(&flagForce, "force", false, "Skip confirmation prompts")
 	pieceCmd.AddCommand(pieceNewCmd)
 	pieceCmd.AddCommand(pieceUpdateCmd)
 	pieceCmd.AddCommand(pieceMergeCmd)
+	pieceCmd.AddCommand(pieceCleanupCmd)
 	rootCmd.AddCommand(pieceCmd)
 }
 
@@ -197,6 +210,57 @@ func runPieceMerge(cmd *cobra.Command, args []string) error {
 	if err := handler.MergePiece(wd, mainBranch); err != nil {
 		return err
 	}
+
+	return nil
+}
+
+func runPieceCleanup(cmd *cobra.Command, args []string) error {
+	wd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("failed to get working directory: %w", err)
+	}
+
+	// Default to "main" if not specified
+	mainBranch := flagMainBranch
+	if mainBranch == "" {
+		mainBranch = "main"
+	}
+
+	deps := core.Deps{
+		FS:     adapters.NewOSFS(""),
+		Output: adapters.NewTextOutput(os.Stderr),
+		Exec:   adapters.NewOSExec(),
+	}
+	handler := piececmd.NewHandler(deps)
+
+	// Get repo root (either from piece or main repo)
+	status, err := handler.Status(wd)
+	if err != nil {
+		return fmt.Errorf("failed to get piece status: %w", err)
+	}
+
+	repoRoot := status.RepoRoot
+	if repoRoot == "" {
+		return fmt.Errorf("not in a git repository")
+	}
+
+	opts := piececmd.CleanupOptions{
+		DryRun:     flagDryRun,
+		Force:      flagForce,
+		MainBranch: mainBranch,
+	}
+
+	results, err := handler.CleanupMergedPieces(repoRoot, opts)
+	if err != nil {
+		return err
+	}
+
+	// Output JSON to stdout
+	jsonData, err := json.MarshalIndent(results, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal results: %w", err)
+	}
+	fmt.Println(string(jsonData))
 
 	return nil
 }

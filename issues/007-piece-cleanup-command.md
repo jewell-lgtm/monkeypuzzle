@@ -1,6 +1,6 @@
 ---
 title: Implement `mp piece cleanup` command
-status: todo
+status: done
 ---
 
 # Implement `mp piece cleanup` command

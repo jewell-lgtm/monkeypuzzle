@@ -651,3 +651,176 @@ func (h *Handler) checkCommitMerged(repoRoot, branchName, mainBranch string) (bo
 	// Check if this commit is in main's history
 	return h.git.IsCommitInBranch(repoRoot, branchCommit, mainBranch)
 }
+
+// CleanupResult contains information about a cleaned up piece
+type CleanupResult struct {
+	PieceName    string `json:"piece_name"`
+	WorktreePath string `json:"worktree_path"`
+	IssuePath    string `json:"issue_path,omitempty"`
+	IssueUpdated bool   `json:"issue_updated,omitempty"`
+}
+
+// CleanupOptions configures the cleanup behavior
+type CleanupOptions struct {
+	DryRun     bool   // If true, only report what would be cleaned
+	Force      bool   // If true, skip confirmation prompts (unused for now)
+	MainBranch string // Main branch name to check for merged status
+}
+
+// CleanupMergedPieces finds and cleans up pieces whose branches have been merged.
+// It removes worktrees, kills tmux sessions, and updates issue status to done.
+func (h *Handler) CleanupMergedPieces(repoRoot string, opts CleanupOptions) ([]CleanupResult, error) {
+	// Get pieces directory
+	piecesDir, err := getPiecesDir()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get pieces directory: %w", err)
+	}
+
+	// List all piece directories
+	entries, err := h.deps.FS.ReadDir(piecesDir)
+	if err != nil {
+		// If pieces directory doesn't exist, no pieces to clean
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to read pieces directory: %w", err)
+	}
+
+	var results []CleanupResult
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		pieceName := entry.Name()
+		worktreePath := filepath.Join(piecesDir, pieceName)
+
+		// Get the branch name from the worktree
+		branchName, err := h.git.CurrentBranch(worktreePath)
+		if err != nil {
+			h.deps.Output.Write(core.Message{
+				Type:    core.MsgWarning,
+				Content: fmt.Sprintf("Skipping %s: failed to get branch: %v", pieceName, err),
+			})
+			continue
+		}
+
+		// Check if branch is merged
+		mergeStatus, err := h.IsBranchMerged(worktreePath, branchName, opts.MainBranch)
+		if err != nil {
+			h.deps.Output.Write(core.Message{
+				Type:    core.MsgWarning,
+				Content: fmt.Sprintf("Skipping %s: failed to check merge status: %v", pieceName, err),
+			})
+			continue
+		}
+
+		if !mergeStatus.IsMerged {
+			continue
+		}
+
+		result := CleanupResult{
+			PieceName:    pieceName,
+			WorktreePath: worktreePath,
+		}
+
+		// Read issue marker if exists
+		marker, err := h.readCurrentIssueMarker(worktreePath)
+		if err == nil && marker != nil {
+			result.IssuePath = marker.IssuePath
+		}
+
+		if opts.DryRun {
+			h.deps.Output.Write(core.Message{
+				Type:    core.MsgInfo,
+				Content: fmt.Sprintf("[dry-run] Would cleanup: %s (merged via %s)", pieceName, mergeStatus.Method),
+			})
+			results = append(results, result)
+			continue
+		}
+
+		// Cleanup the piece
+		if err := h.removePiece(repoRoot, pieceName, worktreePath); err != nil {
+			h.deps.Output.Write(core.Message{
+				Type:    core.MsgWarning,
+				Content: fmt.Sprintf("Failed to cleanup %s: %v", pieceName, err),
+			})
+			continue
+		}
+
+		// Update issue status to done if marker exists
+		if result.IssuePath != "" {
+			absIssuePath := filepath.Join(repoRoot, result.IssuePath)
+			if err := h.updateIssueStatusToDone(absIssuePath); err != nil {
+				h.deps.Output.Write(core.Message{
+					Type:    core.MsgWarning,
+					Content: fmt.Sprintf("Failed to update issue status: %v", err),
+				})
+			} else {
+				result.IssueUpdated = true
+			}
+		}
+
+		h.deps.Output.Write(core.Message{
+			Type:    core.MsgSuccess,
+			Content: fmt.Sprintf("Cleaned up: %s", pieceName),
+		})
+
+		results = append(results, result)
+	}
+
+	return results, nil
+}
+
+// readCurrentIssueMarker reads the current issue marker from a piece worktree.
+func (h *Handler) readCurrentIssueMarker(worktreePath string) (*CurrentIssueMarker, error) {
+	markerPath := filepath.Join(worktreePath, initcmd.DirName, "current-issue.json")
+	data, err := h.deps.FS.ReadFile(markerPath)
+	if err != nil {
+		return nil, err
+	}
+
+	var marker CurrentIssueMarker
+	if err := json.Unmarshal(data, &marker); err != nil {
+		return nil, err
+	}
+
+	return &marker, nil
+}
+
+// removePiece removes a piece worktree and associated tmux session.
+func (h *Handler) removePiece(repoRoot, pieceName, worktreePath string) error {
+	sessionName := fmt.Sprintf("mp-piece-%s", pieceName)
+
+	// Kill tmux session (ignore errors - session may not exist)
+	_ = h.tmux.KillSession(sessionName)
+
+	// Remove worktree
+	if err := h.git.WorktreeRemove(repoRoot, worktreePath); err != nil {
+		return fmt.Errorf("failed to remove worktree: %w", err)
+	}
+
+	return nil
+}
+
+// updateIssueStatusToDone updates the issue status to done if currently in-progress.
+func (h *Handler) updateIssueStatusToDone(issuePath string) error {
+	// Check current status
+	currentStatus, err := ParseStatus(issuePath, h.deps.FS)
+	if err != nil {
+		return fmt.Errorf("failed to read issue status: %w", err)
+	}
+
+	// Only update if status is in-progress
+	if currentStatus != StatusInProgress {
+		return nil
+	}
+
+	// Update to done
+	if err := UpdateStatus(issuePath, StatusDone, h.deps.FS); err != nil {
+		return fmt.Errorf("failed to update issue status: %w", err)
+	}
+
+	return nil
+}
