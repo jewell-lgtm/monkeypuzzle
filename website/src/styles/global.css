@@ -1,0 +1,26 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
+
+  /* Accent colors - violet/purple inspired by charm.sh */
+  --color-accent-400: #a78bfa;
+  --color-accent-500: #8b5cf6;
+  --color-accent-600: #7c3aed;
+}
+
+/* Selection styling */
+::selection {
+  background-color: var(--color-accent-500);
+  color: white;
+}
+
+/* Smooth scrolling */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Code block styling */
+code {
+  font-family: ui-monospace, 'SF Mono', Menlo, Monaco, 'Cascadia Code', monospace;
+}
