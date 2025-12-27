@@ -13,22 +13,23 @@ This document describes the complete workflow from creating markdown issues thro
 
 ### ✅ Implemented
 - `mp init` - Initialize project with markdown issues provider
-- `mp piece new --issue <path>` - Create piece from issue file
+- `mp issue create` - Create markdown issue files
+- `mp piece new --issue <path>` - Create piece from issue, update status to in-progress
 - `mp piece status` - Show current piece status
 - `mp piece update` - Merge main into piece
 - `mp piece merge` - Merge piece back to main locally
-- Issue name extraction from markdown
-- Current issue marker tracking in worktree
+- `mp piece pr create` - Push and create GitHub PR
+- `mp piece list` - List all active pieces
+- `mp piece cleanup` - Remove merged pieces, update issue to done
+- Issue name/status extraction from markdown
+- PR metadata storage in piece worktree
+- MCP server exposing core commands
+- Claude Code skill documentation
 
-### ❌ Missing (Issues Created)
-1. **Issue Creation** - `mp issue create` command (issue 01)
-2. **Issue Status Management** - Status field parsing/updating (issue 02)
-3. **Status Update on Piece Create** - Auto-update to in-progress (issue 03)
-4. **PR Creation** - `mp piece pr create` command (issue 04)
-5. **PR Metadata Storage** - Track PR info in piece (issue 07)
-6. **Merged Detection** - Detect merged branches (issue 05)
-7. **Piece Cleanup** - `mp piece cleanup` command (issue 06)
-8. **Status Update on Merge** - Auto-update issue to done (issue 08)
+### ❌ Missing
+1. **Stack-aware Merge** - Child pieces merge to parent (issue 013)
+2. **Stack-aware PR** - PR base = parent branch (issue 014)
+3. **Issue Storage Interface** - Pluggable backends (abstract)
 
 ## Proposed Complete Workflow
 
@@ -59,18 +60,13 @@ This document describes the complete workflow from creating markdown issues thro
    → Updates issue status: in-progress → done
 ```
 
-## Implementation Order
+## Next Steps
 
-Recommended implementation order based on dependencies:
+Remaining implementation in priority order:
 
-1. **Issue 01** - Issue creation (foundation)
-2. **Issue 02** - Issue status management (foundation)
-3. **Issue 07** - PR metadata storage (foundation for PR tracking)
-4. **Issue 04** - PR creation (uses metadata storage)
-5. **Issue 03** - Status update on piece create (uses status management)
-6. **Issue 05** - Merged detection (uses PR metadata)
-7. **Issue 06** - Piece cleanup (uses merged detection)
-8. **Issue 08** - Status update on merge (uses cleanup and status management)
+1. **Issue 013** - Stack-aware piece merging (core workflow enhancement)
+2. **Issue 014** - Stack-aware PR creation (depends on 013)
+3. **Abstract issue storage** - Lower priority refactor for pluggable backends
 
 ## Related Files
 
