@@ -1,10 +1,11 @@
-package issue_test
+package piece_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/adapters"
-	"github.com/jewell-lgtm/monkeypuzzle/internal/core/issue"
+	"github.com/jewell-lgtm/monkeypuzzle/internal/core/piece"
 )
 
 // Integration test: happy path workflow
@@ -26,7 +27,7 @@ Description here.
 	}
 
 	// Parse status
-	status, err := issue.ParseStatus("issue.md", fs)
+	status, err := piece.ParseStatus("issue.md", fs)
 	if err != nil {
 		t.Fatalf("ParseStatus failed: %v", err)
 	}
@@ -35,12 +36,12 @@ Description here.
 	}
 
 	// Update to in-progress
-	if err := issue.UpdateStatus("issue.md", "in-progress", fs); err != nil {
+	if err := piece.UpdateStatus("issue.md", "in-progress", fs); err != nil {
 		t.Fatalf("UpdateStatus failed: %v", err)
 	}
 
 	// Verify update
-	status, err = issue.ParseStatus("issue.md", fs)
+	status, err = piece.ParseStatus("issue.md", fs)
 	if err != nil {
 		t.Fatalf("ParseStatus after update failed: %v", err)
 	}
@@ -51,38 +52,24 @@ Description here.
 	// Verify other content preserved
 	data, _ := fs.ReadFile("issue.md")
 	text := string(data)
-	if !contains(text, "title: My Feature") {
+	if !strings.Contains(text, "title: My Feature") {
 		t.Error("title should be preserved")
 	}
-	if !contains(text, "# My Feature") {
+	if !strings.Contains(text, "# My Feature") {
 		t.Error("heading should be preserved")
 	}
-	if !contains(text, "Description here.") {
+	if !strings.Contains(text, "Description here.") {
 		t.Error("description should be preserved")
 	}
 
 	// Update to done
-	if err := issue.UpdateStatus("issue.md", "done", fs); err != nil {
+	if err := piece.UpdateStatus("issue.md", "done", fs); err != nil {
 		t.Fatalf("UpdateStatus to done failed: %v", err)
 	}
-	status, _ = issue.ParseStatus("issue.md", fs)
+	status, _ = piece.ParseStatus("issue.md", fs)
 	if status != "done" {
 		t.Errorf("expected 'done', got %q", status)
 	}
-}
-
-func contains(text, substr string) bool {
-	return len(text) >= len(substr) && (text == substr || len(substr) == 0 ||
-		(len(text) > 0 && containsSubstr(text, substr)))
-}
-
-func containsSubstr(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }
 
 // Unit tests: edge cases
@@ -95,7 +82,7 @@ func TestValidateStatus(t *testing.T) {
 		{"todo", true},
 		{"in-progress", true},
 		{"done", true},
-		{"TODO", false},       // case sensitive
+		{"TODO", false},        // case sensitive
 		{"In-Progress", false}, // case sensitive
 		{"pending", false},
 		{"", false},
@@ -104,7 +91,7 @@ func TestValidateStatus(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.status, func(t *testing.T) {
-			if got := issue.ValidateStatus(tt.status); got != tt.valid {
+			if got := piece.ValidateStatus(tt.status); got != tt.valid {
 				t.Errorf("ValidateStatus(%q) = %v, want %v", tt.status, got, tt.valid)
 			}
 		})
@@ -121,7 +108,7 @@ title: No Status Field
 `
 	_ = fs.WriteFile("issue.md", []byte(content), 0644)
 
-	status, err := issue.ParseStatus("issue.md", fs)
+	status, err := piece.ParseStatus("issue.md", fs)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -138,7 +125,7 @@ No frontmatter here.
 `
 	_ = fs.WriteFile("issue.md", []byte(content), 0644)
 
-	status, err := issue.ParseStatus("issue.md", fs)
+	status, err := piece.ParseStatus("issue.md", fs)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -156,7 +143,7 @@ status: invalid-status
 `
 	_ = fs.WriteFile("issue.md", []byte(content), 0644)
 
-	_, err := issue.ParseStatus("issue.md", fs)
+	_, err := piece.ParseStatus("issue.md", fs)
 	if err == nil {
 		t.Error("expected error for invalid status")
 	}
@@ -191,7 +178,7 @@ status: 'done'
 			fs := adapters.NewMemoryFS()
 			_ = fs.WriteFile("issue.md", []byte(tt.content), 0644)
 
-			status, err := issue.ParseStatus("issue.md", fs)
+			status, err := piece.ParseStatus("issue.md", fs)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -205,7 +192,7 @@ status: 'done'
 func TestParseStatus_FileNotFound(t *testing.T) {
 	fs := adapters.NewMemoryFS()
 
-	_, err := issue.ParseStatus("nonexistent.md", fs)
+	_, err := piece.ParseStatus("nonexistent.md", fs)
 	if err == nil {
 		t.Error("expected error for missing file")
 	}
@@ -226,7 +213,7 @@ Body content here.
 `
 	_ = fs.WriteFile("issue.md", []byte(content), 0644)
 
-	if err := issue.UpdateStatus("issue.md", "done", fs); err != nil {
+	if err := piece.UpdateStatus("issue.md", "done", fs); err != nil {
 		t.Fatalf("UpdateStatus failed: %v", err)
 	}
 
@@ -243,7 +230,7 @@ Body content here.
 	}
 
 	for _, check := range checks {
-		if !containsSubstr(text, check) {
+		if !strings.Contains(text, check) {
 			t.Errorf("expected %q in output, got:\n%s", check, text)
 		}
 	}
@@ -259,17 +246,17 @@ title: No Status
 `
 	_ = fs.WriteFile("issue.md", []byte(content), 0644)
 
-	if err := issue.UpdateStatus("issue.md", "in-progress", fs); err != nil {
+	if err := piece.UpdateStatus("issue.md", "in-progress", fs); err != nil {
 		t.Fatalf("UpdateStatus failed: %v", err)
 	}
 
 	data, _ := fs.ReadFile("issue.md")
 	text := string(data)
 
-	if !containsSubstr(text, "status: in-progress") {
+	if !strings.Contains(text, "status: in-progress") {
 		t.Errorf("expected status field added, got:\n%s", text)
 	}
-	if !containsSubstr(text, "title: No Status") {
+	if !strings.Contains(text, "title: No Status") {
 		t.Errorf("expected title preserved, got:\n%s", text)
 	}
 }
@@ -282,17 +269,17 @@ No frontmatter.
 `
 	_ = fs.WriteFile("issue.md", []byte(content), 0644)
 
-	if err := issue.UpdateStatus("issue.md", "done", fs); err != nil {
+	if err := piece.UpdateStatus("issue.md", "done", fs); err != nil {
 		t.Fatalf("UpdateStatus failed: %v", err)
 	}
 
 	data, _ := fs.ReadFile("issue.md")
 	text := string(data)
 
-	if !containsSubstr(text, "---\nstatus: done\n---") {
+	if !strings.Contains(text, "---\nstatus: done\n---") {
 		t.Errorf("expected frontmatter added, got:\n%s", text)
 	}
-	if !containsSubstr(text, "# Just Content") {
+	if !strings.Contains(text, "# Just Content") {
 		t.Errorf("expected original content preserved, got:\n%s", text)
 	}
 }
@@ -305,7 +292,7 @@ status: todo
 `
 	_ = fs.WriteFile("issue.md", []byte(content), 0644)
 
-	err := issue.UpdateStatus("issue.md", "invalid", fs)
+	err := piece.UpdateStatus("issue.md", "invalid", fs)
 	if err == nil {
 		t.Error("expected error for invalid status")
 	}
@@ -314,7 +301,7 @@ status: todo
 func TestUpdateStatus_FileNotFound(t *testing.T) {
 	fs := adapters.NewMemoryFS()
 
-	err := issue.UpdateStatus("nonexistent.md", "done", fs)
+	err := piece.UpdateStatus("nonexistent.md", "done", fs)
 	if err == nil {
 		t.Error("expected error for missing file")
 	}
@@ -357,7 +344,7 @@ Status: in-progress
 			fs := adapters.NewMemoryFS()
 			_ = fs.WriteFile("issue.md", []byte(tt.content), 0644)
 
-			status, err := issue.ParseStatus("issue.md", fs)
+			status, err := piece.ParseStatus("issue.md", fs)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}

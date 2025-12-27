@@ -809,3 +809,167 @@ func setupMonkeypuzzleConfig(t *testing.T, tmpDir string) {
 	}
 }
 
+func TestIntegration_CreatePieceFromIssue_UpdatesStatusToInProgress(t *testing.T) {
+	// Skip if git is not available
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	// Set XDG_DATA_HOME to a temp directory
+	tmpDataHome, err := os.MkdirTemp("", "mp-data-*")
+	if err != nil {
+		t.Fatalf("failed to create temp data dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDataHome)
+	t.Setenv("XDG_DATA_HOME", tmpDataHome)
+
+	// Create temp directory for test repo
+	tmpDir, err := os.MkdirTemp("", "mp-integration-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Initialize git repo
+	setupGitRepo(t, tmpDir)
+
+	// Create monkeypuzzle config
+	setupMonkeypuzzleConfig(t, tmpDir)
+
+	// Create issue file with todo status
+	issuesDir := filepath.Join(tmpDir, ".monkeypuzzle", "issues")
+	if err := os.MkdirAll(issuesDir, 0755); err != nil {
+		t.Fatalf("failed to create issues dir: %v", err)
+	}
+
+	issueContent := `---
+title: My Feature
+status: todo
+---
+
+# My Feature
+
+Description here.
+`
+	issuePath := filepath.Join(issuesDir, "my-feature.md")
+	if err := os.WriteFile(issuePath, []byte(issueContent), 0644); err != nil {
+		t.Fatalf("failed to write issue file: %v", err)
+	}
+
+	// Change to repo directory
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get working directory: %v", err)
+	}
+	defer func() { _ = os.Chdir(oldWd) }()
+
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("failed to change directory: %v", err)
+	}
+
+	// Create piece from issue
+	deps := core.Deps{
+		FS:     adapters.NewOSFS(""),
+		Output: adapters.NewBufferOutput(),
+		Exec:   adapters.NewOSExec(),
+	}
+	handler := piece.NewHandler(deps)
+
+	relIssuePath := ".monkeypuzzle/issues/my-feature.md"
+	_, err = handler.CreatePieceFromIssue(tmpDir, relIssuePath)
+	if err != nil {
+		t.Fatalf("CreatePieceFromIssue failed: %v", err)
+	}
+
+	// Verify issue status was updated to in-progress
+	updatedContent, err := os.ReadFile(issuePath)
+	if err != nil {
+		t.Fatalf("failed to read updated issue: %v", err)
+	}
+
+	if !strings.Contains(string(updatedContent), "status: in-progress") {
+		t.Errorf("expected status to be updated to in-progress, got:\n%s", string(updatedContent))
+	}
+}
+
+func TestIntegration_CreatePieceFromIssue_SkipsUpdateIfNotTodo(t *testing.T) {
+	// Skip if git is not available
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	// Set XDG_DATA_HOME to a temp directory
+	tmpDataHome, err := os.MkdirTemp("", "mp-data-*")
+	if err != nil {
+		t.Fatalf("failed to create temp data dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDataHome)
+	t.Setenv("XDG_DATA_HOME", tmpDataHome)
+
+	// Create temp directory for test repo
+	tmpDir, err := os.MkdirTemp("", "mp-integration-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Initialize git repo
+	setupGitRepo(t, tmpDir)
+
+	// Create monkeypuzzle config
+	setupMonkeypuzzleConfig(t, tmpDir)
+
+	// Create issue file with done status (should not be changed)
+	issuesDir := filepath.Join(tmpDir, ".monkeypuzzle", "issues")
+	if err := os.MkdirAll(issuesDir, 0755); err != nil {
+		t.Fatalf("failed to create issues dir: %v", err)
+	}
+
+	issueContent := `---
+title: Completed Feature
+status: done
+---
+
+# Completed Feature
+`
+	issuePath := filepath.Join(issuesDir, "completed-feature.md")
+	if err := os.WriteFile(issuePath, []byte(issueContent), 0644); err != nil {
+		t.Fatalf("failed to write issue file: %v", err)
+	}
+
+	// Change to repo directory
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get working directory: %v", err)
+	}
+	defer func() { _ = os.Chdir(oldWd) }()
+
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("failed to change directory: %v", err)
+	}
+
+	// Create piece from issue
+	deps := core.Deps{
+		FS:     adapters.NewOSFS(""),
+		Output: adapters.NewBufferOutput(),
+		Exec:   adapters.NewOSExec(),
+	}
+	handler := piece.NewHandler(deps)
+
+	relIssuePath := ".monkeypuzzle/issues/completed-feature.md"
+	_, err = handler.CreatePieceFromIssue(tmpDir, relIssuePath)
+	if err != nil {
+		t.Fatalf("CreatePieceFromIssue failed: %v", err)
+	}
+
+	// Verify issue status was NOT changed (still done)
+	updatedContent, err := os.ReadFile(issuePath)
+	if err != nil {
+		t.Fatalf("failed to read issue: %v", err)
+	}
+
+	if !strings.Contains(string(updatedContent), "status: done") {
+		t.Errorf("expected status to remain 'done', got:\n%s", string(updatedContent))
+	}
+}
+

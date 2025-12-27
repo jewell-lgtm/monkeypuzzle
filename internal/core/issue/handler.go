@@ -11,8 +11,7 @@ import (
 )
 
 const (
-	DefaultFilePerm = 0644
-	DefaultStatus   = "todo"
+	defaultFilePerm = 0644
 )
 
 // IssueFile represents created issue file info
@@ -65,7 +64,7 @@ func (h *Handler) Run(input Input) (IssueFile, error) {
 
 	// Write file
 	filePath := filepath.Join(fullIssuesDir, filename)
-	if err := h.deps.FS.WriteFile(filePath, content, DefaultFilePerm); err != nil {
+	if err := h.deps.FS.WriteFile(filePath, content, defaultFilePerm); err != nil {
 		return IssueFile{}, fmt.Errorf("failed to write issue file: %w", err)
 	}
 
@@ -134,7 +133,7 @@ func (h *Handler) buildMarkdownContent(input Input) []byte {
 	// YAML frontmatter
 	b.WriteString("---\n")
 	b.WriteString(fmt.Sprintf("title: %s\n", escapeYAMLString(input.Title)))
-	b.WriteString(fmt.Sprintf("status: %s\n", DefaultStatus))
+	b.WriteString(fmt.Sprintf("status: %s\n", piece.StatusTodo))
 	if input.Description != "" {
 		b.WriteString(fmt.Sprintf("description: %s\n", escapeYAMLString(input.Description)))
 	}

@@ -1,6 +1,6 @@
 ---
 title: Update issue status to in-progress when creating piece
-status: todo
+status: done
 ---
 
 # Update issue status to in-progress when creating piece

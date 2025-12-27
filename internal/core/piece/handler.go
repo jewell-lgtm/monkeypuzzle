@@ -235,6 +235,9 @@ func (h *Handler) CreatePieceFromIssue(monkeypuzzleSourceDir, issuePath string) 
 		})
 	}
 
+	// Update issue status to in-progress (non-fatal)
+	h.updateIssueStatusToInProgress(absIssuePath)
+
 	return info, nil
 }
 
@@ -258,6 +261,33 @@ func (h *Handler) writeCurrentIssueMarker(worktreePath string, marker CurrentIss
 	}
 
 	return nil
+}
+
+// updateIssueStatusToInProgress updates the issue status to in-progress if it's currently todo.
+// Logs a warning on failure but doesn't fail the piece creation.
+func (h *Handler) updateIssueStatusToInProgress(issuePath string) {
+	// Check current status
+	currentStatus, err := ParseStatus(issuePath, h.deps.FS)
+	if err != nil {
+		h.deps.Output.Write(core.Message{
+			Type:    core.MsgWarning,
+			Content: fmt.Sprintf("Failed to read issue status: %v", err),
+		})
+		return
+	}
+
+	// Only update if status is todo
+	if currentStatus != StatusTodo {
+		return
+	}
+
+	// Update to in-progress
+	if err := UpdateStatus(issuePath, StatusInProgress, h.deps.FS); err != nil {
+		h.deps.Output.Write(core.Message{
+			Type:    core.MsgWarning,
+			Content: fmt.Sprintf("Failed to update issue status: %v", err),
+		})
+	}
 }
 
 // cleanupPiece removes a partially created piece (worktree and tmux session).
