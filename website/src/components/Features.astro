@@ -1,0 +1,46 @@
+---
+import FeatureCard from './FeatureCard.astro';
+
+const features = [
+  {
+    icon: '🌳',
+    title: 'Worktree Isolation',
+    description: 'Each piece lives in its own git worktree. No stashing, no context switching, no lost work. Work on multiple features in parallel.',
+  },
+  {
+    icon: '🤖',
+    title: 'Dual Interface',
+    description: 'Interactive TUI for humans, JSON stdin/stdout for agents. Same commands, same workflow. Build automations or work hands-on.',
+  },
+  {
+    icon: '🛡️',
+    title: 'Safety Built-in',
+    description: 'Prevents merging when main is ahead. Forces sync before merge. Clean, fast-forward merges only. No accidental overwrites.',
+  },
+  {
+    icon: '🪝',
+    title: 'Extensible Hooks',
+    description: 'Shell scripts that run at key moments. Lint before merge, notify on create, run tests automatically. Your workflow, your rules.',
+  },
+];
+---
+
+<section class="py-24 px-4">
+  <div class="container mx-auto max-w-5xl">
+    <h2 class="text-3xl font-bold text-center mb-4">
+      Why monkeypuzzle?
+    </h2>
+    <p class="text-neutral-400 text-center mb-12 max-w-2xl mx-auto">
+      A workflow tool that gets out of your way while keeping you organized
+    </p>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+      {features.map((feature) => (
+        <FeatureCard
+          icon={feature.icon}
+          title={feature.title}
+          description={feature.description}
+        />
+      ))}
+    </div>
+  </div>
+</section>
