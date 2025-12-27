@@ -564,7 +564,7 @@ type MergeStatus struct {
 }
 
 // IsBranchMerged checks if a piece branch has been merged to main.
-// Detection priority: 1) GitHub PR status, 2) git branch --merged, 3) commit history
+// Detection priority: 1) PR metadata, 2) gh pr list by branch, 3) git branch --merged, 4) commit history
 func (h *Handler) IsBranchMerged(repoRoot, branchName, mainBranch string) (MergeStatus, error) {
 	status := MergeStatus{}
 
@@ -579,7 +579,7 @@ func (h *Handler) IsBranchMerged(repoRoot, branchName, mainBranch string) (Merge
 	}
 	status.ExistsOnRemote = existsOnRemote
 
-	// Method 1: Check via GitHub PR status (most reliable for remote PRs)
+	// Method 1: Check via PR metadata file (fastest, no API call)
 	merged, prNumber, err := h.checkPRMergeStatus(repoRoot)
 	if err == nil && merged {
 		status.IsMerged = true
@@ -588,7 +588,16 @@ func (h *Handler) IsBranchMerged(repoRoot, branchName, mainBranch string) (Merge
 		return status, nil
 	}
 
-	// Method 2: Check via git branch --merged
+	// Method 2: Check via gh pr list by branch name (catches squash-merged PRs without metadata)
+	merged, prNumber, err = h.github.FindMergedPRByBranch(repoRoot, branchName)
+	if err == nil && merged {
+		status.IsMerged = true
+		status.Method = "pr-branch"
+		status.PRNumber = prNumber
+		return status, nil
+	}
+
+	// Method 3: Check via git branch --merged
 	merged, err = h.git.IsBranchMerged(repoRoot, mainBranch, branchName)
 	if err != nil {
 		// Log warning but continue to fallback
@@ -602,7 +611,7 @@ func (h *Handler) IsBranchMerged(repoRoot, branchName, mainBranch string) (Merge
 		return status, nil
 	}
 
-	// Method 3: Fallback - check if branch HEAD commit is in main history
+	// Method 4: Fallback - check if branch HEAD commit is in main history
 	merged, err = h.checkCommitMerged(repoRoot, branchName, mainBranch)
 	if err != nil {
 		// This is the last resort, so return error

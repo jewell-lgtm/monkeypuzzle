@@ -111,6 +111,33 @@ func (g *GitHub) IsPRMerged(workDir string, prNumber int) (bool, error) {
 	return result.MergedAt != nil && *result.MergedAt != "", nil
 }
 
+// FindMergedPRByBranch checks if there's a merged PR for the given branch name.
+// Returns (merged, prNumber, error). If no merged PR exists, returns (false, 0, nil).
+func (g *GitHub) FindMergedPRByBranch(workDir, branchName string) (bool, int, error) {
+	output, err := g.exec.RunWithDir(workDir, "gh", "pr", "list",
+		"--head", branchName,
+		"--state", "merged",
+		"--json", "number",
+		"--limit", "1",
+	)
+	if err != nil {
+		return false, 0, fmt.Errorf("failed to list merged PRs: %w", err)
+	}
+
+	var results []struct {
+		Number int `json:"number"`
+	}
+	if err := json.Unmarshal(output, &results); err != nil {
+		return false, 0, fmt.Errorf("failed to parse PR list: %w", err)
+	}
+
+	if len(results) == 0 {
+		return false, 0, nil
+	}
+
+	return true, results[0].Number, nil
+}
+
 // extractPRNumberFromURL extracts the PR number from a GitHub PR URL
 func extractPRNumberFromURL(url string) (int, error) {
 	// URL format: https://github.com/owner/repo/pull/123

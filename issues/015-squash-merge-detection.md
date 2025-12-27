@@ -1,6 +1,6 @@
 ---
 title: Detect squash-merged PRs without metadata
-status: todo
+status: done
 ---
 
 # Detect squash-merged PRs without metadata

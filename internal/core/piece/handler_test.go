@@ -947,6 +947,40 @@ func TestHandler_IsBranchMerged_ViaPR(t *testing.T) {
 	}
 }
 
+func TestHandler_IsBranchMerged_ViaPRBranch(t *testing.T) {
+	fs := adapters.NewMemoryFS()
+	out := adapters.NewBufferOutput()
+	mockExec := adapters.NewMockExec()
+	deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
+	handler := piece.NewHandler(deps)
+
+	repoRoot := "/repo"
+	branchName := "feature-branch"
+
+	// No PR metadata - tests squash-merged PR without metadata file
+
+	// Mock remote branch check
+	mockExec.AddResponse("git", []string{"ls-remote", "--heads", "origin", branchName}, []byte("abc123\trefs/heads/feature-branch\n"), nil)
+
+	// Mock gh pr list --head <branch> --state merged - finds merged PR
+	mockExec.AddResponse("gh", []string{"pr", "list", "--head", branchName, "--state", "merged", "--json", "number", "--limit", "1"}, []byte(`[{"number": 42}]`), nil)
+
+	status, err := handler.IsBranchMerged(repoRoot, branchName, "main")
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	if !status.IsMerged {
+		t.Error("expected IsMerged to be true")
+	}
+	if status.Method != "pr-branch" {
+		t.Errorf("expected method 'pr-branch', got %q", status.Method)
+	}
+	if status.PRNumber != 42 {
+		t.Errorf("expected PR number 42, got %d", status.PRNumber)
+	}
+}
+
 func TestHandler_IsBranchMerged_ViaGit(t *testing.T) {
 	fs := adapters.NewMemoryFS()
 	out := adapters.NewBufferOutput()
@@ -957,10 +991,13 @@ func TestHandler_IsBranchMerged_ViaGit(t *testing.T) {
 	repoRoot := "/repo"
 	branchName := "feature-branch"
 
-	// No PR metadata - skip PR check
+	// No PR metadata - skip PR metadata check
 
 	// Mock remote branch check - branch doesn't exist on remote
 	mockExec.AddResponse("git", []string{"ls-remote", "--heads", "origin", branchName}, []byte(""), nil)
+
+	// Mock gh pr list - no merged PR found
+	mockExec.AddResponse("gh", []string{"pr", "list", "--head", branchName, "--state", "merged", "--json", "number", "--limit", "1"}, []byte(`[]`), nil)
 
 	// Mock git branch --merged - branch is merged
 	mockExec.AddResponse("git", []string{"branch", "--merged", "main"}, []byte("  main\n  feature-branch\n"), nil)
@@ -995,6 +1032,9 @@ func TestHandler_IsBranchMerged_ViaCommit(t *testing.T) {
 
 	// Mock remote branch check
 	mockExec.AddResponse("git", []string{"ls-remote", "--heads", "origin", branchName}, []byte(""), nil)
+
+	// Mock gh pr list - no merged PR found
+	mockExec.AddResponse("gh", []string{"pr", "list", "--head", branchName, "--state", "merged", "--json", "number", "--limit", "1"}, []byte(`[]`), nil)
 
 	// Mock git branch --merged - branch not in list
 	mockExec.AddResponse("git", []string{"branch", "--merged", "main"}, []byte("  main\n"), nil)
@@ -1032,6 +1072,9 @@ func TestHandler_IsBranchMerged_NotMerged(t *testing.T) {
 
 	// Mock remote branch check - branch exists
 	mockExec.AddResponse("git", []string{"ls-remote", "--heads", "origin", branchName}, []byte("abc123\trefs/heads/feature-branch\n"), nil)
+
+	// Mock gh pr list - no merged PR found
+	mockExec.AddResponse("gh", []string{"pr", "list", "--head", branchName, "--state", "merged", "--json", "number", "--limit", "1"}, []byte(`[]`), nil)
 
 	// Mock git branch --merged - branch not in list
 	mockExec.AddResponse("git", []string{"branch", "--merged", "main"}, []byte("  main\n"), nil)
@@ -1079,6 +1122,9 @@ func TestHandler_IsBranchMerged_PRNotMerged_FallsBackToGit(t *testing.T) {
 	// Mock gh pr view - PR is NOT merged
 	mockExec.AddResponse("gh", []string{"pr", "view", "123", "--json", "mergedAt"}, []byte(`{"mergedAt": null}`), nil)
 
+	// Mock gh pr list - no merged PR (since we already checked PR 123 is not merged)
+	mockExec.AddResponse("gh", []string{"pr", "list", "--head", branchName, "--state", "merged", "--json", "number", "--limit", "1"}, []byte(`[]`), nil)
+
 	// Mock git branch --merged - branch is merged (local merge without PR)
 	mockExec.AddResponse("git", []string{"branch", "--merged", "main"}, []byte("  main\n  feature-branch\n"), nil)
 
@@ -1115,6 +1161,9 @@ func TestHandler_IsBranchMerged_GHError_FallsBackToGit(t *testing.T) {
 
 	// Mock gh pr view - error (gh not installed or API error)
 	mockExec.AddResponse("gh", []string{"pr", "view", "123", "--json", "mergedAt"}, nil, fmt.Errorf("gh not found"))
+
+	// Mock gh pr list - also fails
+	mockExec.AddResponse("gh", []string{"pr", "list", "--head", branchName, "--state", "merged", "--json", "number", "--limit", "1"}, nil, fmt.Errorf("gh not found"))
 
 	// Mock git branch --merged - branch is merged
 	mockExec.AddResponse("git", []string{"branch", "--merged", "main"}, []byte("  main\n  feature-branch\n"), nil)
