@@ -182,3 +182,54 @@ func (g *Git) GetCommitMessages(workDir, base, branch string) ([]string, error) 
 	}
 	return messages, nil
 }
+
+// IsBranchMerged checks if branchName is merged into mainBranch.
+// Uses git branch --merged to detect merged branches.
+func (g *Git) IsBranchMerged(workDir, mainBranch, branchName string) (bool, error) {
+	output, err := g.exec.RunWithDir(workDir, "git", "branch", "--merged", mainBranch)
+	if err != nil {
+		return false, fmt.Errorf("failed to list merged branches: %w", err)
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	for _, line := range lines {
+		// branch output has format: "  branch-name" or "* current-branch"
+		name := strings.TrimSpace(strings.TrimPrefix(line, "*"))
+		if name == branchName {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// BranchExistsOnRemote checks if a branch exists on the remote.
+func (g *Git) BranchExistsOnRemote(workDir, branchName string) (bool, error) {
+	output, err := g.exec.RunWithDir(workDir, "git", "ls-remote", "--heads", "origin", branchName)
+	if err != nil {
+		return false, fmt.Errorf("failed to check remote branches: %w", err)
+	}
+	return strings.TrimSpace(string(output)) != "", nil
+}
+
+// GetBranchCommit returns the commit hash of a branch.
+func (g *Git) GetBranchCommit(workDir, branchName string) (string, error) {
+	output, err := g.exec.RunWithDir(workDir, "git", "rev-parse", branchName)
+	if err != nil {
+		return "", fmt.Errorf("failed to get branch commit: %w", err)
+	}
+	return strings.TrimSpace(string(output)), nil
+}
+
+// IsCommitInBranch checks if a commit exists in a branch's history.
+func (g *Git) IsCommitInBranch(workDir, commit, branch string) (bool, error) {
+	// git merge-base --is-ancestor <commit> <branch> returns 0 if true
+	_, err := g.exec.RunWithDir(workDir, "git", "merge-base", "--is-ancestor", commit, branch)
+	if err != nil {
+		// Exit code 1 means not an ancestor, other errors are real errors
+		if strings.Contains(err.Error(), "exit status 1") {
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to check commit ancestry: %w", err)
+	}
+	return true, nil
+}

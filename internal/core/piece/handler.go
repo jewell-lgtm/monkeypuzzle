@@ -22,19 +22,21 @@ const (
 
 // Handler executes piece-related commands
 type Handler struct {
-	deps  core.Deps
-	git   *adapters.Git
-	tmux  *adapters.Tmux
-	hooks *HookRunner
+	deps   core.Deps
+	git    *adapters.Git
+	github *adapters.GitHub
+	tmux   *adapters.Tmux
+	hooks  *HookRunner
 }
 
 // NewHandler creates a new piece handler with dependencies
 func NewHandler(deps core.Deps) *Handler {
 	return &Handler{
-		deps:  deps,
-		git:   adapters.NewGit(deps.Exec),
-		tmux:  adapters.NewTmux(deps.Exec),
-		hooks: NewHookRunner(deps),
+		deps:   deps,
+		git:    adapters.NewGit(deps.Exec),
+		github: adapters.NewGitHub(deps.Exec),
+		tmux:   adapters.NewTmux(deps.Exec),
+		hooks:  NewHookRunner(deps),
 	}
 }
 
@@ -547,4 +549,105 @@ func getPiecesDir() (string, error) {
 		dataHome = filepath.Join(home, ".local", "share")
 	}
 	return filepath.Join(dataHome, "monkeypuzzle", "pieces"), nil
+}
+
+// MergeStatus represents the merge status of a branch
+type MergeStatus struct {
+	// IsMerged is true if the branch has been merged to main
+	IsMerged bool `json:"is_merged"`
+	// Method indicates how the merge was detected: "pr", "git", or "commit"
+	Method string `json:"method,omitempty"`
+	// PRNumber is set if merge was detected via PR status
+	PRNumber int `json:"pr_number,omitempty"`
+	// ExistsOnRemote is true if the branch still exists on the remote
+	ExistsOnRemote bool `json:"exists_on_remote"`
+}
+
+// IsBranchMerged checks if a piece branch has been merged to main.
+// Detection priority: 1) GitHub PR status, 2) git branch --merged, 3) commit history
+func (h *Handler) IsBranchMerged(repoRoot, branchName, mainBranch string) (MergeStatus, error) {
+	status := MergeStatus{}
+
+	// Check if branch exists on remote
+	existsOnRemote, err := h.git.BranchExistsOnRemote(repoRoot, branchName)
+	if err != nil {
+		// Non-fatal: continue with other checks
+		h.deps.Output.Write(core.Message{
+			Type:    core.MsgWarning,
+			Content: fmt.Sprintf("Failed to check remote branch: %v", err),
+		})
+	}
+	status.ExistsOnRemote = existsOnRemote
+
+	// Method 1: Check via GitHub PR status (most reliable for remote PRs)
+	merged, prNumber, err := h.checkPRMergeStatus(repoRoot)
+	if err == nil && merged {
+		status.IsMerged = true
+		status.Method = "pr"
+		status.PRNumber = prNumber
+		return status, nil
+	}
+
+	// Method 2: Check via git branch --merged
+	merged, err = h.git.IsBranchMerged(repoRoot, mainBranch, branchName)
+	if err != nil {
+		// Log warning but continue to fallback
+		h.deps.Output.Write(core.Message{
+			Type:    core.MsgWarning,
+			Content: fmt.Sprintf("git branch --merged check failed: %v", err),
+		})
+	} else if merged {
+		status.IsMerged = true
+		status.Method = "git"
+		return status, nil
+	}
+
+	// Method 3: Fallback - check if branch HEAD commit is in main history
+	merged, err = h.checkCommitMerged(repoRoot, branchName, mainBranch)
+	if err != nil {
+		// This is the last resort, so return error
+		return status, fmt.Errorf("failed to check commit history: %w", err)
+	}
+	if merged {
+		status.IsMerged = true
+		status.Method = "commit"
+		return status, nil
+	}
+
+	return status, nil
+}
+
+// checkPRMergeStatus checks if a PR associated with the piece has been merged.
+// Returns (merged, prNumber, error).
+func (h *Handler) checkPRMergeStatus(worktreePath string) (bool, int, error) {
+	// Try to read PR metadata from the piece
+	metadata, err := ReadPRMetadata(worktreePath, h.deps.FS)
+	if err != nil {
+		// No PR metadata - skip this check
+		return false, 0, fmt.Errorf("no PR metadata found: %w", err)
+	}
+
+	if metadata.PRNumber == 0 {
+		return false, 0, fmt.Errorf("PR number not set in metadata")
+	}
+
+	// Check if PR is merged using gh CLI
+	merged, err := h.github.IsPRMerged(worktreePath, metadata.PRNumber)
+	if err != nil {
+		return false, metadata.PRNumber, fmt.Errorf("failed to check PR status: %w", err)
+	}
+
+	return merged, metadata.PRNumber, nil
+}
+
+// checkCommitMerged checks if the branch's HEAD commit exists in main's history.
+func (h *Handler) checkCommitMerged(repoRoot, branchName, mainBranch string) (bool, error) {
+	// Get the branch's HEAD commit
+	branchCommit, err := h.git.GetBranchCommit(repoRoot, branchName)
+	if err != nil {
+		return false, fmt.Errorf("failed to get branch commit: %w", err)
+	}
+
+	// Check if this commit is in main's history
+	return h.git.IsCommitInBranch(repoRoot, branchCommit, mainBranch)
 }

@@ -902,3 +902,232 @@ func TestHandler_CreatePieceFromIssue_OutsideIssuesDirectory(t *testing.T) {
 		t.Errorf("expected error about issues directory, got: %v", err)
 	}
 }
+
+// ============================================================================
+// IsBranchMerged Tests
+// ============================================================================
+
+func TestHandler_IsBranchMerged_ViaPR(t *testing.T) {
+	fs := adapters.NewMemoryFS()
+	out := adapters.NewBufferOutput()
+	mockExec := adapters.NewMockExec()
+	deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
+	handler := piece.NewHandler(deps)
+
+	repoRoot := "/repo"
+	branchName := "feature-branch"
+
+	// Create PR metadata
+	prMetadata := `{"pr_number": 123, "pr_url": "https://github.com/owner/repo/pull/123", "branch": "feature-branch", "base_branch": "main"}`
+	_ = fs.MkdirAll(filepath.Join(repoRoot, ".monkeypuzzle"), 0755)
+	_ = fs.WriteFile(filepath.Join(repoRoot, ".monkeypuzzle/pr-metadata.json"), []byte(prMetadata), 0644)
+
+	// Mock remote branch check
+	mockExec.AddResponse("git", []string{"ls-remote", "--heads", "origin", branchName}, []byte("abc123\trefs/heads/feature-branch\n"), nil)
+
+	// Mock gh pr view - PR is merged
+	mockExec.AddResponse("gh", []string{"pr", "view", "123", "--json", "mergedAt"}, []byte(`{"mergedAt": "2025-01-27T10:00:00Z"}`), nil)
+
+	status, err := handler.IsBranchMerged(repoRoot, branchName, "main")
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	if !status.IsMerged {
+		t.Error("expected IsMerged to be true")
+	}
+	if status.Method != "pr" {
+		t.Errorf("expected method 'pr', got %q", status.Method)
+	}
+	if status.PRNumber != 123 {
+		t.Errorf("expected PR number 123, got %d", status.PRNumber)
+	}
+	if !status.ExistsOnRemote {
+		t.Error("expected ExistsOnRemote to be true")
+	}
+}
+
+func TestHandler_IsBranchMerged_ViaGit(t *testing.T) {
+	fs := adapters.NewMemoryFS()
+	out := adapters.NewBufferOutput()
+	mockExec := adapters.NewMockExec()
+	deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
+	handler := piece.NewHandler(deps)
+
+	repoRoot := "/repo"
+	branchName := "feature-branch"
+
+	// No PR metadata - skip PR check
+
+	// Mock remote branch check - branch doesn't exist on remote
+	mockExec.AddResponse("git", []string{"ls-remote", "--heads", "origin", branchName}, []byte(""), nil)
+
+	// Mock git branch --merged - branch is merged
+	mockExec.AddResponse("git", []string{"branch", "--merged", "main"}, []byte("  main\n  feature-branch\n"), nil)
+
+	status, err := handler.IsBranchMerged(repoRoot, branchName, "main")
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	if !status.IsMerged {
+		t.Error("expected IsMerged to be true")
+	}
+	if status.Method != "git" {
+		t.Errorf("expected method 'git', got %q", status.Method)
+	}
+	if status.ExistsOnRemote {
+		t.Error("expected ExistsOnRemote to be false")
+	}
+}
+
+func TestHandler_IsBranchMerged_ViaCommit(t *testing.T) {
+	fs := adapters.NewMemoryFS()
+	out := adapters.NewBufferOutput()
+	mockExec := adapters.NewMockExec()
+	deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
+	handler := piece.NewHandler(deps)
+
+	repoRoot := "/repo"
+	branchName := "feature-branch"
+
+	// No PR metadata
+
+	// Mock remote branch check
+	mockExec.AddResponse("git", []string{"ls-remote", "--heads", "origin", branchName}, []byte(""), nil)
+
+	// Mock git branch --merged - branch not in list
+	mockExec.AddResponse("git", []string{"branch", "--merged", "main"}, []byte("  main\n"), nil)
+
+	// Mock commit check - get branch commit
+	mockExec.AddResponse("git", []string{"rev-parse", branchName}, []byte("abc123\n"), nil)
+
+	// Mock merge-base --is-ancestor - commit is in main's history
+	mockExec.AddResponse("git", []string{"merge-base", "--is-ancestor", "abc123", "main"}, nil, nil)
+
+	status, err := handler.IsBranchMerged(repoRoot, branchName, "main")
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	if !status.IsMerged {
+		t.Error("expected IsMerged to be true")
+	}
+	if status.Method != "commit" {
+		t.Errorf("expected method 'commit', got %q", status.Method)
+	}
+}
+
+func TestHandler_IsBranchMerged_NotMerged(t *testing.T) {
+	fs := adapters.NewMemoryFS()
+	out := adapters.NewBufferOutput()
+	mockExec := adapters.NewMockExec()
+	deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
+	handler := piece.NewHandler(deps)
+
+	repoRoot := "/repo"
+	branchName := "feature-branch"
+
+	// No PR metadata
+
+	// Mock remote branch check - branch exists
+	mockExec.AddResponse("git", []string{"ls-remote", "--heads", "origin", branchName}, []byte("abc123\trefs/heads/feature-branch\n"), nil)
+
+	// Mock git branch --merged - branch not in list
+	mockExec.AddResponse("git", []string{"branch", "--merged", "main"}, []byte("  main\n"), nil)
+
+	// Mock commit check
+	mockExec.AddResponse("git", []string{"rev-parse", branchName}, []byte("abc123\n"), nil)
+
+	// Mock merge-base --is-ancestor - commit is NOT in main's history (exit status 1)
+	mockExec.AddResponse("git", []string{"merge-base", "--is-ancestor", "abc123", "main"}, nil, fmt.Errorf("exit status 1"))
+
+	status, err := handler.IsBranchMerged(repoRoot, branchName, "main")
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	if status.IsMerged {
+		t.Error("expected IsMerged to be false")
+	}
+	if status.Method != "" {
+		t.Errorf("expected empty method, got %q", status.Method)
+	}
+	if !status.ExistsOnRemote {
+		t.Error("expected ExistsOnRemote to be true")
+	}
+}
+
+func TestHandler_IsBranchMerged_PRNotMerged_FallsBackToGit(t *testing.T) {
+	fs := adapters.NewMemoryFS()
+	out := adapters.NewBufferOutput()
+	mockExec := adapters.NewMockExec()
+	deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
+	handler := piece.NewHandler(deps)
+
+	repoRoot := "/repo"
+	branchName := "feature-branch"
+
+	// Create PR metadata
+	prMetadata := `{"pr_number": 123, "pr_url": "https://github.com/owner/repo/pull/123", "branch": "feature-branch", "base_branch": "main"}`
+	_ = fs.MkdirAll(filepath.Join(repoRoot, ".monkeypuzzle"), 0755)
+	_ = fs.WriteFile(filepath.Join(repoRoot, ".monkeypuzzle/pr-metadata.json"), []byte(prMetadata), 0644)
+
+	// Mock remote branch check
+	mockExec.AddResponse("git", []string{"ls-remote", "--heads", "origin", branchName}, []byte("abc123\trefs/heads/feature-branch\n"), nil)
+
+	// Mock gh pr view - PR is NOT merged
+	mockExec.AddResponse("gh", []string{"pr", "view", "123", "--json", "mergedAt"}, []byte(`{"mergedAt": null}`), nil)
+
+	// Mock git branch --merged - branch is merged (local merge without PR)
+	mockExec.AddResponse("git", []string{"branch", "--merged", "main"}, []byte("  main\n  feature-branch\n"), nil)
+
+	status, err := handler.IsBranchMerged(repoRoot, branchName, "main")
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	if !status.IsMerged {
+		t.Error("expected IsMerged to be true")
+	}
+	if status.Method != "git" {
+		t.Errorf("expected method 'git', got %q", status.Method)
+	}
+}
+
+func TestHandler_IsBranchMerged_GHError_FallsBackToGit(t *testing.T) {
+	fs := adapters.NewMemoryFS()
+	out := adapters.NewBufferOutput()
+	mockExec := adapters.NewMockExec()
+	deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
+	handler := piece.NewHandler(deps)
+
+	repoRoot := "/repo"
+	branchName := "feature-branch"
+
+	// Create PR metadata
+	prMetadata := `{"pr_number": 123, "pr_url": "https://github.com/owner/repo/pull/123", "branch": "feature-branch", "base_branch": "main"}`
+	_ = fs.MkdirAll(filepath.Join(repoRoot, ".monkeypuzzle"), 0755)
+	_ = fs.WriteFile(filepath.Join(repoRoot, ".monkeypuzzle/pr-metadata.json"), []byte(prMetadata), 0644)
+
+	// Mock remote branch check
+	mockExec.AddResponse("git", []string{"ls-remote", "--heads", "origin", branchName}, []byte("abc123\trefs/heads/feature-branch\n"), nil)
+
+	// Mock gh pr view - error (gh not installed or API error)
+	mockExec.AddResponse("gh", []string{"pr", "view", "123", "--json", "mergedAt"}, nil, fmt.Errorf("gh not found"))
+
+	// Mock git branch --merged - branch is merged
+	mockExec.AddResponse("git", []string{"branch", "--merged", "main"}, []byte("  main\n  feature-branch\n"), nil)
+
+	status, err := handler.IsBranchMerged(repoRoot, branchName, "main")
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	if !status.IsMerged {
+		t.Error("expected IsMerged to be true")
+	}
+	if status.Method != "git" {
+		t.Errorf("expected method 'git', got %q", status.Method)
+	}
+}

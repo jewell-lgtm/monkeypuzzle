@@ -1,6 +1,6 @@
 ---
 title: Detect merged piece branches
-status: todo
+status: done
 ---
 
 # Detect merged piece branches
