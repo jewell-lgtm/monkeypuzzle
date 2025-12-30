@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -880,13 +881,9 @@ func (h *Handler) ListPieces() ([]PieceListItem, error) {
 	}
 
 	// Sort by modification time (newest first)
-	for i := 0; i < len(pieces)-1; i++ {
-		for j := i + 1; j < len(pieces); j++ {
-			if pieces[j].ModTime.After(pieces[i].ModTime) {
-				pieces[i], pieces[j] = pieces[j], pieces[i]
-			}
-		}
-	}
+	sort.Slice(pieces, func(i, j int) bool {
+		return pieces[i].ModTime.After(pieces[j].ModTime)
+	})
 
 	return pieces, nil
 }
