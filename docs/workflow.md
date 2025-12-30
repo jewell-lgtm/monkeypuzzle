@@ -146,6 +146,67 @@ tmux attach -t mp-piece-...  # Attach to specific piece
 
 `mp piece switch` automatically detects if you're in tmux and uses `switch-client` for seamless session switching.
 
+### Tmux for Beginners
+
+**What is tmux?** A terminal multiplexer - run multiple terminal sessions in one window, detach/reattach sessions, and keep processes running when you disconnect.
+
+**Install:**
+
+```bash
+# macOS
+brew install tmux
+
+# Ubuntu/Debian
+sudo apt install tmux
+
+# Fedora
+sudo dnf install tmux
+```
+
+**Essential commands:**
+
+| Command | Description |
+|---------|-------------|
+| `tmux` | Start new session |
+| `tmux ls` | List sessions |
+| `tmux attach -t <name>` | Attach to session |
+| `tmux kill-session -t <name>` | Kill session |
+
+**Inside tmux (prefix is `Ctrl+b`):**
+
+| Keys | Action |
+|------|--------|
+| `Ctrl+b d` | Detach (leave session running) |
+| `Ctrl+b c` | New window |
+| `Ctrl+b n` / `Ctrl+b p` | Next/previous window |
+| `Ctrl+b 0-9` | Switch to window by number |
+| `Ctrl+b %` | Split vertically |
+| `Ctrl+b "` | Split horizontally |
+| `Ctrl+b ←↑↓→` | Move between panes |
+| `Ctrl+b x` | Kill current pane |
+
+**With monkeypuzzle:**
+
+```bash
+# Create piece (auto-creates tmux session)
+mp piece new --name my-feature
+
+# You're now in session "mp-piece-my-feature"
+# Work on code, then detach:
+# Press Ctrl+b, then d
+
+# Later, switch back:
+mp piece switch --name my-feature
+
+# Or list all piece sessions:
+tmux ls | grep mp-piece
+```
+
+**Tips:**
+- Sessions persist after detaching - your work stays running
+- Use `mp piece switch` instead of raw tmux commands for easier navigation
+- If tmux isn't installed, monkeypuzzle falls back to printing the path
+
 ## Hooks
 
 Monkeypuzzle supports hooks to run custom scripts during piece operations. Create executable scripts in `.monkeypuzzle/hooks/`:
