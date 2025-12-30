@@ -86,19 +86,23 @@ Work on multiple features simultaneously:
 
 ```bash
 # From main repo, create first piece
-mp piece new
+mp piece new --name feature-a
 # Work on feature A...
 
 # From main repo, create second piece
-mp piece new
+mp piece new --name feature-b
 # Work on feature B...
 
+# Switch between pieces
+mp piece switch                    # TUI selector
+mp piece switch --name feature-a   # By name
+
 # Merge feature A when ready
-cd ~/.local/share/monkeypuzzle/pieces/piece-20241226-100000
+mp piece switch --name feature-a
 mp piece merge
 
 # Update feature B with changes from A
-cd ~/.local/share/monkeypuzzle/pieces/piece-20241226-110000
+mp piece switch --name feature-b
 mp piece update
 ```
 
@@ -129,12 +133,18 @@ git push origin main
 - Session name: `mp-piece-<piece-name>`
 - Working directory: piece worktree path
 
-Switch between pieces using tmux:
+Switch between pieces:
 
 ```bash
-tmux list-sessions          # See all piece sessions
-tmux attach -t mp-piece-... # Attach to specific piece
+mp piece switch              # TUI selector (works with/without tmux)
+mp piece switch --name foo   # By name
+
+# Or use tmux directly:
+tmux list-sessions           # See all piece sessions
+tmux attach -t mp-piece-...  # Attach to specific piece
 ```
+
+`mp piece switch` automatically detects if you're in tmux and uses `switch-client` for seamless session switching.
 
 ## Hooks
 
@@ -199,10 +209,11 @@ Pieces are stored in:
 - Linux: `~/.local/share/monkeypuzzle/pieces/`
 - macOS: `~/Library/Application Support/monkeypuzzle/pieces/`
 
-List all pieces:
+List and switch between pieces:
 
 ```bash
-ls ~/.local/share/monkeypuzzle/pieces/
+mp piece switch               # Interactive TUI with all pieces
+ls ~/.local/share/monkeypuzzle/pieces/  # Manual listing
 ```
 
 ### Cleaning up old pieces

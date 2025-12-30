@@ -14,6 +14,7 @@ CLI tool for git worktree-based development workflow. Binary: `mp`
 | `mp init` | Initialize monkeypuzzle in a project |
 | `mp piece` | Show current piece status |
 | `mp piece new` | Create new piece (worktree + tmux) |
+| `mp piece switch` | Switch to an existing piece |
 | `mp piece update` | Sync piece with main branch |
 | `mp piece merge` | Merge piece back to main |
 | `mp piece cleanup` | Remove merged piece worktrees |
@@ -47,7 +48,7 @@ mp piece
 
 ## mp piece new
 
-Create new piece (git worktree + tmux session).
+Create new piece (git worktree + tmux session). **Auto-switches to the new piece by default.**
 
 ```bash
 # From issue file (recommended)
@@ -58,16 +59,47 @@ mp piece new --name my-feature
 
 # Auto-generated name
 mp piece new
+
+# Don't auto-switch
+mp piece new --skip-switch
 ```
 
 **Flags:**
 - `--issue <path>` - Create from issue file (sets piece name from issue title)
 - `--name <name>` - Custom piece name (mutually exclusive with --issue)
+- `--skip-switch` - Don't switch to the new piece after creation
 
 **Effects:**
 - Creates git worktree in `~/.local/share/monkeypuzzle/pieces/<name>`
 - Creates tmux session `mp-piece-<name>`
 - If from issue: updates issue status to `in-progress`
+- Switches to the new piece (tmux attach/switch-client or prints path)
+
+## mp piece switch
+
+Switch to an existing piece.
+
+```bash
+# Interactive TUI (sorted by modification time)
+mp piece switch
+
+# By name
+mp piece switch --name my-feature
+
+# JSON stdin
+echo '{"name":"my-feature"}' | mp piece switch
+
+# Use with cd (when no tmux)
+cd $(mp piece switch --name my-feature)
+```
+
+**Flags:**
+- `--name <name>` - Piece name to switch to
+
+**Behavior:**
+- If tmux session exists and in tmux: uses `switch-client`
+- If tmux session exists and outside tmux: uses `attach-session`
+- If no tmux: prints path to stdout (use with `cd $(...)`)
 
 ## mp piece update
 
@@ -161,12 +193,15 @@ echo '{"title":"Add login"}' | mp issue create
 # 3. Start working on issue
 mp piece new --issue issues/add-login.md
 
-# 4. (in piece worktree) Make changes, commit...
+# 4. Switch to piece (if needed)
+mp piece switch --name add-login
 
-# 5. Create PR
+# 5. (in piece worktree) Make changes, commit...
+
+# 6. Create PR
 mp piece pr create
 
-# 6. After PR merged, cleanup
+# 7. After PR merged, cleanup
 mp piece cleanup
 ```
 

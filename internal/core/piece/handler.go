@@ -833,3 +833,126 @@ func (h *Handler) updateIssueStatusToDone(issuePath string) error {
 
 	return nil
 }
+
+// ListPieces returns all available pieces in the pieces directory.
+// Results are sorted by modification time (newest first).
+func (h *Handler) ListPieces() ([]PieceListItem, error) {
+	piecesDir, err := getPiecesDir()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get pieces directory: %w", err)
+	}
+
+	entries, err := h.deps.FS.ReadDir(piecesDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []PieceListItem{}, nil
+		}
+		return nil, fmt.Errorf("failed to read pieces directory: %w", err)
+	}
+
+	var pieces []PieceListItem
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		name := entry.Name()
+		worktreePath := filepath.Join(piecesDir, name)
+		sessionName := fmt.Sprintf("mp-piece-%s", name)
+
+		// Get modification time
+		info, err := entry.Info()
+		var modTime time.Time
+		if err == nil {
+			modTime = info.ModTime()
+		}
+
+		// Check if tmux session exists
+		hasSession := h.tmux.HasSession(sessionName)
+
+		pieces = append(pieces, PieceListItem{
+			Name:         name,
+			WorktreePath: worktreePath,
+			SessionName:  sessionName,
+			HasSession:   hasSession,
+			ModTime:      modTime,
+		})
+	}
+
+	// Sort by modification time (newest first)
+	for i := 0; i < len(pieces)-1; i++ {
+		for j := i + 1; j < len(pieces); j++ {
+			if pieces[j].ModTime.After(pieces[i].ModTime) {
+				pieces[i], pieces[j] = pieces[j], pieces[i]
+			}
+		}
+	}
+
+	return pieces, nil
+}
+
+// SwitchPiece switches to a piece by name.
+// It tries tmux attach/switch first, falls back to printing path.
+func (h *Handler) SwitchPiece(name string) (SwitchResult, error) {
+	pieces, err := h.ListPieces()
+	if err != nil {
+		return SwitchResult{}, err
+	}
+
+	// Find the piece
+	var target *PieceListItem
+	for i := range pieces {
+		if pieces[i].Name == name {
+			target = &pieces[i]
+			break
+		}
+	}
+	if target == nil {
+		// Build list of available pieces for error message
+		var names []string
+		for _, p := range pieces {
+			names = append(names, p.Name)
+		}
+		if len(names) == 0 {
+			return SwitchResult{}, fmt.Errorf("piece %q not found (no pieces exist)", name)
+		}
+		return SwitchResult{}, fmt.Errorf("piece %q not found. Available: %s", name, strings.Join(names, ", "))
+	}
+
+	result := SwitchResult{Piece: *target}
+
+	// Try tmux if session exists
+	if target.HasSession {
+		if h.tmux.InTmux() {
+			// Already in tmux, use switch-client
+			if err := h.tmux.SwitchClient(target.SessionName); err == nil {
+				result.Method = "tmux-switch"
+				h.deps.Output.Write(core.Message{
+					Type:    core.MsgSuccess,
+					Content: fmt.Sprintf("Switched to piece: %s", name),
+					Data:    result,
+				})
+				return result, nil
+			}
+			// Fall through to path on error
+		} else {
+			// Not in tmux, use attach-session
+			if err := h.tmux.AttachSession(target.SessionName); err == nil {
+				result.Method = "tmux-attach"
+				h.deps.Output.Write(core.Message{
+					Type:    core.MsgSuccess,
+					Content: fmt.Sprintf("Attached to piece: %s", name),
+					Data:    result,
+				})
+				return result, nil
+			}
+			// Fall through to path on error
+		}
+	}
+
+	// Fallback: print path for cd $(mp piece switch --name foo)
+	result.Method = "path"
+	fmt.Println(target.WorktreePath)
+
+	return result, nil
+}

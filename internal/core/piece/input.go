@@ -1,5 +1,7 @@
 package piece
 
+import "time"
+
 // PieceInfo contains information about a created piece worktree.
 // It includes the piece name, worktree path, and associated tmux session name.
 type PieceInfo struct {
@@ -24,3 +26,17 @@ type PieceStatus struct {
 	RepoRoot string `json:"repo_root,omitempty"`
 }
 
+// PieceListItem represents a piece available for switching.
+type PieceListItem struct {
+	Name         string    `json:"name"`
+	WorktreePath string    `json:"worktree_path"`
+	SessionName  string    `json:"session_name"`
+	HasSession   bool      `json:"has_session"`
+	ModTime      time.Time `json:"mod_time"`
+}
+
+// SwitchResult contains the result of a switch operation.
+type SwitchResult struct {
+	Piece  PieceListItem `json:"piece"`
+	Method string        `json:"method"` // "tmux-switch", "tmux-attach", "path"
+}

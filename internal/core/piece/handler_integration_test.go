@@ -973,3 +973,189 @@ status: done
 	}
 }
 
+func TestIntegration_ListPieces_And_SwitchPiece(t *testing.T) {
+	// Skip if git is not available
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	// Set XDG_DATA_HOME to a temp directory
+	tmpDataHome, err := os.MkdirTemp("", "mp-data-*")
+	if err != nil {
+		t.Fatalf("failed to create temp data dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDataHome)
+	t.Setenv("XDG_DATA_HOME", tmpDataHome)
+
+	// Create temp directory for test repo
+	tmpDir, err := os.MkdirTemp("", "mp-integration-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Initialize git repo
+	setupGitRepo(t, tmpDir)
+
+	// Create monkeypuzzle config
+	setupMonkeypuzzleConfig(t, tmpDir)
+
+	// Change to repo directory
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get working directory: %v", err)
+	}
+	defer func() { _ = os.Chdir(oldWd) }()
+
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("failed to change directory: %v", err)
+	}
+
+	// Create handler
+	deps := core.Deps{
+		FS:     adapters.NewOSFS(""),
+		Output: adapters.NewBufferOutput(),
+		Exec:   adapters.NewOSExec(),
+	}
+	handler := piece.NewHandler(deps)
+
+	// Initially no pieces
+	pieces, err := handler.ListPieces()
+	if err != nil {
+		t.Fatalf("ListPieces failed: %v", err)
+	}
+	if len(pieces) != 0 {
+		t.Errorf("expected 0 pieces, got %d", len(pieces))
+	}
+
+	// Create two pieces
+	_, err = handler.CreatePiece(tmpDir, "piece-one")
+	if err != nil {
+		t.Fatalf("CreatePiece failed: %v", err)
+	}
+
+	_, err = handler.CreatePiece(tmpDir, "piece-two")
+	if err != nil {
+		t.Fatalf("CreatePiece failed: %v", err)
+	}
+
+	// List pieces
+	pieces, err = handler.ListPieces()
+	if err != nil {
+		t.Fatalf("ListPieces failed: %v", err)
+	}
+	if len(pieces) != 2 {
+		t.Errorf("expected 2 pieces, got %d", len(pieces))
+	}
+
+	// Verify piece names exist
+	var foundOne, foundTwo bool
+	for _, p := range pieces {
+		if p.Name == "piece-one" {
+			foundOne = true
+		}
+		if p.Name == "piece-two" {
+			foundTwo = true
+		}
+	}
+	if !foundOne {
+		t.Error("expected to find piece-one")
+	}
+	if !foundTwo {
+		t.Error("expected to find piece-two")
+	}
+
+	// Switch to piece (will fallback to path since no tmux in CI)
+	result, err := handler.SwitchPiece("piece-one")
+	if err != nil {
+		t.Fatalf("SwitchPiece failed: %v", err)
+	}
+
+	if result.Piece.Name != "piece-one" {
+		t.Errorf("expected piece name 'piece-one', got %q", result.Piece.Name)
+	}
+
+	// Method should be "path" since no tmux session
+	if result.Method != "path" {
+		t.Errorf("expected method 'path', got %q", result.Method)
+	}
+
+	// Try to switch to non-existent piece
+	_, err = handler.SwitchPiece("non-existent")
+	if err == nil {
+		t.Error("expected error for non-existent piece")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("expected 'not found' in error, got: %v", err)
+	}
+}
+
+func TestIntegration_CreatePiece_ThenSwitch(t *testing.T) {
+	// Skip if git is not available
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	// Set XDG_DATA_HOME to a temp directory
+	tmpDataHome, err := os.MkdirTemp("", "mp-data-*")
+	if err != nil {
+		t.Fatalf("failed to create temp data dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDataHome)
+	t.Setenv("XDG_DATA_HOME", tmpDataHome)
+
+	// Create temp directory for test repo
+	tmpDir, err := os.MkdirTemp("", "mp-integration-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Initialize git repo
+	setupGitRepo(t, tmpDir)
+
+	// Create monkeypuzzle config
+	setupMonkeypuzzleConfig(t, tmpDir)
+
+	// Change to repo directory
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get working directory: %v", err)
+	}
+	defer func() { _ = os.Chdir(oldWd) }()
+
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("failed to change directory: %v", err)
+	}
+
+	// Create handler
+	deps := core.Deps{
+		FS:     adapters.NewOSFS(""),
+		Output: adapters.NewBufferOutput(),
+		Exec:   adapters.NewOSExec(),
+	}
+	handler := piece.NewHandler(deps)
+
+	// Create piece
+	info, err := handler.CreatePiece(tmpDir, "auto-switch-test")
+	if err != nil {
+		t.Fatalf("CreatePiece failed: %v", err)
+	}
+
+	// Immediately switch to the created piece (simulating auto-switch)
+	result, err := handler.SwitchPiece(info.Name)
+	if err != nil {
+		t.Fatalf("SwitchPiece after CreatePiece failed: %v", err)
+	}
+
+	// Verify the switch result
+	if result.Piece.Name != "auto-switch-test" {
+		t.Errorf("expected piece name 'auto-switch-test', got %q", result.Piece.Name)
+	}
+
+	// Method should be "path" since no tmux session in CI
+	// (tmux session creation is non-fatal, so it may not exist)
+	if result.Method != "path" && result.Method != "tmux-attach" {
+		t.Errorf("expected method 'path' or 'tmux-attach', got %q", result.Method)
+	}
+}

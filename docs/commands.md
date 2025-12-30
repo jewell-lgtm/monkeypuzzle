@@ -105,13 +105,18 @@ Create a new piece (git worktree + tmux session).
 
 ```bash
 mp piece new
+mp piece new --name my-feature
+mp piece new --issue issues/my-feature.md
+mp piece new --skip-switch  # Don't auto-switch to new piece
 ```
 
 ### Flags
 
-| Flag     | Description       | Default        |
-| -------- | ----------------- | -------------- |
-| `--name` | Custom piece name | Auto-generated |
+| Flag            | Description                                 | Default        |
+| --------------- | ------------------------------------------- | -------------- |
+| `--name`        | Custom piece name                           | Auto-generated |
+| `--issue`       | Create from issue file (sets name from title) | -            |
+| `--skip-switch` | Don't switch to the new piece after creation | `false`       |
 
 ### What it does
 
@@ -121,8 +126,10 @@ mp piece new
 4. Creates symlink `.monkeypuzzle-source` to source monkeypuzzle config
 5. Creates tmux session `mp-piece-<piece-name>` (if tmux available)
 6. Runs `on-piece-create.sh` hook (if exists)
+7. **Switches to the new piece** (unless `--skip-switch` is set)
 
 If the hook fails, the worktree and tmux session are cleaned up automatically.
+The auto-switch uses tmux attach/switch-client if available, otherwise prints the path.
 
 ### Output
 
@@ -216,6 +223,90 @@ If any hook fails, the operation is aborted.
 ### Safety check
 
 If main has commits not in the piece, merge fails. Run `mp piece update` first to incorporate those changes.
+
+---
+
+## mp piece switch
+
+Switch to an existing piece.
+
+### Usage
+
+```bash
+mp piece switch                    # Interactive TUI selector
+mp piece switch --name my-feature  # Switch by name
+echo '{"name":"my-feature"}' | mp piece switch  # JSON stdin
+cd $(mp piece switch --name foo)   # Change directory to piece
+```
+
+### Flags
+
+| Flag     | Description            | Default |
+| -------- | ---------------------- | ------- |
+| `--name` | Piece name to switch to | -       |
+
+### What it does
+
+1. Lists available pieces (sorted by modification time, newest first)
+2. Shows TUI selector if no name provided
+3. Checks if tmux session exists for the piece
+4. If in tmux: uses `switch-client` to swap sessions
+5. If outside tmux: uses `attach-session` to attach
+6. Falls back to printing path if tmux unavailable
+
+### Output
+
+When switching via tmux, outputs JSON:
+
+```json
+{
+  "piece": {
+    "name": "my-feature",
+    "worktree_path": "/home/user/.local/share/monkeypuzzle/pieces/my-feature",
+    "session_name": "mp-piece-my-feature",
+    "has_session": true
+  },
+  "method": "tmux-switch"
+}
+```
+
+When printing path (no tmux), outputs just the path to stdout for use with `cd $(...)`.
+
+### TUI Selector
+
+Interactive mode shows:
+- Piece names sorted by modification time (newest first)
+- `[tmux]` indicator for pieces with active sessions
+- Navigation: up/down or j/k, enter to select, esc to cancel
+
+---
+
+## mp piece cleanup
+
+Remove worktrees for merged pieces.
+
+### Usage
+
+```bash
+mp piece cleanup              # Cleanup merged pieces
+mp piece cleanup --dry-run    # Preview what would be cleaned
+mp piece cleanup --force      # Skip confirmation
+```
+
+### Flags
+
+| Flag            | Description                                   | Default |
+| --------------- | --------------------------------------------- | ------- |
+| `--dry-run`     | Show what would be cleaned without changes    | `false` |
+| `--force`       | Skip confirmation prompts                     | `false` |
+| `--main-branch` | Main branch to check merge status against     | `main`  |
+
+### What it does
+
+1. Scans pieces directory for worktrees
+2. Checks if each piece's branch is merged (via git branch, PR, or remote)
+3. For merged pieces: removes worktree, kills tmux session, updates issue status
+4. Reports what was cleaned
 
 ---
 

@@ -1410,3 +1410,177 @@ func TestHandler_CleanupMergedPieces_NoIssueMarker(t *testing.T) {
 		t.Error("expected IssueUpdated to be false when no issue marker")
 	}
 }
+
+func TestHandler_ListPieces_NoPiecesDir(t *testing.T) {
+	fs := adapters.NewMemoryFS()
+	out := adapters.NewBufferOutput()
+	mockExec := adapters.NewMockExec()
+	deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
+	handler := piece.NewHandler(deps)
+
+	// Mock tmux has-session (not called when no pieces)
+	// No pieces directory exists
+
+	pieces, err := handler.ListPieces()
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	if len(pieces) != 0 {
+		t.Errorf("expected 0 pieces, got %d", len(pieces))
+	}
+}
+
+func TestHandler_ListPieces_EmptyDir(t *testing.T) {
+	fs := adapters.NewMemoryFS()
+	out := adapters.NewBufferOutput()
+	mockExec := adapters.NewMockExec()
+	deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
+	handler := piece.NewHandler(deps)
+
+	// Set XDG_DATA_HOME to match the MemoryFS paths
+	t.Setenv("XDG_DATA_HOME", "/test-data")
+
+	// Create empty pieces directory
+	piecesDir := "/test-data/monkeypuzzle/pieces"
+	_ = fs.MkdirAll(piecesDir, 0755)
+
+	pieces, err := handler.ListPieces()
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	if len(pieces) != 0 {
+		t.Errorf("expected 0 pieces, got %d", len(pieces))
+	}
+}
+
+func TestHandler_ListPieces_WithPieces(t *testing.T) {
+	fs := adapters.NewMemoryFS()
+	out := adapters.NewBufferOutput()
+	mockExec := adapters.NewMockExec()
+	deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
+	handler := piece.NewHandler(deps)
+
+	// Set XDG_DATA_HOME to match the MemoryFS paths
+	t.Setenv("XDG_DATA_HOME", "/test-data")
+
+	// Create pieces directory with pieces
+	piecesDir := "/test-data/monkeypuzzle/pieces"
+	_ = fs.MkdirAll(filepath.Join(piecesDir, "piece-one"), 0755)
+	_ = fs.MkdirAll(filepath.Join(piecesDir, "piece-two"), 0755)
+
+	// Mock tmux has-session for each piece
+	mockExec.AddResponse("tmux", []string{"has-session", "-t", "mp-piece-piece-one"}, nil, nil)
+	mockExec.AddResponse("tmux", []string{"has-session", "-t", "mp-piece-piece-two"}, nil, fmt.Errorf("no session"))
+
+	pieces, err := handler.ListPieces()
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	if len(pieces) != 2 {
+		t.Errorf("expected 2 pieces, got %d", len(pieces))
+	}
+
+	// Find pieces by name
+	var foundOne, foundTwo *piece.PieceListItem
+	for i := range pieces {
+		if pieces[i].Name == "piece-one" {
+			foundOne = &pieces[i]
+		}
+		if pieces[i].Name == "piece-two" {
+			foundTwo = &pieces[i]
+		}
+	}
+
+	if foundOne == nil {
+		t.Error("expected to find piece-one")
+	} else if !foundOne.HasSession {
+		t.Error("expected piece-one to have session")
+	}
+
+	if foundTwo == nil {
+		t.Error("expected to find piece-two")
+	} else if foundTwo.HasSession {
+		t.Error("expected piece-two to NOT have session")
+	}
+}
+
+func TestHandler_SwitchPiece_NotFound(t *testing.T) {
+	fs := adapters.NewMemoryFS()
+	out := adapters.NewBufferOutput()
+	mockExec := adapters.NewMockExec()
+	deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
+	handler := piece.NewHandler(deps)
+
+	// Set XDG_DATA_HOME to match the MemoryFS paths
+	t.Setenv("XDG_DATA_HOME", "/test-data")
+
+	// Create pieces directory with one piece
+	piecesDir := "/test-data/monkeypuzzle/pieces"
+	_ = fs.MkdirAll(filepath.Join(piecesDir, "existing-piece"), 0755)
+
+	// Mock tmux has-session
+	mockExec.AddResponse("tmux", []string{"has-session", "-t", "mp-piece-existing-piece"}, nil, nil)
+
+	_, err := handler.SwitchPiece("non-existent")
+	if err == nil {
+		t.Error("expected error for non-existent piece")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("expected 'not found' in error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "existing-piece") {
+		t.Errorf("expected available pieces in error, got: %v", err)
+	}
+}
+
+func TestHandler_SwitchPiece_PrintsPath_NoSession(t *testing.T) {
+	fs := adapters.NewMemoryFS()
+	out := adapters.NewBufferOutput()
+	mockExec := adapters.NewMockExec()
+	deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
+	handler := piece.NewHandler(deps)
+
+	// Set XDG_DATA_HOME to match the MemoryFS paths
+	t.Setenv("XDG_DATA_HOME", "/test-data")
+
+	// Create pieces directory with one piece
+	piecesDir := "/test-data/monkeypuzzle/pieces"
+	_ = fs.MkdirAll(filepath.Join(piecesDir, "my-piece"), 0755)
+
+	// Mock tmux has-session - no session exists
+	mockExec.AddResponse("tmux", []string{"has-session", "-t", "mp-piece-my-piece"}, nil, fmt.Errorf("no session"))
+
+	result, err := handler.SwitchPiece("my-piece")
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	if result.Method != "path" {
+		t.Errorf("expected method 'path', got %q", result.Method)
+	}
+
+	if result.Piece.Name != "my-piece" {
+		t.Errorf("expected piece name 'my-piece', got %q", result.Piece.Name)
+	}
+}
+
+func TestHandler_SwitchPiece_NoPiecesExist(t *testing.T) {
+	fs := adapters.NewMemoryFS()
+	out := adapters.NewBufferOutput()
+	mockExec := adapters.NewMockExec()
+	deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
+	handler := piece.NewHandler(deps)
+
+	// No pieces directory
+
+	_, err := handler.SwitchPiece("any-piece")
+	if err == nil {
+		t.Error("expected error when no pieces exist")
+	}
+	if !strings.Contains(err.Error(), "no pieces exist") {
+		t.Errorf("expected 'no pieces exist' in error, got: %v", err)
+	}
+}

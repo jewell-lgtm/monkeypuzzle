@@ -2,6 +2,7 @@ package adapters
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
 )
@@ -43,4 +44,25 @@ func (t *Tmux) KillSession(sessionName string) error {
 		return fmt.Errorf("failed to kill tmux session: %w", err)
 	}
 	return nil
+}
+
+// HasSession checks if a tmux session with the given name exists.
+func (t *Tmux) HasSession(sessionName string) bool {
+	_, err := t.exec.Run("tmux", "has-session", "-t", sessionName)
+	return err == nil
+}
+
+// SwitchClient switches the current tmux client to another session.
+// This should be used when already inside a tmux session.
+func (t *Tmux) SwitchClient(sessionName string) error {
+	_, err := t.exec.Run("tmux", "switch-client", "-t", sessionName)
+	if err != nil {
+		return fmt.Errorf("failed to switch tmux client: %w", err)
+	}
+	return nil
+}
+
+// InTmux returns true if the current process is running inside a tmux session.
+func (t *Tmux) InTmux() bool {
+	return os.Getenv("TMUX") != ""
 }

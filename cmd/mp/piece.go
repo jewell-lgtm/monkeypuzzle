@@ -3,15 +3,18 @@ package mp
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/adapters"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
 	piececmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/piece"
+	"github.com/jewell-lgtm/monkeypuzzle/internal/tui/pieceswitch"
 )
 
 var pieceCmd = &cobra.Command{
@@ -50,24 +53,38 @@ var pieceCleanupCmd = &cobra.Command{
 	RunE:  runPieceCleanup,
 }
 
+var pieceSwitchCmd = &cobra.Command{
+	Use:   "switch",
+	Short: "Switch to an existing piece",
+	Long: `Switch to an existing piece worktree.
+Tries to attach to the tmux session first, falls back to printing the path.
+Use with: cd $(mp piece switch --name foo)`,
+	RunE: runPieceSwitch,
+}
+
 var flagMainBranch string
+var flagSwitchName string
 var flagPieceName string
 var flagIssuePath string
+var flagSkipSwitch bool
 var flagDryRun bool
 var flagForce bool
 
 func init() {
 	pieceNewCmd.Flags().StringVar(&flagPieceName, "name", "", "Optional piece name (default: auto-generated)")
 	pieceNewCmd.Flags().StringVar(&flagIssuePath, "issue", "", "Create piece from issue file (e.g., issues/foo.md)")
+	pieceNewCmd.Flags().BoolVar(&flagSkipSwitch, "skip-switch", false, "Don't switch to the new piece after creation")
 	pieceUpdateCmd.Flags().StringVar(&flagMainBranch, "main-branch", "main", "Main branch name to merge (default: main)")
 	pieceMergeCmd.Flags().StringVar(&flagMainBranch, "main-branch", "main", "Main branch name to merge into (default: main)")
 	pieceCleanupCmd.Flags().StringVar(&flagMainBranch, "main-branch", "main", "Main branch name to check for merged status (default: main)")
 	pieceCleanupCmd.Flags().BoolVar(&flagDryRun, "dry-run", false, "Show what would be cleaned without making changes")
 	pieceCleanupCmd.Flags().BoolVar(&flagForce, "force", false, "Skip confirmation prompts")
+	pieceSwitchCmd.Flags().StringVar(&flagSwitchName, "name", "", "Piece name to switch to")
 	pieceCmd.AddCommand(pieceNewCmd)
 	pieceCmd.AddCommand(pieceUpdateCmd)
 	pieceCmd.AddCommand(pieceMergeCmd)
 	pieceCmd.AddCommand(pieceCleanupCmd)
+	pieceCmd.AddCommand(pieceSwitchCmd)
 	rootCmd.AddCommand(pieceCmd)
 }
 
@@ -158,6 +175,15 @@ func runPieceNew(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to marshal info: %w", err)
 	}
 	fmt.Println(string(jsonData))
+
+	// Switch to the new piece (unless --skip-switch is set)
+	if !flagSkipSwitch {
+		_, err := handler.SwitchPiece(info.Name)
+		if err != nil {
+			// Non-fatal: log warning but don't fail
+			fmt.Fprintf(os.Stderr, "Warning: failed to switch to piece: %v\n", err)
+		}
+	}
 
 	return nil
 }
@@ -296,4 +322,98 @@ func containsMonkeypuzzleModule(content string) bool {
 	// Check for monkeypuzzle module name in go.mod
 	return strings.Contains(content, "module github.com/jewell-lgtm/monkeypuzzle") ||
 		strings.Contains(content, "module monkeypuzzle")
+}
+
+func runPieceSwitch(cmd *cobra.Command, args []string) error {
+	deps := core.Deps{
+		FS:     adapters.NewOSFS(""),
+		Output: adapters.NewTextOutput(os.Stderr),
+		Exec:   adapters.NewOSExec(),
+	}
+	handler := piececmd.NewHandler(deps)
+
+	// Get available pieces first
+	pieces, err := handler.ListPieces()
+	if err != nil {
+		return err
+	}
+
+	var selectedName string
+
+	// Three input modes: flag, stdin JSON, TUI
+	if flagSwitchName != "" {
+		// Flag provided
+		selectedName = flagSwitchName
+	} else if hasSwitchStdinData() {
+		// JSON from stdin
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return fmt.Errorf("failed to read stdin: %w", err)
+		}
+		var input struct {
+			Name string `json:"name"`
+		}
+		if err := json.Unmarshal(data, &input); err != nil {
+			return fmt.Errorf("failed to parse JSON: %w", err)
+		}
+		selectedName = input.Name
+	} else if isSwitchTerminal() {
+		// Interactive TUI
+		if len(pieces) == 0 {
+			fmt.Fprintln(os.Stderr, "No pieces found. Use 'mp piece new' to create one.")
+			return nil
+		}
+
+		p := tea.NewProgram(pieceswitch.New(pieces))
+		m, err := p.Run()
+		if err != nil {
+			return fmt.Errorf("TUI error: %w", err)
+		}
+
+		finalModel := m.(pieceswitch.Model)
+		if finalModel.Cancelled {
+			return nil
+		}
+
+		selectedName = pieces[finalModel.Selected].Name
+	} else {
+		return fmt.Errorf("no piece name provided. Use --name flag or run interactively")
+	}
+
+	if selectedName == "" {
+		return fmt.Errorf("piece name is required")
+	}
+
+	result, err := handler.SwitchPiece(selectedName)
+	if err != nil {
+		return err
+	}
+
+	// Output JSON to stdout (only if not printing path, which already uses stdout)
+	if result.Method != "path" {
+		jsonData, err := json.MarshalIndent(result, "", "  ")
+		if err != nil {
+			return fmt.Errorf("failed to marshal result: %w", err)
+		}
+		fmt.Println(string(jsonData))
+	}
+
+	return nil
+}
+
+func isSwitchTerminal() bool {
+	fi, err := os.Stdin.Stat()
+	if err != nil {
+		return false
+	}
+	return (fi.Mode() & os.ModeCharDevice) != 0
+}
+
+func hasSwitchStdinData() bool {
+	fi, err := os.Stdin.Stat()
+	if err != nil {
+		return false
+	}
+	return (fi.Mode()&os.ModeCharDevice) == 0 && fi.Size() > 0 ||
+		(fi.Mode()&os.ModeNamedPipe) != 0
 }
