@@ -86,6 +86,56 @@ func init() {
 	pieceCmd.AddCommand(pieceCleanupCmd)
 	pieceCmd.AddCommand(pieceSwitchCmd)
 	rootCmd.AddCommand(pieceCmd)
+
+	// Register completion functions
+	pieceSwitchCmd.RegisterFlagCompletionFunc("name", completePieceNames)
+	pieceNewCmd.RegisterFlagCompletionFunc("issue", completeIssueFiles)
+	pieceUpdateCmd.RegisterFlagCompletionFunc("main-branch", completeGitBranches)
+	pieceMergeCmd.RegisterFlagCompletionFunc("main-branch", completeGitBranches)
+	pieceCleanupCmd.RegisterFlagCompletionFunc("main-branch", completeGitBranches)
+}
+
+func completePieceNames(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	deps := core.Deps{
+		FS:     adapters.NewOSFS(""),
+		Output: adapters.NewTextOutput(io.Discard),
+		Exec:   adapters.NewOSExec(),
+	}
+	handler := piececmd.NewHandler(deps)
+
+	pieces, err := handler.ListPieces()
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+
+	var names []string
+	for _, p := range pieces {
+		if strings.HasPrefix(p.Name, toComplete) {
+			names = append(names, p.Name)
+		}
+	}
+	return names, cobra.ShellCompDirectiveNoFileComp
+}
+
+func completeIssueFiles(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	// Allow file completion, filtered to issues/ directory by default
+	return nil, cobra.ShellCompDirectiveDefault
+}
+
+func completeGitBranches(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	exec := adapters.NewOSExec()
+	out, err := exec.Run("git", "branch", "--format=%(refname:short)")
+	if err != nil {
+		return []string{"main", "master"}, cobra.ShellCompDirectiveNoFileComp
+	}
+	branches := strings.Split(strings.TrimSpace(string(out)), "\n")
+	var filtered []string
+	for _, b := range branches {
+		if strings.HasPrefix(b, toComplete) {
+			filtered = append(filtered, b)
+		}
+	}
+	return filtered, cobra.ShellCompDirectiveNoFileComp
 }
 
 func runPieceStatus(cmd *cobra.Command, args []string) error {

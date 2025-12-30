@@ -49,6 +49,14 @@ func init() {
 	initCmd.Flags().StringVar(&flagPRProvider, "pr-provider", "", "PR provider (github)")
 	initCmd.Flags().BoolVarP(&flagYes, "yes", "y", false, "Overwrite existing config without prompting")
 	initCmd.Flags().BoolVar(&flagSchema, "schema", false, "Output JSON schema with defaults and exit")
+
+	// Register completion functions
+	initCmd.RegisterFlagCompletionFunc("issue-provider", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		return []string{"markdown"}, cobra.ShellCompDirectiveNoFileComp
+	})
+	initCmd.RegisterFlagCompletionFunc("pr-provider", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		return []string{"github"}, cobra.ShellCompDirectiveNoFileComp
+	})
 }
 
 func runInit(cmd *cobra.Command, args []string) error {

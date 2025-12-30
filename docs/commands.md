@@ -15,6 +15,50 @@ Output goes to stderr (human-readable) while stdout is reserved for JSON (machin
 
 ---
 
+## Shell Completion
+
+Enable tab completion for mp commands:
+
+### Bash
+
+```bash
+source <(mp completion bash)
+# Permanent: echo 'source <(mp completion bash)' >> ~/.bashrc
+```
+
+### Zsh
+
+```bash
+source <(mp completion zsh)
+# Or: mp completion zsh > "${fpath[1]}/_mp"
+```
+
+### Fish
+
+```bash
+mp completion fish | source
+# Permanent: mp completion fish > ~/.config/fish/completions/mp.fish
+```
+
+### PowerShell
+
+```powershell
+mp completion powershell | Out-String | Invoke-Expression
+```
+
+### What completes
+
+| Flag | Completes To |
+|------|-------------|
+| `mp piece switch --name` | Available piece names |
+| `mp piece new --issue` | Files (for issue paths) |
+| `mp init --issue-provider` | `markdown` |
+| `mp init --pr-provider` | `github` |
+| `mp piece update --main-branch` | Git branch names |
+| `mp piece merge --main-branch` | Git branch names |
+
+---
+
 ## mp init
 
 Initialize monkeypuzzle in current directory.
