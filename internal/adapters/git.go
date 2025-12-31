@@ -37,6 +37,28 @@ func (g *Git) WorktreeRemove(ctx context.Context, repoRoot, worktreePath string)
 	return nil
 }
 
+// WorktreeRemoveForce removes a git worktree, discarding uncommitted changes
+func (g *Git) WorktreeRemoveForce(ctx context.Context, repoRoot, worktreePath string) error {
+	_, err := g.exec.RunWithDir(ctx, repoRoot, "git", "worktree", "remove", "--force", worktreePath)
+	if err != nil {
+		return fmt.Errorf("failed to force remove worktree at %s from repo %s: %w", worktreePath, repoRoot, err)
+	}
+	return nil
+}
+
+// BranchDelete deletes a local git branch
+func (g *Git) BranchDelete(ctx context.Context, repoRoot, branchName string, force bool) error {
+	flag := "-d"
+	if force {
+		flag = "-D"
+	}
+	_, err := g.exec.RunWithDir(ctx, repoRoot, "git", "branch", flag, branchName)
+	if err != nil {
+		return fmt.Errorf("failed to delete branch %s: %w", branchName, err)
+	}
+	return nil
+}
+
 // RevParseGitDir runs git rev-parse --git-dir to get the git directory.
 // Returns the absolute path to the .git directory or worktree gitdir.
 func (g *Git) RevParseGitDir(ctx context.Context, workDir string) (string, error) {

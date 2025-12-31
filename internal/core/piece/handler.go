@@ -817,6 +817,109 @@ func (h *Handler) removePiece(ctx context.Context, repoRoot, pieceName, worktree
 	return nil
 }
 
+// AbandonOptions configures the abandon behavior
+type AbandonOptions struct {
+	Force        bool // Force removal even with uncommitted changes
+	DeleteBranch bool // Also delete the git branch
+}
+
+// AbandonResult contains information about the abandoned piece
+type AbandonResult struct {
+	PieceName     string `json:"piece_name"`
+	WorktreePath  string `json:"worktree_path"`
+	BranchName    string `json:"branch_name,omitempty"`
+	BranchDeleted bool   `json:"branch_deleted,omitempty"`
+}
+
+// AbandonPiece removes a piece worktree, tmux session, and optionally the branch.
+// Unlike cleanup, this works on unmerged pieces.
+func (h *Handler) AbandonPiece(ctx context.Context, pieceName string, opts AbandonOptions) (AbandonResult, error) {
+	result := AbandonResult{PieceName: pieceName}
+
+	// Find the piece
+	pieces, err := h.ListPieces(ctx)
+	if err != nil {
+		return result, fmt.Errorf("failed to list pieces: %w", err)
+	}
+
+	var target *PieceListItem
+	for i := range pieces {
+		if pieces[i].Name == pieceName {
+			target = &pieces[i]
+			break
+		}
+	}
+	if target == nil {
+		var names []string
+		for _, p := range pieces {
+			names = append(names, p.Name)
+		}
+		if len(names) == 0 {
+			return result, fmt.Errorf("piece %q not found (no pieces exist)", pieceName)
+		}
+		return result, fmt.Errorf("piece %q not found. Available: %s", pieceName, strings.Join(names, ", "))
+	}
+
+	result.WorktreePath = target.WorktreePath
+
+	// Get branch name and repo root before removing worktree
+	branchName, err := h.git.CurrentBranch(ctx, target.WorktreePath)
+	if err != nil {
+		h.deps.Output.Write(core.Message{
+			Type:    core.MsgWarning,
+			Content: fmt.Sprintf("Could not get branch name: %v", err),
+		})
+	} else {
+		result.BranchName = branchName
+	}
+
+	repoRoot, err := h.git.GetMainRepoRoot(ctx, target.WorktreePath)
+	if err != nil {
+		return result, fmt.Errorf("failed to get repo root: %w", err)
+	}
+
+	// Kill tmux session if exists
+	if target.HasSession {
+		if err := h.tmux.KillSession(ctx, target.SessionName); err != nil {
+			h.deps.Output.Write(core.Message{
+				Type:    core.MsgWarning,
+				Content: fmt.Sprintf("Failed to kill tmux session: %v", err),
+			})
+		}
+	}
+
+	// Remove worktree (force if requested)
+	if opts.Force {
+		if err := h.git.WorktreeRemoveForce(ctx, repoRoot, target.WorktreePath); err != nil {
+			return result, fmt.Errorf("failed to remove worktree: %w", err)
+		}
+	} else {
+		if err := h.git.WorktreeRemove(ctx, repoRoot, target.WorktreePath); err != nil {
+			return result, fmt.Errorf("failed to remove worktree (use --force to discard changes): %w", err)
+		}
+	}
+
+	// Delete branch if requested
+	if opts.DeleteBranch && branchName != "" {
+		if err := h.git.BranchDelete(ctx, repoRoot, branchName, true); err != nil {
+			h.deps.Output.Write(core.Message{
+				Type:    core.MsgWarning,
+				Content: fmt.Sprintf("Failed to delete branch: %v", err),
+			})
+		} else {
+			result.BranchDeleted = true
+		}
+	}
+
+	h.deps.Output.Write(core.Message{
+		Type:    core.MsgSuccess,
+		Content: fmt.Sprintf("Abandoned piece: %s", pieceName),
+		Data:    result,
+	})
+
+	return result, nil
+}
+
 // updateIssueStatusToDone updates the issue status to done if currently in-progress.
 func (h *Handler) updateIssueStatusToDone(issuePath string) error {
 	// Check current status

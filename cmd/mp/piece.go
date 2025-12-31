@@ -62,6 +62,15 @@ Use with: cd $(mp piece switch --name foo)`,
 	RunE: runPieceSwitch,
 }
 
+var pieceAbandonCmd = &cobra.Command{
+	Use:   "abandon",
+	Short: "Abandon an unmerged piece",
+	Long: `Remove a piece worktree, kill its tmux session, and optionally delete the branch.
+Use --force to discard uncommitted changes.
+Use --delete-branch to also remove the git branch.`,
+	RunE: runPieceAbandon,
+}
+
 var flagMainBranch string
 var flagSwitchName string
 var flagPieceName string
@@ -69,6 +78,8 @@ var flagIssuePath string
 var flagSkipSwitch bool
 var flagDryRun bool
 var flagForce bool
+var flagAbandonName string
+var flagDeleteBranch bool
 
 func init() {
 	pieceNewCmd.Flags().StringVar(&flagPieceName, "name", "", "Optional piece name (default: auto-generated)")
@@ -80,15 +91,20 @@ func init() {
 	pieceCleanupCmd.Flags().BoolVar(&flagDryRun, "dry-run", false, "Show what would be cleaned without making changes")
 	pieceCleanupCmd.Flags().BoolVar(&flagForce, "force", false, "Skip confirmation prompts")
 	pieceSwitchCmd.Flags().StringVar(&flagSwitchName, "name", "", "Piece name to switch to")
+	pieceAbandonCmd.Flags().StringVar(&flagAbandonName, "name", "", "Piece name to abandon")
+	pieceAbandonCmd.Flags().BoolVar(&flagForce, "force", false, "Force removal even with uncommitted changes")
+	pieceAbandonCmd.Flags().BoolVar(&flagDeleteBranch, "delete-branch", false, "Also delete the git branch")
 	pieceCmd.AddCommand(pieceNewCmd)
 	pieceCmd.AddCommand(pieceUpdateCmd)
 	pieceCmd.AddCommand(pieceMergeCmd)
 	pieceCmd.AddCommand(pieceCleanupCmd)
 	pieceCmd.AddCommand(pieceSwitchCmd)
+	pieceCmd.AddCommand(pieceAbandonCmd)
 	rootCmd.AddCommand(pieceCmd)
 
 	// Register completion functions
 	pieceSwitchCmd.RegisterFlagCompletionFunc("name", completePieceNames)
+	pieceAbandonCmd.RegisterFlagCompletionFunc("name", completePieceNames)
 	pieceNewCmd.RegisterFlagCompletionFunc("issue", completeIssueFiles)
 	pieceUpdateCmd.RegisterFlagCompletionFunc("main-branch", completeGitBranches)
 	pieceMergeCmd.RegisterFlagCompletionFunc("main-branch", completeGitBranches)
@@ -344,6 +360,100 @@ func runPieceCleanup(cmd *cobra.Command, args []string) error {
 	fmt.Println(string(jsonData))
 
 	return nil
+}
+
+func runPieceAbandon(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
+	deps := core.Deps{
+		FS:     adapters.NewOSFS(""),
+		Output: adapters.NewTextOutput(os.Stderr),
+		Exec:   adapters.NewOSExec(),
+	}
+	handler := piececmd.NewHandler(deps)
+
+	var pieceName string
+
+	// Get piece name from flag, stdin JSON, or TUI
+	if flagAbandonName != "" {
+		pieceName = flagAbandonName
+	} else if hasAbandonStdinData() {
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return fmt.Errorf("failed to read stdin: %w", err)
+		}
+		var input struct {
+			Name string `json:"name"`
+		}
+		if err := json.Unmarshal(data, &input); err != nil {
+			return fmt.Errorf("failed to parse JSON: %w", err)
+		}
+		pieceName = input.Name
+	} else if isAbandonTerminal() {
+		// Interactive TUI - reuse piece switch TUI
+		pieces, err := handler.ListPieces(ctx)
+		if err != nil {
+			return err
+		}
+		if len(pieces) == 0 {
+			fmt.Fprintln(os.Stderr, "No pieces to abandon.")
+			return nil
+		}
+
+		p := tea.NewProgram(pieceswitch.New(pieces))
+		m, err := p.Run()
+		if err != nil {
+			return fmt.Errorf("TUI error: %w", err)
+		}
+
+		finalModel := m.(pieceswitch.Model)
+		if finalModel.Cancelled {
+			return nil
+		}
+
+		pieceName = pieces[finalModel.Selected].Name
+	} else {
+		return fmt.Errorf("no piece name provided. Use --name flag or run interactively")
+	}
+
+	if pieceName == "" {
+		return fmt.Errorf("piece name is required")
+	}
+
+	opts := piececmd.AbandonOptions{
+		Force:        flagForce,
+		DeleteBranch: flagDeleteBranch,
+	}
+
+	result, err := handler.AbandonPiece(ctx, pieceName, opts)
+	if err != nil {
+		return err
+	}
+
+	// Output JSON to stdout
+	jsonData, err := json.MarshalIndent(result, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal result: %w", err)
+	}
+	fmt.Println(string(jsonData))
+
+	return nil
+}
+
+func isAbandonTerminal() bool {
+	fi, err := os.Stdin.Stat()
+	if err != nil {
+		return false
+	}
+	return (fi.Mode() & os.ModeCharDevice) != 0
+}
+
+func hasAbandonStdinData() bool {
+	fi, err := os.Stdin.Stat()
+	if err != nil {
+		return false
+	}
+	return (fi.Mode()&os.ModeCharDevice) == 0 && fi.Size() > 0 ||
+		(fi.Mode()&os.ModeNamedPipe) != 0
 }
 
 // findMonkeypuzzleSource tries to find the monkeypuzzle source directory
