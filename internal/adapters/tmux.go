@@ -1,6 +1,7 @@
 package adapters
 
 import (
+	"context"
 	"fmt"
 	"os"
 
@@ -19,8 +20,8 @@ func NewTmux(exec core.Exec) *Tmux {
 
 // NewSession creates a new detached tmux session in the specified directory.
 // The session is created in detached mode (-d) so it can be attached to later.
-func (t *Tmux) NewSession(sessionName, workDir string) error {
-	_, err := t.exec.Run("tmux", "new-session", "-d", "-s", sessionName, "-c", workDir)
+func (t *Tmux) NewSession(ctx context.Context, sessionName, workDir string) error {
+	_, err := t.exec.Run(ctx, "tmux", "new-session", "-d", "-s", sessionName, "-c", workDir)
 	if err != nil {
 		return fmt.Errorf("failed to create tmux session: %w", err)
 	}
@@ -29,8 +30,8 @@ func (t *Tmux) NewSession(sessionName, workDir string) error {
 
 // AttachSession attaches to an existing tmux session.
 // This will block until the session is detached or terminated.
-func (t *Tmux) AttachSession(sessionName string) error {
-	_, err := t.exec.Run("tmux", "attach-session", "-t", sessionName)
+func (t *Tmux) AttachSession(ctx context.Context, sessionName string) error {
+	_, err := t.exec.Run(ctx, "tmux", "attach-session", "-t", sessionName)
 	if err != nil {
 		return fmt.Errorf("failed to attach to tmux session: %w", err)
 	}
@@ -38,8 +39,8 @@ func (t *Tmux) AttachSession(sessionName string) error {
 }
 
 // KillSession terminates a tmux session.
-func (t *Tmux) KillSession(sessionName string) error {
-	_, err := t.exec.Run("tmux", "kill-session", "-t", sessionName)
+func (t *Tmux) KillSession(ctx context.Context, sessionName string) error {
+	_, err := t.exec.Run(ctx, "tmux", "kill-session", "-t", sessionName)
 	if err != nil {
 		return fmt.Errorf("failed to kill tmux session: %w", err)
 	}
@@ -47,15 +48,15 @@ func (t *Tmux) KillSession(sessionName string) error {
 }
 
 // HasSession checks if a tmux session with the given name exists.
-func (t *Tmux) HasSession(sessionName string) bool {
-	_, err := t.exec.Run("tmux", "has-session", "-t", sessionName)
+func (t *Tmux) HasSession(ctx context.Context, sessionName string) bool {
+	_, err := t.exec.Run(ctx, "tmux", "has-session", "-t", sessionName)
 	return err == nil
 }
 
 // SwitchClient switches the current tmux client to another session.
 // This should be used when already inside a tmux session.
-func (t *Tmux) SwitchClient(sessionName string) error {
-	_, err := t.exec.Run("tmux", "switch-client", "-t", sessionName)
+func (t *Tmux) SwitchClient(ctx context.Context, sessionName string) error {
+	_, err := t.exec.Run(ctx, "tmux", "switch-client", "-t", sessionName)
 	if err != nil {
 		return fmt.Errorf("failed to switch tmux client: %w", err)
 	}

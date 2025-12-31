@@ -1,6 +1,7 @@
 package piece_test
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -20,7 +21,7 @@ func TestHookRunner_RunHook_HookNotExists(t *testing.T) {
 	runner := piece.NewHookRunner(deps)
 
 	// No hook file exists, should return nil (no error)
-	err := runner.RunHook("/repo", piece.HookOnPieceCreate, piece.HookContext{
+	err := runner.RunHook(context.Background(), "/repo", piece.HookOnPieceCreate, piece.HookContext{
 		PieceName:    "test-piece",
 		WorktreePath: "/pieces/test-piece",
 		RepoRoot:     "/repo",
@@ -45,7 +46,7 @@ func TestHookRunner_RunHook_HooksDirNotExists(t *testing.T) {
 	runner := piece.NewHookRunner(deps)
 
 	// .monkeypuzzle/hooks directory doesn't exist
-	err := runner.RunHook("/repo", piece.HookBeforePieceMerge, piece.HookContext{
+	err := runner.RunHook(context.Background(), "/repo", piece.HookBeforePieceMerge, piece.HookContext{
 		PieceName:  "test-piece",
 		MainBranch: "main",
 	})
@@ -68,7 +69,7 @@ func TestHookRunner_RunHook_HookNotExecutable(t *testing.T) {
 	_ = fs.MkdirAll(hooksDir, 0755)
 	_ = fs.WriteFile(hookPath, []byte("#!/bin/bash\necho test"), 0644) // Not executable
 
-	err := runner.RunHook("/", piece.HookOnPieceCreate, piece.HookContext{
+	err := runner.RunHook(context.Background(), "/", piece.HookOnPieceCreate, piece.HookContext{
 		PieceName: "test-piece",
 	})
 
@@ -99,7 +100,7 @@ func TestHookRunner_RunHook_HookExecutionFails(t *testing.T) {
 	fullHookPath := filepath.Join("/", hooksDir, piece.HookOnPieceCreate)
 	mockExec.AddResponse("bash", []string{fullHookPath}, []byte("hook error output"), errors.New("exit status 1"))
 
-	err := runner.RunHook("/", piece.HookOnPieceCreate, piece.HookContext{
+	err := runner.RunHook(context.Background(), "/", piece.HookOnPieceCreate, piece.HookContext{
 		PieceName: "test-piece",
 	})
 
@@ -129,7 +130,7 @@ func TestHookRunner_RunHook_Success(t *testing.T) {
 	fullHookPath := filepath.Join("/", hooksDir, piece.HookOnPieceCreate)
 	mockExec.AddResponse("bash", []string{fullHookPath}, []byte("hook output\n"), nil)
 
-	err := runner.RunHook("/", piece.HookOnPieceCreate, piece.HookContext{
+	err := runner.RunHook(context.Background(), "/", piece.HookOnPieceCreate, piece.HookContext{
 		PieceName:    "test-piece",
 		WorktreePath: "/pieces/test-piece",
 		RepoRoot:     "/repo",
@@ -172,7 +173,7 @@ func TestHookRunner_RunHook_PassesEnvironmentVariables(t *testing.T) {
 		SessionName:  "mp-piece-my-piece",
 	}
 
-	err := runner.RunHook("/repo", piece.HookBeforePieceMerge, ctx)
+	err := runner.RunHook(context.Background(), "/repo", piece.HookBeforePieceMerge, ctx)
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
@@ -266,7 +267,7 @@ func TestHookRunner_RunHook_EmptyContext(t *testing.T) {
 	mockExec.AddResponse("bash", []string{fullHookPath}, nil, nil)
 
 	// Run with empty context - should still work
-	err := runner.RunHook("/", piece.HookOnPieceCreate, piece.HookContext{})
+	err := runner.RunHook(context.Background(), "/", piece.HookOnPieceCreate, piece.HookContext{})
 
 	if err != nil {
 		t.Errorf("expected no error with empty context, got: %v", err)
@@ -301,7 +302,7 @@ func TestHookRunner_BuildEnv_FiltersExistingMPVariables(t *testing.T) {
 		RepoRoot:     "/repo",
 	}
 
-	err := runner.RunHook("/repo", piece.HookOnPieceCreate, ctx)
+	err := runner.RunHook(context.Background(), "/repo", piece.HookOnPieceCreate, ctx)
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}

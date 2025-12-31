@@ -1,6 +1,7 @@
 package piece
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -44,14 +45,14 @@ func NewHandler(deps core.Deps) *Handler {
 // CreatePiece creates a new git worktree with tmux session.
 // If pieceName is provided and non-empty, it will be used (after checking it doesn't exist).
 // If pieceName is empty, a name will be generated automatically.
-func (h *Handler) CreatePiece(monkeypuzzleSourceDir string, pieceName string) (PieceInfo, error) {
+func (h *Handler) CreatePiece(ctx context.Context, monkeypuzzleSourceDir string, pieceName string) (PieceInfo, error) {
 	wd, err := os.Getwd()
 	if err != nil {
 		return PieceInfo{}, fmt.Errorf("failed to get working directory: %w", err)
 	}
 
 	// Detect git repo root
-	repoRoot, err := h.git.RepoRoot(wd)
+	repoRoot, err := h.git.RepoRoot(ctx, wd)
 	if err != nil {
 		return PieceInfo{}, fmt.Errorf("not in a git repository: %w", err)
 	}
@@ -85,7 +86,7 @@ func (h *Handler) CreatePiece(monkeypuzzleSourceDir string, pieceName string) (P
 
 	// Create worktree
 	worktreePath := filepath.Join(piecesDir, pieceName)
-	if err := h.git.WorktreeAdd(repoRoot, worktreePath); err != nil {
+	if err := h.git.WorktreeAdd(ctx, repoRoot, worktreePath); err != nil {
 		return PieceInfo{}, fmt.Errorf("failed to create worktree at %s: %w", worktreePath, err)
 	}
 
@@ -107,7 +108,7 @@ func (h *Handler) CreatePiece(monkeypuzzleSourceDir string, pieceName string) (P
 	// Create tmux session
 	sessionName := fmt.Sprintf("mp-piece-%s", pieceName)
 	tmuxCreated := false
-	if err := h.tmux.NewSession(sessionName, worktreePath); err != nil {
+	if err := h.tmux.NewSession(ctx, sessionName, worktreePath); err != nil {
 		// If tmux fails, log but don't fail the operation
 		h.deps.Output.Write(core.Message{
 			Type:    core.MsgWarning,
@@ -130,9 +131,9 @@ func (h *Handler) CreatePiece(monkeypuzzleSourceDir string, pieceName string) (P
 		RepoRoot:     repoRoot,
 		SessionName:  sessionName,
 	}
-	if err := h.hooks.RunHook(repoRoot, HookOnPieceCreate, hookCtx); err != nil {
+	if err := h.hooks.RunHook(ctx, repoRoot, HookOnPieceCreate, hookCtx); err != nil {
 		// Cleanup: remove worktree and tmux session on hook failure
-		h.cleanupPiece(repoRoot, worktreePath, sessionName, tmuxCreated)
+		h.cleanupPiece(ctx, repoRoot, worktreePath, sessionName, tmuxCreated)
 		return PieceInfo{}, fmt.Errorf("on-piece-create hook failed: %w", err)
 	}
 
@@ -155,14 +156,14 @@ type CurrentIssueMarker struct {
 // CreatePieceFromIssue creates a new piece from a markdown issue file.
 // It extracts the issue name, sanitizes it for use as a piece name, creates the piece,
 // and writes a marker file in the worktree to track the current issue.
-func (h *Handler) CreatePieceFromIssue(monkeypuzzleSourceDir, issuePath string) (PieceInfo, error) {
+func (h *Handler) CreatePieceFromIssue(ctx context.Context, monkeypuzzleSourceDir, issuePath string) (PieceInfo, error) {
 	wd, err := os.Getwd()
 	if err != nil {
 		return PieceInfo{}, fmt.Errorf("failed to get working directory: %w", err)
 	}
 
 	// Detect git repo root
-	repoRoot, err := h.git.RepoRoot(wd)
+	repoRoot, err := h.git.RepoRoot(ctx, wd)
 	if err != nil {
 		return PieceInfo{}, fmt.Errorf("not in a git repository: %w", err)
 	}
@@ -210,7 +211,7 @@ func (h *Handler) CreatePieceFromIssue(monkeypuzzleSourceDir, issuePath string) 
 	pieceName := SanitizePieceName(issueName)
 
 	// Create the piece using the sanitized name
-	info, err := h.CreatePiece(monkeypuzzleSourceDir, pieceName)
+	info, err := h.CreatePiece(ctx, monkeypuzzleSourceDir, pieceName)
 	if err != nil {
 		return PieceInfo{}, err
 	}
@@ -295,10 +296,10 @@ func (h *Handler) updateIssueStatusToInProgress(issuePath string) {
 
 // cleanupPiece removes a partially created piece (worktree and tmux session).
 // Errors during cleanup are logged as warnings but not returned.
-func (h *Handler) cleanupPiece(repoRoot, worktreePath, sessionName string, tmuxCreated bool) {
+func (h *Handler) cleanupPiece(ctx context.Context, repoRoot, worktreePath, sessionName string, tmuxCreated bool) {
 	// Kill tmux session if it was created
 	if tmuxCreated {
-		if err := h.tmux.KillSession(sessionName); err != nil {
+		if err := h.tmux.KillSession(ctx, sessionName); err != nil {
 			h.deps.Output.Write(core.Message{
 				Type:    core.MsgWarning,
 				Content: fmt.Sprintf("Failed to cleanup tmux session: %v", err),
@@ -307,7 +308,7 @@ func (h *Handler) cleanupPiece(repoRoot, worktreePath, sessionName string, tmuxC
 	}
 
 	// Remove worktree
-	if err := h.git.WorktreeRemove(repoRoot, worktreePath); err != nil {
+	if err := h.git.WorktreeRemove(ctx, repoRoot, worktreePath); err != nil {
 		h.deps.Output.Write(core.Message{
 			Type:    core.MsgWarning,
 			Content: fmt.Sprintf("Failed to cleanup worktree: %v", err),
@@ -316,8 +317,8 @@ func (h *Handler) cleanupPiece(repoRoot, worktreePath, sessionName string, tmuxC
 }
 
 // Status detects if we're currently in a piece worktree or main repo
-func (h *Handler) Status(workDir string) (PieceStatus, error) {
-	gitDir, err := h.git.RevParseGitDir(workDir)
+func (h *Handler) Status(ctx context.Context, workDir string) (PieceStatus, error) {
+	gitDir, err := h.git.RevParseGitDir(ctx, workDir)
 	if err != nil {
 		// Not in a git repo
 		return PieceStatus{
@@ -328,7 +329,7 @@ func (h *Handler) Status(workDir string) (PieceStatus, error) {
 	isWorktree := h.git.IsWorktree(gitDir)
 	if !isWorktree {
 		// In main repo
-		repoRoot, err := h.git.RepoRoot(workDir)
+		repoRoot, err := h.git.RepoRoot(ctx, workDir)
 		if err != nil {
 			// If we can't get repo root, leave it empty
 			repoRoot = ""
@@ -340,7 +341,7 @@ func (h *Handler) Status(workDir string) (PieceStatus, error) {
 	}
 
 	// In worktree - extract piece name from path
-	worktreePath, err := h.git.RepoRoot(workDir)
+	worktreePath, err := h.git.RepoRoot(ctx, workDir)
 	if err != nil {
 		// Fallback: use workDir if we can't get worktree path
 		worktreePath = workDir
@@ -348,7 +349,7 @@ func (h *Handler) Status(workDir string) (PieceStatus, error) {
 	pieceName := filepath.Base(worktreePath)
 
 	// Get main repo root from worktree
-	repoRoot, err := h.git.GetMainRepoRoot(workDir)
+	repoRoot, err := h.git.GetMainRepoRoot(ctx, workDir)
 	if err != nil {
 		// If we can't get main repo root, leave it empty
 		repoRoot = ""
@@ -391,9 +392,9 @@ func (h *Handler) GeneratePieceName(baseDir string) (string, error) {
 }
 
 // UpdatePiece merges the main branch into the current piece's history
-func (h *Handler) UpdatePiece(workDir, mainBranch string) error {
+func (h *Handler) UpdatePiece(ctx context.Context, workDir, mainBranch string) error {
 	// Check if we're in a piece worktree
-	status, err := h.Status(workDir)
+	status, err := h.Status(ctx, workDir)
 	if err != nil {
 		return fmt.Errorf("failed to get piece status: %w", err)
 	}
@@ -403,7 +404,7 @@ func (h *Handler) UpdatePiece(workDir, mainBranch string) error {
 	}
 
 	// Get current branch to verify we're on a branch
-	currentBranch, err := h.git.CurrentBranch(workDir)
+	currentBranch, err := h.git.CurrentBranch(ctx, workDir)
 	if err != nil {
 		return fmt.Errorf("failed to get current branch: %w", err)
 	}
@@ -417,17 +418,17 @@ func (h *Handler) UpdatePiece(workDir, mainBranch string) error {
 	}
 
 	// Run before-piece-update hook
-	if err := h.hooks.RunHook(status.RepoRoot, HookBeforePieceUpdate, hookCtx); err != nil {
+	if err := h.hooks.RunHook(ctx, status.RepoRoot, HookBeforePieceUpdate, hookCtx); err != nil {
 		return fmt.Errorf("before-piece-update hook failed: %w", err)
 	}
 
 	// Merge the main branch
-	if err := h.git.Merge(workDir, mainBranch); err != nil {
+	if err := h.git.Merge(ctx, workDir, mainBranch); err != nil {
 		return err
 	}
 
 	// Run after-piece-update hook
-	if err := h.hooks.RunHook(status.RepoRoot, HookAfterPieceUpdate, hookCtx); err != nil {
+	if err := h.hooks.RunHook(ctx, status.RepoRoot, HookAfterPieceUpdate, hookCtx); err != nil {
 		return fmt.Errorf("after-piece-update hook failed: %w", err)
 	}
 
@@ -441,9 +442,9 @@ func (h *Handler) UpdatePiece(workDir, mainBranch string) error {
 
 // MergePiece squash-merges the piece branch back into main as a single commit.
 // Fails if main has commits that are not in the piece worktree.
-func (h *Handler) MergePiece(workDir, mainBranch string) error {
+func (h *Handler) MergePiece(ctx context.Context, workDir, mainBranch string) error {
 	// Check if we're in a piece worktree
-	status, err := h.Status(workDir)
+	status, err := h.Status(ctx, workDir)
 	if err != nil {
 		return fmt.Errorf("failed to get piece status: %w", err)
 	}
@@ -453,13 +454,13 @@ func (h *Handler) MergePiece(workDir, mainBranch string) error {
 	}
 
 	// Get current branch (piece branch)
-	pieceBranch, err := h.git.CurrentBranch(workDir)
+	pieceBranch, err := h.git.CurrentBranch(ctx, workDir)
 	if err != nil {
 		return fmt.Errorf("failed to get current branch: %w", err)
 	}
 
 	// Get main repo root
-	mainRepoRoot, err := h.git.GetMainRepoRoot(workDir)
+	mainRepoRoot, err := h.git.GetMainRepoRoot(ctx, workDir)
 	if err != nil {
 		return fmt.Errorf("failed to get main repo root: %w", err)
 	}
@@ -473,12 +474,12 @@ func (h *Handler) MergePiece(workDir, mainBranch string) error {
 	}
 
 	// Run before-piece-merge hook
-	if err := h.hooks.RunHook(mainRepoRoot, HookBeforePieceMerge, hookCtx); err != nil {
+	if err := h.hooks.RunHook(ctx, mainRepoRoot, HookBeforePieceMerge, hookCtx); err != nil {
 		return fmt.Errorf("before-piece-merge hook failed: %w", err)
 	}
 
 	// Check if main has commits not in the piece branch
-	isAhead, err := h.git.IsMainAhead(mainRepoRoot, mainBranch, pieceBranch)
+	isAhead, err := h.git.IsMainAhead(ctx, mainRepoRoot, mainBranch, pieceBranch)
 	if err != nil {
 		return fmt.Errorf("failed to check if main is ahead: %w", err)
 	}
@@ -488,7 +489,7 @@ func (h *Handler) MergePiece(workDir, mainBranch string) error {
 	}
 
 	// Get commit messages from piece branch for the squash commit message
-	commitMsgs, err := h.git.GetCommitMessages(mainRepoRoot, mainBranch, pieceBranch)
+	commitMsgs, err := h.git.GetCommitMessages(ctx, mainRepoRoot, mainBranch, pieceBranch)
 	if err != nil {
 		return fmt.Errorf("failed to get commit messages: %w", err)
 	}
@@ -497,22 +498,22 @@ func (h *Handler) MergePiece(workDir, mainBranch string) error {
 	commitMsg := h.buildSquashCommitMessage(status.PieceName, commitMsgs)
 
 	// Switch to main branch
-	if err := h.git.Checkout(mainRepoRoot, mainBranch); err != nil {
+	if err := h.git.Checkout(ctx, mainRepoRoot, mainBranch); err != nil {
 		return fmt.Errorf("failed to checkout main branch: %w", err)
 	}
 
 	// Squash merge the piece branch into main
-	if err := h.git.MergeSquash(mainRepoRoot, pieceBranch); err != nil {
+	if err := h.git.MergeSquash(ctx, mainRepoRoot, pieceBranch); err != nil {
 		return fmt.Errorf("failed to squash merge piece branch into main: %w", err)
 	}
 
 	// Commit the squashed changes
-	if err := h.git.Commit(mainRepoRoot, commitMsg); err != nil {
+	if err := h.git.Commit(ctx, mainRepoRoot, commitMsg); err != nil {
 		return fmt.Errorf("failed to commit squashed changes: %w", err)
 	}
 
 	// Run after-piece-merge hook
-	if err := h.hooks.RunHook(mainRepoRoot, HookAfterPieceMerge, hookCtx); err != nil {
+	if err := h.hooks.RunHook(ctx, mainRepoRoot, HookAfterPieceMerge, hookCtx); err != nil {
 		return fmt.Errorf("after-piece-merge hook failed: %w", err)
 	}
 
@@ -566,11 +567,11 @@ type MergeStatus struct {
 
 // IsBranchMerged checks if a piece branch has been merged to main.
 // Detection priority: 1) PR metadata, 2) gh pr list by branch, 3) git branch --merged, 4) commit history
-func (h *Handler) IsBranchMerged(repoRoot, branchName, mainBranch string) (MergeStatus, error) {
+func (h *Handler) IsBranchMerged(ctx context.Context, repoRoot, branchName, mainBranch string) (MergeStatus, error) {
 	status := MergeStatus{}
 
 	// Check if branch exists on remote
-	existsOnRemote, err := h.git.BranchExistsOnRemote(repoRoot, branchName)
+	existsOnRemote, err := h.git.BranchExistsOnRemote(ctx, repoRoot, branchName)
 	if err != nil {
 		// Non-fatal: continue with other checks
 		h.deps.Output.Write(core.Message{
@@ -581,7 +582,7 @@ func (h *Handler) IsBranchMerged(repoRoot, branchName, mainBranch string) (Merge
 	status.ExistsOnRemote = existsOnRemote
 
 	// Method 1: Check via PR metadata file (fastest, no API call)
-	merged, prNumber, err := h.checkPRMergeStatus(repoRoot)
+	merged, prNumber, err := h.checkPRMergeStatus(ctx, repoRoot)
 	if err == nil && merged {
 		status.IsMerged = true
 		status.Method = "pr"
@@ -590,7 +591,7 @@ func (h *Handler) IsBranchMerged(repoRoot, branchName, mainBranch string) (Merge
 	}
 
 	// Method 2: Check via gh pr list by branch name (catches squash-merged PRs without metadata)
-	merged, prNumber, err = h.github.FindMergedPRByBranch(repoRoot, branchName)
+	merged, prNumber, err = h.github.FindMergedPRByBranch(ctx, repoRoot, branchName)
 	if err == nil && merged {
 		status.IsMerged = true
 		status.Method = "pr-branch"
@@ -599,7 +600,7 @@ func (h *Handler) IsBranchMerged(repoRoot, branchName, mainBranch string) (Merge
 	}
 
 	// Method 3: Check via git branch --merged
-	merged, err = h.git.IsBranchMerged(repoRoot, mainBranch, branchName)
+	merged, err = h.git.IsBranchMerged(ctx, repoRoot, mainBranch, branchName)
 	if err != nil {
 		// Log warning but continue to fallback
 		h.deps.Output.Write(core.Message{
@@ -613,7 +614,7 @@ func (h *Handler) IsBranchMerged(repoRoot, branchName, mainBranch string) (Merge
 	}
 
 	// Method 4: Fallback - check if branch HEAD commit is in main history
-	merged, err = h.checkCommitMerged(repoRoot, branchName, mainBranch)
+	merged, err = h.checkCommitMerged(ctx, repoRoot, branchName, mainBranch)
 	if err != nil {
 		// This is the last resort, so return error
 		return status, fmt.Errorf("failed to check commit history: %w", err)
@@ -629,7 +630,7 @@ func (h *Handler) IsBranchMerged(repoRoot, branchName, mainBranch string) (Merge
 
 // checkPRMergeStatus checks if a PR associated with the piece has been merged.
 // Returns (merged, prNumber, error).
-func (h *Handler) checkPRMergeStatus(worktreePath string) (bool, int, error) {
+func (h *Handler) checkPRMergeStatus(ctx context.Context, worktreePath string) (bool, int, error) {
 	// Try to read PR metadata from the piece
 	metadata, err := ReadPRMetadata(worktreePath, h.deps.FS)
 	if err != nil {
@@ -642,7 +643,7 @@ func (h *Handler) checkPRMergeStatus(worktreePath string) (bool, int, error) {
 	}
 
 	// Check if PR is merged using gh CLI
-	merged, err := h.github.IsPRMerged(worktreePath, metadata.PRNumber)
+	merged, err := h.github.IsPRMerged(ctx, worktreePath, metadata.PRNumber)
 	if err != nil {
 		return false, metadata.PRNumber, fmt.Errorf("failed to check PR status: %w", err)
 	}
@@ -651,15 +652,15 @@ func (h *Handler) checkPRMergeStatus(worktreePath string) (bool, int, error) {
 }
 
 // checkCommitMerged checks if the branch's HEAD commit exists in main's history.
-func (h *Handler) checkCommitMerged(repoRoot, branchName, mainBranch string) (bool, error) {
+func (h *Handler) checkCommitMerged(ctx context.Context, repoRoot, branchName, mainBranch string) (bool, error) {
 	// Get the branch's HEAD commit
-	branchCommit, err := h.git.GetBranchCommit(repoRoot, branchName)
+	branchCommit, err := h.git.GetBranchCommit(ctx, repoRoot, branchName)
 	if err != nil {
 		return false, fmt.Errorf("failed to get branch commit: %w", err)
 	}
 
 	// Check if this commit is in main's history
-	return h.git.IsCommitInBranch(repoRoot, branchCommit, mainBranch)
+	return h.git.IsCommitInBranch(ctx, repoRoot, branchCommit, mainBranch)
 }
 
 // CleanupResult contains information about a cleaned up piece
@@ -679,7 +680,7 @@ type CleanupOptions struct {
 
 // CleanupMergedPieces finds and cleans up pieces whose branches have been merged.
 // It removes worktrees, kills tmux sessions, and updates issue status to done.
-func (h *Handler) CleanupMergedPieces(repoRoot string, opts CleanupOptions) ([]CleanupResult, error) {
+func (h *Handler) CleanupMergedPieces(ctx context.Context, repoRoot string, opts CleanupOptions) ([]CleanupResult, error) {
 	// Get pieces directory
 	piecesDir, err := getPiecesDir()
 	if err != nil {
@@ -707,7 +708,7 @@ func (h *Handler) CleanupMergedPieces(repoRoot string, opts CleanupOptions) ([]C
 		worktreePath := filepath.Join(piecesDir, pieceName)
 
 		// Get the branch name from the worktree
-		branchName, err := h.git.CurrentBranch(worktreePath)
+		branchName, err := h.git.CurrentBranch(ctx, worktreePath)
 		if err != nil {
 			h.deps.Output.Write(core.Message{
 				Type:    core.MsgWarning,
@@ -717,7 +718,7 @@ func (h *Handler) CleanupMergedPieces(repoRoot string, opts CleanupOptions) ([]C
 		}
 
 		// Check if branch is merged
-		mergeStatus, err := h.IsBranchMerged(worktreePath, branchName, opts.MainBranch)
+		mergeStatus, err := h.IsBranchMerged(ctx, worktreePath, branchName, opts.MainBranch)
 		if err != nil {
 			h.deps.Output.Write(core.Message{
 				Type:    core.MsgWarning,
@@ -751,7 +752,7 @@ func (h *Handler) CleanupMergedPieces(repoRoot string, opts CleanupOptions) ([]C
 		}
 
 		// Cleanup the piece
-		if err := h.removePiece(repoRoot, pieceName, worktreePath); err != nil {
+		if err := h.removePiece(ctx, repoRoot, pieceName, worktreePath); err != nil {
 			h.deps.Output.Write(core.Message{
 				Type:    core.MsgWarning,
 				Content: fmt.Sprintf("Failed to cleanup %s: %v", pieceName, err),
@@ -800,14 +801,14 @@ func (h *Handler) readCurrentIssueMarker(worktreePath string) (*CurrentIssueMark
 }
 
 // removePiece removes a piece worktree and associated tmux session.
-func (h *Handler) removePiece(repoRoot, pieceName, worktreePath string) error {
+func (h *Handler) removePiece(ctx context.Context, repoRoot, pieceName, worktreePath string) error {
 	sessionName := fmt.Sprintf("mp-piece-%s", pieceName)
 
 	// Kill tmux session (ignore errors - session may not exist)
-	_ = h.tmux.KillSession(sessionName)
+	_ = h.tmux.KillSession(ctx, sessionName)
 
 	// Remove worktree
-	if err := h.git.WorktreeRemove(repoRoot, worktreePath); err != nil {
+	if err := h.git.WorktreeRemove(ctx, repoRoot, worktreePath); err != nil {
 		return fmt.Errorf("failed to remove worktree: %w", err)
 	}
 
@@ -837,7 +838,7 @@ func (h *Handler) updateIssueStatusToDone(issuePath string) error {
 
 // ListPieces returns all available pieces in the pieces directory.
 // Results are sorted by modification time (newest first).
-func (h *Handler) ListPieces() ([]PieceListItem, error) {
+func (h *Handler) ListPieces(ctx context.Context) ([]PieceListItem, error) {
 	piecesDir, err := getPiecesDir()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pieces directory: %w", err)
@@ -869,7 +870,7 @@ func (h *Handler) ListPieces() ([]PieceListItem, error) {
 		}
 
 		// Check if tmux session exists
-		hasSession := h.tmux.HasSession(sessionName)
+		hasSession := h.tmux.HasSession(ctx, sessionName)
 
 		pieces = append(pieces, PieceListItem{
 			Name:         name,
@@ -890,8 +891,8 @@ func (h *Handler) ListPieces() ([]PieceListItem, error) {
 
 // SwitchPiece switches to a piece by name.
 // It tries tmux attach/switch first, falls back to printing path.
-func (h *Handler) SwitchPiece(name string) (SwitchResult, error) {
-	pieces, err := h.ListPieces()
+func (h *Handler) SwitchPiece(ctx context.Context, name string) (SwitchResult, error) {
+	pieces, err := h.ListPieces(ctx)
 	if err != nil {
 		return SwitchResult{}, err
 	}
@@ -922,7 +923,7 @@ func (h *Handler) SwitchPiece(name string) (SwitchResult, error) {
 	if target.HasSession {
 		if h.tmux.InTmux() {
 			// Already in tmux, use switch-client
-			if err := h.tmux.SwitchClient(target.SessionName); err == nil {
+			if err := h.tmux.SwitchClient(ctx, target.SessionName); err == nil {
 				result.Method = "tmux-switch"
 				h.deps.Output.Write(core.Message{
 					Type:    core.MsgSuccess,
@@ -934,7 +935,7 @@ func (h *Handler) SwitchPiece(name string) (SwitchResult, error) {
 			// Fall through to path on error
 		} else {
 			// Not in tmux, use attach-session
-			if err := h.tmux.AttachSession(target.SessionName); err == nil {
+			if err := h.tmux.AttachSession(ctx, target.SessionName); err == nil {
 				result.Method = "tmux-attach"
 				h.deps.Output.Write(core.Message{
 					Type:    core.MsgSuccess,

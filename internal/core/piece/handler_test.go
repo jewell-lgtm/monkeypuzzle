@@ -1,6 +1,7 @@
 package piece_test
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -30,7 +31,7 @@ func TestHandler_CreatePiece(t *testing.T) {
 	// Execute - will fail at worktree creation since we didn't mock it, but that's ok
 	// We're testing the flow, not end-to-end success
 	// Use a deterministic piece name for testing
-	_, err := handler.CreatePiece("/monkeypuzzle", "test-piece-1")
+	_, err := handler.CreatePiece(context.Background(), "/monkeypuzzle", "test-piece-1")
 
 	// We expect an error at worktree creation since we didn't mock the exact path
 	if err == nil {
@@ -78,7 +79,7 @@ func TestHandler_Status_InMainRepo(t *testing.T) {
 	mockExec.AddResponse("git", []string{"rev-parse", "--git-dir"}, []byte(gitDir+"\n"), nil)
 	mockExec.AddResponse("git", []string{"rev-parse", "--show-toplevel"}, []byte(repoRoot+"\n"), nil)
 
-	status, err := handler.Status("/repo")
+	status, err := handler.Status(context.Background(), "/repo")
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -105,7 +106,7 @@ func TestHandler_Status_InWorktree(t *testing.T) {
 	mockExec.AddResponse("git", []string{"rev-parse", "--git-dir"}, []byte(gitDir+"\n"), nil)
 	mockExec.AddResponse("git", []string{"rev-parse", "--show-toplevel"}, []byte(worktreePath+"\n"), nil)
 
-	status, err := handler.Status("/pieces/piece-1")
+	status, err := handler.Status(context.Background(), "/pieces/piece-1")
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -129,7 +130,7 @@ func TestHandler_Status_NotInGitRepo(t *testing.T) {
 	// Setup mock to return error (not in git repo)
 	mockExec.AddResponse("git", []string{"rev-parse", "--git-dir"}, nil, os.ErrNotExist)
 
-	status, err := handler.Status("/tmp")
+	status, err := handler.Status(context.Background(), "/tmp")
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -211,7 +212,7 @@ func TestHandler_CreatePiece_WithName(t *testing.T) {
 
 	// Test with a specific piece name
 	pieceName := "test-piece-deterministic"
-	_, err := handler.CreatePiece("/monkeypuzzle", pieceName)
+	_, err := handler.CreatePiece(context.Background(), "/monkeypuzzle", pieceName)
 
 	// We expect an error at worktree creation since we didn't mock it, but that's ok
 	// We're testing that the name parameter is accepted
@@ -250,7 +251,7 @@ func TestHandler_CreatePiece_NameAlreadyExists(t *testing.T) {
 	_ = fs.MkdirAll(existingPiecePath, 0755)
 
 	// Try to create a piece with the same name
-	_, err := handler.CreatePiece("/monkeypuzzle", "existing-piece")
+	_, err := handler.CreatePiece(context.Background(), "/monkeypuzzle", "existing-piece")
 	if err == nil {
 		t.Fatal("expected error when piece name already exists")
 	}
@@ -277,7 +278,7 @@ func TestHandler_UpdatePiece_InWorktree(t *testing.T) {
 	mockExec.AddResponse("git", []string{"rev-parse", "--abbrev-ref", "HEAD"}, []byte("piece-1\n"), nil)
 	mockExec.AddResponse("git", []string{"merge", "main"}, nil, nil)
 
-	err := handler.UpdatePiece("/pieces/piece-1", "main")
+	err := handler.UpdatePiece(context.Background(), "/pieces/piece-1", "main")
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -305,7 +306,7 @@ func TestHandler_UpdatePiece_NotInWorktree(t *testing.T) {
 	mockExec.AddResponse("git", []string{"rev-parse", "--git-dir"}, []byte(gitDir+"\n"), nil)
 	mockExec.AddResponse("git", []string{"rev-parse", "--show-toplevel"}, []byte("/repo\n"), nil)
 
-	err := handler.UpdatePiece("/repo", "main")
+	err := handler.UpdatePiece(context.Background(), "/repo", "main")
 	if err == nil {
 		t.Fatal("expected error when not in worktree")
 	}
@@ -341,7 +342,7 @@ func TestHandler_MergePiece_Success(t *testing.T) {
 	commitMsg := "feat: piece-1\n\nSquashed commits:\n- feat: add feature\n- fix: bug fix\n"
 	mockExec.AddResponse("git", []string{"commit", "-m", commitMsg}, nil, nil)
 
-	err := handler.MergePiece("/pieces/piece-1", "main")
+	err := handler.MergePiece(context.Background(), "/pieces/piece-1", "main")
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -379,7 +380,7 @@ func TestHandler_MergePiece_MainAhead(t *testing.T) {
 	mockExec.AddResponse("git", []string{"merge-base", "main", "piece-1"}, []byte("abc123\n"), nil)
 	mockExec.AddResponse("git", []string{"rev-list", "--count", "abc123..main"}, []byte("2\n"), nil) // main has 2 commits ahead
 
-	err := handler.MergePiece("/pieces/piece-1", "main")
+	err := handler.MergePiece(context.Background(), "/pieces/piece-1", "main")
 	if err == nil {
 		t.Fatal("expected error when main is ahead")
 	}
@@ -401,7 +402,7 @@ func TestHandler_MergePiece_NotInWorktree(t *testing.T) {
 	mockExec.AddResponse("git", []string{"rev-parse", "--git-dir"}, []byte(gitDir+"\n"), nil)
 	mockExec.AddResponse("git", []string{"rev-parse", "--show-toplevel"}, []byte("/repo\n"), nil)
 
-	err := handler.MergePiece("/repo", "main")
+	err := handler.MergePiece(context.Background(), "/repo", "main")
 	if err == nil {
 		t.Fatal("expected error when not in worktree")
 	}
@@ -439,7 +440,7 @@ func TestHandler_UpdatePiece_BeforeHookFails(t *testing.T) {
 	fullHookPath := filepath.Join(repoRoot, ".monkeypuzzle/hooks", "before-piece-update.sh")
 	mockExec.AddResponse("bash", []string{fullHookPath}, []byte("hook failed"), fmt.Errorf("exit status 1"))
 
-	err := handler.UpdatePiece("/pieces/piece-1", "main")
+	err := handler.UpdatePiece(context.Background(), "/pieces/piece-1", "main")
 
 	if err == nil {
 		t.Fatal("expected error when before hook fails")
@@ -479,7 +480,7 @@ func TestHandler_MergePiece_BeforeHookFails(t *testing.T) {
 	fullHookPath := filepath.Join(repoRoot, ".monkeypuzzle/hooks", "before-piece-merge.sh")
 	mockExec.AddResponse("bash", []string{fullHookPath}, []byte("hook failed"), fmt.Errorf("exit status 1"))
 
-	err := handler.MergePiece("/pieces/piece-1", "main")
+	err := handler.MergePiece(context.Background(), "/pieces/piece-1", "main")
 
 	if err == nil {
 		t.Fatal("expected error when before hook fails")
@@ -513,7 +514,7 @@ func TestHandler_UpdatePiece_NoHooks_Success(t *testing.T) {
 	mockExec.AddResponse("git", []string{"merge", "main"}, nil, nil)
 
 	// No hooks directory exists - should work fine
-	err := handler.UpdatePiece("/pieces/piece-1", "main")
+	err := handler.UpdatePiece(context.Background(), "/pieces/piece-1", "main")
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
@@ -558,7 +559,7 @@ func TestHandler_CreatePiece_OnPieceCreateHookFails_CleansUp(t *testing.T) {
 	mockExec.AddResponse("git", []string{"worktree", "remove", worktreePath}, nil, nil)
 
 	// Execute
-	_, err := handler.CreatePiece("/monkeypuzzle", pieceName)
+	_, err := handler.CreatePiece(context.Background(), "/monkeypuzzle", pieceName)
 
 	// Verify the operation failed
 	if err == nil {
@@ -633,7 +634,7 @@ Content here.
 	mockExec.AddResponse("tmux", []string{"new-session", "-d", "-s", sessionName, "-c", worktreePath}, nil, nil)
 
 	// Execute
-	info, err := handler.CreatePieceFromIssue("/monkeypuzzle", issuePath)
+	info, err := handler.CreatePieceFromIssue(context.Background(), "/monkeypuzzle", issuePath)
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
@@ -709,7 +710,7 @@ Content here.
 	mockExec.AddResponse("tmux", []string{"new-session", "-d", "-s", sessionName, "-c", worktreePath}, nil, nil)
 
 	// Execute
-	info, err := handler.CreatePieceFromIssue("/monkeypuzzle", issuePath)
+	info, err := handler.CreatePieceFromIssue(context.Background(), "/monkeypuzzle", issuePath)
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
@@ -767,7 +768,7 @@ Content here.
 	mockExec.AddResponse("tmux", []string{"new-session", "-d", "-s", sessionName, "-c", worktreePath}, nil, nil)
 
 	// Execute
-	info, err := handler.CreatePieceFromIssue("/monkeypuzzle", issuePath)
+	info, err := handler.CreatePieceFromIssue(context.Background(), "/monkeypuzzle", issuePath)
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
@@ -800,7 +801,7 @@ func TestHandler_CreatePieceFromIssue_InvalidIssuePath(t *testing.T) {
 	_ = fs.MkdirAll(filepath.Join(repoRoot, ".monkeypuzzle"), 0755)
 	_ = fs.WriteFile(filepath.Join(repoRoot, ".monkeypuzzle/monkeypuzzle.json"), []byte(configData), 0644)
 
-	_, err := handler.CreatePieceFromIssue("/monkeypuzzle", ".monkeypuzzle/issues/nonexistent.md")
+	_, err := handler.CreatePieceFromIssue(context.Background(), "/monkeypuzzle", ".monkeypuzzle/issues/nonexistent.md")
 	if err == nil {
 		t.Fatal("expected error when issue file doesn't exist")
 	}
@@ -821,7 +822,7 @@ func TestHandler_CreatePieceFromIssue_MissingConfig(t *testing.T) {
 	mockExec.AddResponse("git", []string{"rev-parse", "--show-toplevel"}, []byte(repoRoot+"\n"), nil)
 
 	// No config file
-	_, err := handler.CreatePieceFromIssue("/monkeypuzzle", ".monkeypuzzle/issues/test.md")
+	_, err := handler.CreatePieceFromIssue(context.Background(), "/monkeypuzzle", ".monkeypuzzle/issues/test.md")
 	if err == nil {
 		t.Fatal("expected error when config file doesn't exist")
 	}
@@ -854,7 +855,7 @@ func TestHandler_CreatePieceFromIssue_InvalidProvider(t *testing.T) {
 	_ = fs.MkdirAll(filepath.Join(repoRoot, ".monkeypuzzle"), 0755)
 	_ = fs.WriteFile(filepath.Join(repoRoot, ".monkeypuzzle/monkeypuzzle.json"), []byte(configData), 0644)
 
-	_, err := handler.CreatePieceFromIssue("/monkeypuzzle", ".monkeypuzzle/issues/test.md")
+	_, err := handler.CreatePieceFromIssue(context.Background(), "/monkeypuzzle", ".monkeypuzzle/issues/test.md")
 	if err == nil {
 		t.Fatal("expected error when issue provider is not markdown")
 	}
@@ -893,7 +894,7 @@ func TestHandler_CreatePieceFromIssue_OutsideIssuesDirectory(t *testing.T) {
 	_ = fs.MkdirAll(filepath.Dir(absIssuePath), 0755)
 	_ = fs.WriteFile(absIssuePath, []byte("# Issue\n"), 0644)
 
-	_, err := handler.CreatePieceFromIssue("/monkeypuzzle", issuePath)
+	_, err := handler.CreatePieceFromIssue(context.Background(), "/monkeypuzzle", issuePath)
 	if err == nil {
 		t.Fatal("expected error when issue file is outside issues directory")
 	}
@@ -928,7 +929,7 @@ func TestHandler_IsBranchMerged_ViaPR(t *testing.T) {
 	// Mock gh pr view - PR is merged
 	mockExec.AddResponse("gh", []string{"pr", "view", "123", "--json", "mergedAt"}, []byte(`{"mergedAt": "2025-01-27T10:00:00Z"}`), nil)
 
-	status, err := handler.IsBranchMerged(repoRoot, branchName, "main")
+	status, err := handler.IsBranchMerged(context.Background(), repoRoot, branchName, "main")
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
@@ -965,7 +966,7 @@ func TestHandler_IsBranchMerged_ViaPRBranch(t *testing.T) {
 	// Mock gh pr list --head <branch> --state merged - finds merged PR
 	mockExec.AddResponse("gh", []string{"pr", "list", "--head", branchName, "--state", "merged", "--json", "number", "--limit", "1"}, []byte(`[{"number": 42}]`), nil)
 
-	status, err := handler.IsBranchMerged(repoRoot, branchName, "main")
+	status, err := handler.IsBranchMerged(context.Background(), repoRoot, branchName, "main")
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
@@ -1002,7 +1003,7 @@ func TestHandler_IsBranchMerged_ViaGit(t *testing.T) {
 	// Mock git branch --merged - branch is merged
 	mockExec.AddResponse("git", []string{"branch", "--merged", "main"}, []byte("  main\n  feature-branch\n"), nil)
 
-	status, err := handler.IsBranchMerged(repoRoot, branchName, "main")
+	status, err := handler.IsBranchMerged(context.Background(), repoRoot, branchName, "main")
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
@@ -1045,7 +1046,7 @@ func TestHandler_IsBranchMerged_ViaCommit(t *testing.T) {
 	// Mock merge-base --is-ancestor - commit is in main's history
 	mockExec.AddResponse("git", []string{"merge-base", "--is-ancestor", "abc123", "main"}, nil, nil)
 
-	status, err := handler.IsBranchMerged(repoRoot, branchName, "main")
+	status, err := handler.IsBranchMerged(context.Background(), repoRoot, branchName, "main")
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
@@ -1085,7 +1086,7 @@ func TestHandler_IsBranchMerged_NotMerged(t *testing.T) {
 	// Mock merge-base --is-ancestor - commit is NOT in main's history (exit status 1)
 	mockExec.AddResponse("git", []string{"merge-base", "--is-ancestor", "abc123", "main"}, nil, fmt.Errorf("exit status 1"))
 
-	status, err := handler.IsBranchMerged(repoRoot, branchName, "main")
+	status, err := handler.IsBranchMerged(context.Background(), repoRoot, branchName, "main")
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
@@ -1128,7 +1129,7 @@ func TestHandler_IsBranchMerged_PRNotMerged_FallsBackToGit(t *testing.T) {
 	// Mock git branch --merged - branch is merged (local merge without PR)
 	mockExec.AddResponse("git", []string{"branch", "--merged", "main"}, []byte("  main\n  feature-branch\n"), nil)
 
-	status, err := handler.IsBranchMerged(repoRoot, branchName, "main")
+	status, err := handler.IsBranchMerged(context.Background(), repoRoot, branchName, "main")
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
@@ -1168,7 +1169,7 @@ func TestHandler_IsBranchMerged_GHError_FallsBackToGit(t *testing.T) {
 	// Mock git branch --merged - branch is merged
 	mockExec.AddResponse("git", []string{"branch", "--merged", "main"}, []byte("  main\n  feature-branch\n"), nil)
 
-	status, err := handler.IsBranchMerged(repoRoot, branchName, "main")
+	status, err := handler.IsBranchMerged(context.Background(), repoRoot, branchName, "main")
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
@@ -1196,7 +1197,7 @@ func TestHandler_CleanupMergedPieces_NoPieces(t *testing.T) {
 
 	// Pieces directory doesn't exist
 	opts := piece.CleanupOptions{MainBranch: "main"}
-	results, err := handler.CleanupMergedPieces("/repo", opts)
+	results, err := handler.CleanupMergedPieces(context.Background(), "/repo", opts)
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
@@ -1235,7 +1236,7 @@ func TestHandler_CleanupMergedPieces_DryRun(t *testing.T) {
 		DryRun:     true,
 	}
 
-	results, err := handler.CleanupMergedPieces("/repo", opts)
+	results, err := handler.CleanupMergedPieces(context.Background(), "/repo", opts)
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
@@ -1303,7 +1304,7 @@ status: in-progress
 	mockExec.AddResponse("tmux", []string{"kill-session", "-t", "mp-piece-" + pieceName}, nil, nil)
 
 	opts := piece.CleanupOptions{MainBranch: "main"}
-	results, err := handler.CleanupMergedPieces(repoRoot, opts)
+	results, err := handler.CleanupMergedPieces(context.Background(), repoRoot, opts)
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
@@ -1356,7 +1357,7 @@ func TestHandler_CleanupMergedPieces_SkipsUnmerged(t *testing.T) {
 	mockExec.AddResponse("git", []string{"merge-base", "--is-ancestor", "abc123", "main"}, nil, fmt.Errorf("exit status 1")) // not an ancestor
 
 	opts := piece.CleanupOptions{MainBranch: "main"}
-	results, err := handler.CleanupMergedPieces("/repo", opts)
+	results, err := handler.CleanupMergedPieces(context.Background(), "/repo", opts)
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
@@ -1393,7 +1394,7 @@ func TestHandler_CleanupMergedPieces_NoIssueMarker(t *testing.T) {
 	mockExec.AddResponse("tmux", []string{"kill-session", "-t", "mp-piece-" + pieceName}, nil, nil)
 
 	opts := piece.CleanupOptions{MainBranch: "main"}
-	results, err := handler.CleanupMergedPieces("/repo", opts)
+	results, err := handler.CleanupMergedPieces(context.Background(), "/repo", opts)
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
@@ -1421,7 +1422,7 @@ func TestHandler_ListPieces_NoPiecesDir(t *testing.T) {
 	// Mock tmux has-session (not called when no pieces)
 	// No pieces directory exists
 
-	pieces, err := handler.ListPieces()
+	pieces, err := handler.ListPieces(context.Background())
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
@@ -1445,7 +1446,7 @@ func TestHandler_ListPieces_EmptyDir(t *testing.T) {
 	piecesDir := "/test-data/monkeypuzzle/pieces"
 	_ = fs.MkdirAll(piecesDir, 0755)
 
-	pieces, err := handler.ListPieces()
+	pieces, err := handler.ListPieces(context.Background())
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
@@ -1474,7 +1475,7 @@ func TestHandler_ListPieces_WithPieces(t *testing.T) {
 	mockExec.AddResponse("tmux", []string{"has-session", "-t", "mp-piece-piece-one"}, nil, nil)
 	mockExec.AddResponse("tmux", []string{"has-session", "-t", "mp-piece-piece-two"}, nil, fmt.Errorf("no session"))
 
-	pieces, err := handler.ListPieces()
+	pieces, err := handler.ListPieces(context.Background())
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
@@ -1524,7 +1525,7 @@ func TestHandler_SwitchPiece_NotFound(t *testing.T) {
 	// Mock tmux has-session
 	mockExec.AddResponse("tmux", []string{"has-session", "-t", "mp-piece-existing-piece"}, nil, nil)
 
-	_, err := handler.SwitchPiece("non-existent")
+	_, err := handler.SwitchPiece(context.Background(), "non-existent")
 	if err == nil {
 		t.Error("expected error for non-existent piece")
 	}
@@ -1553,7 +1554,7 @@ func TestHandler_SwitchPiece_PrintsPath_NoSession(t *testing.T) {
 	// Mock tmux has-session - no session exists
 	mockExec.AddResponse("tmux", []string{"has-session", "-t", "mp-piece-my-piece"}, nil, fmt.Errorf("no session"))
 
-	result, err := handler.SwitchPiece("my-piece")
+	result, err := handler.SwitchPiece(context.Background(), "my-piece")
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
@@ -1576,7 +1577,7 @@ func TestHandler_SwitchPiece_NoPiecesExist(t *testing.T) {
 
 	// No pieces directory
 
-	_, err := handler.SwitchPiece("any-piece")
+	_, err := handler.SwitchPiece(context.Background(), "any-piece")
 	if err == nil {
 		t.Error("expected error when no pieces exist")
 	}

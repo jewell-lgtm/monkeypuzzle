@@ -1,6 +1,7 @@
 package adapters
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os/exec"
@@ -26,8 +27,8 @@ func NewOSExec() *OSExec {
 }
 
 // Run executes a command and returns its output
-func (e *OSExec) Run(name string, args ...string) ([]byte, error) {
-	cmd := exec.Command(name, args...)
+func (e *OSExec) Run(ctx context.Context, name string, args ...string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, name, args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return output, err
@@ -36,8 +37,8 @@ func (e *OSExec) Run(name string, args ...string) ([]byte, error) {
 }
 
 // RunWithDir executes a command in the specified directory and returns its output
-func (e *OSExec) RunWithDir(dir, name string, args ...string) ([]byte, error) {
-	cmd := exec.Command(name, args...)
+func (e *OSExec) RunWithDir(ctx context.Context, dir, name string, args ...string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = dir
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -47,8 +48,8 @@ func (e *OSExec) RunWithDir(dir, name string, args ...string) ([]byte, error) {
 }
 
 // RunWithEnv executes a command in the specified directory with environment variables
-func (e *OSExec) RunWithEnv(dir string, env []string, name string, args ...string) ([]byte, error) {
-	cmd := exec.Command(name, args...)
+func (e *OSExec) RunWithEnv(ctx context.Context, dir string, env []string, name string, args ...string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = dir
 	cmd.Env = env
 	output, err := cmd.CombinedOutput()
@@ -99,7 +100,7 @@ func (m *MockExec) AddResponse(name string, args []string, output []byte, err er
 }
 
 // Run executes a command and returns configured output or an error
-func (m *MockExec) Run(name string, args ...string) ([]byte, error) {
+func (m *MockExec) Run(ctx context.Context, name string, args ...string) ([]byte, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -119,7 +120,7 @@ func (m *MockExec) Run(name string, args ...string) ([]byte, error) {
 }
 
 // RunWithDir executes a command in the specified directory and returns configured output or an error
-func (m *MockExec) RunWithDir(dir, name string, args ...string) ([]byte, error) {
+func (m *MockExec) RunWithDir(ctx context.Context, dir, name string, args ...string) ([]byte, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -140,7 +141,7 @@ func (m *MockExec) RunWithDir(dir, name string, args ...string) ([]byte, error) 
 }
 
 // RunWithEnv executes a command with environment variables and returns configured output or an error
-func (m *MockExec) RunWithEnv(dir string, env []string, name string, args ...string) ([]byte, error) {
+func (m *MockExec) RunWithEnv(ctx context.Context, dir string, env []string, name string, args ...string) ([]byte, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 

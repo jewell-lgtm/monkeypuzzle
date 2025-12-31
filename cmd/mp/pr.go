@@ -43,6 +43,7 @@ func init() {
 }
 
 func runPRCreate(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
 	wd, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("failed to get working directory: %w", err)
@@ -61,7 +62,7 @@ func runPRCreate(cmd *cobra.Command, args []string) error {
 		Base:  flagPRBase,
 	}
 
-	result, err := handler.CreatePR(wd, input)
+	result, err := handler.CreatePR(ctx, wd, input)
 	if err != nil {
 		return err
 	}

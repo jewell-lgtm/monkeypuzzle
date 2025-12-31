@@ -1,6 +1,7 @@
 package piece
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -48,7 +49,7 @@ func NewHookRunner(deps core.Deps) *HookRunner {
 // RunHook executes a hook script if it exists and is executable.
 // Returns nil if the hook doesn't exist or the hooks directory doesn't exist.
 // Returns an error if the hook exists but fails to execute (non-zero exit code).
-func (h *HookRunner) RunHook(repoRoot, hookName string, ctx HookContext) error {
+func (h *HookRunner) RunHook(ctx context.Context, repoRoot, hookName string, hookCtx HookContext) error {
 	hookPath := filepath.Join(repoRoot, HooksDir, hookName)
 
 	// Check if the hook file exists
@@ -73,7 +74,7 @@ func (h *HookRunner) RunHook(repoRoot, hookName string, ctx HookContext) error {
 	}
 
 	// Build environment variables
-	env := h.buildEnv(ctx)
+	env := h.buildEnv(hookCtx)
 
 	// Execute the hook
 	h.output.Write(core.Message{
@@ -81,7 +82,7 @@ func (h *HookRunner) RunHook(repoRoot, hookName string, ctx HookContext) error {
 		Content: fmt.Sprintf("Running hook: %s", hookName),
 	})
 
-	output, err := h.execWithEnv(repoRoot, hookPath, env)
+	output, err := h.execWithEnv(ctx, repoRoot, hookPath, env)
 	if err != nil {
 		// Output hook's stderr/stdout
 		if len(output) > 0 {
@@ -153,8 +154,8 @@ func hasEnvPrefix(envVar, prefix string) bool {
 }
 
 // execWithEnv executes a script with the given environment variables
-func (h *HookRunner) execWithEnv(dir, script string, env []string) ([]byte, error) {
+func (h *HookRunner) execWithEnv(ctx context.Context, dir, script string, env []string) ([]byte, error) {
 	// Use bash to execute the script
-	return h.exec.RunWithEnv(dir, env, "bash", script)
+	return h.exec.RunWithEnv(ctx, dir, env, "bash", script)
 }
 

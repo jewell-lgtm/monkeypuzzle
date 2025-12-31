@@ -1,6 +1,7 @@
 package adapters
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -33,7 +34,7 @@ type PRCreateInput struct {
 
 // CreatePR creates a GitHub PR using gh CLI and returns the PR number and URL.
 // Must be run from within a git repository.
-func (g *GitHub) CreatePR(workDir string, input PRCreateInput) (*PRCreateResult, error) {
+func (g *GitHub) CreatePR(ctx context.Context, workDir string, input PRCreateInput) (*PRCreateResult, error) {
 	// Build gh pr create command
 	args := []string{"pr", "create", "--title", input.Title}
 
@@ -47,7 +48,7 @@ func (g *GitHub) CreatePR(workDir string, input PRCreateInput) (*PRCreateResult,
 		args = append(args, "--base", input.Base)
 	}
 
-	output, err := g.exec.RunWithDir(workDir, "gh", args...)
+	output, err := g.exec.RunWithDir(ctx, workDir, "gh", args...)
 	if err != nil {
 		// Extract meaningful error message from gh output
 		errMsg := string(output)
@@ -77,8 +78,8 @@ func (g *GitHub) CreatePR(workDir string, input PRCreateInput) (*PRCreateResult,
 }
 
 // Push pushes the current branch to remote with upstream tracking
-func (g *GitHub) Push(workDir string) error {
-	_, err := g.exec.RunWithDir(workDir, "git", "push", "-u", "origin", "HEAD")
+func (g *GitHub) Push(ctx context.Context, workDir string) error {
+	_, err := g.exec.RunWithDir(ctx, workDir, "git", "push", "-u", "origin", "HEAD")
 	if err != nil {
 		return fmt.Errorf("failed to push to remote: %w", err)
 	}
@@ -86,8 +87,8 @@ func (g *GitHub) Push(workDir string) error {
 }
 
 // GetPRStatus gets the status of a PR by number
-func (g *GitHub) GetPRStatus(workDir string, prNumber int) (string, error) {
-	output, err := g.exec.RunWithDir(workDir, "gh", "pr", "view", fmt.Sprintf("%d", prNumber), "--json", "state", "--jq", ".state")
+func (g *GitHub) GetPRStatus(ctx context.Context, workDir string, prNumber int) (string, error) {
+	output, err := g.exec.RunWithDir(ctx, workDir, "gh", "pr", "view", fmt.Sprintf("%d", prNumber), "--json", "state", "--jq", ".state")
 	if err != nil {
 		return "", fmt.Errorf("failed to get PR status: %w", err)
 	}
@@ -95,8 +96,8 @@ func (g *GitHub) GetPRStatus(workDir string, prNumber int) (string, error) {
 }
 
 // IsPRMerged checks if a PR has been merged
-func (g *GitHub) IsPRMerged(workDir string, prNumber int) (bool, error) {
-	output, err := g.exec.RunWithDir(workDir, "gh", "pr", "view", fmt.Sprintf("%d", prNumber), "--json", "mergedAt")
+func (g *GitHub) IsPRMerged(ctx context.Context, workDir string, prNumber int) (bool, error) {
+	output, err := g.exec.RunWithDir(ctx, workDir, "gh", "pr", "view", fmt.Sprintf("%d", prNumber), "--json", "mergedAt")
 	if err != nil {
 		return false, fmt.Errorf("failed to get PR merge status: %w", err)
 	}
@@ -113,8 +114,8 @@ func (g *GitHub) IsPRMerged(workDir string, prNumber int) (bool, error) {
 
 // FindMergedPRByBranch checks if there's a merged PR for the given branch name.
 // Returns (merged, prNumber, error). If no merged PR exists, returns (false, 0, nil).
-func (g *GitHub) FindMergedPRByBranch(workDir, branchName string) (bool, int, error) {
-	output, err := g.exec.RunWithDir(workDir, "gh", "pr", "list",
+func (g *GitHub) FindMergedPRByBranch(ctx context.Context, workDir, branchName string) (bool, int, error) {
+	output, err := g.exec.RunWithDir(ctx, workDir, "gh", "pr", "list",
 		"--head", branchName,
 		"--state", "merged",
 		"--json", "number",

@@ -1,6 +1,7 @@
 package adapters
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -19,8 +20,8 @@ func NewGit(exec core.Exec) *Git {
 }
 
 // WorktreeAdd creates a new git worktree at the specified path
-func (g *Git) WorktreeAdd(repoRoot, worktreePath string) error {
-	_, err := g.exec.RunWithDir(repoRoot, "git", "worktree", "add", worktreePath)
+func (g *Git) WorktreeAdd(ctx context.Context, repoRoot, worktreePath string) error {
+	_, err := g.exec.RunWithDir(ctx, repoRoot, "git", "worktree", "add", worktreePath)
 	if err != nil {
 		return fmt.Errorf("failed to create worktree at %s from repo %s: %w", worktreePath, repoRoot, err)
 	}
@@ -28,8 +29,8 @@ func (g *Git) WorktreeAdd(repoRoot, worktreePath string) error {
 }
 
 // WorktreeRemove removes a git worktree
-func (g *Git) WorktreeRemove(repoRoot, worktreePath string) error {
-	_, err := g.exec.RunWithDir(repoRoot, "git", "worktree", "remove", worktreePath)
+func (g *Git) WorktreeRemove(ctx context.Context, repoRoot, worktreePath string) error {
+	_, err := g.exec.RunWithDir(ctx, repoRoot, "git", "worktree", "remove", worktreePath)
 	if err != nil {
 		return fmt.Errorf("failed to remove worktree at %s from repo %s: %w", worktreePath, repoRoot, err)
 	}
@@ -38,8 +39,8 @@ func (g *Git) WorktreeRemove(repoRoot, worktreePath string) error {
 
 // RevParseGitDir runs git rev-parse --git-dir to get the git directory.
 // Returns the absolute path to the .git directory or worktree gitdir.
-func (g *Git) RevParseGitDir(workDir string) (string, error) {
-	output, err := g.exec.RunWithDir(workDir, "git", "rev-parse", "--git-dir")
+func (g *Git) RevParseGitDir(ctx context.Context, workDir string) (string, error) {
+	output, err := g.exec.RunWithDir(ctx, workDir, "git", "rev-parse", "--git-dir")
 	if err != nil {
 		return "", fmt.Errorf("failed to get git dir: %w", err)
 	}
@@ -63,8 +64,8 @@ func (g *Git) IsWorktree(gitDir string) bool {
 
 // RepoRoot runs git rev-parse --show-toplevel to get the repository root.
 // Returns the absolute path to the top-level directory of the git repository.
-func (g *Git) RepoRoot(workDir string) (string, error) {
-	output, err := g.exec.RunWithDir(workDir, "git", "rev-parse", "--show-toplevel")
+func (g *Git) RepoRoot(ctx context.Context, workDir string) (string, error) {
+	output, err := g.exec.RunWithDir(ctx, workDir, "git", "rev-parse", "--show-toplevel")
 	if err != nil {
 		return "", fmt.Errorf("failed to get repo root: %w", err)
 	}
@@ -75,8 +76,8 @@ func (g *Git) RepoRoot(workDir string) (string, error) {
 
 // CurrentBranch gets the current branch name.
 // Returns the short name of the current branch (e.g., "main", "piece-1").
-func (g *Git) CurrentBranch(workDir string) (string, error) {
-	output, err := g.exec.RunWithDir(workDir, "git", "rev-parse", "--abbrev-ref", "HEAD")
+func (g *Git) CurrentBranch(ctx context.Context, workDir string) (string, error) {
+	output, err := g.exec.RunWithDir(ctx, workDir, "git", "rev-parse", "--abbrev-ref", "HEAD")
 	if err != nil {
 		return "", fmt.Errorf("failed to get current branch: %w", err)
 	}
@@ -85,8 +86,8 @@ func (g *Git) CurrentBranch(workDir string) (string, error) {
 }
 
 // Merge merges the specified branch into the current branch
-func (g *Git) Merge(workDir, branch string) error {
-	_, err := g.exec.RunWithDir(workDir, "git", "merge", branch)
+func (g *Git) Merge(ctx context.Context, workDir, branch string) error {
+	_, err := g.exec.RunWithDir(ctx, workDir, "git", "merge", branch)
 	if err != nil {
 		return fmt.Errorf("failed to merge branch %s in %s: %w", branch, workDir, err)
 	}
@@ -95,16 +96,16 @@ func (g *Git) Merge(workDir, branch string) error {
 
 // IsMainAhead checks if main branch has commits that are not in the piece branch
 // Returns true if main is ahead (has commits not in piece), false otherwise
-func (g *Git) IsMainAhead(workDir, mainBranch, pieceBranch string) (bool, error) {
+func (g *Git) IsMainAhead(ctx context.Context, workDir, mainBranch, pieceBranch string) (bool, error) {
 	// Get the merge-base between main and piece branch
-	output, err := g.exec.RunWithDir(workDir, "git", "merge-base", mainBranch, pieceBranch)
+	output, err := g.exec.RunWithDir(ctx, workDir, "git", "merge-base", mainBranch, pieceBranch)
 	if err != nil {
 		return false, fmt.Errorf("failed to find merge-base: %w", err)
 	}
 	mergeBase := strings.TrimSpace(string(output))
 
 	// Check if main has commits ahead of the merge-base
-	output, err = g.exec.RunWithDir(workDir, "git", "rev-list", "--count", mergeBase+".."+mainBranch)
+	output, err = g.exec.RunWithDir(ctx, workDir, "git", "rev-list", "--count", mergeBase+".."+mainBranch)
 	if err != nil {
 		return false, fmt.Errorf("failed to count commits: %w", err)
 	}
@@ -117,8 +118,8 @@ func (g *Git) IsMainAhead(workDir, mainBranch, pieceBranch string) (bool, error)
 // GetMainRepoRoot gets the main repository root from a worktree.
 // For worktrees, this finds the main repo by examining the gitdir structure.
 // For regular repositories, it returns the same as RepoRoot.
-func (g *Git) GetMainRepoRoot(workDir string) (string, error) {
-	gitDir, err := g.RevParseGitDir(workDir)
+func (g *Git) GetMainRepoRoot(ctx context.Context, workDir string) (string, error) {
+	gitDir, err := g.RevParseGitDir(ctx, workDir)
 	if err != nil {
 		return "", err
 	}
@@ -135,12 +136,12 @@ func (g *Git) GetMainRepoRoot(workDir string) (string, error) {
 	}
 
 	// Not a worktree, just return the repo root
-	return g.RepoRoot(workDir)
+	return g.RepoRoot(ctx, workDir)
 }
 
 // Checkout switches to the specified branch
-func (g *Git) Checkout(workDir, branch string) error {
-	_, err := g.exec.RunWithDir(workDir, "git", "checkout", branch)
+func (g *Git) Checkout(ctx context.Context, workDir, branch string) error {
+	_, err := g.exec.RunWithDir(ctx, workDir, "git", "checkout", branch)
 	if err != nil {
 		return fmt.Errorf("failed to checkout branch %s in %s: %w", branch, workDir, err)
 	}
@@ -149,8 +150,8 @@ func (g *Git) Checkout(workDir, branch string) error {
 
 // MergeSquash performs a squash merge of the specified branch into the current branch.
 // This stages all changes but does not commit - caller must commit with desired message.
-func (g *Git) MergeSquash(workDir, branch string) error {
-	_, err := g.exec.RunWithDir(workDir, "git", "merge", "--squash", branch)
+func (g *Git) MergeSquash(ctx context.Context, workDir, branch string) error {
+	_, err := g.exec.RunWithDir(ctx, workDir, "git", "merge", "--squash", branch)
 	if err != nil {
 		return fmt.Errorf("failed to squash merge branch %s in %s: %w", branch, workDir, err)
 	}
@@ -158,8 +159,8 @@ func (g *Git) MergeSquash(workDir, branch string) error {
 }
 
 // Commit creates a commit with the specified message
-func (g *Git) Commit(workDir, message string) error {
-	_, err := g.exec.RunWithDir(workDir, "git", "commit", "-m", message)
+func (g *Git) Commit(ctx context.Context, workDir, message string) error {
+	_, err := g.exec.RunWithDir(ctx, workDir, "git", "commit", "-m", message)
 	if err != nil {
 		return fmt.Errorf("failed to commit in %s: %w", workDir, err)
 	}
@@ -167,8 +168,8 @@ func (g *Git) Commit(workDir, message string) error {
 }
 
 // GetCommitMessages returns commit messages from branch that are not in base
-func (g *Git) GetCommitMessages(workDir, base, branch string) ([]string, error) {
-	output, err := g.exec.RunWithDir(workDir, "git", "log", "--format=%s", base+".."+branch)
+func (g *Git) GetCommitMessages(ctx context.Context, workDir, base, branch string) ([]string, error) {
+	output, err := g.exec.RunWithDir(ctx, workDir, "git", "log", "--format=%s", base+".."+branch)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get commit messages: %w", err)
 	}
@@ -185,8 +186,8 @@ func (g *Git) GetCommitMessages(workDir, base, branch string) ([]string, error) 
 
 // IsBranchMerged checks if branchName is merged into mainBranch.
 // Uses git branch --merged to detect merged branches.
-func (g *Git) IsBranchMerged(workDir, mainBranch, branchName string) (bool, error) {
-	output, err := g.exec.RunWithDir(workDir, "git", "branch", "--merged", mainBranch)
+func (g *Git) IsBranchMerged(ctx context.Context, workDir, mainBranch, branchName string) (bool, error) {
+	output, err := g.exec.RunWithDir(ctx, workDir, "git", "branch", "--merged", mainBranch)
 	if err != nil {
 		return false, fmt.Errorf("failed to list merged branches: %w", err)
 	}
@@ -203,8 +204,8 @@ func (g *Git) IsBranchMerged(workDir, mainBranch, branchName string) (bool, erro
 }
 
 // BranchExistsOnRemote checks if a branch exists on the remote.
-func (g *Git) BranchExistsOnRemote(workDir, branchName string) (bool, error) {
-	output, err := g.exec.RunWithDir(workDir, "git", "ls-remote", "--heads", "origin", branchName)
+func (g *Git) BranchExistsOnRemote(ctx context.Context, workDir, branchName string) (bool, error) {
+	output, err := g.exec.RunWithDir(ctx, workDir, "git", "ls-remote", "--heads", "origin", branchName)
 	if err != nil {
 		return false, fmt.Errorf("failed to check remote branches: %w", err)
 	}
@@ -212,8 +213,8 @@ func (g *Git) BranchExistsOnRemote(workDir, branchName string) (bool, error) {
 }
 
 // GetBranchCommit returns the commit hash of a branch.
-func (g *Git) GetBranchCommit(workDir, branchName string) (string, error) {
-	output, err := g.exec.RunWithDir(workDir, "git", "rev-parse", branchName)
+func (g *Git) GetBranchCommit(ctx context.Context, workDir, branchName string) (string, error) {
+	output, err := g.exec.RunWithDir(ctx, workDir, "git", "rev-parse", branchName)
 	if err != nil {
 		return "", fmt.Errorf("failed to get branch commit: %w", err)
 	}
@@ -221,9 +222,9 @@ func (g *Git) GetBranchCommit(workDir, branchName string) (string, error) {
 }
 
 // IsCommitInBranch checks if a commit exists in a branch's history.
-func (g *Git) IsCommitInBranch(workDir, commit, branch string) (bool, error) {
+func (g *Git) IsCommitInBranch(ctx context.Context, workDir, commit, branch string) (bool, error) {
 	// git merge-base --is-ancestor <commit> <branch> returns 0 if true
-	_, err := g.exec.RunWithDir(workDir, "git", "merge-base", "--is-ancestor", commit, branch)
+	_, err := g.exec.RunWithDir(ctx, workDir, "git", "merge-base", "--is-ancestor", commit, branch)
 	if err != nil {
 		// Exit code 1 means not an ancestor, other errors are real errors
 		if strings.Contains(err.Error(), "exit status 1") {

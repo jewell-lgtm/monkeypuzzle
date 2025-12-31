@@ -1,6 +1,7 @@
 package adapters
 
 import (
+	"context"
 	"testing"
 )
 
@@ -37,7 +38,7 @@ func TestGit_WorktreeAdd(t *testing.T) {
 			exec.AddResponse("git", []string{"worktree", "add", tt.worktreePath}, tt.mockOutput, tt.mockErr)
 
 			git := NewGit(exec)
-			err := git.WorktreeAdd(tt.repoRoot, tt.worktreePath)
+			err := git.WorktreeAdd(context.Background(), tt.repoRoot, tt.worktreePath)
 
 			if (err != nil) != tt.wantErr {
 				t.Errorf("WorktreeAdd() error = %v, wantErr %v", err, tt.wantErr)
@@ -82,7 +83,7 @@ func TestGit_CurrentBranch(t *testing.T) {
 			exec.AddResponse("git", []string{"rev-parse", "--abbrev-ref", "HEAD"}, tt.mockOutput, tt.mockErr)
 
 			git := NewGit(exec)
-			got, err := git.CurrentBranch("/repo")
+			got, err := git.CurrentBranch(context.Background(), "/repo")
 
 			if (err != nil) != tt.wantErr {
 				t.Errorf("CurrentBranch() error = %v, wantErr %v", err, tt.wantErr)
@@ -138,7 +139,7 @@ func TestGit_IsMainAhead(t *testing.T) {
 			exec.AddResponse("git", []string{"rev-list", "--count", tt.mergeBase + ".." + tt.mainBranch}, []byte(tt.commitCount+"\n"), nil)
 
 			git := NewGit(exec)
-			got, err := git.IsMainAhead("/repo", tt.mainBranch, tt.pieceBranch)
+			got, err := git.IsMainAhead(context.Background(), "/repo", tt.mainBranch, tt.pieceBranch)
 
 			if (err != nil) != tt.wantErr {
 				t.Errorf("IsMainAhead() error = %v, wantErr %v", err, tt.wantErr)
@@ -188,7 +189,7 @@ func TestGit_IsBranchMerged(t *testing.T) {
 			exec.AddResponse("git", []string{"branch", "--merged", tt.mainBranch}, tt.mockOutput, nil)
 
 			git := NewGit(exec)
-			got, err := git.IsBranchMerged("/repo", tt.mainBranch, tt.branchName)
+			got, err := git.IsBranchMerged(context.Background(), "/repo", tt.mainBranch, tt.branchName)
 
 			if err != nil {
 				t.Errorf("IsBranchMerged() error = %v", err)
@@ -230,7 +231,7 @@ func TestGit_GetCommitMessages(t *testing.T) {
 			exec.AddResponse("git", []string{"log", "--format=%s", "main..feature"}, tt.mockOutput, nil)
 
 			git := NewGit(exec)
-			got, err := git.GetCommitMessages("/repo", "main", "feature")
+			got, err := git.GetCommitMessages(context.Background(), "/repo", "main", "feature")
 
 			if err != nil {
 				t.Errorf("GetCommitMessages() error = %v", err)
@@ -310,7 +311,7 @@ func TestGit_BranchExistsOnRemote(t *testing.T) {
 			exec.AddResponse("git", []string{"ls-remote", "--heads", "origin", tt.branch}, tt.mockOutput, nil)
 
 			git := NewGit(exec)
-			got, err := git.BranchExistsOnRemote("/repo", tt.branch)
+			got, err := git.BranchExistsOnRemote(context.Background(), "/repo", tt.branch)
 
 			if err != nil {
 				t.Errorf("BranchExistsOnRemote() error = %v", err)

@@ -1,6 +1,7 @@
 package pr
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"path/filepath"
@@ -37,13 +38,13 @@ func NewHandler(deps core.Deps) *Handler {
 
 // CreatePR creates a GitHub PR for the current piece.
 // Must be run from within a piece worktree.
-func (h *Handler) CreatePR(workDir string, input Input) (*PRCreateResult, error) {
+func (h *Handler) CreatePR(ctx context.Context, workDir string, input Input) (*PRCreateResult, error) {
 	// Apply defaults
 	input = WithDefaults(input)
 
 	// Check if we're in a piece worktree
 	pieceHandler := piece.NewHandler(h.deps)
-	status, err := pieceHandler.Status(workDir)
+	status, err := pieceHandler.Status(ctx, workDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get piece status: %w", err)
 	}
@@ -53,7 +54,7 @@ func (h *Handler) CreatePR(workDir string, input Input) (*PRCreateResult, error)
 	}
 
 	// Get current branch
-	branch, err := h.git.CurrentBranch(workDir)
+	branch, err := h.git.CurrentBranch(ctx, workDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get current branch: %w", err)
 	}
@@ -77,7 +78,7 @@ func (h *Handler) CreatePR(workDir string, input Input) (*PRCreateResult, error)
 		Content: fmt.Sprintf("Pushing branch %s to origin...", branch),
 	})
 
-	if err := h.github.Push(workDir); err != nil {
+	if err := h.github.Push(ctx, workDir); err != nil {
 		return nil, fmt.Errorf("failed to push branch: %w", err)
 	}
 
@@ -87,7 +88,7 @@ func (h *Handler) CreatePR(workDir string, input Input) (*PRCreateResult, error)
 		Content: "Creating PR...",
 	})
 
-	prResult, err := h.github.CreatePR(workDir, adapters.PRCreateInput{
+	prResult, err := h.github.CreatePR(ctx, workDir, adapters.PRCreateInput{
 		Title: input.Title,
 		Body:  input.Body,
 		Base:  input.Base,

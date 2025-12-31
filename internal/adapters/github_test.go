@@ -1,6 +1,7 @@
 package adapters
 
 import (
+	"context"
 	"testing"
 )
 
@@ -61,7 +62,7 @@ func TestGitHub_CreatePR(t *testing.T) {
 			exec.AddResponse("gh", args, tt.mockOutput, tt.mockErr)
 
 			gh := NewGitHub(exec)
-			result, err := gh.CreatePR("/repo", tt.input)
+			result, err := gh.CreatePR(context.Background(), "/repo", tt.input)
 
 			if (err != nil) != tt.wantErr {
 				t.Errorf("CreatePR() error = %v, wantErr %v", err, tt.wantErr)
@@ -121,7 +122,7 @@ func TestGitHub_IsPRMerged(t *testing.T) {
 			exec.AddResponse("gh", []string{"pr", "view", "42", "--json", "mergedAt"}, tt.mockOutput, tt.mockErr)
 
 			gh := NewGitHub(exec)
-			got, err := gh.IsPRMerged("/repo", tt.prNumber)
+			got, err := gh.IsPRMerged(context.Background(), "/repo", tt.prNumber)
 
 			if (err != nil) != tt.wantErr {
 				t.Errorf("IsPRMerged() error = %v, wantErr %v", err, tt.wantErr)
@@ -172,7 +173,7 @@ func TestGitHub_FindMergedPRByBranch(t *testing.T) {
 			exec.AddResponse("gh", []string{"pr", "list", "--head", tt.branch, "--state", "merged", "--json", "number", "--limit", "1"}, tt.mockOutput, tt.mockErr)
 
 			gh := NewGitHub(exec)
-			merged, num, err := gh.FindMergedPRByBranch("/repo", tt.branch)
+			merged, num, err := gh.FindMergedPRByBranch(context.Background(), "/repo", tt.branch)
 
 			if (err != nil) != tt.wantErr {
 				t.Errorf("FindMergedPRByBranch() error = %v, wantErr %v", err, tt.wantErr)
@@ -229,7 +230,7 @@ func TestGitHub_GetPRStatus(t *testing.T) {
 			exec.AddResponse("gh", []string{"pr", "view", "42", "--json", "state", "--jq", ".state"}, tt.mockOutput, tt.mockErr)
 
 			gh := NewGitHub(exec)
-			got, err := gh.GetPRStatus("/repo", tt.prNumber)
+			got, err := gh.GetPRStatus(context.Background(), "/repo", tt.prNumber)
 
 			if (err != nil) != tt.wantErr {
 				t.Errorf("GetPRStatus() error = %v, wantErr %v", err, tt.wantErr)
@@ -305,7 +306,7 @@ func TestGitHub_Push(t *testing.T) {
 			exec.AddResponse("git", []string{"push", "-u", "origin", "HEAD"}, nil, tt.mockErr)
 
 			gh := NewGitHub(exec)
-			err := gh.Push("/repo")
+			err := gh.Push(context.Background(), "/repo")
 
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Push() error = %v, wantErr %v", err, tt.wantErr)

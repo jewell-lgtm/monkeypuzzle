@@ -1,6 +1,7 @@
 package pr_test
 
 import (
+	"context"
 	"encoding/json"
 	"path/filepath"
 	"testing"
@@ -62,7 +63,7 @@ func TestCreatePR_HappyPath(t *testing.T) {
 		Base:  "main",
 	}
 
-	result, err := handler.CreatePR(worktreePath, input)
+	result, err := handler.CreatePR(context.Background(), worktreePath, input)
 	if err != nil {
 		t.Fatalf("CreatePR failed: %v", err)
 	}
@@ -132,7 +133,7 @@ func TestCreatePR_UsesIssueTitleWhenAvailable(t *testing.T) {
 		Base:  "main",
 	}
 
-	result, err := handler.CreatePR(worktreePath, input)
+	result, err := handler.CreatePR(context.Background(), worktreePath, input)
 	if err != nil {
 		t.Fatalf("CreatePR failed: %v", err)
 	}
@@ -190,7 +191,7 @@ func TestCreatePR_UsesPieceNameAsFallback(t *testing.T) {
 		Base:  "main",
 	}
 
-	result, err := handler.CreatePR(worktreePath, input)
+	result, err := handler.CreatePR(context.Background(), worktreePath, input)
 	if err != nil {
 		t.Fatalf("CreatePR failed: %v", err)
 	}
@@ -225,7 +226,7 @@ func TestCreatePR_NotInPieceWorktree(t *testing.T) {
 		Base:  "main",
 	}
 
-	_, err := handler.CreatePR(workDir, input)
+	_, err := handler.CreatePR(context.Background(), workDir, input)
 	if err == nil {
 		t.Error("expected error when not in piece worktree")
 	}
@@ -259,7 +260,7 @@ func TestCreatePR_PushFails(t *testing.T) {
 		Base:  "main",
 	}
 
-	_, err := handler.CreatePR(worktreePath, input)
+	_, err := handler.CreatePR(context.Background(), worktreePath, input)
 	if err == nil {
 		t.Error("expected error when push fails")
 	}
@@ -296,7 +297,7 @@ func TestCreatePR_GhFails(t *testing.T) {
 		Base:  "main",
 	}
 
-	_, err := handler.CreatePR(worktreePath, input)
+	_, err := handler.CreatePR(context.Background(), worktreePath, input)
 	if err == nil {
 		t.Error("expected error when gh fails")
 	}

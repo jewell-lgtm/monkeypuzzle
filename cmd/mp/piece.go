@@ -103,7 +103,7 @@ func completePieceNames(cmd *cobra.Command, args []string, toComplete string) ([
 	}
 	handler := piececmd.NewHandler(deps)
 
-	pieces, err := handler.ListPieces()
+	pieces, err := handler.ListPieces(cmd.Context())
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
@@ -124,7 +124,7 @@ func completeIssueFiles(cmd *cobra.Command, args []string, toComplete string) ([
 
 func completeGitBranches(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	exec := adapters.NewOSExec()
-	out, err := exec.Run("git", "branch", "--format=%(refname:short)")
+	out, err := exec.Run(cmd.Context(), "git", "branch", "--format=%(refname:short)")
 	if err != nil {
 		return []string{"main", "master"}, cobra.ShellCompDirectiveNoFileComp
 	}
@@ -139,6 +139,7 @@ func completeGitBranches(cmd *cobra.Command, args []string, toComplete string) (
 }
 
 func runPieceStatus(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
 	wd, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("failed to get working directory: %w", err)
@@ -151,7 +152,7 @@ func runPieceStatus(cmd *cobra.Command, args []string) error {
 	}
 	handler := piececmd.NewHandler(deps)
 
-	status, err := handler.Status(wd)
+	status, err := handler.Status(ctx, wd)
 	if err != nil {
 		return err
 	}
@@ -178,6 +179,7 @@ func runPieceStatus(cmd *cobra.Command, args []string) error {
 }
 
 func runPieceNew(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
 	wd, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("failed to get working directory: %w", err)
@@ -210,9 +212,9 @@ func runPieceNew(cmd *cobra.Command, args []string) error {
 		if strings.TrimSpace(flagIssuePath) == "" {
 			return fmt.Errorf("--issue flag requires a non-empty path")
 		}
-		info, err = handler.CreatePieceFromIssue(monkeypuzzleSourceDir, flagIssuePath)
+		info, err = handler.CreatePieceFromIssue(ctx, monkeypuzzleSourceDir, flagIssuePath)
 	} else {
-		info, err = handler.CreatePiece(monkeypuzzleSourceDir, flagPieceName)
+		info, err = handler.CreatePiece(ctx, monkeypuzzleSourceDir, flagPieceName)
 	}
 
 	if err != nil {
@@ -228,7 +230,7 @@ func runPieceNew(cmd *cobra.Command, args []string) error {
 
 	// Switch to the new piece (unless --skip-switch is set)
 	if !flagSkipSwitch {
-		_, err := handler.SwitchPiece(info.Name)
+		_, err := handler.SwitchPiece(ctx, info.Name)
 		if err != nil {
 			// Non-fatal: log warning but don't fail
 			fmt.Fprintf(os.Stderr, "Warning: failed to switch to piece: %v\n", err)
@@ -239,6 +241,7 @@ func runPieceNew(cmd *cobra.Command, args []string) error {
 }
 
 func runPieceUpdate(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
 	wd, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("failed to get working directory: %w", err)
@@ -257,7 +260,7 @@ func runPieceUpdate(cmd *cobra.Command, args []string) error {
 	}
 	handler := piececmd.NewHandler(deps)
 
-	if err := handler.UpdatePiece(wd, mainBranch); err != nil {
+	if err := handler.UpdatePiece(ctx, wd, mainBranch); err != nil {
 		return err
 	}
 
@@ -265,6 +268,7 @@ func runPieceUpdate(cmd *cobra.Command, args []string) error {
 }
 
 func runPieceMerge(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
 	wd, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("failed to get working directory: %w", err)
@@ -283,7 +287,7 @@ func runPieceMerge(cmd *cobra.Command, args []string) error {
 	}
 	handler := piececmd.NewHandler(deps)
 
-	if err := handler.MergePiece(wd, mainBranch); err != nil {
+	if err := handler.MergePiece(ctx, wd, mainBranch); err != nil {
 		return err
 	}
 
@@ -291,6 +295,7 @@ func runPieceMerge(cmd *cobra.Command, args []string) error {
 }
 
 func runPieceCleanup(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
 	wd, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("failed to get working directory: %w", err)
@@ -310,7 +315,7 @@ func runPieceCleanup(cmd *cobra.Command, args []string) error {
 	handler := piececmd.NewHandler(deps)
 
 	// Get repo root (either from piece or main repo)
-	status, err := handler.Status(wd)
+	status, err := handler.Status(ctx, wd)
 	if err != nil {
 		return fmt.Errorf("failed to get piece status: %w", err)
 	}
@@ -326,7 +331,7 @@ func runPieceCleanup(cmd *cobra.Command, args []string) error {
 		MainBranch: mainBranch,
 	}
 
-	results, err := handler.CleanupMergedPieces(repoRoot, opts)
+	results, err := handler.CleanupMergedPieces(ctx, repoRoot, opts)
 	if err != nil {
 		return err
 	}
@@ -375,6 +380,7 @@ func containsMonkeypuzzleModule(content string) bool {
 }
 
 func runPieceSwitch(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
 	deps := core.Deps{
 		FS:     adapters.NewOSFS(""),
 		Output: adapters.NewTextOutput(os.Stderr),
@@ -383,7 +389,7 @@ func runPieceSwitch(cmd *cobra.Command, args []string) error {
 	handler := piececmd.NewHandler(deps)
 
 	// Get available pieces first
-	pieces, err := handler.ListPieces()
+	pieces, err := handler.ListPieces(ctx)
 	if err != nil {
 		return err
 	}
@@ -434,7 +440,7 @@ func runPieceSwitch(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("piece name is required")
 	}
 
-	result, err := handler.SwitchPiece(selectedName)
+	result, err := handler.SwitchPiece(ctx, selectedName)
 	if err != nil {
 		return err
 	}

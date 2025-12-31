@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"io/fs"
 	"os"
 )
@@ -40,9 +41,9 @@ type Output interface {
 
 // Exec abstracts command execution for testability
 type Exec interface {
-	Run(name string, args ...string) ([]byte, error)
-	RunWithDir(dir, name string, args ...string) ([]byte, error)
-	RunWithEnv(dir string, env []string, name string, args ...string) ([]byte, error)
+	Run(ctx context.Context, name string, args ...string) ([]byte, error)
+	RunWithDir(ctx context.Context, dir, name string, args ...string) ([]byte, error)
+	RunWithEnv(ctx context.Context, dir string, env []string, name string, args ...string) ([]byte, error)
 }
 
 // Deps holds all injectable dependencies for handlers

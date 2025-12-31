@@ -1,6 +1,7 @@
 package adapters
 
 import (
+	"context"
 	"testing"
 )
 
@@ -34,7 +35,7 @@ func TestTmux_NewSession(t *testing.T) {
 			exec.AddResponse("tmux", []string{"new-session", "-d", "-s", tt.sessionName, "-c", tt.workDir}, nil, tt.mockErr)
 
 			tmux := NewTmux(exec)
-			err := tmux.NewSession(tt.sessionName, tt.workDir)
+			err := tmux.NewSession(context.Background(), tt.sessionName, tt.workDir)
 
 			if (err != nil) != tt.wantErr {
 				t.Errorf("NewSession() error = %v, wantErr %v", err, tt.wantErr)
@@ -70,7 +71,7 @@ func TestTmux_HasSession(t *testing.T) {
 			exec.AddResponse("tmux", []string{"has-session", "-t", tt.sessionName}, nil, tt.mockErr)
 
 			tmux := NewTmux(exec)
-			got := tmux.HasSession(tt.sessionName)
+			got := tmux.HasSession(context.Background(), tt.sessionName)
 
 			if got != tt.want {
 				t.Errorf("HasSession() = %v, want %v", got, tt.want)
@@ -106,7 +107,7 @@ func TestTmux_KillSession(t *testing.T) {
 			exec.AddResponse("tmux", []string{"kill-session", "-t", tt.sessionName}, nil, tt.mockErr)
 
 			tmux := NewTmux(exec)
-			err := tmux.KillSession(tt.sessionName)
+			err := tmux.KillSession(context.Background(), tt.sessionName)
 
 			if (err != nil) != tt.wantErr {
 				t.Errorf("KillSession() error = %v, wantErr %v", err, tt.wantErr)
@@ -142,7 +143,7 @@ func TestTmux_SwitchClient(t *testing.T) {
 			exec.AddResponse("tmux", []string{"switch-client", "-t", tt.sessionName}, nil, tt.mockErr)
 
 			tmux := NewTmux(exec)
-			err := tmux.SwitchClient(tt.sessionName)
+			err := tmux.SwitchClient(context.Background(), tt.sessionName)
 
 			if (err != nil) != tt.wantErr {
 				t.Errorf("SwitchClient() error = %v, wantErr %v", err, tt.wantErr)
