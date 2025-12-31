@@ -80,11 +80,13 @@ var flagDryRun bool
 var flagForce bool
 var flagAbandonName string
 var flagDeleteBranch bool
+var flagOverwriteSession bool
 
 func init() {
 	pieceNewCmd.Flags().StringVar(&flagPieceName, "name", "", "Optional piece name (default: auto-generated)")
 	pieceNewCmd.Flags().StringVar(&flagIssuePath, "issue", "", "Create piece from issue file (e.g., issues/foo.md)")
 	pieceNewCmd.Flags().BoolVar(&flagSkipSwitch, "skip-switch", false, "Don't switch to the new piece after creation")
+	pieceNewCmd.Flags().BoolVar(&flagOverwriteSession, "overwrite-session", false, "Replace existing main repo tmux session")
 	pieceUpdateCmd.Flags().StringVar(&flagMainBranch, "main-branch", "main", "Main branch name to merge (default: main)")
 	pieceMergeCmd.Flags().StringVar(&flagMainBranch, "main-branch", "main", "Main branch name to merge into (default: main)")
 	pieceCleanupCmd.Flags().StringVar(&flagMainBranch, "main-branch", "main", "Main branch name to check for merged status (default: main)")
@@ -218,6 +220,10 @@ func runPieceNew(cmd *cobra.Command, args []string) error {
 
 	var info piececmd.PieceInfo
 
+	opts := piececmd.CreatePieceOptions{
+		OverwriteSession: flagOverwriteSession,
+	}
+
 	// Check if --issue flag is set
 	if flagIssuePath != "" {
 		// Validate that --name is not also set (they're mutually exclusive)
@@ -228,9 +234,9 @@ func runPieceNew(cmd *cobra.Command, args []string) error {
 		if strings.TrimSpace(flagIssuePath) == "" {
 			return fmt.Errorf("--issue flag requires a non-empty path")
 		}
-		info, err = handler.CreatePieceFromIssue(ctx, monkeypuzzleSourceDir, flagIssuePath)
+		info, err = handler.CreatePieceFromIssue(ctx, monkeypuzzleSourceDir, flagIssuePath, opts)
 	} else {
-		info, err = handler.CreatePiece(ctx, monkeypuzzleSourceDir, flagPieceName)
+		info, err = handler.CreatePiece(ctx, monkeypuzzleSourceDir, flagPieceName, opts)
 	}
 
 	if err != nil {

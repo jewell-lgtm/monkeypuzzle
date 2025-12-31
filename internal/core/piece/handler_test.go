@@ -31,7 +31,7 @@ func TestHandler_CreatePiece(t *testing.T) {
 	// Execute - will fail at worktree creation since we didn't mock it, but that's ok
 	// We're testing the flow, not end-to-end success
 	// Use a deterministic piece name for testing
-	_, err := handler.CreatePiece(context.Background(), "/monkeypuzzle", "test-piece-1")
+	_, err := handler.CreatePiece(context.Background(), "/monkeypuzzle", "test-piece-1", piece.CreatePieceOptions{})
 
 	// We expect an error at worktree creation since we didn't mock the exact path
 	if err == nil {
@@ -212,7 +212,7 @@ func TestHandler_CreatePiece_WithName(t *testing.T) {
 
 	// Test with a specific piece name
 	pieceName := "test-piece-deterministic"
-	_, err := handler.CreatePiece(context.Background(), "/monkeypuzzle", pieceName)
+	_, err := handler.CreatePiece(context.Background(), "/monkeypuzzle", pieceName, piece.CreatePieceOptions{})
 
 	// We expect an error at worktree creation since we didn't mock it, but that's ok
 	// We're testing that the name parameter is accepted
@@ -250,7 +250,7 @@ func TestHandler_CreatePiece_SanitizesName(t *testing.T) {
 	mockExec.AddResponse("git", []string{"worktree", "add", worktreePath}, nil, nil)
 	mockExec.AddResponse("tmux", []string{"new-session", "-d", "-s", "mp-piece-" + expectedSanitized, "-c", worktreePath}, nil, nil)
 
-	info, err := handler.CreatePiece(context.Background(), "/monkeypuzzle", inputName)
+	info, err := handler.CreatePiece(context.Background(), "/monkeypuzzle", inputName, piece.CreatePieceOptions{})
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
@@ -285,7 +285,7 @@ func TestHandler_CreatePiece_NameAlreadyExists(t *testing.T) {
 	_ = fs.MkdirAll(existingPiecePath, 0755)
 
 	// Try to create a piece with the same name
-	_, err := handler.CreatePiece(context.Background(), "/monkeypuzzle", "existing-piece")
+	_, err := handler.CreatePiece(context.Background(), "/monkeypuzzle", "existing-piece", piece.CreatePieceOptions{})
 	if err == nil {
 		t.Fatal("expected error when piece name already exists")
 	}
@@ -593,7 +593,7 @@ func TestHandler_CreatePiece_OnPieceCreateHookFails_CleansUp(t *testing.T) {
 	mockExec.AddResponse("git", []string{"worktree", "remove", worktreePath}, nil, nil)
 
 	// Execute
-	_, err := handler.CreatePiece(context.Background(), "/monkeypuzzle", pieceName)
+	_, err := handler.CreatePiece(context.Background(), "/monkeypuzzle", pieceName, piece.CreatePieceOptions{})
 
 	// Verify the operation failed
 	if err == nil {
@@ -668,7 +668,7 @@ Content here.
 	mockExec.AddResponse("tmux", []string{"new-session", "-d", "-s", sessionName, "-c", worktreePath}, nil, nil)
 
 	// Execute
-	info, err := handler.CreatePieceFromIssue(context.Background(), "/monkeypuzzle", issuePath)
+	info, err := handler.CreatePieceFromIssue(context.Background(), "/monkeypuzzle", issuePath, piece.CreatePieceOptions{})
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
@@ -744,7 +744,7 @@ Content here.
 	mockExec.AddResponse("tmux", []string{"new-session", "-d", "-s", sessionName, "-c", worktreePath}, nil, nil)
 
 	// Execute
-	info, err := handler.CreatePieceFromIssue(context.Background(), "/monkeypuzzle", issuePath)
+	info, err := handler.CreatePieceFromIssue(context.Background(), "/monkeypuzzle", issuePath, piece.CreatePieceOptions{})
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
@@ -802,7 +802,7 @@ Content here.
 	mockExec.AddResponse("tmux", []string{"new-session", "-d", "-s", sessionName, "-c", worktreePath}, nil, nil)
 
 	// Execute
-	info, err := handler.CreatePieceFromIssue(context.Background(), "/monkeypuzzle", issuePath)
+	info, err := handler.CreatePieceFromIssue(context.Background(), "/monkeypuzzle", issuePath, piece.CreatePieceOptions{})
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
@@ -835,7 +835,7 @@ func TestHandler_CreatePieceFromIssue_InvalidIssuePath(t *testing.T) {
 	_ = fs.MkdirAll(filepath.Join(repoRoot, ".monkeypuzzle"), 0755)
 	_ = fs.WriteFile(filepath.Join(repoRoot, ".monkeypuzzle/monkeypuzzle.json"), []byte(configData), 0644)
 
-	_, err := handler.CreatePieceFromIssue(context.Background(), "/monkeypuzzle", ".monkeypuzzle/issues/nonexistent.md")
+	_, err := handler.CreatePieceFromIssue(context.Background(), "/monkeypuzzle", ".monkeypuzzle/issues/nonexistent.md", piece.CreatePieceOptions{})
 	if err == nil {
 		t.Fatal("expected error when issue file doesn't exist")
 	}
@@ -856,7 +856,7 @@ func TestHandler_CreatePieceFromIssue_MissingConfig(t *testing.T) {
 	mockExec.AddResponse("git", []string{"rev-parse", "--show-toplevel"}, []byte(repoRoot+"\n"), nil)
 
 	// No config file
-	_, err := handler.CreatePieceFromIssue(context.Background(), "/monkeypuzzle", ".monkeypuzzle/issues/test.md")
+	_, err := handler.CreatePieceFromIssue(context.Background(), "/monkeypuzzle", ".monkeypuzzle/issues/test.md", piece.CreatePieceOptions{})
 	if err == nil {
 		t.Fatal("expected error when config file doesn't exist")
 	}
@@ -889,7 +889,7 @@ func TestHandler_CreatePieceFromIssue_InvalidProvider(t *testing.T) {
 	_ = fs.MkdirAll(filepath.Join(repoRoot, ".monkeypuzzle"), 0755)
 	_ = fs.WriteFile(filepath.Join(repoRoot, ".monkeypuzzle/monkeypuzzle.json"), []byte(configData), 0644)
 
-	_, err := handler.CreatePieceFromIssue(context.Background(), "/monkeypuzzle", ".monkeypuzzle/issues/test.md")
+	_, err := handler.CreatePieceFromIssue(context.Background(), "/monkeypuzzle", ".monkeypuzzle/issues/test.md", piece.CreatePieceOptions{})
 	if err == nil {
 		t.Fatal("expected error when issue provider is not markdown")
 	}
@@ -928,7 +928,7 @@ func TestHandler_CreatePieceFromIssue_OutsideIssuesDirectory(t *testing.T) {
 	_ = fs.MkdirAll(filepath.Dir(absIssuePath), 0755)
 	_ = fs.WriteFile(absIssuePath, []byte("# Issue\n"), 0644)
 
-	_, err := handler.CreatePieceFromIssue(context.Background(), "/monkeypuzzle", issuePath)
+	_, err := handler.CreatePieceFromIssue(context.Background(), "/monkeypuzzle", issuePath, piece.CreatePieceOptions{})
 	if err == nil {
 		t.Fatal("expected error when issue file is outside issues directory")
 	}
@@ -1617,5 +1617,156 @@ func TestHandler_SwitchPiece_NoPiecesExist(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "no pieces exist") {
 		t.Errorf("expected 'no pieces exist' in error, got: %v", err)
+	}
+}
+
+// ============================================================================
+// Main Repo Session Tests
+// ============================================================================
+
+func TestHandler_CreatePiece_CreatesMainRepoSession(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", "/test-data")
+
+	fs := adapters.NewMemoryFS()
+	out := adapters.NewBufferOutput()
+	mockExec := adapters.NewMockExec()
+	deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
+	handler := piece.NewHandler(deps)
+
+	repoRoot := "/projects/myrepo"
+	pieceName := "test-feature"
+	piecesDir := "/test-data/monkeypuzzle/pieces"
+	worktreePath := filepath.Join(piecesDir, pieceName)
+
+	// Mock git repo root
+	mockExec.AddResponse("git", []string{"rev-parse", "--show-toplevel"}, []byte(repoRoot+"\n"), nil)
+	// Mock worktree creation
+	mockExec.AddResponse("git", []string{"worktree", "add", worktreePath}, nil, nil)
+	// Mock main repo session check - doesn't exist yet
+	mockExec.AddResponse("tmux", []string{"has-session", "-t", "mp-myrepo"}, nil, fmt.Errorf("no session"))
+	// Mock main repo session creation
+	mockExec.AddResponse("tmux", []string{"new-session", "-d", "-s", "mp-myrepo", "-c", repoRoot}, nil, nil)
+	// Mock piece session creation
+	mockExec.AddResponse("tmux", []string{"new-session", "-d", "-s", "mp-piece-" + pieceName, "-c", worktreePath}, nil, nil)
+
+	info, err := handler.CreatePiece(context.Background(), "/monkeypuzzle", pieceName, piece.CreatePieceOptions{})
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	if info.Name != pieceName {
+		t.Errorf("expected piece name %q, got %q", pieceName, info.Name)
+	}
+
+	// Verify main repo session was created
+	calls := mockExec.GetCalls()
+	foundMainSession := false
+	for _, call := range calls {
+		if call.Name == "tmux" && len(call.Args) >= 4 &&
+			call.Args[0] == "new-session" && call.Args[3] == "mp-myrepo" {
+			foundMainSession = true
+			break
+		}
+	}
+	if !foundMainSession {
+		t.Error("expected main repo session 'mp-myrepo' to be created")
+	}
+}
+
+func TestHandler_CreatePiece_MainSessionAlreadyExists_Skips(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", "/test-data")
+
+	fs := adapters.NewMemoryFS()
+	out := adapters.NewBufferOutput()
+	mockExec := adapters.NewMockExec()
+	deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
+	handler := piece.NewHandler(deps)
+
+	repoRoot := "/projects/myrepo"
+	pieceName := "test-feature"
+	piecesDir := "/test-data/monkeypuzzle/pieces"
+	worktreePath := filepath.Join(piecesDir, pieceName)
+
+	// Mock git repo root
+	mockExec.AddResponse("git", []string{"rev-parse", "--show-toplevel"}, []byte(repoRoot+"\n"), nil)
+	// Mock worktree creation
+	mockExec.AddResponse("git", []string{"worktree", "add", worktreePath}, nil, nil)
+	// Mock main repo session check - already exists
+	mockExec.AddResponse("tmux", []string{"has-session", "-t", "mp-myrepo"}, nil, nil)
+	// Mock piece session creation
+	mockExec.AddResponse("tmux", []string{"new-session", "-d", "-s", "mp-piece-" + pieceName, "-c", worktreePath}, nil, nil)
+
+	_, err := handler.CreatePiece(context.Background(), "/monkeypuzzle", pieceName, piece.CreatePieceOptions{})
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	// Verify main repo session was NOT created (only has-session check)
+	calls := mockExec.GetCalls()
+	mainSessionCreated := false
+	for _, call := range calls {
+		if call.Name == "tmux" && len(call.Args) >= 4 &&
+			call.Args[0] == "new-session" && call.Args[3] == "mp-myrepo" {
+			mainSessionCreated = true
+			break
+		}
+	}
+	if mainSessionCreated {
+		t.Error("main repo session should not be created when it already exists")
+	}
+}
+
+func TestHandler_CreatePiece_OverwriteSession(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", "/test-data")
+
+	fs := adapters.NewMemoryFS()
+	out := adapters.NewBufferOutput()
+	mockExec := adapters.NewMockExec()
+	deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
+	handler := piece.NewHandler(deps)
+
+	repoRoot := "/projects/myrepo"
+	pieceName := "test-feature"
+	piecesDir := "/test-data/monkeypuzzle/pieces"
+	worktreePath := filepath.Join(piecesDir, pieceName)
+
+	// Mock git repo root
+	mockExec.AddResponse("git", []string{"rev-parse", "--show-toplevel"}, []byte(repoRoot+"\n"), nil)
+	// Mock worktree creation
+	mockExec.AddResponse("git", []string{"worktree", "add", worktreePath}, nil, nil)
+	// Mock main repo session check - already exists
+	mockExec.AddResponse("tmux", []string{"has-session", "-t", "mp-myrepo"}, nil, nil)
+	// Mock kill existing session
+	mockExec.AddResponse("tmux", []string{"kill-session", "-t", "mp-myrepo"}, nil, nil)
+	// Mock main repo session creation
+	mockExec.AddResponse("tmux", []string{"new-session", "-d", "-s", "mp-myrepo", "-c", repoRoot}, nil, nil)
+	// Mock piece session creation
+	mockExec.AddResponse("tmux", []string{"new-session", "-d", "-s", "mp-piece-" + pieceName, "-c", worktreePath}, nil, nil)
+
+	opts := piece.CreatePieceOptions{OverwriteSession: true}
+	_, err := handler.CreatePiece(context.Background(), "/monkeypuzzle", pieceName, opts)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	// Verify old session was killed and new one created
+	calls := mockExec.GetCalls()
+	killedSession := false
+	createdSession := false
+	for _, call := range calls {
+		if call.Name == "tmux" && len(call.Args) >= 3 &&
+			call.Args[0] == "kill-session" && call.Args[2] == "mp-myrepo" {
+			killedSession = true
+		}
+		if call.Name == "tmux" && len(call.Args) >= 4 &&
+			call.Args[0] == "new-session" && call.Args[3] == "mp-myrepo" {
+			createdSession = true
+		}
+	}
+	if !killedSession {
+		t.Error("expected existing session to be killed")
+	}
+	if !createdSession {
+		t.Error("expected new session to be created")
 	}
 }

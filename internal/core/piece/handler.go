@@ -42,10 +42,15 @@ func NewHandler(deps core.Deps) *Handler {
 	}
 }
 
+// CreatePieceOptions configures piece creation behavior
+type CreatePieceOptions struct {
+	OverwriteSession bool // If true, replace existing main repo session
+}
+
 // CreatePiece creates a new git worktree with tmux session.
 // If pieceName is provided and non-empty, it will be used (after checking it doesn't exist).
 // If pieceName is empty, a name will be generated automatically.
-func (h *Handler) CreatePiece(ctx context.Context, monkeypuzzleSourceDir string, pieceName string) (PieceInfo, error) {
+func (h *Handler) CreatePiece(ctx context.Context, monkeypuzzleSourceDir string, pieceName string, opts CreatePieceOptions) (PieceInfo, error) {
 	wd, err := os.Getwd()
 	if err != nil {
 		return PieceInfo{}, fmt.Errorf("failed to get working directory: %w", err)
@@ -56,6 +61,9 @@ func (h *Handler) CreatePiece(ctx context.Context, monkeypuzzleSourceDir string,
 	if err != nil {
 		return PieceInfo{}, fmt.Errorf("not in a git repository: %w", err)
 	}
+
+	// Ensure main repo tmux session exists
+	h.ensureMainSession(ctx, repoRoot, opts.OverwriteSession)
 
 	// Get pieces directory
 	piecesDir, err := getPiecesDir()
@@ -158,7 +166,7 @@ type CurrentIssueMarker struct {
 // CreatePieceFromIssue creates a new piece from a markdown issue file.
 // It extracts the issue name, sanitizes it for use as a piece name, creates the piece,
 // and writes a marker file in the worktree to track the current issue.
-func (h *Handler) CreatePieceFromIssue(ctx context.Context, monkeypuzzleSourceDir, issuePath string) (PieceInfo, error) {
+func (h *Handler) CreatePieceFromIssue(ctx context.Context, monkeypuzzleSourceDir, issuePath string, opts CreatePieceOptions) (PieceInfo, error) {
 	wd, err := os.Getwd()
 	if err != nil {
 		return PieceInfo{}, fmt.Errorf("failed to get working directory: %w", err)
@@ -213,7 +221,7 @@ func (h *Handler) CreatePieceFromIssue(ctx context.Context, monkeypuzzleSourceDi
 	pieceName := SanitizePieceName(issueName)
 
 	// Create the piece using the sanitized name
-	info, err := h.CreatePiece(ctx, monkeypuzzleSourceDir, pieceName)
+	info, err := h.CreatePiece(ctx, monkeypuzzleSourceDir, pieceName, opts)
 	if err != nil {
 		return PieceInfo{}, err
 	}
@@ -918,6 +926,42 @@ func (h *Handler) AbandonPiece(ctx context.Context, pieceName string, opts Aband
 	})
 
 	return result, nil
+}
+
+// getMainSessionName returns the tmux session name for a repo's main worktree.
+// Format: mp-<repo-directory-name>
+func getMainSessionName(repoRoot string) string {
+	repoName := filepath.Base(repoRoot)
+	return fmt.Sprintf("mp-%s", repoName)
+}
+
+// ensureMainSession creates a tmux session for the main repo if it doesn't exist.
+// If overwrite is true, kills existing session and creates a new one.
+// Errors are logged as warnings but don't fail the operation.
+func (h *Handler) ensureMainSession(ctx context.Context, repoRoot string, overwrite bool) {
+	sessionName := getMainSessionName(repoRoot)
+
+	// Check if session already exists
+	if h.tmux.HasSession(ctx, sessionName) {
+		if !overwrite {
+			return
+		}
+		// Kill existing session before recreating
+		if err := h.tmux.KillSession(ctx, sessionName); err != nil {
+			h.deps.Output.Write(core.Message{
+				Type:    core.MsgWarning,
+				Content: fmt.Sprintf("Failed to kill existing session: %v", err),
+			})
+		}
+	}
+
+	// Create the session
+	if err := h.tmux.NewSession(ctx, sessionName, repoRoot); err != nil {
+		h.deps.Output.Write(core.Message{
+			Type:    core.MsgWarning,
+			Content: fmt.Sprintf("Failed to create main repo session: %v", err),
+		})
+	}
 }
 
 // updateIssueStatusToDone updates the issue status to done if currently in-progress.
