@@ -226,6 +226,40 @@ func TestHandler_CreatePiece_WithName(t *testing.T) {
 	}
 }
 
+func TestHandler_CreatePiece_SanitizesName(t *testing.T) {
+	// Set XDG_DATA_HOME to a test directory
+	t.Setenv("XDG_DATA_HOME", "/test-data")
+
+	fs := adapters.NewMemoryFS()
+	out := adapters.NewBufferOutput()
+	mockExec := adapters.NewMockExec()
+	deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
+	handler := piece.NewHandler(deps)
+
+	// Setup mock responses
+	repoRoot := "/repo"
+	mockExec.AddResponse("git", []string{"rev-parse", "--show-toplevel"}, []byte(repoRoot+"\n"), nil)
+
+	// Test with a name containing spaces and uppercase
+	inputName := "Remote Functions For Auth"
+	expectedSanitized := "remote-functions-for-auth"
+
+	// Mock the worktree creation with the sanitized name
+	piecesDir := "/test-data/monkeypuzzle/pieces"
+	worktreePath := filepath.Join(piecesDir, expectedSanitized)
+	mockExec.AddResponse("git", []string{"worktree", "add", worktreePath}, nil, nil)
+	mockExec.AddResponse("tmux", []string{"new-session", "-d", "-s", "mp-piece-" + expectedSanitized, "-c", worktreePath}, nil, nil)
+
+	info, err := handler.CreatePiece(context.Background(), "/monkeypuzzle", inputName)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	if info.Name != expectedSanitized {
+		t.Errorf("expected sanitized name %q, got %q", expectedSanitized, info.Name)
+	}
+}
+
 func TestHandler_CreatePiece_NameAlreadyExists(t *testing.T) {
 	// Set XDG_DATA_HOME to a test directory
 	t.Setenv("XDG_DATA_HOME", "/test-data")

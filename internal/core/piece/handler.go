@@ -71,7 +71,9 @@ func (h *Handler) CreatePiece(ctx context.Context, monkeypuzzleSourceDir string,
 			return PieceInfo{}, fmt.Errorf("failed to generate piece name: %w", err)
 		}
 	} else {
-		// Validate that the provided name doesn't already exist
+		// Sanitize the provided name (convert spaces to hyphens, lowercase, etc.)
+		pieceName = SanitizePieceName(pieceName)
+		// Validate that the sanitized name doesn't already exist
 		piecePath := filepath.Join(piecesDir, pieceName)
 		_, err := h.deps.FS.Stat(piecePath)
 		if err == nil {
