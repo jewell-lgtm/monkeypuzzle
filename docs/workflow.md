@@ -128,10 +128,12 @@ git push origin main
 
 ## Tmux Integration
 
-`mp piece new` creates a tmux session automatically:
+`mp piece new` creates tmux sessions automatically:
 
-- Session name: `mp-piece-<piece-name>`
-- Working directory: piece worktree path
+- **Main repo session**: `mp-<repo-name>` (created once, reused)
+- **Piece session**: `mp-piece-<piece-name>` (one per piece)
+
+This lets you always switch back to the main repo via `Ctrl+b s` session picker.
 
 Switch between pieces:
 
@@ -277,11 +279,19 @@ mp piece switch               # Interactive TUI with all pieces
 ls ~/.local/share/monkeypuzzle/pieces/  # Manual listing
 ```
 
-### Cleaning up old pieces
+### Cleaning up pieces
 
-After merging, worktrees remain. Clean up manually:
+**Merged pieces** - use cleanup to remove all merged pieces at once:
 
 ```bash
-# From main repo
-git worktree remove ~/.local/share/monkeypuzzle/pieces/<piece-name>
+mp piece cleanup              # Remove all merged pieces
+mp piece cleanup --dry-run    # Preview what would be removed
+```
+
+**Unmerged pieces** - use abandon to discard work:
+
+```bash
+mp piece abandon --name my-feature            # Remove piece
+mp piece abandon --name my-feature --force    # Discard uncommitted changes
+mp piece abandon --name foo --delete-branch   # Also delete git branch
 ```

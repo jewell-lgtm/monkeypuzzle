@@ -51,6 +51,7 @@ mp completion powershell | Out-String | Invoke-Expression
 | Flag | Completes To |
 |------|-------------|
 | `mp piece switch --name` | Available piece names |
+| `mp piece abandon --name` | Available piece names |
 | `mp piece new --issue` | Files (for issue paths) |
 | `mp init --issue-provider` | `markdown` |
 | `mp init --pr-provider` | `github` |
@@ -156,21 +157,23 @@ mp piece new --skip-switch  # Don't auto-switch to new piece
 
 ### Flags
 
-| Flag            | Description                                 | Default        |
-| --------------- | ------------------------------------------- | -------------- |
-| `--name`        | Custom piece name                           | Auto-generated |
-| `--issue`       | Create from issue file (sets name from title) | -            |
-| `--skip-switch` | Don't switch to the new piece after creation | `false`       |
+| Flag                  | Description                                   | Default        |
+| --------------------- | --------------------------------------------- | -------------- |
+| `--name`              | Custom piece name                             | Auto-generated |
+| `--issue`             | Create from issue file (sets name from title) | -              |
+| `--skip-switch`       | Don't switch to the new piece after creation  | `false`        |
+| `--overwrite-session` | Replace existing main repo tmux session       | `false`        |
 
 ### What it does
 
 1. Detects current git repository root
-2. Generates piece name: `piece-YYYYMMDD-HHMMSS` (or uses `--name`)
-3. Creates git worktree at `~/.local/share/monkeypuzzle/pieces/<piece-name>`
-4. Creates symlink `.monkeypuzzle-source` to source monkeypuzzle config
-5. Creates tmux session `mp-piece-<piece-name>` (if tmux available)
-6. Runs `on-piece-create.sh` hook (if exists)
-7. **Switches to the new piece** (unless `--skip-switch` is set)
+2. **Creates main repo tmux session** `mp-<repo-name>` if it doesn't exist
+3. Generates piece name: `piece-YYYYMMDD-HHMMSS` (or uses `--name`)
+4. Creates git worktree at `~/.local/share/monkeypuzzle/pieces/<piece-name>`
+5. Creates symlink `.monkeypuzzle-source` to source monkeypuzzle config
+6. Creates tmux session `mp-piece-<piece-name>` (if tmux available)
+7. Runs `on-piece-create.sh` hook (if exists)
+8. **Switches to the new piece** (unless `--skip-switch` is set)
 
 If the hook fails, the worktree and tmux session are cleaned up automatically.
 The auto-switch uses tmux attach/switch-client if available, otherwise prints the path.
@@ -351,6 +354,47 @@ mp piece cleanup --force      # Skip confirmation
 2. Checks if each piece's branch is merged (via git branch, PR, or remote)
 3. For merged pieces: removes worktree, kills tmux session, updates issue status
 4. Reports what was cleaned
+
+---
+
+## mp piece abandon
+
+Remove an unmerged piece (worktree, tmux session, optionally branch).
+
+### Usage
+
+```bash
+mp piece abandon                              # Interactive TUI selector
+mp piece abandon --name my-feature            # By name
+mp piece abandon --name my-feature --force    # Discard uncommitted changes
+mp piece abandon --name foo --delete-branch   # Also delete git branch
+```
+
+### Flags
+
+| Flag              | Description                               | Default |
+| ----------------- | ----------------------------------------- | ------- |
+| `--name`          | Piece name to abandon                     | -       |
+| `--force`         | Force removal even with uncommitted changes | `false` |
+| `--delete-branch` | Also delete the git branch                | `false` |
+
+### What it does
+
+1. Finds the piece by name (or shows TUI selector)
+2. Kills the tmux session if it exists
+3. Removes the git worktree (use `--force` to discard uncommitted changes)
+4. Optionally deletes the git branch (`--delete-branch`)
+
+### Output
+
+```json
+{
+  "piece_name": "my-feature",
+  "worktree_path": "/home/user/.local/share/monkeypuzzle/pieces/my-feature",
+  "branch_name": "my-feature",
+  "branch_deleted": true
+}
+```
 
 ---
 
