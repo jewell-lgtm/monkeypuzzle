@@ -7,202 +7,211 @@ description: Interact with the monkeypuzzle (mp) CLI for project workflow manage
 
 CLI tool for git worktree-based development workflow. Binary: `mp`
 
-## Commands Overview
+## Agent Usage
 
-| Command | Description |
-|---------|-------------|
-| `mp init` | Initialize monkeypuzzle in a project |
-| `mp piece` | Show current piece status |
-| `mp piece new` | Create new piece (worktree + tmux) |
-| `mp piece switch` | Switch to an existing piece |
-| `mp piece update` | Sync piece with main branch |
-| `mp piece merge` | Merge piece back to main |
-| `mp piece cleanup` | Remove merged piece worktrees |
-| `mp piece pr create` | Create GitHub PR for piece |
-| `mp issue create` | Create a markdown issue file |
+**All agent-compatible commands support:**
+- `--schema` flag to get expected JSON input format
+- JSON via stdin: `echo '{"field":"value"}' | mp <command>`
+- Flags: `mp <command> --field value`
+- JSON output to stdout
 
-## mp init
+**Commands for agents:**
 
-Initialize monkeypuzzle. Creates `.monkeypuzzle/monkeypuzzle.json`.
+| Command | Agent-friendly | Notes |
+|---------|----------------|-------|
+| `mp issue list` | ✅ | JSON output, stdin filter |
+| `mp issue create` | ✅ | JSON stdin or flags |
+| `mp piece new` | ✅ | Use `--skip-switch` flag |
+| `mp piece list --flat` | ✅ | JSON output |
+| `mp piece update` | ✅ | Run from worktree |
+| `mp piece merge` | ✅ | Run from worktree |
+| `mp piece pr create` | ✅ | Flags for title/body |
+| `mp piece cleanup --force` | ✅ | Use `--force` to skip prompts |
+| `mp piece abandon` | ✅ | Use `--name` and `--force` |
+| `mp init` | ✅ | JSON stdin or flags |
+
+## mp issue list
+
+List issues. Returns JSON array.
 
 ```bash
-# JSON stdin (recommended for agents)
-echo '{"name":"myproject","issue_provider":"markdown","pr_provider":"github"}' | mp init
+# All issues
+mp issue list
 
-# Get schema
-mp init --schema
+# Filter by status
+mp issue list --status todo
+mp issue list --status todo,in-progress
 
-# Flags
-mp init --name myproject --issue-provider markdown --pr-provider github
+# JSON stdin
+echo '{"status":["todo"]}' | mp issue list
+
+# Schema
+mp issue list --schema
 ```
 
-## mp piece
+**Output:**
+```json
+[
+  {"path": "issues/add-login.md", "title": "Add login", "status": "todo"},
+  {"path": "issues/fix-bug.md", "title": "Fix bug", "status": "in-progress"}
+]
+```
 
-Show current piece status. Returns JSON.
+## mp issue create
+
+Create markdown issue file. Returns JSON.
 
 ```bash
-mp piece
-# Output: {"in_piece":true,"piece_name":"my-feature","worktree_path":"/path","repo_root":"/repo"}
-# Or: {"in_piece":false,"repo_root":"/repo"}
+# JSON stdin
+echo '{"title":"Add feature","description":"Details"}' | mp issue create
+
+# Flags
+mp issue create --title "Add feature" --description "Details"
+
+# Schema
+mp issue create --schema
+```
+
+**Output:**
+```json
+{"path": "issues/add-feature.md", "title": "Add feature", "filename": "add-feature.md"}
 ```
 
 ## mp piece new
 
-Create new piece (git worktree + tmux session). **Auto-switches to the new piece by default.**
+Create new piece (git worktree). **Use `--skip-switch` for agents.**
 
 ```bash
-# From issue file (recommended)
-mp piece new --issue issues/my-feature.md
+# From issue (recommended)
+mp piece new --issue issues/add-login.md --skip-switch
 
-# With custom name
-mp piece new --name my-feature
-
-# Auto-generated name
-mp piece new
-
-# Don't auto-switch
-mp piece new --skip-switch
-```
-
-**Flags:**
-- `--issue <path>` - Create from issue file (sets piece name from issue title)
-- `--name <name>` - Custom piece name (mutually exclusive with --issue)
-- `--skip-switch` - Don't switch to the new piece after creation
-
-**Effects:**
-- Creates git worktree in `~/.local/share/monkeypuzzle/pieces/<name>`
-- Creates tmux session `mp-piece-<name>`
-- If from issue: updates issue status to `in-progress`
-- Switches to the new piece (tmux attach/switch-client or prints path)
-
-## mp piece switch
-
-Switch to an existing piece.
-
-```bash
-# Interactive TUI (sorted by modification time)
-mp piece switch
-
-# By name
-mp piece switch --name my-feature
+# With name
+mp piece new --name my-feature --skip-switch
 
 # JSON stdin
-echo '{"name":"my-feature"}' | mp piece switch
+echo '{"issue_path":"issues/add-login.md","skip_switch":true}' | mp piece new
 
-# Use with cd (when no tmux)
-cd $(mp piece switch --name my-feature)
+# Schema
+mp piece new --schema
 ```
 
-**Flags:**
-- `--name <name>` - Piece name to switch to
+**Output:**
+```json
+{"name": "add-login", "worktree_path": "/path/to/pieces/add-login", "session_name": "mp-piece-add-login"}
+```
 
-**Behavior:**
-- If tmux session exists and in tmux: uses `switch-client`
-- If tmux session exists and outside tmux: uses `attach-session`
-- If no tmux: prints path to stdout (use with `cd $(...)`)
+**Effects:**
+- Creates worktree in `~/.local/share/monkeypuzzle/pieces/<repo-id>/<name>`
+- If from issue: updates issue status to `in-progress`
+
+## mp piece list
+
+List all pieces.
+
+```bash
+# JSON output (for agents)
+mp piece list --flat
+
+# Tree view (human readable)
+mp piece list
+```
+
+**Output (--flat):**
+```json
+[
+  {"name": "feature-auth", "worktree_path": "/path", "parent": "main", "mod_time": "2025-01-04T10:00:00Z"},
+  {"name": "auth-oauth", "worktree_path": "/path", "parent": "feature-auth", "mod_time": "2025-01-04T11:00:00Z"}
+]
+```
 
 ## mp piece update
 
-Merge main branch into current piece. Must run from piece worktree.
+Merge main into current piece. Run from piece worktree.
 
 ```bash
 mp piece update
 mp piece update --main-branch develop
 ```
 
-**Flags:**
-- `--main-branch <branch>` - Branch to merge from (default: main)
-
 ## mp piece merge
 
-Squash-merge piece back into main. Must run from piece worktree.
+Squash-merge piece into main. Run from piece worktree.
 
 ```bash
 mp piece merge
 mp piece merge --main-branch develop
 ```
 
-**Flags:**
-- `--main-branch <branch>` - Branch to merge into (default: main)
-
-**Requirements:**
-- Must be in piece worktree
-- Main branch must not have new commits (run `mp piece update` first)
-
-## mp piece cleanup
-
-Remove worktrees for merged pieces.
-
-```bash
-mp piece cleanup              # Cleanup merged pieces
-mp piece cleanup --dry-run    # Preview what would be cleaned
-mp piece cleanup --force      # Skip confirmation
-```
-
-**Flags:**
-- `--dry-run` - Show what would be cleaned without making changes
-- `--force` - Skip confirmation prompts
-- `--main-branch <branch>` - Main branch to check merge status against
-
-**Effects:**
-- Removes git worktrees for merged branches
-- Kills associated tmux sessions
-- Updates linked issue status to `done`
-
 ## mp piece pr create
 
-Create GitHub PR for current piece. Must run from piece worktree.
+Create GitHub PR. Run from piece worktree.
 
 ```bash
-mp piece pr create
-mp piece pr create --title "My PR" --body "Description"
+mp piece pr create --title "Add login" --body "Implements login feature"
 mp piece pr create --base develop
 ```
 
-**Flags:**
-- `--title <title>` - PR title (default: issue title or piece name)
-- `--body <body>` - PR description
-- `--base <branch>` - Base branch (default: main)
+**Output:**
+```json
+{"url": "https://github.com/owner/repo/pull/123", "number": 123}
+```
 
-**Effects:**
-- Pushes branch to origin
-- Creates PR via `gh pr create`
-- Stores PR metadata in `.monkeypuzzle/pr-metadata.json`
+## mp piece cleanup
 
-## mp issue create
+Remove merged piece worktrees.
 
-Create a markdown issue file.
+```bash
+# For agents - skip confirmation
+mp piece cleanup --force
+
+# Preview
+mp piece cleanup --dry-run
+```
+
+## mp piece abandon
+
+Remove unmerged piece.
+
+```bash
+# For agents
+mp piece abandon --name my-feature --force
+
+# Also delete branch
+mp piece abandon --name my-feature --force --delete-branch
+
+# JSON stdin
+echo '{"name":"my-feature","force":true}' | mp piece abandon
+```
+
+## mp init
+
+Initialize monkeypuzzle in project.
 
 ```bash
 # JSON stdin
-echo '{"title":"My Feature","description":"Details here"}' | mp issue create
+echo '{"name":"myproject","issue_provider":"markdown","pr_provider":"github"}' | mp init
 
-# Flags
-mp issue create --title "My Feature" --description "Details"
+# Schema
+mp init --schema
 ```
 
-## Workflow Example
+## Workflow for Agents
 
 ```bash
-# 1. Initialize project
-echo '{"name":"myapp","issue_provider":"markdown","pr_provider":"github"}' | mp init
+# 1. List open issues
+mp issue list --status todo
 
-# 2. Create issue
-echo '{"title":"Add login"}' | mp issue create
+# 2. Create piece from issue
+echo '{"issue_path":"issues/add-login.md","skip_switch":true}' | mp piece new
 
-# 3. Start working on issue
-mp piece new --issue issues/add-login.md
+# 3. Work in the worktree path returned
+cd /path/to/worktree
 
-# 4. Switch to piece (if needed)
-mp piece switch --name add-login
+# 4. After commits, create PR
+mp piece pr create --title "Add login" --body "Description"
 
-# 5. (in piece worktree) Make changes, commit...
-
-# 6. Create PR
-mp piece pr create
-
-# 7. After PR merged, cleanup
-mp piece cleanup
+# 5. After merge, cleanup
+mp piece cleanup --force
 ```
 
 ## Directory Structure
@@ -214,9 +223,10 @@ project/
 └── issues/
     └── *.md
 
-~/.local/share/monkeypuzzle/pieces/
+~/.local/share/monkeypuzzle/pieces/<repo-id>/
 └── <piece-name>/          # Worktree
     └── .monkeypuzzle/
-        ├── current-issue.json   # Link to issue
-        └── pr-metadata.json     # PR info
+        ├── current-issue.json
+        ├── piece-metadata.json
+        └── pr-metadata.json
 ```
