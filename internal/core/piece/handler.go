@@ -13,6 +13,7 @@ import (
 	"github.com/jewell-lgtm/monkeypuzzle/internal/adapters"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
 	initcmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/init"
+	"github.com/jewell-lgtm/monkeypuzzle/internal/paths"
 )
 
 const (
@@ -559,17 +560,10 @@ func (h *Handler) buildSquashCommitMessage(pieceName string, commitMsgs []string
 	return b.String()
 }
 
-// getPiecesDir returns the directory for storing pieces, using XDG_DATA_HOME
+// getPiecesDir returns the directory for storing pieces.
+// Uses GAP (go-app-paths) for platform-appropriate paths.
 func getPiecesDir() (string, error) {
-	dataHome := os.Getenv("XDG_DATA_HOME")
-	if dataHome == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", fmt.Errorf("failed to get home directory: %w", err)
-		}
-		dataHome = filepath.Join(home, ".local", "share")
-	}
-	return filepath.Join(dataHome, "monkeypuzzle", "pieces"), nil
+	return paths.PiecesDir()
 }
 
 // MergeStatus represents the merge status of a branch

@@ -14,6 +14,7 @@ import (
 	"github.com/jewell-lgtm/monkeypuzzle/internal/adapters"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core/piece"
+	"github.com/jewell-lgtm/monkeypuzzle/internal/paths"
 )
 
 // Integration tests for hooks that use real filesystem and shell scripts.
@@ -363,13 +364,16 @@ func TestIntegration_CreatePieceFromIssue_WithFrontmatter(t *testing.T) {
 		t.Skip("git not available")
 	}
 
-	// Set XDG_DATA_HOME to a temp directory
+	// Override data dir for tests
 	tmpDataHome, err := os.MkdirTemp("", "mp-data-*")
 	if err != nil {
 		t.Fatalf("failed to create temp data dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDataHome)
-	t.Setenv("XDG_DATA_HOME", tmpDataHome)
+	t.Cleanup(func() {
+		os.RemoveAll(tmpDataHome)
+		paths.ResetDataDir()
+	})
+	paths.SetDataDir(tmpDataHome)
 
 	// Create temp directory for test repo
 	tmpDir, err := os.MkdirTemp("", "mp-integration-*")
@@ -521,13 +525,16 @@ func TestIntegration_CreatePieceFromIssue_WithH1Heading(t *testing.T) {
 		t.Skip("git not available")
 	}
 
-	// Set XDG_DATA_HOME to a temp directory
+	// Override data dir for tests
 	tmpDataHome, err := os.MkdirTemp("", "mp-data-*")
 	if err != nil {
 		t.Fatalf("failed to create temp data dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDataHome)
-	t.Setenv("XDG_DATA_HOME", tmpDataHome)
+	t.Cleanup(func() {
+		os.RemoveAll(tmpDataHome)
+		paths.ResetDataDir()
+	})
+	paths.SetDataDir(tmpDataHome)
 
 	// Create temp directory for test repo
 	tmpDir, err := os.MkdirTemp("", "mp-integration-*")
@@ -595,13 +602,16 @@ func TestIntegration_CreatePieceFromIssue_WithFilenameFallback(t *testing.T) {
 		t.Skip("git not available")
 	}
 
-	// Set XDG_DATA_HOME to a temp directory
+	// Override data dir for tests
 	tmpDataHome, err := os.MkdirTemp("", "mp-data-*")
 	if err != nil {
 		t.Fatalf("failed to create temp data dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDataHome)
-	t.Setenv("XDG_DATA_HOME", tmpDataHome)
+	t.Cleanup(func() {
+		os.RemoveAll(tmpDataHome)
+		paths.ResetDataDir()
+	})
+	paths.SetDataDir(tmpDataHome)
 
 	// Create temp directory for test repo
 	tmpDir, err := os.MkdirTemp("", "mp-integration-*")
@@ -669,13 +679,16 @@ func TestIntegration_CreatePieceFromIssue_SanitizesName(t *testing.T) {
 		t.Skip("git not available")
 	}
 
-	// Set XDG_DATA_HOME to a temp directory
+	// Override data dir for tests
 	tmpDataHome, err := os.MkdirTemp("", "mp-data-*")
 	if err != nil {
 		t.Fatalf("failed to create temp data dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDataHome)
-	t.Setenv("XDG_DATA_HOME", tmpDataHome)
+	t.Cleanup(func() {
+		os.RemoveAll(tmpDataHome)
+		paths.ResetDataDir()
+	})
+	paths.SetDataDir(tmpDataHome)
 
 	// Create temp directory for test repo
 	tmpDir, err := os.MkdirTemp("", "mp-integration-*")
@@ -816,13 +829,16 @@ func TestIntegration_CreatePieceFromIssue_UpdatesStatusToInProgress(t *testing.T
 		t.Skip("git not available")
 	}
 
-	// Set XDG_DATA_HOME to a temp directory
+	// Override data dir for tests
 	tmpDataHome, err := os.MkdirTemp("", "mp-data-*")
 	if err != nil {
 		t.Fatalf("failed to create temp data dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDataHome)
-	t.Setenv("XDG_DATA_HOME", tmpDataHome)
+	t.Cleanup(func() {
+		os.RemoveAll(tmpDataHome)
+		paths.ResetDataDir()
+	})
+	paths.SetDataDir(tmpDataHome)
 
 	// Create temp directory for test repo
 	tmpDir, err := os.MkdirTemp("", "mp-integration-*")
@@ -899,13 +915,16 @@ func TestIntegration_CreatePieceFromIssue_SkipsUpdateIfNotTodo(t *testing.T) {
 		t.Skip("git not available")
 	}
 
-	// Set XDG_DATA_HOME to a temp directory
+	// Override data dir for tests
 	tmpDataHome, err := os.MkdirTemp("", "mp-data-*")
 	if err != nil {
 		t.Fatalf("failed to create temp data dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDataHome)
-	t.Setenv("XDG_DATA_HOME", tmpDataHome)
+	t.Cleanup(func() {
+		os.RemoveAll(tmpDataHome)
+		paths.ResetDataDir()
+	})
+	paths.SetDataDir(tmpDataHome)
 
 	// Create temp directory for test repo
 	tmpDir, err := os.MkdirTemp("", "mp-integration-*")
@@ -980,13 +999,16 @@ func TestIntegration_ListPieces_And_SwitchPiece(t *testing.T) {
 		t.Skip("git not available")
 	}
 
-	// Set XDG_DATA_HOME to a temp directory
+	// Override data dir for tests
 	tmpDataHome, err := os.MkdirTemp("", "mp-data-*")
 	if err != nil {
 		t.Fatalf("failed to create temp data dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDataHome)
-	t.Setenv("XDG_DATA_HOME", tmpDataHome)
+	t.Cleanup(func() {
+		os.RemoveAll(tmpDataHome)
+		paths.ResetDataDir()
+	})
+	paths.SetDataDir(tmpDataHome)
 
 	// Create temp directory for test repo
 	tmpDir, err := os.MkdirTemp("", "mp-integration-*")
@@ -1097,13 +1119,16 @@ func TestIntegration_CreatePiece_ThenSwitch(t *testing.T) {
 		t.Skip("git not available")
 	}
 
-	// Set XDG_DATA_HOME to a temp directory
+	// Override data dir for tests
 	tmpDataHome, err := os.MkdirTemp("", "mp-data-*")
 	if err != nil {
 		t.Fatalf("failed to create temp data dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDataHome)
-	t.Setenv("XDG_DATA_HOME", tmpDataHome)
+	t.Cleanup(func() {
+		os.RemoveAll(tmpDataHome)
+		paths.ResetDataDir()
+	})
+	paths.SetDataDir(tmpDataHome)
 
 	// Create temp directory for test repo
 	tmpDir, err := os.MkdirTemp("", "mp-integration-*")
@@ -1167,13 +1192,16 @@ func TestIntegration_CreatePieceWithInput_FromIssue(t *testing.T) {
 		t.Skip("git not available")
 	}
 
-	// Set XDG_DATA_HOME to a temp directory
+	// Override data dir for tests
 	tmpDataHome, err := os.MkdirTemp("", "mp-data-*")
 	if err != nil {
 		t.Fatalf("failed to create temp data dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDataHome)
-	t.Setenv("XDG_DATA_HOME", tmpDataHome)
+	t.Cleanup(func() {
+		os.RemoveAll(tmpDataHome)
+		paths.ResetDataDir()
+	})
+	paths.SetDataDir(tmpDataHome)
 
 	// Create temp directory for test repo
 	tmpDir, err := os.MkdirTemp("", "mp-integration-*")
@@ -1259,13 +1287,16 @@ func TestIntegration_CreatePieceWithInput_WithName(t *testing.T) {
 		t.Skip("git not available")
 	}
 
-	// Set XDG_DATA_HOME to a temp directory
+	// Override data dir for tests
 	tmpDataHome, err := os.MkdirTemp("", "mp-data-*")
 	if err != nil {
 		t.Fatalf("failed to create temp data dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDataHome)
-	t.Setenv("XDG_DATA_HOME", tmpDataHome)
+	t.Cleanup(func() {
+		os.RemoveAll(tmpDataHome)
+		paths.ResetDataDir()
+	})
+	paths.SetDataDir(tmpDataHome)
 
 	// Create temp directory for test repo
 	tmpDir, err := os.MkdirTemp("", "mp-integration-*")

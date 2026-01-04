@@ -32,7 +32,7 @@ var pieceNewCmd = &cobra.Command{
 	Use:   "new",
 	Short: "Create a new puzzle piece",
 	Long: `Create a new puzzle piece by initializing a git worktree and opening a tmux session.
-The worktree will be created in XDG_DATA_HOME/monkeypuzzle/pieces (default: ~/.local/share/monkeypuzzle/pieces).`,
+The worktree will be created in the platform-appropriate data directory (e.g., ~/Library/Application Support/monkeypuzzle/pieces on macOS, ~/.local/share/monkeypuzzle/pieces on Linux).`,
 	RunE: runPieceNew,
 }
 

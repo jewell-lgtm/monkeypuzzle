@@ -12,11 +12,13 @@ import (
 	"github.com/jewell-lgtm/monkeypuzzle/internal/adapters"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core/piece"
+	"github.com/jewell-lgtm/monkeypuzzle/internal/paths"
 )
 
 func TestHandler_CreatePiece(t *testing.T) {
-	// Set XDG_DATA_HOME to a test directory
-	t.Setenv("XDG_DATA_HOME", "/test-data")
+	// Override data dir for tests
+	paths.SetDataDir("/test-data/monkeypuzzle")
+	t.Cleanup(paths.ResetDataDir)
 
 	fs := adapters.NewMemoryFS()
 	out := adapters.NewBufferOutput()
@@ -197,8 +199,9 @@ func TestHandler_GeneratePieceName(t *testing.T) {
 }
 
 func TestHandler_CreatePiece_WithName(t *testing.T) {
-	// Set XDG_DATA_HOME to a test directory
-	t.Setenv("XDG_DATA_HOME", "/test-data")
+	// Override data dir for tests
+	paths.SetDataDir("/test-data/monkeypuzzle")
+	t.Cleanup(paths.ResetDataDir)
 
 	fs := adapters.NewMemoryFS()
 	out := adapters.NewBufferOutput()
@@ -227,8 +230,9 @@ func TestHandler_CreatePiece_WithName(t *testing.T) {
 }
 
 func TestHandler_CreatePiece_SanitizesName(t *testing.T) {
-	// Set XDG_DATA_HOME to a test directory
-	t.Setenv("XDG_DATA_HOME", "/test-data")
+	// Override data dir for tests
+	paths.SetDataDir("/test-data/monkeypuzzle")
+	t.Cleanup(paths.ResetDataDir)
 
 	fs := adapters.NewMemoryFS()
 	out := adapters.NewBufferOutput()
@@ -261,8 +265,9 @@ func TestHandler_CreatePiece_SanitizesName(t *testing.T) {
 }
 
 func TestHandler_CreatePiece_NameAlreadyExists(t *testing.T) {
-	// Set XDG_DATA_HOME to a test directory
-	t.Setenv("XDG_DATA_HOME", "/test-data")
+	// Override data dir for tests
+	paths.SetDataDir("/test-data/monkeypuzzle")
+	t.Cleanup(paths.ResetDataDir)
 
 	fs := adapters.NewMemoryFS()
 	out := adapters.NewBufferOutput()
@@ -560,8 +565,9 @@ func TestHandler_UpdatePiece_NoHooks_Success(t *testing.T) {
 }
 
 func TestHandler_CreatePiece_OnPieceCreateHookFails_CleansUp(t *testing.T) {
-	// Set XDG_DATA_HOME to a test directory
-	t.Setenv("XDG_DATA_HOME", "/test-data")
+	// Override data dir for tests
+	paths.SetDataDir("/test-data/monkeypuzzle")
+	t.Cleanup(paths.ResetDataDir)
 
 	fs := adapters.NewMemoryFS()
 	out := adapters.NewBufferOutput()
@@ -620,8 +626,9 @@ func TestHandler_CreatePiece_OnPieceCreateHookFails_CleansUp(t *testing.T) {
 // ============================================================================
 
 func TestHandler_CreatePieceFromIssue_WithFrontmatter(t *testing.T) {
-	// Set XDG_DATA_HOME to a test directory
-	t.Setenv("XDG_DATA_HOME", "/test-data")
+	// Override data dir for tests
+	paths.SetDataDir("/test-data/monkeypuzzle")
+	t.Cleanup(paths.ResetDataDir)
 
 	fs := adapters.NewMemoryFS()
 	out := adapters.NewBufferOutput()
@@ -699,8 +706,9 @@ Content here.
 }
 
 func TestHandler_CreatePieceFromIssue_WithH1(t *testing.T) {
-	// Set XDG_DATA_HOME to a test directory
-	t.Setenv("XDG_DATA_HOME", "/test-data")
+	// Override data dir for tests
+	paths.SetDataDir("/test-data/monkeypuzzle")
+	t.Cleanup(paths.ResetDataDir)
 
 	fs := adapters.NewMemoryFS()
 	out := adapters.NewBufferOutput()
@@ -755,8 +763,9 @@ Content here.
 }
 
 func TestHandler_CreatePieceFromIssue_SanitizesName(t *testing.T) {
-	// Set XDG_DATA_HOME to a test directory
-	t.Setenv("XDG_DATA_HOME", "/test-data")
+	// Override data dir for tests
+	paths.SetDataDir("/test-data/monkeypuzzle")
+	t.Cleanup(paths.ResetDataDir)
 
 	fs := adapters.NewMemoryFS()
 	out := adapters.NewBufferOutput()
@@ -1221,7 +1230,8 @@ func TestHandler_IsBranchMerged_GHError_FallsBackToGit(t *testing.T) {
 // ============================================================================
 
 func TestHandler_CleanupMergedPieces_NoPieces(t *testing.T) {
-	t.Setenv("XDG_DATA_HOME", "/test-data")
+	paths.SetDataDir("/test-data/monkeypuzzle")
+	t.Cleanup(paths.ResetDataDir)
 
 	fs := adapters.NewMemoryFS()
 	out := adapters.NewBufferOutput()
@@ -1242,7 +1252,8 @@ func TestHandler_CleanupMergedPieces_NoPieces(t *testing.T) {
 }
 
 func TestHandler_CleanupMergedPieces_DryRun(t *testing.T) {
-	t.Setenv("XDG_DATA_HOME", "/test-data")
+	paths.SetDataDir("/test-data/monkeypuzzle")
+	t.Cleanup(paths.ResetDataDir)
 
 	fs := adapters.NewMemoryFS()
 	out := adapters.NewBufferOutput()
@@ -1295,7 +1306,8 @@ func TestHandler_CleanupMergedPieces_DryRun(t *testing.T) {
 }
 
 func TestHandler_CleanupMergedPieces_WithIssue(t *testing.T) {
-	t.Setenv("XDG_DATA_HOME", "/test-data")
+	paths.SetDataDir("/test-data/monkeypuzzle")
+	t.Cleanup(paths.ResetDataDir)
 
 	fs := adapters.NewMemoryFS()
 	out := adapters.NewBufferOutput()
@@ -1366,7 +1378,8 @@ status: in-progress
 }
 
 func TestHandler_CleanupMergedPieces_SkipsUnmerged(t *testing.T) {
-	t.Setenv("XDG_DATA_HOME", "/test-data")
+	paths.SetDataDir("/test-data/monkeypuzzle")
+	t.Cleanup(paths.ResetDataDir)
 
 	fs := adapters.NewMemoryFS()
 	out := adapters.NewBufferOutput()
@@ -1402,7 +1415,8 @@ func TestHandler_CleanupMergedPieces_SkipsUnmerged(t *testing.T) {
 }
 
 func TestHandler_CleanupMergedPieces_NoIssueMarker(t *testing.T) {
-	t.Setenv("XDG_DATA_HOME", "/test-data")
+	paths.SetDataDir("/test-data/monkeypuzzle")
+	t.Cleanup(paths.ResetDataDir)
 
 	fs := adapters.NewMemoryFS()
 	out := adapters.NewBufferOutput()
@@ -1473,8 +1487,9 @@ func TestHandler_ListPieces_EmptyDir(t *testing.T) {
 	deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
 	handler := piece.NewHandler(deps)
 
-	// Set XDG_DATA_HOME to match the MemoryFS paths
-	t.Setenv("XDG_DATA_HOME", "/test-data")
+	// Override data dir for tests
+	paths.SetDataDir("/test-data/monkeypuzzle")
+	t.Cleanup(paths.ResetDataDir)
 
 	// Create empty pieces directory
 	piecesDir := "/test-data/monkeypuzzle/pieces"
@@ -1497,8 +1512,9 @@ func TestHandler_ListPieces_WithPieces(t *testing.T) {
 	deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
 	handler := piece.NewHandler(deps)
 
-	// Set XDG_DATA_HOME to match the MemoryFS paths
-	t.Setenv("XDG_DATA_HOME", "/test-data")
+	// Override data dir for tests
+	paths.SetDataDir("/test-data/monkeypuzzle")
+	t.Cleanup(paths.ResetDataDir)
 
 	// Create pieces directory with pieces
 	piecesDir := "/test-data/monkeypuzzle/pieces"
@@ -1549,8 +1565,9 @@ func TestHandler_SwitchPiece_NotFound(t *testing.T) {
 	deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
 	handler := piece.NewHandler(deps)
 
-	// Set XDG_DATA_HOME to match the MemoryFS paths
-	t.Setenv("XDG_DATA_HOME", "/test-data")
+	// Override data dir for tests
+	paths.SetDataDir("/test-data/monkeypuzzle")
+	t.Cleanup(paths.ResetDataDir)
 
 	// Create pieces directory with one piece
 	piecesDir := "/test-data/monkeypuzzle/pieces"
@@ -1578,8 +1595,9 @@ func TestHandler_SwitchPiece_PrintsPath_NoSession(t *testing.T) {
 	deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
 	handler := piece.NewHandler(deps)
 
-	// Set XDG_DATA_HOME to match the MemoryFS paths
-	t.Setenv("XDG_DATA_HOME", "/test-data")
+	// Override data dir for tests
+	paths.SetDataDir("/test-data/monkeypuzzle")
+	t.Cleanup(paths.ResetDataDir)
 
 	// Create pieces directory with one piece
 	piecesDir := "/test-data/monkeypuzzle/pieces"
@@ -1625,7 +1643,8 @@ func TestHandler_SwitchPiece_NoPiecesExist(t *testing.T) {
 // ============================================================================
 
 func TestHandler_CreatePiece_CreatesMainRepoSession(t *testing.T) {
-	t.Setenv("XDG_DATA_HOME", "/test-data")
+	paths.SetDataDir("/test-data/monkeypuzzle")
+	t.Cleanup(paths.ResetDataDir)
 
 	fs := adapters.NewMemoryFS()
 	out := adapters.NewBufferOutput()
@@ -1674,7 +1693,8 @@ func TestHandler_CreatePiece_CreatesMainRepoSession(t *testing.T) {
 }
 
 func TestHandler_CreatePiece_MainSessionAlreadyExists_Skips(t *testing.T) {
-	t.Setenv("XDG_DATA_HOME", "/test-data")
+	paths.SetDataDir("/test-data/monkeypuzzle")
+	t.Cleanup(paths.ResetDataDir)
 
 	fs := adapters.NewMemoryFS()
 	out := adapters.NewBufferOutput()
@@ -1717,7 +1737,8 @@ func TestHandler_CreatePiece_MainSessionAlreadyExists_Skips(t *testing.T) {
 }
 
 func TestHandler_CreatePiece_OverwriteSession(t *testing.T) {
-	t.Setenv("XDG_DATA_HOME", "/test-data")
+	paths.SetDataDir("/test-data/monkeypuzzle")
+	t.Cleanup(paths.ResetDataDir)
 
 	fs := adapters.NewMemoryFS()
 	out := adapters.NewBufferOutput()
