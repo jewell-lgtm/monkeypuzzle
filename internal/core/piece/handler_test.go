@@ -1791,3 +1791,111 @@ func TestHandler_CreatePiece_OverwriteSession(t *testing.T) {
 		t.Error("expected new session to be created")
 	}
 }
+
+// ============================================================================
+// Piece Metadata Integration Tests
+// ============================================================================
+
+func TestHandler_CreatePiece_WritesPieceMetadata(t *testing.T) {
+	paths.SetDataDir("/test-data/monkeypuzzle")
+	t.Cleanup(paths.ResetDataDir)
+
+	fs := adapters.NewMemoryFS()
+	out := adapters.NewBufferOutput()
+	mockExec := adapters.NewMockExec()
+	deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
+	handler := piece.NewHandler(deps)
+
+	repoRoot := "/projects/myrepo"
+	pieceName := "test-feature"
+	piecesDir := "/test-data/monkeypuzzle/pieces"
+	worktreePath := filepath.Join(piecesDir, pieceName)
+
+	// Mock git repo root
+	mockExec.AddResponse("git", []string{"rev-parse", "--show-toplevel"}, []byte(repoRoot+"\n"), nil)
+	// Mock getting current branch for metadata
+	mockExec.AddResponse("git", []string{"rev-parse", "--abbrev-ref", "HEAD"}, []byte("main\n"), nil)
+	// Mock worktree creation
+	mockExec.AddResponse("git", []string{"worktree", "add", worktreePath}, nil, nil)
+	// Mock main repo session check - already exists
+	mockExec.AddResponse("tmux", []string{"has-session", "-t", "mp-myrepo"}, nil, nil)
+	// Mock piece session creation
+	mockExec.AddResponse("tmux", []string{"new-session", "-d", "-s", "mp-piece-" + pieceName, "-c", worktreePath}, nil, nil)
+
+	info, err := handler.CreatePiece(context.Background(), "/monkeypuzzle", pieceName, piece.CreatePieceOptions{})
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	if info.Name != pieceName {
+		t.Errorf("expected piece name %q, got %q", pieceName, info.Name)
+	}
+
+	// Verify piece metadata was written
+	metadata, err := piece.ReadPieceMetadata(worktreePath, fs)
+	if err != nil {
+		t.Fatalf("failed to read piece metadata: %v", err)
+	}
+
+	// Parent should be "main" when created from main repo
+	if metadata.Parent != "main" {
+		t.Errorf("expected Parent 'main', got %q", metadata.Parent)
+	}
+
+	// CreatedFromBranch should be the branch we were on when creating the piece
+	if metadata.CreatedFromBranch != "main" {
+		t.Errorf("expected CreatedFromBranch 'main', got %q", metadata.CreatedFromBranch)
+	}
+}
+
+func TestHandler_CreatePiece_WritesPieceMetadata_FromFeatureBranch(t *testing.T) {
+	paths.SetDataDir("/test-data/monkeypuzzle")
+	t.Cleanup(paths.ResetDataDir)
+
+	fs := adapters.NewMemoryFS()
+	out := adapters.NewBufferOutput()
+	mockExec := adapters.NewMockExec()
+	deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
+	handler := piece.NewHandler(deps)
+
+	repoRoot := "/projects/myrepo"
+	pieceName := "child-feature"
+	piecesDir := "/test-data/monkeypuzzle/pieces"
+	worktreePath := filepath.Join(piecesDir, pieceName)
+
+	// Mock git repo root
+	mockExec.AddResponse("git", []string{"rev-parse", "--show-toplevel"}, []byte(repoRoot+"\n"), nil)
+	// Mock getting current branch for metadata - we're on a feature branch
+	mockExec.AddResponse("git", []string{"rev-parse", "--abbrev-ref", "HEAD"}, []byte("parent-feature\n"), nil)
+	// Mock worktree creation
+	mockExec.AddResponse("git", []string{"worktree", "add", worktreePath}, nil, nil)
+	// Mock main repo session check - already exists
+	mockExec.AddResponse("tmux", []string{"has-session", "-t", "mp-myrepo"}, nil, nil)
+	// Mock piece session creation
+	mockExec.AddResponse("tmux", []string{"new-session", "-d", "-s", "mp-piece-" + pieceName, "-c", worktreePath}, nil, nil)
+
+	info, err := handler.CreatePiece(context.Background(), "/monkeypuzzle", pieceName, piece.CreatePieceOptions{})
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	if info.Name != pieceName {
+		t.Errorf("expected piece name %q, got %q", pieceName, info.Name)
+	}
+
+	// Verify piece metadata was written
+	metadata, err := piece.ReadPieceMetadata(worktreePath, fs)
+	if err != nil {
+		t.Fatalf("failed to read piece metadata: %v", err)
+	}
+
+	// Parent should still be "main" for now (future issue will allow --parent flag)
+	if metadata.Parent != "main" {
+		t.Errorf("expected Parent 'main', got %q", metadata.Parent)
+	}
+
+	// CreatedFromBranch should be the feature branch we were on
+	if metadata.CreatedFromBranch != "parent-feature" {
+		t.Errorf("expected CreatedFromBranch 'parent-feature', got %q", metadata.CreatedFromBranch)
+	}
+}
