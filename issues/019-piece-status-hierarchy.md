@@ -1,6 +1,6 @@
 ---
 title: Show hierarchy in mp piece status
-status: todo
+status: done
 ---
 
 # Show hierarchy in mp piece status
