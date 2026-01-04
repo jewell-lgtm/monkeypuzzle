@@ -1,6 +1,6 @@
 ---
 title: CLI input mode consistency
-status: todo
+status: done
 ---
 
 # CLI input mode consistency
