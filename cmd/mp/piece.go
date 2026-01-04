@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
@@ -75,6 +76,13 @@ Use --delete-branch to also remove the git branch.`,
 	RunE: runPieceAbandon,
 }
 
+var pieceListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List all pieces",
+	Long:  `List all pieces in a tree view showing parent/child relationships. Use --flat for a simple list.`,
+	RunE:  runPieceList,
+}
+
 var flagMainBranch string
 var flagSwitchName string
 var flagPieceName string
@@ -91,6 +99,7 @@ var flagPieceMergeSchema bool
 var flagPieceCleanupSchema bool
 var flagPieceSwitchSchema bool
 var flagPieceAbandonSchema bool
+var flagPieceListFlat bool
 
 func init() {
 	pieceNewCmd.Flags().StringVar(&flagPieceName, "name", "", "Optional piece name (default: auto-generated)")
@@ -113,12 +122,14 @@ func init() {
 	pieceAbandonCmd.Flags().BoolVar(&flagDeleteBranch, "delete-branch", false, "Also delete the git branch")
 	pieceAbandonCmd.Flags().BoolVar(&flagPieceAbandonSchema, "schema", false, "Output JSON schema and exit")
 	pieceCmd.Flags().StringVar(&flagMainBranch, "main-branch", "main", "Main branch name (default: main)")
+	pieceListCmd.Flags().BoolVar(&flagPieceListFlat, "flat", false, "Display pieces in a flat list instead of tree view")
 	pieceCmd.AddCommand(pieceNewCmd)
 	pieceCmd.AddCommand(pieceUpdateCmd)
 	pieceCmd.AddCommand(pieceMergeCmd)
 	pieceCmd.AddCommand(pieceCleanupCmd)
 	pieceCmd.AddCommand(pieceSwitchCmd)
 	pieceCmd.AddCommand(pieceAbandonCmd)
+	pieceCmd.AddCommand(pieceListCmd)
 	rootCmd.AddCommand(pieceCmd)
 
 	// Register completion functions (errors ignored - completion is optional)
@@ -757,6 +768,100 @@ func runAbandonTUI(ctx context.Context, handler *piececmd.Handler) (piececmd.Aba
 	return piececmd.AbandonInput{Name: pieces[finalModel.Selected].Name}, nil
 }
 
+func runPieceList(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
+	deps := core.Deps{
+		FS:     adapters.NewOSFS(""),
+		Output: adapters.NewTextOutput(os.Stderr),
+		Exec:   adapters.NewOSExec(),
+	}
+	handler := piececmd.NewHandler(deps)
+
+	pieces, err := handler.ListPieces(ctx, "")
+	if err != nil {
+		return err
+	}
+
+	// Output JSON to stdout
+	if flagPieceListFlat {
+		// Flat list: just output pieces as JSON array
+		jsonData, err := json.MarshalIndent(pieces, "", "  ")
+		if err != nil {
+			return fmt.Errorf("failed to marshal result: %w", err)
+		}
+		fmt.Println(string(jsonData))
+	} else {
+		// Tree view: build tree and render
+		tree := piececmd.BuildPieceTree(pieces)
+		renderTree(tree)
+	}
+
+	return nil
+}
+
+// renderTree renders a piece tree to stdout in human-readable format
+func renderTree(root *piececmd.TreeNode) {
+	if root == nil {
+		return
+	}
+
+	// Print "main" as root
+	fmt.Println("main")
+
+	// Render children recursively
+	renderTreeNodes(root.Children, "")
+}
+
+// renderTreeNodes recursively renders tree nodes with proper indentation
+func renderTreeNodes(nodes []*piececmd.TreeNode, prefix string) {
+	for i, node := range nodes {
+		isLastChild := i == len(nodes)-1
+		
+		// Determine the connector symbols
+		var connector, childPrefix string
+		if isLastChild {
+			connector = "└── "
+			childPrefix = prefix + "    "
+		} else {
+			connector = "├── "
+			childPrefix = prefix + "│   "
+		}
+
+		// Handle orphan node
+		if node.IsOrphan {
+			fmt.Printf("%s%s(orphaned)\n", prefix, connector)
+			renderTreeNodes(node.Children, childPrefix)
+			continue
+		}
+
+		// Handle regular piece node
+		if node.Piece != nil {
+			timeStr := formatTimeAgo(node.Piece.ModTime)
+			fmt.Printf("%s%s%s (%s)\n", prefix, connector, node.Piece.Name, timeStr)
+			renderTreeNodes(node.Children, childPrefix)
+		}
+	}
+}
+
+// formatTimeAgo formats a time as "X ago" (e.g., "1h ago", "30m ago")
+func formatTimeAgo(t time.Time) string {
+	if t.IsZero() {
+		return "unknown"
+	}
+	
+	duration := time.Since(t)
+	
+	if duration < time.Minute {
+		return fmt.Sprintf("%ds ago", int(duration.Seconds()))
+	} else if duration < time.Hour {
+		return fmt.Sprintf("%dm ago", int(duration.Minutes()))
+	} else if duration < 24*time.Hour {
+		return fmt.Sprintf("%dh ago", int(duration.Hours()))
+	} else {
+		days := int(duration.Hours() / 24)
+		return fmt.Sprintf("%dd ago", days)
+	}
+}
 
 // findMonkeypuzzleSource tries to find the monkeypuzzle source directory
 // by walking up from the current directory looking for go.mod with monkeypuzzle module

@@ -52,6 +52,7 @@ type PieceListItem struct {
 	SessionName  string    `json:"session_name"`
 	HasSession   bool      `json:"has_session"`
 	ModTime      time.Time `json:"mod_time"`
+	Parent       string    `json:"parent,omitempty"` // Parent piece name, or "main" for root pieces
 }
 
 // SwitchResult contains the result of a switch operation.
