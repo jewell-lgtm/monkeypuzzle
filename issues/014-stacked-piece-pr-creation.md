@@ -1,6 +1,6 @@
 ---
 title: Stack-aware PR creation
-status: todo
+status: done
 ---
 
 # Stack-aware PR creation
