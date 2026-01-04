@@ -20,6 +20,8 @@ var (
 	flagIssueTitle       string
 	flagIssueDescription string
 	flagIssueSchema      bool
+	flagIssueListStatus  []string
+	flagIssueListSchema  bool
 )
 
 var issueCmd = &cobra.Command{
@@ -46,11 +48,33 @@ Examples:
 	RunE: runIssueCreate,
 }
 
+var issueListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List issues",
+	Long: `List issues from the configured issues directory.
+
+Modes:
+  Flags/stdin:  Filter by status
+  --schema:     Output expected JSON format
+
+Examples:
+  mp issue list                        # List all issues
+  mp issue list --status todo          # Filter by status
+  mp issue list --status todo,in-progress  # Multiple statuses
+  echo '{"status":["todo"]}' | mp issue list  # Stdin JSON`,
+	RunE: runIssueList,
+}
+
 func init() {
 	issueCreateCmd.Flags().StringVar(&flagIssueTitle, "title", "", "Issue title")
 	issueCreateCmd.Flags().StringVar(&flagIssueDescription, "description", "", "Issue description")
 	issueCreateCmd.Flags().BoolVar(&flagIssueSchema, "schema", false, "Output JSON schema with defaults and exit")
+
+	issueListCmd.Flags().StringSliceVar(&flagIssueListStatus, "status", nil, "Filter by status (todo, in-progress, done)")
+	issueListCmd.Flags().BoolVar(&flagIssueListSchema, "schema", false, "Output JSON schema and exit")
+
 	issueCmd.AddCommand(issueCreateCmd)
+	issueCmd.AddCommand(issueListCmd)
 	rootCmd.AddCommand(issueCmd)
 }
 
@@ -157,4 +181,76 @@ func runIssueInteractiveMode() (issue.Input, error) {
 		Title:       finalModel.Title.Value(),
 		Description: finalModel.Description.Value(),
 	}, nil
+}
+
+func runIssueList(cmd *cobra.Command, args []string) error {
+	// --schema: output template and exit
+	if flagIssueListSchema {
+		schema, err := issue.ListSchema()
+		if err != nil {
+			return err
+		}
+		fmt.Println(string(schema))
+		return nil
+	}
+
+	wd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("failed to get working directory: %w", err)
+	}
+
+	deps := core.Deps{
+		FS:     adapters.NewOSFS(""),
+		Output: adapters.NewTextOutput(os.Stderr),
+		Exec:   adapters.NewOSExec(),
+	}
+	handler := issue.NewHandler(deps, wd)
+
+	input, err := getIssueListInput()
+	if err != nil {
+		return err
+	}
+
+	issues, err := handler.ListIssues(input.Status)
+	if err != nil {
+		return err
+	}
+
+	// Output JSON to stdout
+	jsonData, err := json.MarshalIndent(issues, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal result: %w", err)
+	}
+	fmt.Println(string(jsonData))
+
+	return nil
+}
+
+func getIssueListInput() (issue.ListInput, error) {
+	var input issue.ListInput
+
+	switch {
+	case len(flagIssueListStatus) > 0:
+		input = issue.ListInput{Status: flagIssueListStatus}
+
+	case cli.HasStdinData():
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return issue.ListInput{}, fmt.Errorf("failed to read stdin: %w", err)
+		}
+		input, err = issue.ParseListJSON(data)
+		if err != nil {
+			return issue.ListInput{}, err
+		}
+
+	default:
+		// No filter - list all
+		input = issue.ListInput{}
+	}
+
+	if err := issue.ValidateListInput(input); err != nil {
+		return issue.ListInput{}, err
+	}
+
+	return input, nil
 }

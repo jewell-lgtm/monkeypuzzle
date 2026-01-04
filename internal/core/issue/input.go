@@ -89,3 +89,48 @@ func ParseJSON(data []byte) (Input, error) {
 	}
 	return input, nil
 }
+
+// ListInput holds input for issue list command
+type ListInput struct {
+	Status []string `json:"status,omitempty"`
+}
+
+// ListSchema returns the JSON schema for issue list input
+func ListSchema() ([]byte, error) {
+	schema := map[string]any{
+		"status": []string{},
+	}
+	return json.MarshalIndent(schema, "", "  ")
+}
+
+// ParseListJSON parses JSON input into ListInput
+func ParseListJSON(data []byte) (ListInput, error) {
+	var input ListInput
+	if err := json.Unmarshal(data, &input); err != nil {
+		return ListInput{}, fmt.Errorf("invalid JSON: %w", err)
+	}
+	return input, nil
+}
+
+// ValidStatuses returns valid status values for filtering
+func ValidStatuses() []string {
+	return []string{"todo", "in-progress", "done"}
+}
+
+// ValidateListInput validates the list input
+func ValidateListInput(input ListInput) error {
+	valid := ValidStatuses()
+	for _, s := range input.Status {
+		found := false
+		for _, v := range valid {
+			if s == v {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("invalid status %q (valid: %v)", s, valid)
+		}
+	}
+	return nil
+}

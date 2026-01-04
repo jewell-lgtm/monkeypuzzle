@@ -387,3 +387,49 @@ func TestHandler_ListIssues_SortsByTitle(t *testing.T) {
 		}
 	}
 }
+
+func TestListSchema(t *testing.T) {
+	schema, err := issue.ListSchema()
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	var data map[string]any
+	if err := json.Unmarshal(schema, &data); err != nil {
+		t.Fatalf("invalid schema JSON: %v", err)
+	}
+
+	if _, ok := data["status"]; !ok {
+		t.Error("expected 'status' in schema")
+	}
+}
+
+func TestParseListJSON(t *testing.T) {
+	jsonData := `{"status":["todo","in-progress"]}`
+
+	input, err := issue.ParseListJSON([]byte(jsonData))
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if len(input.Status) != 2 {
+		t.Errorf("expected 2 statuses, got %d", len(input.Status))
+	}
+}
+
+func TestValidateListInput(t *testing.T) {
+	valid := issue.ListInput{Status: []string{"todo", "in-progress"}}
+	if err := issue.ValidateListInput(valid); err != nil {
+		t.Errorf("expected valid input, got error: %v", err)
+	}
+
+	empty := issue.ListInput{}
+	if err := issue.ValidateListInput(empty); err != nil {
+		t.Errorf("expected empty input to be valid, got error: %v", err)
+	}
+
+	invalid := issue.ListInput{Status: []string{"invalid"}}
+	if err := issue.ValidateListInput(invalid); err == nil {
+		t.Error("expected validation error for invalid status")
+	}
+}

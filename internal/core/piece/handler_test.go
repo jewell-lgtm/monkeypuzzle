@@ -298,7 +298,7 @@ func TestHandler_CreatePiece_NameAlreadyExists(t *testing.T) {
 	_ = fs.MkdirAll(existingPiecePath, 0755)
 
 	// Try to create a piece with the same name
-	_, err := handler.CreatePiece(context.Background(), "/monkeypuzzle", "existing-piece", piece.CreatePieceOptions{})
+	_, err = handler.CreatePiece(context.Background(), "/monkeypuzzle", "existing-piece", piece.CreatePieceOptions{})
 	if err == nil {
 		t.Fatal("expected error when piece name already exists")
 	}
