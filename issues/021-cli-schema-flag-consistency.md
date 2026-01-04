@@ -1,6 +1,6 @@
 ---
 title: CLI --schema flag consistency
-status: todo
+status: done
 ---
 
 # CLI --schema flag consistency

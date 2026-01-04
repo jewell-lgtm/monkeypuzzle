@@ -1,6 +1,6 @@
 ---
 title: CLI JSON stdout consistency
-status: todo
+status: done
 ---
 
 # CLI JSON stdout consistency
