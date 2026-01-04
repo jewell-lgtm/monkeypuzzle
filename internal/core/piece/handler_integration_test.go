@@ -1345,3 +1345,105 @@ func TestIntegration_CreatePieceWithInput_WithName(t *testing.T) {
 		t.Errorf("expected piece name 'my-manual-piece', got %q", info.Name)
 	}
 }
+
+func TestIntegration_RepoSpecificPieces_Isolation(t *testing.T) {
+	// Skip if git is not available
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	// Override data dir for tests
+	tmpDataHome, err := os.MkdirTemp("", "mp-data-*")
+	if err != nil {
+		t.Fatalf("failed to create temp data dir: %v", err)
+	}
+	t.Cleanup(func() {
+		os.RemoveAll(tmpDataHome)
+		paths.ResetDataDir()
+	})
+	paths.SetDataDir(tmpDataHome)
+
+	// Create TWO separate repos
+	repoA, err := os.MkdirTemp("", "mp-repo-a-*")
+	if err != nil {
+		t.Fatalf("failed to create repo A: %v", err)
+	}
+	defer os.RemoveAll(repoA)
+
+	repoB, err := os.MkdirTemp("", "mp-repo-b-*")
+	if err != nil {
+		t.Fatalf("failed to create repo B: %v", err)
+	}
+	defer os.RemoveAll(repoB)
+
+	// Initialize both repos
+	setupGitRepo(t, repoA)
+	setupGitRepo(t, repoB)
+	setupMonkeypuzzleConfig(t, repoA)
+	setupMonkeypuzzleConfig(t, repoB)
+
+	deps := core.Deps{
+		FS:     adapters.NewOSFS(""),
+		Output: adapters.NewBufferOutput(),
+		Exec:   adapters.NewOSExec(),
+	}
+
+	// Save original working directory
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get working directory: %v", err)
+	}
+	defer func() { _ = os.Chdir(oldWd) }()
+
+	// Create piece in repo A
+	if err := os.Chdir(repoA); err != nil {
+		t.Fatalf("failed to chdir to repo A: %v", err)
+	}
+	handlerA := piece.NewHandler(deps)
+	_, err = handlerA.CreatePiece(context.Background(), repoA, "piece-in-a", piece.CreatePieceOptions{})
+	if err != nil {
+		t.Fatalf("CreatePiece in repo A failed: %v", err)
+	}
+
+	// Create piece in repo B
+	if err := os.Chdir(repoB); err != nil {
+		t.Fatalf("failed to chdir to repo B: %v", err)
+	}
+	handlerB := piece.NewHandler(deps)
+	_, err = handlerB.CreatePiece(context.Background(), repoB, "piece-in-b", piece.CreatePieceOptions{})
+	if err != nil {
+		t.Fatalf("CreatePiece in repo B failed: %v", err)
+	}
+
+	// List pieces from repo A - should only see piece-in-a
+	if err := os.Chdir(repoA); err != nil {
+		t.Fatalf("failed to chdir to repo A: %v", err)
+	}
+	piecesA, err := handlerA.ListPieces(context.Background())
+	if err != nil {
+		t.Fatalf("ListPieces from repo A failed: %v", err)
+	}
+
+	if len(piecesA) != 1 {
+		t.Errorf("repo A: expected 1 piece, got %d", len(piecesA))
+	}
+	if len(piecesA) > 0 && piecesA[0].Name != "piece-in-a" {
+		t.Errorf("repo A: expected piece 'piece-in-a', got %q", piecesA[0].Name)
+	}
+
+	// List pieces from repo B - should only see piece-in-b
+	if err := os.Chdir(repoB); err != nil {
+		t.Fatalf("failed to chdir to repo B: %v", err)
+	}
+	piecesB, err := handlerB.ListPieces(context.Background())
+	if err != nil {
+		t.Fatalf("ListPieces from repo B failed: %v", err)
+	}
+
+	if len(piecesB) != 1 {
+		t.Errorf("repo B: expected 1 piece, got %d", len(piecesB))
+	}
+	if len(piecesB) > 0 && piecesB[0].Name != "piece-in-b" {
+		t.Errorf("repo B: expected piece 'piece-in-b', got %q", piecesB[0].Name)
+	}
+}

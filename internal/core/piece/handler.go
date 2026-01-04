@@ -75,8 +75,8 @@ func (h *Handler) CreatePiece(ctx context.Context, monkeypuzzleSourceDir string,
 	// Ensure main repo tmux session exists
 	h.ensureMainSession(ctx, repoRoot, opts.OverwriteSession)
 
-	// Get pieces directory
-	piecesDir, err := getPiecesDir()
+	// Get pieces directory (scoped to this repo)
+	piecesDir, err := getPiecesDir(repoRoot)
 	if err != nil {
 		return PieceInfo{}, fmt.Errorf("failed to get pieces directory: %w", err)
 	}
@@ -575,10 +575,10 @@ func (h *Handler) buildSquashCommitMessage(pieceName string, commitMsgs []string
 	return b.String()
 }
 
-// getPiecesDir returns the directory for storing pieces.
+// getPiecesDir returns the directory for storing pieces scoped to the given repo.
 // Uses GAP (go-app-paths) for platform-appropriate paths.
-func getPiecesDir() (string, error) {
-	return paths.PiecesDir()
+func getPiecesDir(repoRoot string) (string, error) {
+	return paths.PiecesDirForRepo(repoRoot)
 }
 
 // MergeStatus represents the merge status of a branch
@@ -709,8 +709,8 @@ type CleanupOptions struct {
 // CleanupMergedPieces finds and cleans up pieces whose branches have been merged.
 // It removes worktrees, kills tmux sessions, and updates issue status to done.
 func (h *Handler) CleanupMergedPieces(ctx context.Context, repoRoot string, opts CleanupOptions) ([]CleanupResult, error) {
-	// Get pieces directory
-	piecesDir, err := getPiecesDir()
+	// Get pieces directory (scoped to this repo)
+	piecesDir, err := getPiecesDir(repoRoot)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pieces directory: %w", err)
 	}
@@ -1006,7 +1006,17 @@ func (h *Handler) updateIssueStatusToDone(issuePath string) error {
 // ListPieces returns all available pieces in the pieces directory.
 // Results are sorted by modification time (newest first).
 func (h *Handler) ListPieces(ctx context.Context) ([]PieceListItem, error) {
-	piecesDir, err := getPiecesDir()
+	// Get repo root from current working directory
+	wd, err := os.Getwd()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get working directory: %w", err)
+	}
+	repoRoot, err := h.git.RepoRoot(ctx, wd)
+	if err != nil {
+		return nil, fmt.Errorf("not in a git repository: %w", err)
+	}
+
+	piecesDir, err := getPiecesDir(repoRoot)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pieces directory: %w", err)
 	}

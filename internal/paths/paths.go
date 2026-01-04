@@ -3,6 +3,8 @@
 package paths
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"path/filepath"
 
 	gap "github.com/muesli/go-app-paths"
@@ -42,12 +44,26 @@ func DataDir() (string, error) {
 }
 
 // PiecesDir returns the directory for storing piece worktrees.
+// Deprecated: Use PiecesDirForRepo for repo-scoped pieces.
 func PiecesDir() (string, error) {
 	dataDir, err := DataDir()
 	if err != nil {
 		return "", err
 	}
 	return filepath.Join(dataDir, "pieces"), nil
+}
+
+// PiecesDirForRepo returns a repo-scoped directory for storing piece worktrees.
+// Uses a hash of the repo path to create isolated directories per repository.
+func PiecesDirForRepo(repoRoot string) (string, error) {
+	dataDir, err := DataDir()
+	if err != nil {
+		return "", err
+	}
+	// Hash the repo path for a short, filesystem-safe identifier
+	hash := sha256.Sum256([]byte(repoRoot))
+	repoID := hex.EncodeToString(hash[:])[:12]
+	return filepath.Join(dataDir, "pieces", repoID), nil
 }
 
 // ConfigDir returns the user config directory for monkeypuzzle.
