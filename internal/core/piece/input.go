@@ -1,6 +1,11 @@
 package piece
 
-import "time"
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+	"time"
+)
 
 // PieceInfo contains information about a created piece worktree.
 // It includes the piece name, worktree path, and associated tmux session name.
@@ -39,4 +44,52 @@ type PieceListItem struct {
 type SwitchResult struct {
 	Piece  PieceListItem `json:"piece"`
 	Method string        `json:"method"` // "tmux-switch", "tmux-attach", "path"
+}
+
+// NewPieceInput holds input for the piece new command.
+// Either IssuePath or Name must be provided (mutually exclusive).
+type NewPieceInput struct {
+	IssuePath string `json:"issue_path,omitempty"`
+	Name      string `json:"name,omitempty"`
+}
+
+// NewPieceSchema returns the JSON schema for piece new input.
+func NewPieceSchema() ([]byte, error) {
+	schema := map[string]any{
+		"issue_path": "",
+		"name":       "",
+	}
+	return json.MarshalIndent(schema, "", "  ")
+}
+
+// ParseNewPieceJSON parses JSON input into NewPieceInput.
+func ParseNewPieceJSON(data []byte) (NewPieceInput, error) {
+	var input NewPieceInput
+	if err := json.Unmarshal(data, &input); err != nil {
+		return NewPieceInput{}, fmt.Errorf("invalid JSON: %w", err)
+	}
+	return input, nil
+}
+
+// ValidateNewPieceInput validates the input.
+// One of IssuePath or Name must be provided, but not both.
+func ValidateNewPieceInput(input NewPieceInput) error {
+	hasIssue := strings.TrimSpace(input.IssuePath) != ""
+	hasName := strings.TrimSpace(input.Name) != ""
+
+	if hasIssue && hasName {
+		return fmt.Errorf("cannot specify both issue_path and name")
+	}
+	if !hasIssue && !hasName {
+		return fmt.Errorf("must specify either issue_path or name")
+	}
+	return nil
+}
+
+// WithNewPieceDefaults returns input with whitespace trimmed.
+func WithNewPieceDefaults(input NewPieceInput) NewPieceInput {
+	return NewPieceInput{
+		IssuePath: strings.TrimSpace(input.IssuePath),
+		Name:      strings.TrimSpace(input.Name),
+	}
 }

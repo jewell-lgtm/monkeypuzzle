@@ -13,7 +13,9 @@ import (
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/adapters"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
+	"github.com/jewell-lgtm/monkeypuzzle/internal/core/issue"
 	piececmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/piece"
+	"github.com/jewell-lgtm/monkeypuzzle/internal/tui/issuepicker"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/tui/pieceswitch"
 )
 
@@ -81,12 +83,14 @@ var flagForce bool
 var flagAbandonName string
 var flagDeleteBranch bool
 var flagOverwriteSession bool
+var flagPieceNewSchema bool
 
 func init() {
 	pieceNewCmd.Flags().StringVar(&flagPieceName, "name", "", "Optional piece name (default: auto-generated)")
 	pieceNewCmd.Flags().StringVar(&flagIssuePath, "issue", "", "Create piece from issue file (e.g., issues/foo.md)")
 	pieceNewCmd.Flags().BoolVar(&flagSkipSwitch, "skip-switch", false, "Don't switch to the new piece after creation")
 	pieceNewCmd.Flags().BoolVar(&flagOverwriteSession, "overwrite-session", false, "Replace existing main repo tmux session")
+	pieceNewCmd.Flags().BoolVar(&flagPieceNewSchema, "schema", false, "Output JSON schema and exit")
 	pieceUpdateCmd.Flags().StringVar(&flagMainBranch, "main-branch", "main", "Main branch name to merge (default: main)")
 	pieceMergeCmd.Flags().StringVar(&flagMainBranch, "main-branch", "main", "Main branch name to merge into (default: main)")
 	pieceCleanupCmd.Flags().StringVar(&flagMainBranch, "main-branch", "main", "Main branch name to check for merged status (default: main)")
@@ -197,6 +201,16 @@ func runPieceStatus(cmd *cobra.Command, args []string) error {
 }
 
 func runPieceNew(cmd *cobra.Command, args []string) error {
+	// --schema mode: output JSON schema and exit
+	if flagPieceNewSchema {
+		schema, err := piececmd.NewPieceSchema()
+		if err != nil {
+			return err
+		}
+		fmt.Println(string(schema))
+		return nil
+	}
+
 	ctx := cmd.Context()
 	wd, err := os.Getwd()
 	if err != nil {
@@ -204,8 +218,6 @@ func runPieceNew(cmd *cobra.Command, args []string) error {
 	}
 
 	// Detect monkeypuzzle source directory
-	// Try to find it by looking for the monkeypuzzle source repo
-	// Start from current directory and walk up looking for go.mod with monkeypuzzle module
 	monkeypuzzleSourceDir, err := findMonkeypuzzleSource(wd)
 	if err != nil {
 		return fmt.Errorf("failed to find monkeypuzzle source directory: %w", err)
@@ -218,25 +230,27 @@ func runPieceNew(cmd *cobra.Command, args []string) error {
 	}
 	handler := piececmd.NewHandler(deps)
 
-	var info piececmd.PieceInfo
+	// Get input from flags/stdin/TUI
+	input, err := getPieceNewInput(deps, wd)
+	if err != nil {
+		return err
+	}
+
+	// Apply defaults and validate
+	input = piececmd.WithNewPieceDefaults(input)
+	if err := piececmd.ValidateNewPieceInput(input); err != nil {
+		return err
+	}
 
 	opts := piececmd.CreatePieceOptions{
 		OverwriteSession: flagOverwriteSession,
 	}
 
-	// Check if --issue flag is set
-	if flagIssuePath != "" {
-		// Validate that --name is not also set (they're mutually exclusive)
-		if flagPieceName != "" {
-			return fmt.Errorf("cannot use both --name and --issue flags together")
-		}
-		// Validate that issue path is not empty
-		if strings.TrimSpace(flagIssuePath) == "" {
-			return fmt.Errorf("--issue flag requires a non-empty path")
-		}
-		info, err = handler.CreatePieceFromIssue(ctx, monkeypuzzleSourceDir, flagIssuePath, opts)
+	var info piececmd.PieceInfo
+	if input.IssuePath != "" {
+		info, err = handler.CreatePieceFromIssue(ctx, monkeypuzzleSourceDir, input.IssuePath, opts)
 	} else {
-		info, err = handler.CreatePiece(ctx, monkeypuzzleSourceDir, flagPieceName, opts)
+		info, err = handler.CreatePiece(ctx, monkeypuzzleSourceDir, input.Name, opts)
 	}
 
 	if err != nil {
@@ -260,6 +274,77 @@ func runPieceNew(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+func getPieceNewInput(deps core.Deps, workDir string) (piececmd.NewPieceInput, error) {
+	// Mode 1: Flags provided
+	if flagIssuePath != "" || flagPieceName != "" {
+		return piececmd.NewPieceInput{
+			IssuePath: flagIssuePath,
+			Name:      flagPieceName,
+		}, nil
+	}
+
+	// Mode 2: Stdin JSON
+	if hasPieceNewStdinData() {
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return piececmd.NewPieceInput{}, fmt.Errorf("failed to read stdin: %w", err)
+		}
+		return piececmd.ParseNewPieceJSON(data)
+	}
+
+	// Mode 3: Interactive TUI
+	if isPieceNewTerminal() {
+		return runPieceNewTUI(deps, workDir)
+	}
+
+	return piececmd.NewPieceInput{}, fmt.Errorf("no input provided; use --schema to see expected format")
+}
+
+func runPieceNewTUI(deps core.Deps, workDir string) (piececmd.NewPieceInput, error) {
+	issueHandler := issue.NewHandler(deps, workDir)
+	issues, err := issueHandler.ListIssues([]string{piececmd.StatusTodo})
+	if err != nil {
+		// Fall through to error - no issues available
+		return piececmd.NewPieceInput{}, fmt.Errorf("failed to list issues: %w", err)
+	}
+
+	if len(issues) == 0 {
+		return piececmd.NewPieceInput{}, fmt.Errorf("no todo issues found; create one with 'mp issue create' or use --name flag")
+	}
+
+	p := tea.NewProgram(issuepicker.New(issues))
+	m, err := p.Run()
+	if err != nil {
+		return piececmd.NewPieceInput{}, fmt.Errorf("TUI error: %w", err)
+	}
+
+	finalModel := m.(issuepicker.Model)
+	if finalModel.Cancelled {
+		return piececmd.NewPieceInput{}, fmt.Errorf("cancelled")
+	}
+
+	return piececmd.NewPieceInput{
+		IssuePath: issues[finalModel.Selected].Path,
+	}, nil
+}
+
+func isPieceNewTerminal() bool {
+	fi, err := os.Stdin.Stat()
+	if err != nil {
+		return false
+	}
+	return (fi.Mode() & os.ModeCharDevice) != 0
+}
+
+func hasPieceNewStdinData() bool {
+	fi, err := os.Stdin.Stat()
+	if err != nil {
+		return false
+	}
+	return (fi.Mode()&os.ModeCharDevice) == 0 && fi.Size() > 0 ||
+		(fi.Mode()&os.ModeNamedPipe) != 0
 }
 
 func runPieceUpdate(cmd *cobra.Command, args []string) error {

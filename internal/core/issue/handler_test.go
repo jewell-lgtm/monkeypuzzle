@@ -278,3 +278,117 @@ func TestWithDefaults(t *testing.T) {
 		t.Errorf("expected trimmed description, got %q", result.Description)
 	}
 }
+
+func TestHandler_ListIssues_EmptyDirectory(t *testing.T) {
+	fs := adapters.NewMemoryFS()
+	out := adapters.NewBufferOutput()
+	deps := core.Deps{FS: fs, Output: out}
+	setupConfig(t, fs)
+
+	// Create empty issues directory
+	_ = fs.MkdirAll("issues", 0755)
+
+	handler := issue.NewHandler(deps, "")
+
+	issues, err := handler.ListIssues(nil)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if len(issues) != 0 {
+		t.Errorf("expected 0 issues, got %d", len(issues))
+	}
+}
+
+func TestHandler_ListIssues_NoIssuesDirectory(t *testing.T) {
+	fs := adapters.NewMemoryFS()
+	out := adapters.NewBufferOutput()
+	deps := core.Deps{FS: fs, Output: out}
+	setupConfig(t, fs)
+	// Note: issues directory not created
+
+	handler := issue.NewHandler(deps, "")
+
+	issues, err := handler.ListIssues(nil)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if len(issues) != 0 {
+		t.Errorf("expected 0 issues, got %d", len(issues))
+	}
+}
+
+func TestHandler_ListIssues_FiltersTodo(t *testing.T) {
+	fs := adapters.NewMemoryFS()
+	out := adapters.NewBufferOutput()
+	deps := core.Deps{FS: fs, Output: out}
+	setupConfig(t, fs)
+
+	_ = fs.MkdirAll("issues", 0755)
+	_ = fs.WriteFile("issues/todo.md", []byte("---\ntitle: Todo\nstatus: todo\n---\n"), 0644)
+	_ = fs.WriteFile("issues/done.md", []byte("---\ntitle: Done\nstatus: done\n---\n"), 0644)
+
+	handler := issue.NewHandler(deps, "")
+
+	issues, err := handler.ListIssues([]string{"todo"})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if len(issues) != 1 {
+		t.Errorf("expected 1 issue, got %d", len(issues))
+	}
+	if len(issues) > 0 && issues[0].Title != "Todo" {
+		t.Errorf("expected title 'Todo', got %q", issues[0].Title)
+	}
+}
+
+func TestHandler_ListIssues_MissingStatusDefaultsTodo(t *testing.T) {
+	fs := adapters.NewMemoryFS()
+	out := adapters.NewBufferOutput()
+	deps := core.Deps{FS: fs, Output: out}
+	setupConfig(t, fs)
+
+	_ = fs.MkdirAll("issues", 0755)
+	_ = fs.WriteFile("issues/no-status.md", []byte("---\ntitle: No Status\n---\n"), 0644)
+
+	handler := issue.NewHandler(deps, "")
+
+	issues, err := handler.ListIssues([]string{"todo"})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if len(issues) != 1 {
+		t.Errorf("expected 1 issue, got %d", len(issues))
+	}
+	if len(issues) > 0 && issues[0].Status != "todo" {
+		t.Errorf("expected status 'todo', got %q", issues[0].Status)
+	}
+}
+
+func TestHandler_ListIssues_SortsByTitle(t *testing.T) {
+	fs := adapters.NewMemoryFS()
+	out := adapters.NewBufferOutput()
+	deps := core.Deps{FS: fs, Output: out}
+	setupConfig(t, fs)
+
+	_ = fs.MkdirAll("issues", 0755)
+	_ = fs.WriteFile("issues/z.md", []byte("---\ntitle: Zebra\nstatus: todo\n---\n"), 0644)
+	_ = fs.WriteFile("issues/a.md", []byte("---\ntitle: Alpha\nstatus: todo\n---\n"), 0644)
+	_ = fs.WriteFile("issues/m.md", []byte("---\ntitle: Middle\nstatus: todo\n---\n"), 0644)
+
+	handler := issue.NewHandler(deps, "")
+
+	issues, err := handler.ListIssues(nil)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if len(issues) != 3 {
+		t.Fatalf("expected 3 issues, got %d", len(issues))
+	}
+
+	expected := []string{"Alpha", "Middle", "Zebra"}
+	for i, exp := range expected {
+		if issues[i].Title != exp {
+			t.Errorf("issue %d: expected %q, got %q", i, exp, issues[i].Title)
+		}
+	}
+}

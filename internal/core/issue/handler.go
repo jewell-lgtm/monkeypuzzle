@@ -2,7 +2,9 @@ package issue
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
@@ -160,4 +162,80 @@ func escapeYAMLString(s string) string {
 		return `"` + escaped + `"`
 	}
 	return s
+}
+
+// IssueListItem represents an issue for listing/selection
+type IssueListItem struct {
+	Path   string `json:"path"`   // Relative path from repo root
+	Title  string `json:"title"`  // Display title
+	Status string `json:"status"` // Current status
+}
+
+// ListIssues returns issues from the configured issues directory.
+// If statusFilter is non-empty, only issues with matching status are returned.
+// Issues are sorted alphabetically by title.
+func (h *Handler) ListIssues(statusFilter []string) ([]IssueListItem, error) {
+	issuesDir, err := h.getIssuesDirectory()
+	if err != nil {
+		return nil, err
+	}
+
+	fullIssuesDir := filepath.Join(h.workDir, issuesDir)
+
+	entries, err := h.deps.FS.ReadDir(fullIssuesDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []IssueListItem{}, nil
+		}
+		return nil, fmt.Errorf("failed to read issues directory: %w", err)
+	}
+
+	var issues []IssueListItem
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
+			continue
+		}
+
+		filePath := filepath.Join(fullIssuesDir, entry.Name())
+		relPath := filepath.Join(issuesDir, entry.Name())
+
+		// Parse status (defaults to "todo" if not set)
+		status, err := piece.ParseStatus(filePath, h.deps.FS)
+		if err != nil {
+			continue // Skip files with parse errors
+		}
+
+		// Apply status filter
+		if len(statusFilter) > 0 && !containsStatus(statusFilter, status) {
+			continue
+		}
+
+		// Extract title
+		title, err := piece.ExtractIssueName(filePath, h.deps.FS)
+		if err != nil {
+			continue
+		}
+
+		issues = append(issues, IssueListItem{
+			Path:   relPath,
+			Title:  title,
+			Status: status,
+		})
+	}
+
+	// Sort by title
+	sort.Slice(issues, func(i, j int) bool {
+		return issues[i].Title < issues[j].Title
+	})
+
+	return issues, nil
+}
+
+func containsStatus(slice []string, item string) bool {
+	for _, s := range slice {
+		if s == item {
+			return true
+		}
+	}
+	return false
 }
