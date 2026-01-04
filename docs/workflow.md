@@ -8,7 +8,7 @@ Monkeypuzzle enables a "stacked branch" workflow using git worktrees, allowing i
 
 A **piece** is an isolated git worktree for developing a single atomic change. Each piece:
 
-- Lives in its own directory (`~/.local/share/monkeypuzzle/pieces/`)
+- Lives in its own directory (repo-scoped: `~/.local/share/monkeypuzzle/pieces/{repo-hash}/`)
 - Has its own branch
 - Can be worked on independently
 - Gets merged back to main when complete
@@ -39,7 +39,7 @@ mp piece new
 
 This creates:
 
-- New worktree at `~/.local/share/monkeypuzzle/pieces/piece-YYYYMMDD-HHMMSS`
+- New worktree at `~/.local/share/monkeypuzzle/pieces/{repo-hash}/piece-YYYYMMDD-HHMMSS`
 - New git branch
 - Tmux session (if available)
 
@@ -167,25 +167,25 @@ sudo dnf install tmux
 
 **Essential commands:**
 
-| Command | Description |
-|---------|-------------|
-| `tmux` | Start new session |
-| `tmux ls` | List sessions |
-| `tmux attach -t <name>` | Attach to session |
-| `tmux kill-session -t <name>` | Kill session |
+| Command                       | Description       |
+| ----------------------------- | ----------------- |
+| `tmux`                        | Start new session |
+| `tmux ls`                     | List sessions     |
+| `tmux attach -t <name>`       | Attach to session |
+| `tmux kill-session -t <name>` | Kill session      |
 
 **Inside tmux (prefix is `Ctrl+b`):**
 
-| Keys | Action |
-|------|--------|
-| `Ctrl+b d` | Detach (leave session running) |
-| `Ctrl+b c` | New window |
-| `Ctrl+b n` / `Ctrl+b p` | Next/previous window |
-| `Ctrl+b 0-9` | Switch to window by number |
-| `Ctrl+b %` | Split vertically |
-| `Ctrl+b "` | Split horizontally |
-| `Ctrl+b ←↑↓→` | Move between panes |
-| `Ctrl+b x` | Kill current pane |
+| Keys                    | Action                         |
+| ----------------------- | ------------------------------ |
+| `Ctrl+b d`              | Detach (leave session running) |
+| `Ctrl+b c`              | New window                     |
+| `Ctrl+b n` / `Ctrl+b p` | Next/previous window           |
+| `Ctrl+b 0-9`            | Switch to window by number     |
+| `Ctrl+b %`              | Split vertically               |
+| `Ctrl+b "`              | Split horizontally             |
+| `Ctrl+b ←↑↓→`           | Move between panes             |
+| `Ctrl+b x`              | Kill current pane              |
 
 **With monkeypuzzle:**
 
@@ -205,6 +205,7 @@ tmux ls | grep mp-piece
 ```
 
 **Tips:**
+
 - Sessions persist after detaching - your work stays running
 - Use `mp piece switch` instead of raw tmux commands for easier navigation
 - If tmux isn't installed, monkeypuzzle falls back to printing the path
@@ -267,16 +268,22 @@ mp piece merge    # Now safe to merge
 
 ### Finding pieces
 
-Pieces are stored in:
+Pieces are stored in repo-scoped directories:
 
-- Linux: `~/.local/share/monkeypuzzle/pieces/`
-- macOS: `~/Library/Application Support/monkeypuzzle/pieces/`
+- Linux: `~/.local/share/monkeypuzzle/pieces/{repo-hash}/`
+- macOS: `~/Library/Application Support/monkeypuzzle/pieces/{repo-hash}/`
+
+Each repository has its own pieces directory (identified by a hash of the repo root path), which:
+
+- Isolates pieces per repository
+- Prevents naming conflicts between repos
+- Makes it easier to manage pieces per project
 
 List and switch between pieces:
 
 ```bash
-mp piece switch               # Interactive TUI with all pieces
-ls ~/.local/share/monkeypuzzle/pieces/  # Manual listing
+mp piece switch               # Interactive TUI with all pieces (for current repo)
+ls ~/.local/share/monkeypuzzle/pieces/  # Manual listing (shows all repos)
 ```
 
 ### Cleaning up pieces

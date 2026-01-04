@@ -1042,8 +1042,15 @@ func TestIntegration_ListPieces_And_SwitchPiece(t *testing.T) {
 	}
 	handler := piece.NewHandler(deps)
 
+	// Get repo root for ListPieces
+	git := adapters.NewGit(adapters.NewOSExec())
+	repoRoot, err := git.RepoRoot(context.Background(), tmpDir)
+	if err != nil {
+		t.Fatalf("failed to get repo root: %v", err)
+	}
+
 	// Initially no pieces
-	pieces, err := handler.ListPieces(context.Background())
+	pieces, err := handler.ListPieces(context.Background(), repoRoot)
 	if err != nil {
 		t.Fatalf("ListPieces failed: %v", err)
 	}
@@ -1063,7 +1070,7 @@ func TestIntegration_ListPieces_And_SwitchPiece(t *testing.T) {
 	}
 
 	// List pieces
-	pieces, err = handler.ListPieces(context.Background())
+	pieces, err = handler.ListPieces(context.Background(), repoRoot)
 	if err != nil {
 		t.Fatalf("ListPieces failed: %v", err)
 	}

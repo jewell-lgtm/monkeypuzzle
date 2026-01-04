@@ -54,17 +54,20 @@ func TestHandler_CreatePiece(t *testing.T) {
 	}
 
 	// Verify pieces directory was created (MemoryFS stores relative paths)
+	// Note: With repo-scoped directories, the path includes the repo identifier
 	dirs := fs.Dirs()
 	found := false
-	expectedDir := "test-data/monkeypuzzle/pieces" // MemoryFS cleans paths
+	// The directory will be test-data/monkeypuzzle/pieces/{repoID}
+	// We check for the base pieces directory
+	expectedBaseDir := "test-data/monkeypuzzle/pieces" // MemoryFS cleans paths
 	for _, d := range dirs {
-		if d == expectedDir {
+		if strings.HasPrefix(d, expectedBaseDir) {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Errorf("expected pieces directory %q to be created, dirs: %v", expectedDir, dirs)
+		t.Errorf("expected pieces directory starting with %q to be created, dirs: %v", expectedBaseDir, dirs)
 	}
 }
 
@@ -279,9 +282,13 @@ func TestHandler_CreatePiece_NameAlreadyExists(t *testing.T) {
 	repoRoot := "/repo"
 	mockExec.AddResponse("git", []string{"rev-parse", "--show-toplevel"}, []byte(repoRoot+"\n"), nil)
 
-	// Get the actual pieces directory that will be used
-	// This matches what getPiecesDir() returns
-	piecesDir := "/test-data/monkeypuzzle/pieces"
+	// Get the actual pieces directory that will be used (repo-scoped)
+	// This matches what getPiecesDir(repoRoot) returns
+	repoID, err := paths.RepoIdentifier(repoRoot)
+	if err != nil {
+		t.Fatalf("failed to get repo identifier: %v", err)
+	}
+	piecesDir := filepath.Join("/test-data/monkeypuzzle/pieces", repoID)
 	existingPiecePath := filepath.Join(piecesDir, "existing-piece")
 
 	// Create the pieces directory structure first
@@ -1469,8 +1476,9 @@ func TestHandler_ListPieces_NoPiecesDir(t *testing.T) {
 
 	// Mock tmux has-session (not called when no pieces)
 	// No pieces directory exists
+	// Use empty repoRoot to test global directory fallback
 
-	pieces, err := handler.ListPieces(context.Background())
+	pieces, err := handler.ListPieces(context.Background(), "")
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
@@ -1491,11 +1499,16 @@ func TestHandler_ListPieces_EmptyDir(t *testing.T) {
 	paths.SetDataDir("/test-data/monkeypuzzle")
 	t.Cleanup(paths.ResetDataDir)
 
-	// Create empty pieces directory
-	piecesDir := "/test-data/monkeypuzzle/pieces"
+	// Create empty pieces directory (using repo-scoped path)
+	repoRoot := "/test-repo"
+	repoID, err := paths.RepoIdentifier(repoRoot)
+	if err != nil {
+		t.Fatalf("failed to get repo identifier: %v", err)
+	}
+	piecesDir := filepath.Join("/test-data/monkeypuzzle/pieces", repoID)
 	_ = fs.MkdirAll(piecesDir, 0755)
 
-	pieces, err := handler.ListPieces(context.Background())
+	pieces, err := handler.ListPieces(context.Background(), repoRoot)
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
@@ -1516,8 +1529,13 @@ func TestHandler_ListPieces_WithPieces(t *testing.T) {
 	paths.SetDataDir("/test-data/monkeypuzzle")
 	t.Cleanup(paths.ResetDataDir)
 
-	// Create pieces directory with pieces
-	piecesDir := "/test-data/monkeypuzzle/pieces"
+	// Create pieces directory with pieces (using repo-scoped path)
+	repoRoot := "/test-repo"
+	repoID, err := paths.RepoIdentifier(repoRoot)
+	if err != nil {
+		t.Fatalf("failed to get repo identifier: %v", err)
+	}
+	piecesDir := filepath.Join("/test-data/monkeypuzzle/pieces", repoID)
 	_ = fs.MkdirAll(filepath.Join(piecesDir, "piece-one"), 0755)
 	_ = fs.MkdirAll(filepath.Join(piecesDir, "piece-two"), 0755)
 
@@ -1525,7 +1543,7 @@ func TestHandler_ListPieces_WithPieces(t *testing.T) {
 	mockExec.AddResponse("tmux", []string{"has-session", "-t", "mp-piece-piece-one"}, nil, nil)
 	mockExec.AddResponse("tmux", []string{"has-session", "-t", "mp-piece-piece-two"}, nil, fmt.Errorf("no session"))
 
-	pieces, err := handler.ListPieces(context.Background())
+	pieces, err := handler.ListPieces(context.Background(), repoRoot)
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
