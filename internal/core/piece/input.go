@@ -66,6 +66,7 @@ type SwitchResult struct {
 type NewPieceInput struct {
 	IssuePath        string `json:"issue_path,omitempty"`
 	Name             string `json:"name,omitempty"`
+	Parent           string `json:"parent,omitempty"` // Parent piece name, defaults to "main"
 	SkipSwitch       bool   `json:"skip_switch,omitempty"`
 	OverwriteSession bool   `json:"overwrite_session,omitempty"`
 }
@@ -75,6 +76,7 @@ func NewPieceSchema() ([]byte, error) {
 	schema := map[string]any{
 		"issue_path":        "",
 		"name":              "",
+		"parent":            "main",
 		"skip_switch":       false,
 		"overwrite_session": false,
 	}
@@ -105,11 +107,16 @@ func ValidateNewPieceInput(input NewPieceInput) error {
 	return nil
 }
 
-// WithNewPieceDefaults returns input with whitespace trimmed.
+// WithNewPieceDefaults returns input with whitespace trimmed and defaults applied.
 func WithNewPieceDefaults(input NewPieceInput) NewPieceInput {
+	parent := strings.TrimSpace(input.Parent)
+	if parent == "" {
+		parent = "main"
+	}
 	return NewPieceInput{
 		IssuePath:        strings.TrimSpace(input.IssuePath),
 		Name:             strings.TrimSpace(input.Name),
+		Parent:           parent,
 		SkipSwitch:       input.SkipSwitch,
 		OverwriteSession: input.OverwriteSession,
 	}
