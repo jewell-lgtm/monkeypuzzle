@@ -179,3 +179,119 @@ func WithAbandonDefaults(input AbandonInput) AbandonInput {
 		DeleteBranch: input.DeleteBranch,
 	}
 }
+
+// UpdateInput holds input for the piece update command.
+type UpdateInput struct {
+	MainBranch string `json:"main_branch,omitempty"`
+}
+
+// UpdateResult contains the result of an update operation.
+type UpdateResult struct {
+	PieceName  string `json:"piece_name"`
+	MainBranch string `json:"main_branch"`
+	Status     string `json:"status"` // "updated", "already-up-to-date"
+}
+
+// UpdateSchema returns the JSON schema for piece update input.
+func UpdateSchema() ([]byte, error) {
+	schema := map[string]any{
+		"main_branch": "main",
+	}
+	return json.MarshalIndent(schema, "", "  ")
+}
+
+// ParseUpdateJSON parses JSON input into UpdateInput.
+func ParseUpdateJSON(data []byte) (UpdateInput, error) {
+	var input UpdateInput
+	if err := json.Unmarshal(data, &input); err != nil {
+		return UpdateInput{}, fmt.Errorf("invalid JSON: %w", err)
+	}
+	return input, nil
+}
+
+// WithUpdateDefaults returns input with defaults applied.
+func WithUpdateDefaults(input UpdateInput) UpdateInput {
+	mainBranch := strings.TrimSpace(input.MainBranch)
+	if mainBranch == "" {
+		mainBranch = "main"
+	}
+	return UpdateInput{MainBranch: mainBranch}
+}
+
+// MergeInput holds input for the piece merge command.
+type MergeInput struct {
+	MainBranch string `json:"main_branch,omitempty"`
+}
+
+// MergeResult contains the result of a merge operation.
+type MergeResult struct {
+	PieceName   string `json:"piece_name"`
+	PieceBranch string `json:"piece_branch"`
+	MainBranch  string `json:"main_branch"`
+	Status      string `json:"status"` // "merged"
+}
+
+// MergeSchema returns the JSON schema for piece merge input.
+func MergeSchema() ([]byte, error) {
+	schema := map[string]any{
+		"main_branch": "main",
+	}
+	return json.MarshalIndent(schema, "", "  ")
+}
+
+// ParseMergeJSON parses JSON input into MergeInput.
+func ParseMergeJSON(data []byte) (MergeInput, error) {
+	var input MergeInput
+	if err := json.Unmarshal(data, &input); err != nil {
+		return MergeInput{}, fmt.Errorf("invalid JSON: %w", err)
+	}
+	return input, nil
+}
+
+// WithMergeDefaults returns input with defaults applied.
+func WithMergeDefaults(input MergeInput) MergeInput {
+	mainBranch := strings.TrimSpace(input.MainBranch)
+	if mainBranch == "" {
+		mainBranch = "main"
+	}
+	return MergeInput{MainBranch: mainBranch}
+}
+
+// CleanupInput holds input for the piece cleanup command.
+type CleanupInput struct {
+	MainBranch string `json:"main_branch,omitempty"`
+	DryRun     bool   `json:"dry_run,omitempty"`
+	Force      bool   `json:"force,omitempty"`
+}
+
+// CleanupSchema returns the JSON schema for piece cleanup input.
+func CleanupSchema() ([]byte, error) {
+	schema := map[string]any{
+		"main_branch": "main",
+		"dry_run":     false,
+		"force":       false,
+	}
+	return json.MarshalIndent(schema, "", "  ")
+}
+
+// ParseCleanupJSON parses JSON input into CleanupInput.
+func ParseCleanupJSON(data []byte) (CleanupInput, error) {
+	var input CleanupInput
+	if err := json.Unmarshal(data, &input); err != nil {
+		return CleanupInput{}, fmt.Errorf("invalid JSON: %w", err)
+	}
+	return input, nil
+}
+
+// WithCleanupDefaults returns input with defaults applied.
+func WithCleanupDefaults(input CleanupInput) CleanupInput {
+	mainBranch := strings.TrimSpace(input.MainBranch)
+	if mainBranch == "" {
+		mainBranch = "main"
+	}
+	return CleanupInput{
+		MainBranch: mainBranch,
+		DryRun:     input.DryRun,
+		Force:      input.Force,
+	}
+}

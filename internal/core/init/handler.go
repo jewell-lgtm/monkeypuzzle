@@ -57,16 +57,17 @@ func (h *Handler) ConfigExists() bool {
 
 // Run executes the init command with validated input.
 // Expects input to be pre-validated via WithDefaults() and Validate().
-func (h *Handler) Run(input Input) error {
+// Returns the created Config for JSON output.
+func (h *Handler) Run(input Input) (Config, error) {
 	// Create directories
 	if err := h.deps.FS.MkdirAll(DirName, DefaultDirPerm); err != nil {
-		return err
+		return Config{}, err
 	}
 
 	issuesDir := "issues"
 	if input.IssueProvider == "markdown" {
 		if err := h.deps.FS.MkdirAll(issuesDir, DefaultDirPerm); err != nil {
-			return err
+			return Config{}, err
 		}
 	}
 
@@ -91,17 +92,17 @@ func (h *Handler) Run(input Input) error {
 	// Write config
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
-		return err
+		return Config{}, err
 	}
 
 	configPath := filepath.Join(DirName, ConfigFile)
 	if err := h.deps.FS.WriteFile(configPath, data, DefaultFilePerm); err != nil {
-		return err
+		return Config{}, err
 	}
 
 	// Ensure .gitignore has correct entries
 	if err := h.ensureGitignore(); err != nil {
-		return err
+		return Config{}, err
 	}
 
 	h.deps.Output.Write(core.Message{
@@ -110,7 +111,7 @@ func (h *Handler) Run(input Input) error {
 		Data:    cfg,
 	})
 
-	return nil
+	return cfg, nil
 }
 
 // ensureGitignore creates .monkeypuzzle/.gitignore with worktree-specific entries

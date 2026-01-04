@@ -22,7 +22,7 @@ func TestHandler_Run_CreatesConfig(t *testing.T) {
 		PRProvider:    "github",
 	}
 
-	err := handler.Run(input)
+	_, err := handler.Run(input)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -64,7 +64,7 @@ func TestHandler_Run_CreatesIssuesDirectory(t *testing.T) {
 		PRProvider:    "github",
 	}
 
-	err := handler.Run(input)
+	_, err := handler.Run(input)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -95,7 +95,7 @@ func TestHandler_Run_OutputsSuccessMessage(t *testing.T) {
 		PRProvider:    "github",
 	}
 
-	err := handler.Run(input)
+	_, err := handler.Run(input)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -161,7 +161,7 @@ func TestHandler_ConfigExists(t *testing.T) {
 		IssueProvider: "markdown",
 		PRProvider:    "github",
 	}
-	if err := handler.Run(input); err != nil {
+	if _, err := handler.Run(input); err != nil {
 		t.Fatalf("failed to create config: %v", err)
 	}
 
@@ -237,7 +237,7 @@ func TestHandler_Run_CreatesNestedGitignore(t *testing.T) {
 		PRProvider:    "github",
 	}
 
-	err := handler.Run(input)
+	_, err := handler.Run(input)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}

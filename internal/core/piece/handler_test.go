@@ -317,7 +317,7 @@ func TestHandler_UpdatePiece_InWorktree(t *testing.T) {
 	mockExec.AddResponse("git", []string{"rev-parse", "--abbrev-ref", "HEAD"}, []byte("piece-1\n"), nil)
 	mockExec.AddResponse("git", []string{"merge", "main"}, nil, nil)
 
-	err := handler.UpdatePiece(context.Background(), "/pieces/piece-1", "main")
+	_, err := handler.UpdatePiece(context.Background(), "/pieces/piece-1", "main")
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -345,7 +345,7 @@ func TestHandler_UpdatePiece_NotInWorktree(t *testing.T) {
 	mockExec.AddResponse("git", []string{"rev-parse", "--git-dir"}, []byte(gitDir+"\n"), nil)
 	mockExec.AddResponse("git", []string{"rev-parse", "--show-toplevel"}, []byte("/repo\n"), nil)
 
-	err := handler.UpdatePiece(context.Background(), "/repo", "main")
+	_, err := handler.UpdatePiece(context.Background(), "/repo", "main")
 	if err == nil {
 		t.Fatal("expected error when not in worktree")
 	}
@@ -381,7 +381,7 @@ func TestHandler_MergePiece_Success(t *testing.T) {
 	commitMsg := "feat: piece-1\n\nSquashed commits:\n- feat: add feature\n- fix: bug fix\n"
 	mockExec.AddResponse("git", []string{"commit", "-m", commitMsg}, nil, nil)
 
-	err := handler.MergePiece(context.Background(), "/pieces/piece-1", "main")
+	_, err := handler.MergePiece(context.Background(), "/pieces/piece-1", "main")
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -419,7 +419,7 @@ func TestHandler_MergePiece_MainAhead(t *testing.T) {
 	mockExec.AddResponse("git", []string{"merge-base", "main", "piece-1"}, []byte("abc123\n"), nil)
 	mockExec.AddResponse("git", []string{"rev-list", "--count", "abc123..main"}, []byte("2\n"), nil) // main has 2 commits ahead
 
-	err := handler.MergePiece(context.Background(), "/pieces/piece-1", "main")
+	_, err := handler.MergePiece(context.Background(), "/pieces/piece-1", "main")
 	if err == nil {
 		t.Fatal("expected error when main is ahead")
 	}
@@ -441,7 +441,7 @@ func TestHandler_MergePiece_NotInWorktree(t *testing.T) {
 	mockExec.AddResponse("git", []string{"rev-parse", "--git-dir"}, []byte(gitDir+"\n"), nil)
 	mockExec.AddResponse("git", []string{"rev-parse", "--show-toplevel"}, []byte("/repo\n"), nil)
 
-	err := handler.MergePiece(context.Background(), "/repo", "main")
+	_, err := handler.MergePiece(context.Background(), "/repo", "main")
 	if err == nil {
 		t.Fatal("expected error when not in worktree")
 	}
@@ -479,7 +479,7 @@ func TestHandler_UpdatePiece_BeforeHookFails(t *testing.T) {
 	fullHookPath := filepath.Join(repoRoot, ".monkeypuzzle/hooks", "before-piece-update.sh")
 	mockExec.AddResponse("bash", []string{fullHookPath}, []byte("hook failed"), fmt.Errorf("exit status 1"))
 
-	err := handler.UpdatePiece(context.Background(), "/pieces/piece-1", "main")
+	_, err := handler.UpdatePiece(context.Background(), "/pieces/piece-1", "main")
 
 	if err == nil {
 		t.Fatal("expected error when before hook fails")
@@ -519,7 +519,7 @@ func TestHandler_MergePiece_BeforeHookFails(t *testing.T) {
 	fullHookPath := filepath.Join(repoRoot, ".monkeypuzzle/hooks", "before-piece-merge.sh")
 	mockExec.AddResponse("bash", []string{fullHookPath}, []byte("hook failed"), fmt.Errorf("exit status 1"))
 
-	err := handler.MergePiece(context.Background(), "/pieces/piece-1", "main")
+	_, err := handler.MergePiece(context.Background(), "/pieces/piece-1", "main")
 
 	if err == nil {
 		t.Fatal("expected error when before hook fails")
@@ -553,7 +553,7 @@ func TestHandler_UpdatePiece_NoHooks_Success(t *testing.T) {
 	mockExec.AddResponse("git", []string{"merge", "main"}, nil, nil)
 
 	// No hooks directory exists - should work fine
-	err := handler.UpdatePiece(context.Background(), "/pieces/piece-1", "main")
+	_, err := handler.UpdatePiece(context.Background(), "/pieces/piece-1", "main")
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}

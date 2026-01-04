@@ -86,6 +86,11 @@ var flagAbandonName string
 var flagDeleteBranch bool
 var flagOverwriteSession bool
 var flagPieceNewSchema bool
+var flagPieceUpdateSchema bool
+var flagPieceMergeSchema bool
+var flagPieceCleanupSchema bool
+var flagPieceSwitchSchema bool
+var flagPieceAbandonSchema bool
 
 func init() {
 	pieceNewCmd.Flags().StringVar(&flagPieceName, "name", "", "Optional piece name (default: auto-generated)")
@@ -94,14 +99,19 @@ func init() {
 	pieceNewCmd.Flags().BoolVar(&flagOverwriteSession, "overwrite-session", false, "Replace existing main repo tmux session")
 	pieceNewCmd.Flags().BoolVar(&flagPieceNewSchema, "schema", false, "Output JSON schema and exit")
 	pieceUpdateCmd.Flags().StringVar(&flagMainBranch, "main-branch", "main", "Main branch name to merge (default: main)")
+	pieceUpdateCmd.Flags().BoolVar(&flagPieceUpdateSchema, "schema", false, "Output JSON schema and exit")
 	pieceMergeCmd.Flags().StringVar(&flagMainBranch, "main-branch", "main", "Main branch name to merge into (default: main)")
+	pieceMergeCmd.Flags().BoolVar(&flagPieceMergeSchema, "schema", false, "Output JSON schema and exit")
 	pieceCleanupCmd.Flags().StringVar(&flagMainBranch, "main-branch", "main", "Main branch name to check for merged status (default: main)")
 	pieceCleanupCmd.Flags().BoolVar(&flagDryRun, "dry-run", false, "Show what would be cleaned without making changes")
 	pieceCleanupCmd.Flags().BoolVar(&flagForce, "force", false, "Skip confirmation prompts")
+	pieceCleanupCmd.Flags().BoolVar(&flagPieceCleanupSchema, "schema", false, "Output JSON schema and exit")
 	pieceSwitchCmd.Flags().StringVar(&flagSwitchName, "name", "", "Piece name to switch to")
+	pieceSwitchCmd.Flags().BoolVar(&flagPieceSwitchSchema, "schema", false, "Output JSON schema and exit")
 	pieceAbandonCmd.Flags().StringVar(&flagAbandonName, "name", "", "Piece name to abandon")
 	pieceAbandonCmd.Flags().BoolVar(&flagForce, "force", false, "Force removal even with uncommitted changes")
 	pieceAbandonCmd.Flags().BoolVar(&flagDeleteBranch, "delete-branch", false, "Also delete the git branch")
+	pieceAbandonCmd.Flags().BoolVar(&flagPieceAbandonSchema, "schema", false, "Output JSON schema and exit")
 	pieceCmd.AddCommand(pieceNewCmd)
 	pieceCmd.AddCommand(pieceUpdateCmd)
 	pieceCmd.AddCommand(pieceMergeCmd)
@@ -344,16 +354,20 @@ func runPieceNewTUI(deps core.Deps, workDir string) (piececmd.NewPieceInput, err
 
 
 func runPieceUpdate(cmd *cobra.Command, args []string) error {
+	// --schema mode
+	if flagPieceUpdateSchema {
+		schema, err := piececmd.UpdateSchema()
+		if err != nil {
+			return err
+		}
+		fmt.Println(string(schema))
+		return nil
+	}
+
 	ctx := cmd.Context()
 	wd, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("failed to get working directory: %w", err)
-	}
-
-	// Default to "main" if not specified
-	mainBranch := flagMainBranch
-	if mainBranch == "" {
-		mainBranch = "main"
 	}
 
 	deps := core.Deps{
@@ -363,24 +377,61 @@ func runPieceUpdate(cmd *cobra.Command, args []string) error {
 	}
 	handler := piececmd.NewHandler(deps)
 
-	if err := handler.UpdatePiece(ctx, wd, mainBranch); err != nil {
+	// Get input
+	input, err := getUpdateInput()
+	if err != nil {
 		return err
 	}
 
+	result, err := handler.UpdatePiece(ctx, wd, input.MainBranch)
+	if err != nil {
+		return err
+	}
+
+	// Output JSON to stdout
+	jsonData, err := json.MarshalIndent(result, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal result: %w", err)
+	}
+	fmt.Println(string(jsonData))
+
 	return nil
+}
+
+func getUpdateInput() (piececmd.UpdateInput, error) {
+	var input piececmd.UpdateInput
+
+	if flagMainBranch != "" {
+		input = piececmd.UpdateInput{MainBranch: flagMainBranch}
+	} else if cli.HasStdinData() {
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return piececmd.UpdateInput{}, fmt.Errorf("failed to read stdin: %w", err)
+		}
+		input, err = piececmd.ParseUpdateJSON(data)
+		if err != nil {
+			return piececmd.UpdateInput{}, err
+		}
+	}
+
+	return piececmd.WithUpdateDefaults(input), nil
 }
 
 func runPieceMerge(cmd *cobra.Command, args []string) error {
+	// --schema mode
+	if flagPieceMergeSchema {
+		schema, err := piececmd.MergeSchema()
+		if err != nil {
+			return err
+		}
+		fmt.Println(string(schema))
+		return nil
+	}
+
 	ctx := cmd.Context()
 	wd, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("failed to get working directory: %w", err)
-	}
-
-	// Default to "main" if not specified
-	mainBranch := flagMainBranch
-	if mainBranch == "" {
-		mainBranch = "main"
 	}
 
 	deps := core.Deps{
@@ -390,24 +441,61 @@ func runPieceMerge(cmd *cobra.Command, args []string) error {
 	}
 	handler := piececmd.NewHandler(deps)
 
-	if err := handler.MergePiece(ctx, wd, mainBranch); err != nil {
+	// Get input
+	input, err := getMergeInput()
+	if err != nil {
 		return err
 	}
+
+	result, err := handler.MergePiece(ctx, wd, input.MainBranch)
+	if err != nil {
+		return err
+	}
+
+	// Output JSON to stdout
+	jsonData, err := json.MarshalIndent(result, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal result: %w", err)
+	}
+	fmt.Println(string(jsonData))
 
 	return nil
 }
 
+func getMergeInput() (piececmd.MergeInput, error) {
+	var input piececmd.MergeInput
+
+	if flagMainBranch != "" {
+		input = piececmd.MergeInput{MainBranch: flagMainBranch}
+	} else if cli.HasStdinData() {
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return piececmd.MergeInput{}, fmt.Errorf("failed to read stdin: %w", err)
+		}
+		input, err = piececmd.ParseMergeJSON(data)
+		if err != nil {
+			return piececmd.MergeInput{}, err
+		}
+	}
+
+	return piececmd.WithMergeDefaults(input), nil
+}
+
 func runPieceCleanup(cmd *cobra.Command, args []string) error {
+	// --schema mode
+	if flagPieceCleanupSchema {
+		schema, err := piececmd.CleanupSchema()
+		if err != nil {
+			return err
+		}
+		fmt.Println(string(schema))
+		return nil
+	}
+
 	ctx := cmd.Context()
 	wd, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("failed to get working directory: %w", err)
-	}
-
-	// Default to "main" if not specified
-	mainBranch := flagMainBranch
-	if mainBranch == "" {
-		mainBranch = "main"
 	}
 
 	deps := core.Deps{
@@ -416,6 +504,12 @@ func runPieceCleanup(cmd *cobra.Command, args []string) error {
 		Exec:   adapters.NewOSExec(),
 	}
 	handler := piececmd.NewHandler(deps)
+
+	// Get input
+	input, err := getCleanupInput()
+	if err != nil {
+		return err
+	}
 
 	// Get repo root (either from piece or main repo)
 	status, err := handler.Status(ctx, wd)
@@ -429,9 +523,9 @@ func runPieceCleanup(cmd *cobra.Command, args []string) error {
 	}
 
 	opts := piececmd.CleanupOptions{
-		DryRun:     flagDryRun,
-		Force:      flagForce,
-		MainBranch: mainBranch,
+		DryRun:     input.DryRun,
+		Force:      input.Force,
+		MainBranch: input.MainBranch,
 	}
 
 	results, err := handler.CleanupMergedPieces(ctx, repoRoot, opts)
@@ -449,7 +543,41 @@ func runPieceCleanup(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+func getCleanupInput() (piececmd.CleanupInput, error) {
+	var input piececmd.CleanupInput
+
+	// Flags take priority
+	if flagMainBranch != "" || flagDryRun || flagForce {
+		input = piececmd.CleanupInput{
+			MainBranch: flagMainBranch,
+			DryRun:     flagDryRun,
+			Force:      flagForce,
+		}
+	} else if cli.HasStdinData() {
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return piececmd.CleanupInput{}, fmt.Errorf("failed to read stdin: %w", err)
+		}
+		input, err = piececmd.ParseCleanupJSON(data)
+		if err != nil {
+			return piececmd.CleanupInput{}, err
+		}
+	}
+
+	return piececmd.WithCleanupDefaults(input), nil
+}
+
 func runPieceAbandon(cmd *cobra.Command, args []string) error {
+	// --schema mode
+	if flagPieceAbandonSchema {
+		schema, err := piececmd.AbandonSchema()
+		if err != nil {
+			return err
+		}
+		fmt.Println(string(schema))
+		return nil
+	}
+
 	ctx := cmd.Context()
 	deps := core.Deps{
 		FS:     adapters.NewOSFS(""),
@@ -587,6 +715,16 @@ func containsMonkeypuzzleModule(content string) bool {
 }
 
 func runPieceSwitch(cmd *cobra.Command, args []string) error {
+	// --schema mode
+	if flagPieceSwitchSchema {
+		schema, err := piececmd.SwitchSchema()
+		if err != nil {
+			return err
+		}
+		fmt.Println(string(schema))
+		return nil
+	}
+
 	ctx := cmd.Context()
 	deps := core.Deps{
 		FS:     adapters.NewOSFS(""),
@@ -609,14 +747,12 @@ func runPieceSwitch(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Output JSON to stdout (only if not printing path, which already uses stdout)
-	if result.Method != "path" {
-		jsonData, err := json.MarshalIndent(result, "", "  ")
-		if err != nil {
-			return fmt.Errorf("failed to marshal result: %w", err)
-		}
-		fmt.Println(string(jsonData))
+	// Always output JSON to stdout
+	jsonData, err := json.MarshalIndent(result, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal result: %w", err)
 	}
+	fmt.Println(string(jsonData))
 
 	return nil
 }

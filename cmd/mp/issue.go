@@ -1,6 +1,7 @@
 package mp
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -83,8 +84,19 @@ func runIssueCreate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	_, err = handler.Run(input)
-	return err
+	result, err := handler.Run(input)
+	if err != nil {
+		return err
+	}
+
+	// Output JSON to stdout
+	jsonData, err := json.MarshalIndent(result, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal result: %w", err)
+	}
+	fmt.Println(string(jsonData))
+
+	return nil
 }
 
 func getIssueInput() (issue.Input, error) {

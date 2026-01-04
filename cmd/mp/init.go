@@ -2,6 +2,7 @@ package mp
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -108,7 +109,19 @@ func runInit(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	return handler.Run(input)
+	cfg, err := handler.Run(input)
+	if err != nil {
+		return err
+	}
+
+	// Output JSON to stdout
+	jsonData, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal config: %w", err)
+	}
+	fmt.Println(string(jsonData))
+
+	return nil
 }
 
 func getInput(workDir string) (initcmd.Input, error) {
