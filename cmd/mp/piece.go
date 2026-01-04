@@ -777,7 +777,7 @@ func runPieceList(cmd *cobra.Command, args []string) error {
 	}
 	handler := piececmd.NewHandler(deps)
 
-	pieces, err := handler.ListPieces(ctx)
+	pieces, err := handler.ListPieces(ctx, "")
 	if err != nil {
 		return err
 	}
