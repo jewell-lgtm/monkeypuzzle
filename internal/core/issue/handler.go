@@ -34,14 +34,9 @@ func NewHandler(deps core.Deps, workDir string) *Handler {
 	return &Handler{deps: deps, workDir: workDir}
 }
 
-// Run creates an issue file with the given input
+// Run creates an issue file with the given input.
+// Expects input to be pre-validated via WithDefaults() and Validate().
 func (h *Handler) Run(input Input) (IssueFile, error) {
-	// Apply defaults and validate
-	input = WithDefaults(input)
-	if err := Validate(input); err != nil {
-		return IssueFile{}, err
-	}
-
 	// Get issues directory from config
 	issuesDir, err := h.getIssuesDirectory()
 	if err != nil {

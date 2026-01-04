@@ -3,6 +3,7 @@ package mp
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -10,6 +11,7 @@ import (
 	"github.com/jewell-lgtm/monkeypuzzle/internal/adapters"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
 	prcmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/pr"
+	"github.com/jewell-lgtm/monkeypuzzle/pkg/cli"
 )
 
 var prCmd = &cobra.Command{
@@ -29,20 +31,32 @@ If the piece was created from an issue, the issue title is used as the default P
 }
 
 var (
-	flagPRTitle string
-	flagPRBody  string
-	flagPRBase  string
+	flagPRTitle  string
+	flagPRBody   string
+	flagPRBase   string
+	flagPRSchema bool
 )
 
 func init() {
 	prCreateCmd.Flags().StringVar(&flagPRTitle, "title", "", "PR title (default: issue title or piece name)")
 	prCreateCmd.Flags().StringVar(&flagPRBody, "body", "", "PR description")
 	prCreateCmd.Flags().StringVar(&flagPRBase, "base", "main", "Base branch to merge into")
+	prCreateCmd.Flags().BoolVar(&flagPRSchema, "schema", false, "Output JSON schema and exit")
 	prCmd.AddCommand(prCreateCmd)
 	pieceCmd.AddCommand(prCmd)
 }
 
 func runPRCreate(cmd *cobra.Command, args []string) error {
+	// --schema mode
+	if flagPRSchema {
+		schema, err := prcmd.Schema()
+		if err != nil {
+			return err
+		}
+		fmt.Println(string(schema))
+		return nil
+	}
+
 	ctx := cmd.Context()
 	wd, err := os.Getwd()
 	if err != nil {
@@ -56,10 +70,10 @@ func runPRCreate(cmd *cobra.Command, args []string) error {
 	}
 	handler := prcmd.NewHandler(deps)
 
-	input := prcmd.Input{
-		Title: flagPRTitle,
-		Body:  flagPRBody,
-		Base:  flagPRBase,
+	// Get validated input
+	input, err := getPRInput()
+	if err != nil {
+		return err
 	}
 
 	result, err := handler.CreatePR(ctx, wd, input)
@@ -75,4 +89,35 @@ func runPRCreate(cmd *cobra.Command, args []string) error {
 	fmt.Println(string(jsonData))
 
 	return nil
+}
+
+func getPRInput() (prcmd.Input, error) {
+	var input prcmd.Input
+
+	// Flags always take priority
+	if flagPRTitle != "" || flagPRBody != "" || flagPRBase != "" {
+		input = prcmd.Input{
+			Title: flagPRTitle,
+			Body:  flagPRBody,
+			Base:  flagPRBase,
+		}
+	} else if cli.HasStdinData() {
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return prcmd.Input{}, fmt.Errorf("failed to read stdin: %w", err)
+		}
+		input, err = prcmd.ParseJSON(data)
+		if err != nil {
+			return prcmd.Input{}, err
+		}
+	}
+	// Note: PR create doesn't need TUI - all fields are optional and have sensible defaults
+
+	// Apply defaults and validate
+	input = prcmd.WithDefaults(input)
+	if err := prcmd.Validate(input); err != nil {
+		return prcmd.Input{}, err
+	}
+
+	return input, nil
 }

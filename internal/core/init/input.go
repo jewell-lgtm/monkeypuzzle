@@ -69,6 +69,20 @@ func Fields() []Field {
 	return fields
 }
 
+// GetDefaults returns default values for all fields.
+// Used by TUI to set initial values.
+func GetDefaults(workDir string) map[string]string {
+	defaults := make(map[string]string)
+	for _, f := range fields {
+		def := f.Default
+		if f.Name == "name" && def == "" {
+			def = filepath.Base(workDir)
+		}
+		defaults[f.Name] = def
+	}
+	return defaults
+}
+
 // Validate validates input and returns errors for invalid fields
 func Validate(input Input) error {
 	var errs []string

@@ -47,6 +47,15 @@ type CreatePieceOptions struct {
 	OverwriteSession bool // If true, replace existing main repo session
 }
 
+// CreatePieceWithInput creates a piece from validated input.
+// Routes to CreatePieceFromIssue if IssuePath is set, otherwise CreatePiece.
+func (h *Handler) CreatePieceWithInput(ctx context.Context, srcDir string, input NewPieceInput, opts CreatePieceOptions) (PieceInfo, error) {
+	if input.IssuePath != "" {
+		return h.CreatePieceFromIssue(ctx, srcDir, input.IssuePath, opts)
+	}
+	return h.CreatePiece(ctx, srcDir, input.Name, opts)
+}
+
 // CreatePiece creates a new git worktree with tmux session.
 // If pieceName is provided and non-empty, it will be used (after checking it doesn't exist).
 // If pieceName is empty, a name will be generated automatically.

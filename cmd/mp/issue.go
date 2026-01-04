@@ -12,6 +12,7 @@ import (
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core/issue"
 	issueTUI "github.com/jewell-lgtm/monkeypuzzle/internal/tui/issue"
+	"github.com/jewell-lgtm/monkeypuzzle/pkg/cli"
 )
 
 var (
@@ -88,7 +89,6 @@ func runIssueCreate(cmd *cobra.Command, args []string) error {
 
 func getIssueInput() (issue.Input, error) {
 	allFlagsProvided := flagIssueTitle != ""
-	hasStdin := hasStdinData()
 
 	var input issue.Input
 	var err error
@@ -100,7 +100,7 @@ func getIssueInput() (issue.Input, error) {
 			Description: flagIssueDescription,
 		}
 
-	case hasStdin:
+	case cli.HasStdinData():
 		data, err := io.ReadAll(os.Stdin)
 		if err != nil {
 			return issue.Input{}, fmt.Errorf("failed to read stdin: %w", err)
@@ -110,7 +110,7 @@ func getIssueInput() (issue.Input, error) {
 			return issue.Input{}, err
 		}
 
-	case isTerminal():
+	case cli.IsTerminal():
 		input, err = runIssueInteractiveMode()
 		if err != nil {
 			return issue.Input{}, err
@@ -120,10 +120,8 @@ func getIssueInput() (issue.Input, error) {
 		return issue.Input{}, fmt.Errorf("no input provided; use --schema to see expected format, or provide --title flag")
 	}
 
-	// Apply defaults
+	// Apply defaults and validate inside input layer
 	input = issue.WithDefaults(input)
-
-	// Validate
 	if err := issue.Validate(input); err != nil {
 		return issue.Input{}, err
 	}

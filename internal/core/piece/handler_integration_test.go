@@ -3,6 +3,7 @@
 package piece_test
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -62,7 +63,7 @@ echo "Session: $MP_SESSION_NAME" >> "` + outputFile + `"
 		SessionName:  "mp-piece-test",
 	}
 
-	err = runner.RunHook(tmpDir, piece.HookOnPieceCreate, ctx)
+	err = runner.RunHook(context.Background(), tmpDir, piece.HookOnPieceCreate, ctx)
 	if err != nil {
 		t.Fatalf("hook execution failed: %v", err)
 	}
@@ -124,7 +125,7 @@ exit 1
 	}
 	runner := piece.NewHookRunner(deps)
 
-	err = runner.RunHook(tmpDir, piece.HookBeforePieceMerge, piece.HookContext{
+	err = runner.RunHook(context.Background(), tmpDir, piece.HookBeforePieceMerge, piece.HookContext{
 		PieceName: "test-piece",
 	})
 
@@ -169,7 +170,7 @@ echo "This should not run"
 	}
 	runner := piece.NewHookRunner(deps)
 
-	err = runner.RunHook(tmpDir, piece.HookAfterPieceUpdate, piece.HookContext{
+	err = runner.RunHook(context.Background(), tmpDir, piece.HookAfterPieceUpdate, piece.HookContext{
 		PieceName: "test-piece",
 	})
 
@@ -205,7 +206,7 @@ func TestIntegration_HookRunner_MissingHook(t *testing.T) {
 	}
 	runner := piece.NewHookRunner(deps)
 
-	err = runner.RunHook(tmpDir, piece.HookOnPieceCreate, piece.HookContext{
+	err = runner.RunHook(context.Background(), tmpDir, piece.HookOnPieceCreate, piece.HookContext{
 		PieceName: "test-piece",
 	})
 
@@ -230,7 +231,7 @@ func TestIntegration_HookRunner_MissingHooksDir(t *testing.T) {
 	}
 	runner := piece.NewHookRunner(deps)
 
-	err = runner.RunHook(tmpDir, piece.HookOnPieceCreate, piece.HookContext{
+	err = runner.RunHook(context.Background(), tmpDir, piece.HookOnPieceCreate, piece.HookContext{
 		PieceName: "test-piece",
 	})
 
@@ -340,7 +341,7 @@ echo "before-update ran for $MP_PIECE_NAME" > "` + hookOutputFile + `"
 		MainBranch:   "main",
 	}
 
-	err = runner.RunHook(tmpDir, piece.HookBeforePieceUpdate, ctx)
+	err = runner.RunHook(context.Background(), tmpDir, piece.HookBeforePieceUpdate, ctx)
 	if err != nil {
 		t.Fatalf("hook execution failed: %v", err)
 	}
@@ -482,7 +483,7 @@ This is a great feature.
 	handler := piece.NewHandler(deps)
 
 	relIssuePath := ".monkeypuzzle/issues/my-feature.md"
-	info, err := handler.CreatePieceFromIssue(tmpDir, relIssuePath)
+	info, err := handler.CreatePieceFromIssue(context.Background(), tmpDir, relIssuePath, piece.CreatePieceOptions{})
 	if err != nil {
 		t.Fatalf("CreatePieceFromIssue failed: %v", err)
 	}
@@ -576,7 +577,7 @@ This is a great feature.
 	handler := piece.NewHandler(deps)
 
 	relIssuePath := ".monkeypuzzle/issues/my-feature.md"
-	info, err := handler.CreatePieceFromIssue(tmpDir, relIssuePath)
+	info, err := handler.CreatePieceFromIssue(context.Background(), tmpDir, relIssuePath, piece.CreatePieceOptions{})
 	if err != nil {
 		t.Fatalf("CreatePieceFromIssue failed: %v", err)
 	}
@@ -650,7 +651,7 @@ No H1 heading.
 	handler := piece.NewHandler(deps)
 
 	relIssuePath := ".monkeypuzzle/issues/my-feature.md"
-	info, err := handler.CreatePieceFromIssue(tmpDir, relIssuePath)
+	info, err := handler.CreatePieceFromIssue(context.Background(), tmpDir, relIssuePath, piece.CreatePieceOptions{})
 	if err != nil {
 		t.Fatalf("CreatePieceFromIssue failed: %v", err)
 	}
@@ -726,7 +727,7 @@ Content here.
 	handler := piece.NewHandler(deps)
 
 	relIssuePath := ".monkeypuzzle/issues/my-feature.md"
-	info, err := handler.CreatePieceFromIssue(tmpDir, relIssuePath)
+	info, err := handler.CreatePieceFromIssue(context.Background(), tmpDir, relIssuePath, piece.CreatePieceOptions{})
 	if err != nil {
 		t.Fatalf("CreatePieceFromIssue failed: %v", err)
 	}
@@ -876,7 +877,7 @@ Description here.
 	handler := piece.NewHandler(deps)
 
 	relIssuePath := ".monkeypuzzle/issues/my-feature.md"
-	_, err = handler.CreatePieceFromIssue(tmpDir, relIssuePath)
+	_, err = handler.CreatePieceFromIssue(context.Background(), tmpDir, relIssuePath, piece.CreatePieceOptions{})
 	if err != nil {
 		t.Fatalf("CreatePieceFromIssue failed: %v", err)
 	}
@@ -957,7 +958,7 @@ status: done
 	handler := piece.NewHandler(deps)
 
 	relIssuePath := ".monkeypuzzle/issues/completed-feature.md"
-	_, err = handler.CreatePieceFromIssue(tmpDir, relIssuePath)
+	_, err = handler.CreatePieceFromIssue(context.Background(), tmpDir, relIssuePath, piece.CreatePieceOptions{})
 	if err != nil {
 		t.Fatalf("CreatePieceFromIssue failed: %v", err)
 	}
@@ -1020,7 +1021,7 @@ func TestIntegration_ListPieces_And_SwitchPiece(t *testing.T) {
 	handler := piece.NewHandler(deps)
 
 	// Initially no pieces
-	pieces, err := handler.ListPieces()
+	pieces, err := handler.ListPieces(context.Background())
 	if err != nil {
 		t.Fatalf("ListPieces failed: %v", err)
 	}
@@ -1029,18 +1030,18 @@ func TestIntegration_ListPieces_And_SwitchPiece(t *testing.T) {
 	}
 
 	// Create two pieces
-	_, err = handler.CreatePiece(tmpDir, "piece-one")
+	_, err = handler.CreatePiece(context.Background(), tmpDir, "piece-one", piece.CreatePieceOptions{})
 	if err != nil {
 		t.Fatalf("CreatePiece failed: %v", err)
 	}
 
-	_, err = handler.CreatePiece(tmpDir, "piece-two")
+	_, err = handler.CreatePiece(context.Background(), tmpDir, "piece-two", piece.CreatePieceOptions{})
 	if err != nil {
 		t.Fatalf("CreatePiece failed: %v", err)
 	}
 
 	// List pieces
-	pieces, err = handler.ListPieces()
+	pieces, err = handler.ListPieces(context.Background())
 	if err != nil {
 		t.Fatalf("ListPieces failed: %v", err)
 	}
@@ -1066,7 +1067,7 @@ func TestIntegration_ListPieces_And_SwitchPiece(t *testing.T) {
 	}
 
 	// Switch to piece (will fallback to path since no tmux in CI)
-	result, err := handler.SwitchPiece("piece-one")
+	result, err := handler.SwitchPiece(context.Background(), "piece-one")
 	if err != nil {
 		t.Fatalf("SwitchPiece failed: %v", err)
 	}
@@ -1081,7 +1082,7 @@ func TestIntegration_ListPieces_And_SwitchPiece(t *testing.T) {
 	}
 
 	// Try to switch to non-existent piece
-	_, err = handler.SwitchPiece("non-existent")
+	_, err = handler.SwitchPiece(context.Background(), "non-existent")
 	if err == nil {
 		t.Error("expected error for non-existent piece")
 	}
@@ -1137,13 +1138,13 @@ func TestIntegration_CreatePiece_ThenSwitch(t *testing.T) {
 	handler := piece.NewHandler(deps)
 
 	// Create piece
-	info, err := handler.CreatePiece(tmpDir, "auto-switch-test")
+	info, err := handler.CreatePiece(context.Background(), tmpDir, "auto-switch-test", piece.CreatePieceOptions{})
 	if err != nil {
 		t.Fatalf("CreatePiece failed: %v", err)
 	}
 
 	// Immediately switch to the created piece (simulating auto-switch)
-	result, err := handler.SwitchPiece(info.Name)
+	result, err := handler.SwitchPiece(context.Background(), info.Name)
 	if err != nil {
 		t.Fatalf("SwitchPiece after CreatePiece failed: %v", err)
 	}
@@ -1157,5 +1158,159 @@ func TestIntegration_CreatePiece_ThenSwitch(t *testing.T) {
 	// (tmux session creation is non-fatal, so it may not exist)
 	if result.Method != "path" && result.Method != "tmux-attach" {
 		t.Errorf("expected method 'path' or 'tmux-attach', got %q", result.Method)
+	}
+}
+
+func TestIntegration_CreatePieceWithInput_FromIssue(t *testing.T) {
+	// Skip if git is not available
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	// Set XDG_DATA_HOME to a temp directory
+	tmpDataHome, err := os.MkdirTemp("", "mp-data-*")
+	if err != nil {
+		t.Fatalf("failed to create temp data dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDataHome)
+	t.Setenv("XDG_DATA_HOME", tmpDataHome)
+
+	// Create temp directory for test repo
+	tmpDir, err := os.MkdirTemp("", "mp-integration-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Initialize git repo
+	setupGitRepo(t, tmpDir)
+
+	// Create monkeypuzzle config
+	setupMonkeypuzzleConfig(t, tmpDir)
+
+	// Create issue file
+	issuesDir := filepath.Join(tmpDir, ".monkeypuzzle", "issues")
+	if err := os.MkdirAll(issuesDir, 0755); err != nil {
+		t.Fatalf("failed to create issues dir: %v", err)
+	}
+
+	issueContent := `---
+title: Test Feature
+status: todo
+---
+
+# Test Feature
+
+Description here.
+`
+	issuePath := filepath.Join(issuesDir, "test-feature.md")
+	if err := os.WriteFile(issuePath, []byte(issueContent), 0644); err != nil {
+		t.Fatalf("failed to write issue file: %v", err)
+	}
+
+	// Change to repo directory
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get working directory: %v", err)
+	}
+	defer func() { _ = os.Chdir(oldWd) }()
+
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("failed to change directory: %v", err)
+	}
+
+	// Create handler
+	deps := core.Deps{
+		FS:     adapters.NewOSFS(""),
+		Output: adapters.NewBufferOutput(),
+		Exec:   adapters.NewOSExec(),
+	}
+	handler := piece.NewHandler(deps)
+
+	// Create piece using NewPieceInput with IssuePath
+	input := piece.NewPieceInput{
+		IssuePath: ".monkeypuzzle/issues/test-feature.md",
+	}
+
+	info, err := handler.CreatePieceWithInput(context.Background(), tmpDir, input, piece.CreatePieceOptions{})
+	if err != nil {
+		t.Fatalf("CreatePieceWithInput failed: %v", err)
+	}
+
+	// Verify piece was created with correct name
+	if info.Name != "test-feature" {
+		t.Errorf("expected piece name 'test-feature', got %q", info.Name)
+	}
+
+	// Verify issue status was updated to in-progress
+	updatedContent, err := os.ReadFile(issuePath)
+	if err != nil {
+		t.Fatalf("failed to read updated issue: %v", err)
+	}
+
+	if !strings.Contains(string(updatedContent), "status: in-progress") {
+		t.Errorf("expected status to be updated to in-progress, got:\n%s", string(updatedContent))
+	}
+}
+
+func TestIntegration_CreatePieceWithInput_WithName(t *testing.T) {
+	// Skip if git is not available
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	// Set XDG_DATA_HOME to a temp directory
+	tmpDataHome, err := os.MkdirTemp("", "mp-data-*")
+	if err != nil {
+		t.Fatalf("failed to create temp data dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDataHome)
+	t.Setenv("XDG_DATA_HOME", tmpDataHome)
+
+	// Create temp directory for test repo
+	tmpDir, err := os.MkdirTemp("", "mp-integration-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Initialize git repo
+	setupGitRepo(t, tmpDir)
+
+	// Create monkeypuzzle config
+	setupMonkeypuzzleConfig(t, tmpDir)
+
+	// Change to repo directory
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get working directory: %v", err)
+	}
+	defer func() { _ = os.Chdir(oldWd) }()
+
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("failed to change directory: %v", err)
+	}
+
+	// Create handler
+	deps := core.Deps{
+		FS:     adapters.NewOSFS(""),
+		Output: adapters.NewBufferOutput(),
+		Exec:   adapters.NewOSExec(),
+	}
+	handler := piece.NewHandler(deps)
+
+	// Create piece using NewPieceInput with Name
+	input := piece.NewPieceInput{
+		Name: "my-manual-piece",
+	}
+
+	info, err := handler.CreatePieceWithInput(context.Background(), tmpDir, input, piece.CreatePieceOptions{})
+	if err != nil {
+		t.Fatalf("CreatePieceWithInput failed: %v", err)
+	}
+
+	// Verify piece was created with correct name
+	if info.Name != "my-manual-piece" {
+		t.Errorf("expected piece name 'my-manual-piece', got %q", info.Name)
 	}
 }

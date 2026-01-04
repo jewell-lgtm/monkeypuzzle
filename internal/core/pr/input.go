@@ -56,6 +56,15 @@ func Fields() []Field {
 	return fields
 }
 
+// GetDefaults returns default values for all fields.
+func GetDefaults() map[string]string {
+	defaults := make(map[string]string)
+	for _, f := range fields {
+		defaults[f.Name] = f.Default
+	}
+	return defaults
+}
+
 // WithDefaults returns input with defaults applied and whitespace trimmed
 func WithDefaults(input Input) Input {
 	input.Title = strings.TrimSpace(input.Title)
@@ -76,4 +85,10 @@ func ParseJSON(data []byte) (Input, error) {
 		return Input{}, err
 	}
 	return input, nil
+}
+
+// Validate validates the input (title is optional, derived from issue if not provided)
+func Validate(input Input) error {
+	// All fields are optional - title can be derived from issue
+	return nil
 }

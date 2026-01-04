@@ -14,6 +14,7 @@ import (
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
 	initcmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/init"
 	initTUI "github.com/jewell-lgtm/monkeypuzzle/internal/tui/init"
+	"github.com/jewell-lgtm/monkeypuzzle/pkg/cli"
 )
 
 var (
@@ -85,7 +86,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 
 	// Check for existing config
 	if handler.ConfigExists() && !flagYes {
-		if !isTerminal() {
+		if !cli.IsTerminal() {
 			return fmt.Errorf("config already exists, use --yes to overwrite")
 		}
 		fmt.Print("Config already exists. Overwrite? [y/N] ")
@@ -112,7 +113,6 @@ func runInit(cmd *cobra.Command, args []string) error {
 
 func getInput(workDir string) (initcmd.Input, error) {
 	allFlagsProvided := flagName != "" && flagIssueProvider != "" && flagPRProvider != ""
-	hasStdin := hasStdinData()
 
 	var input initcmd.Input
 	var err error
@@ -125,7 +125,7 @@ func getInput(workDir string) (initcmd.Input, error) {
 			PRProvider:    flagPRProvider,
 		}
 
-	case hasStdin:
+	case cli.HasStdinData():
 		data, err := io.ReadAll(os.Stdin)
 		if err != nil {
 			return initcmd.Input{}, fmt.Errorf("failed to read stdin: %w", err)
@@ -135,7 +135,7 @@ func getInput(workDir string) (initcmd.Input, error) {
 			return initcmd.Input{}, err
 		}
 
-	case isTerminal():
+	case cli.IsTerminal():
 		input, err = runInteractiveMode(workDir)
 		if err != nil {
 			return initcmd.Input{}, err
@@ -145,10 +145,8 @@ func getInput(workDir string) (initcmd.Input, error) {
 		return initcmd.Input{}, fmt.Errorf("no input provided; use --schema to see expected format, or provide flags")
 	}
 
-	// Apply defaults
+	// Apply defaults and validate inside input layer
 	input = initcmd.WithDefaults(input, workDir)
-
-	// Validate
 	if err := initcmd.Validate(input); err != nil {
 		return initcmd.Input{}, err
 	}
@@ -193,18 +191,3 @@ func runInteractiveMode(workDir string) (initcmd.Input, error) {
 	}, nil
 }
 
-func isTerminal() bool {
-	fi, err := os.Stdin.Stat()
-	if err != nil {
-		return false
-	}
-	return (fi.Mode() & os.ModeCharDevice) != 0
-}
-
-func hasStdinData() bool {
-	fi, err := os.Stdin.Stat()
-	if err != nil {
-		return false
-	}
-	return (fi.Mode()&os.ModeCharDevice) == 0 && fi.Size() > 0 || (fi.Mode()&os.ModeNamedPipe) != 0
-}

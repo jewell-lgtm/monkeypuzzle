@@ -105,12 +105,9 @@ func TestHandler_Run_OutputsSuccessMessage(t *testing.T) {
 	}
 }
 
-func TestHandler_Run_ValidationError(t *testing.T) {
-	fs := adapters.NewMemoryFS()
-	out := adapters.NewBufferOutput()
-	deps := core.Deps{FS: fs, Output: out}
-	handler := initcmd.NewHandler(deps)
-
+func TestValidate_InvalidInputs(t *testing.T) {
+	// Note: Validation is done in input layer, not handler.
+	// Handler.Run() expects pre-validated input.
 	tests := []struct {
 		name  string
 		input initcmd.Input
@@ -139,7 +136,7 @@ func TestHandler_Run_ValidationError(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := handler.Run(tt.input)
+			err := initcmd.Validate(tt.input)
 			if err == nil {
 				t.Error("expected validation error")
 			}

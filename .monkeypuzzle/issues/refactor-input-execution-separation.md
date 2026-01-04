@@ -1,6 +1,6 @@
 ---
 title: Refactor input/execution layer separation
-status: todo
+status: done
 ---
 
 # Refactor input/execution layer separation
@@ -16,8 +16,8 @@ Clean up inconsistencies in input layer abstraction across commands.
 
 ## Tasks
 
-- [ ] Move validation inside `getPieceNewInput()` to match `getIssueInput()` pattern
-- [ ] Unify handler to single `CreatePiece(ctx, srcDir, input, opts)` that routes internally
-- [ ] Add `SkipSwitch`/`OverwriteSession` to `NewPieceInput` struct
-- [ ] Extract shared `isTerminal()`/`hasStdinData()` to pkg/cli or similar
-- [ ] Apply same pattern to `piece switch`, `piece abandon` commands
+- [x] Move validation inside `getPieceNewInput()` to match `getIssueInput()` pattern
+- [x] Unify handler to single `CreatePieceWithInput(ctx, srcDir, input, opts)` that routes internally
+- [x] Add `SkipSwitch`/`OverwriteSession` to `NewPieceInput` struct
+- [x] Extract shared `isTerminal()`/`hasStdinData()` to `pkg/cli`
+- [x] Apply same pattern to `piece switch`, `piece abandon`, `pr create` commands

@@ -124,19 +124,14 @@ func TestHandler_Run_DuplicateFilename_AddsNumericSuffix(t *testing.T) {
 	}
 }
 
-func TestHandler_Run_ValidationError_MissingTitle(t *testing.T) {
-	fs := adapters.NewMemoryFS()
-	out := adapters.NewBufferOutput()
-	deps := core.Deps{FS: fs, Output: out}
-	setupConfig(t, fs)
-
-	handler := issue.NewHandler(deps, "")
-
+func TestValidate_MissingTitle(t *testing.T) {
+	// Note: Validation is done in input layer, not handler.
+	// Handler.Run() expects pre-validated input.
 	input := issue.Input{
 		Title: "",
 	}
 
-	_, err := handler.Run(input)
+	err := issue.Validate(input)
 	if err == nil {
 		t.Error("expected validation error for empty title")
 	}

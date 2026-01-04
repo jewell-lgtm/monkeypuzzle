@@ -50,6 +50,15 @@ func Fields() []Field {
 	return fields
 }
 
+// GetDefaults returns default values for all fields.
+func GetDefaults() map[string]string {
+	defaults := make(map[string]string)
+	for _, f := range fields {
+		defaults[f.Name] = f.Default
+	}
+	return defaults
+}
+
 // Validate validates input and returns errors for invalid fields
 func Validate(input Input) error {
 	var errs []string

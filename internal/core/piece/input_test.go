@@ -48,7 +48,7 @@ func TestNewPieceSchema(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	var data map[string]string
+	var data map[string]any
 	if err := json.Unmarshal(schema, &data); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
@@ -58,6 +58,12 @@ func TestNewPieceSchema(t *testing.T) {
 	}
 	if _, ok := data["name"]; !ok {
 		t.Error("expected 'name' in schema")
+	}
+	if _, ok := data["skip_switch"]; !ok {
+		t.Error("expected 'skip_switch' in schema")
+	}
+	if _, ok := data["overwrite_session"]; !ok {
+		t.Error("expected 'overwrite_session' in schema")
 	}
 }
 

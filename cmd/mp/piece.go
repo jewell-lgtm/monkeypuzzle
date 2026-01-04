@@ -1,6 +1,7 @@
 package mp
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -17,6 +18,7 @@ import (
 	piececmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/piece"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/tui/issuepicker"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/tui/pieceswitch"
+	"github.com/jewell-lgtm/monkeypuzzle/pkg/cli"
 )
 
 var pieceCmd = &cobra.Command{
@@ -230,29 +232,18 @@ func runPieceNew(cmd *cobra.Command, args []string) error {
 	}
 	handler := piececmd.NewHandler(deps)
 
-	// Get input from flags/stdin/TUI
+	// Get validated input from flags/stdin/TUI
 	input, err := getPieceNewInput(deps, wd)
 	if err != nil {
 		return err
 	}
 
-	// Apply defaults and validate
-	input = piececmd.WithNewPieceDefaults(input)
-	if err := piececmd.ValidateNewPieceInput(input); err != nil {
-		return err
-	}
-
 	opts := piececmd.CreatePieceOptions{
-		OverwriteSession: flagOverwriteSession,
+		OverwriteSession: input.OverwriteSession,
 	}
 
-	var info piececmd.PieceInfo
-	if input.IssuePath != "" {
-		info, err = handler.CreatePieceFromIssue(ctx, monkeypuzzleSourceDir, input.IssuePath, opts)
-	} else {
-		info, err = handler.CreatePiece(ctx, monkeypuzzleSourceDir, input.Name, opts)
-	}
-
+	// Unified handler routes based on input
+	info, err := handler.CreatePieceWithInput(ctx, monkeypuzzleSourceDir, input, opts)
 	if err != nil {
 		return err
 	}
@@ -264,8 +255,8 @@ func runPieceNew(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Println(string(jsonData))
 
-	// Switch to the new piece (unless --skip-switch is set)
-	if !flagSkipSwitch {
+	// Switch to the new piece (unless skip_switch is set)
+	if !input.SkipSwitch {
 		_, err := handler.SwitchPiece(ctx, info.Name)
 		if err != nil {
 			// Non-fatal: log warning but don't fail
@@ -277,29 +268,50 @@ func runPieceNew(cmd *cobra.Command, args []string) error {
 }
 
 func getPieceNewInput(deps core.Deps, workDir string) (piececmd.NewPieceInput, error) {
+	var input piececmd.NewPieceInput
+	var err error
+
 	// Mode 1: Flags provided
 	if flagIssuePath != "" || flagPieceName != "" {
-		return piececmd.NewPieceInput{
+		input = piececmd.NewPieceInput{
 			IssuePath: flagIssuePath,
 			Name:      flagPieceName,
-		}, nil
-	}
-
-	// Mode 2: Stdin JSON
-	if hasPieceNewStdinData() {
+		}
+	} else if cli.HasStdinData() {
+		// Mode 2: Stdin JSON
 		data, err := io.ReadAll(os.Stdin)
 		if err != nil {
 			return piececmd.NewPieceInput{}, fmt.Errorf("failed to read stdin: %w", err)
 		}
-		return piececmd.ParseNewPieceJSON(data)
+		input, err = piececmd.ParseNewPieceJSON(data)
+		if err != nil {
+			return piececmd.NewPieceInput{}, err
+		}
+	} else if cli.IsTerminal() {
+		// Mode 3: Interactive TUI
+		input, err = runPieceNewTUI(deps, workDir)
+		if err != nil {
+			return piececmd.NewPieceInput{}, err
+		}
+	} else {
+		return piececmd.NewPieceInput{}, fmt.Errorf("no input provided; use --schema to see expected format")
 	}
 
-	// Mode 3: Interactive TUI
-	if isPieceNewTerminal() {
-		return runPieceNewTUI(deps, workDir)
+	// Flags override stdin/TUI options (flags take priority)
+	if flagSkipSwitch {
+		input.SkipSwitch = true
+	}
+	if flagOverwriteSession {
+		input.OverwriteSession = true
 	}
 
-	return piececmd.NewPieceInput{}, fmt.Errorf("no input provided; use --schema to see expected format")
+	// Apply defaults and validate inside input layer
+	input = piececmd.WithNewPieceDefaults(input)
+	if err := piececmd.ValidateNewPieceInput(input); err != nil {
+		return piececmd.NewPieceInput{}, err
+	}
+
+	return input, nil
 }
 
 func runPieceNewTUI(deps core.Deps, workDir string) (piececmd.NewPieceInput, error) {
@@ -330,22 +342,6 @@ func runPieceNewTUI(deps core.Deps, workDir string) (piececmd.NewPieceInput, err
 	}, nil
 }
 
-func isPieceNewTerminal() bool {
-	fi, err := os.Stdin.Stat()
-	if err != nil {
-		return false
-	}
-	return (fi.Mode() & os.ModeCharDevice) != 0
-}
-
-func hasPieceNewStdinData() bool {
-	fi, err := os.Stdin.Stat()
-	if err != nil {
-		return false
-	}
-	return (fi.Mode()&os.ModeCharDevice) == 0 && fi.Size() > 0 ||
-		(fi.Mode()&os.ModeNamedPipe) != 0
-}
 
 func runPieceUpdate(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
@@ -462,60 +458,21 @@ func runPieceAbandon(cmd *cobra.Command, args []string) error {
 	}
 	handler := piececmd.NewHandler(deps)
 
-	var pieceName string
-
-	// Get piece name from flag, stdin JSON, or TUI
-	if flagAbandonName != "" {
-		pieceName = flagAbandonName
-	} else if hasAbandonStdinData() {
-		data, err := io.ReadAll(os.Stdin)
-		if err != nil {
-			return fmt.Errorf("failed to read stdin: %w", err)
-		}
-		var input struct {
-			Name string `json:"name"`
-		}
-		if err := json.Unmarshal(data, &input); err != nil {
-			return fmt.Errorf("failed to parse JSON: %w", err)
-		}
-		pieceName = input.Name
-	} else if isAbandonTerminal() {
-		// Interactive TUI - reuse piece switch TUI
-		pieces, err := handler.ListPieces(ctx)
-		if err != nil {
-			return err
-		}
-		if len(pieces) == 0 {
-			fmt.Fprintln(os.Stderr, "No pieces to abandon.")
+	// Get validated input
+	input, err := getAbandonInput(ctx, handler)
+	if err != nil {
+		if err.Error() == "cancelled" || err.Error() == "no pieces" {
 			return nil
 		}
-
-		p := tea.NewProgram(pieceswitch.New(pieces))
-		m, err := p.Run()
-		if err != nil {
-			return fmt.Errorf("TUI error: %w", err)
-		}
-
-		finalModel := m.(pieceswitch.Model)
-		if finalModel.Cancelled {
-			return nil
-		}
-
-		pieceName = pieces[finalModel.Selected].Name
-	} else {
-		return fmt.Errorf("no piece name provided. Use --name flag or run interactively")
-	}
-
-	if pieceName == "" {
-		return fmt.Errorf("piece name is required")
+		return err
 	}
 
 	opts := piececmd.AbandonOptions{
-		Force:        flagForce,
-		DeleteBranch: flagDeleteBranch,
+		Force:        input.Force,
+		DeleteBranch: input.DeleteBranch,
 	}
 
-	result, err := handler.AbandonPiece(ctx, pieceName, opts)
+	result, err := handler.AbandonPiece(ctx, input.Name, opts)
 	if err != nil {
 		return err
 	}
@@ -530,22 +487,71 @@ func runPieceAbandon(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func isAbandonTerminal() bool {
-	fi, err := os.Stdin.Stat()
-	if err != nil {
-		return false
+func getAbandonInput(ctx context.Context, handler *piececmd.Handler) (piececmd.AbandonInput, error) {
+	var input piececmd.AbandonInput
+	var err error
+
+	if flagAbandonName != "" {
+		input = piececmd.AbandonInput{Name: flagAbandonName}
+	} else if cli.HasStdinData() {
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return piececmd.AbandonInput{}, fmt.Errorf("failed to read stdin: %w", err)
+		}
+		input, err = piececmd.ParseAbandonJSON(data)
+		if err != nil {
+			return piececmd.AbandonInput{}, err
+		}
+	} else if cli.IsTerminal() {
+		input, err = runAbandonTUI(ctx, handler)
+		if err != nil {
+			return piececmd.AbandonInput{}, err
+		}
+	} else {
+		return piececmd.AbandonInput{}, fmt.Errorf("no input provided; use --name flag or run interactively")
 	}
-	return (fi.Mode() & os.ModeCharDevice) != 0
+
+	// Flags override stdin/TUI options
+	if flagForce {
+		input.Force = true
+	}
+	if flagDeleteBranch {
+		input.DeleteBranch = true
+	}
+
+	input = piececmd.WithAbandonDefaults(input)
+	if err := piececmd.ValidateAbandonInput(input); err != nil {
+		return piececmd.AbandonInput{}, err
+	}
+
+	return input, nil
 }
 
-func hasAbandonStdinData() bool {
-	fi, err := os.Stdin.Stat()
+func runAbandonTUI(ctx context.Context, handler *piececmd.Handler) (piececmd.AbandonInput, error) {
+	pieces, err := handler.ListPieces(ctx)
 	if err != nil {
-		return false
+		return piececmd.AbandonInput{}, err
 	}
-	return (fi.Mode()&os.ModeCharDevice) == 0 && fi.Size() > 0 ||
-		(fi.Mode()&os.ModeNamedPipe) != 0
+
+	if len(pieces) == 0 {
+		fmt.Fprintln(os.Stderr, "No pieces to abandon.")
+		return piececmd.AbandonInput{}, fmt.Errorf("no pieces")
+	}
+
+	p := tea.NewProgram(pieceswitch.New(pieces))
+	m, err := p.Run()
+	if err != nil {
+		return piececmd.AbandonInput{}, fmt.Errorf("TUI error: %w", err)
+	}
+
+	finalModel := m.(pieceswitch.Model)
+	if finalModel.Cancelled {
+		return piececmd.AbandonInput{}, fmt.Errorf("cancelled")
+	}
+
+	return piececmd.AbandonInput{Name: pieces[finalModel.Selected].Name}, nil
 }
+
 
 // findMonkeypuzzleSource tries to find the monkeypuzzle source directory
 // by walking up from the current directory looking for go.mod with monkeypuzzle module
@@ -589,59 +595,16 @@ func runPieceSwitch(cmd *cobra.Command, args []string) error {
 	}
 	handler := piececmd.NewHandler(deps)
 
-	// Get available pieces first
-	pieces, err := handler.ListPieces(ctx)
+	// Get validated input
+	input, err := getSwitchInput(ctx, handler)
 	if err != nil {
+		if err.Error() == "cancelled" || err.Error() == "no pieces" {
+			return nil
+		}
 		return err
 	}
 
-	var selectedName string
-
-	// Three input modes: flag, stdin JSON, TUI
-	if flagSwitchName != "" {
-		// Flag provided
-		selectedName = flagSwitchName
-	} else if hasSwitchStdinData() {
-		// JSON from stdin
-		data, err := io.ReadAll(os.Stdin)
-		if err != nil {
-			return fmt.Errorf("failed to read stdin: %w", err)
-		}
-		var input struct {
-			Name string `json:"name"`
-		}
-		if err := json.Unmarshal(data, &input); err != nil {
-			return fmt.Errorf("failed to parse JSON: %w", err)
-		}
-		selectedName = input.Name
-	} else if isSwitchTerminal() {
-		// Interactive TUI
-		if len(pieces) == 0 {
-			fmt.Fprintln(os.Stderr, "No pieces found. Use 'mp piece new' to create one.")
-			return nil
-		}
-
-		p := tea.NewProgram(pieceswitch.New(pieces))
-		m, err := p.Run()
-		if err != nil {
-			return fmt.Errorf("TUI error: %w", err)
-		}
-
-		finalModel := m.(pieceswitch.Model)
-		if finalModel.Cancelled {
-			return nil
-		}
-
-		selectedName = pieces[finalModel.Selected].Name
-	} else {
-		return fmt.Errorf("no piece name provided. Use --name flag or run interactively")
-	}
-
-	if selectedName == "" {
-		return fmt.Errorf("piece name is required")
-	}
-
-	result, err := handler.SwitchPiece(ctx, selectedName)
+	result, err := handler.SwitchPiece(ctx, input.Name)
 	if err != nil {
 		return err
 	}
@@ -658,19 +621,60 @@ func runPieceSwitch(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func isSwitchTerminal() bool {
-	fi, err := os.Stdin.Stat()
-	if err != nil {
-		return false
+func getSwitchInput(ctx context.Context, handler *piececmd.Handler) (piececmd.SwitchInput, error) {
+	var input piececmd.SwitchInput
+	var err error
+
+	if flagSwitchName != "" {
+		input = piececmd.SwitchInput{Name: flagSwitchName}
+	} else if cli.HasStdinData() {
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return piececmd.SwitchInput{}, fmt.Errorf("failed to read stdin: %w", err)
+		}
+		input, err = piececmd.ParseSwitchJSON(data)
+		if err != nil {
+			return piececmd.SwitchInput{}, err
+		}
+	} else if cli.IsTerminal() {
+		input, err = runSwitchTUI(ctx, handler)
+		if err != nil {
+			return piececmd.SwitchInput{}, err
+		}
+	} else {
+		return piececmd.SwitchInput{}, fmt.Errorf("no input provided; use --name flag or run interactively")
 	}
-	return (fi.Mode() & os.ModeCharDevice) != 0
+
+	input = piececmd.WithSwitchDefaults(input)
+	if err := piececmd.ValidateSwitchInput(input); err != nil {
+		return piececmd.SwitchInput{}, err
+	}
+
+	return input, nil
 }
 
-func hasSwitchStdinData() bool {
-	fi, err := os.Stdin.Stat()
+func runSwitchTUI(ctx context.Context, handler *piececmd.Handler) (piececmd.SwitchInput, error) {
+	pieces, err := handler.ListPieces(ctx)
 	if err != nil {
-		return false
+		return piececmd.SwitchInput{}, err
 	}
-	return (fi.Mode()&os.ModeCharDevice) == 0 && fi.Size() > 0 ||
-		(fi.Mode()&os.ModeNamedPipe) != 0
+
+	if len(pieces) == 0 {
+		fmt.Fprintln(os.Stderr, "No pieces found. Use 'mp piece new' to create one.")
+		return piececmd.SwitchInput{}, fmt.Errorf("no pieces")
+	}
+
+	p := tea.NewProgram(pieceswitch.New(pieces))
+	m, err := p.Run()
+	if err != nil {
+		return piececmd.SwitchInput{}, fmt.Errorf("TUI error: %w", err)
+	}
+
+	finalModel := m.(pieceswitch.Model)
+	if finalModel.Cancelled {
+		return piececmd.SwitchInput{}, fmt.Errorf("cancelled")
+	}
+
+	return piececmd.SwitchInput{Name: pieces[finalModel.Selected].Name}, nil
 }
+

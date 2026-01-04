@@ -38,10 +38,8 @@ func NewHandler(deps core.Deps) *Handler {
 
 // CreatePR creates a GitHub PR for the current piece.
 // Must be run from within a piece worktree.
+// Expects input to be pre-validated via WithDefaults() and Validate().
 func (h *Handler) CreatePR(ctx context.Context, workDir string, input Input) (*PRCreateResult, error) {
-	// Apply defaults
-	input = WithDefaults(input)
-
 	// Check if we're in a piece worktree
 	pieceHandler := piece.NewHandler(h.deps)
 	status, err := pieceHandler.Status(ctx, workDir)

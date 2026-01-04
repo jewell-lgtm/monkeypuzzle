@@ -55,16 +55,9 @@ func (h *Handler) ConfigExists() bool {
 	return err == nil
 }
 
-// Run executes the init command with validated input
+// Run executes the init command with validated input.
+// Expects input to be pre-validated via WithDefaults() and Validate().
 func (h *Handler) Run(input Input) error {
-	// Sanitize project name (remove invalid filesystem characters)
-	input.Name = SanitizeProjectName(input.Name)
-	
-	// Validate input
-	if err := Validate(input); err != nil {
-		return err
-	}
-
 	// Create directories
 	if err := h.deps.FS.MkdirAll(DirName, DefaultDirPerm); err != nil {
 		return err

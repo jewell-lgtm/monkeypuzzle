@@ -49,15 +49,19 @@ type SwitchResult struct {
 // NewPieceInput holds input for the piece new command.
 // Either IssuePath or Name must be provided (mutually exclusive).
 type NewPieceInput struct {
-	IssuePath string `json:"issue_path,omitempty"`
-	Name      string `json:"name,omitempty"`
+	IssuePath        string `json:"issue_path,omitempty"`
+	Name             string `json:"name,omitempty"`
+	SkipSwitch       bool   `json:"skip_switch,omitempty"`
+	OverwriteSession bool   `json:"overwrite_session,omitempty"`
 }
 
 // NewPieceSchema returns the JSON schema for piece new input.
 func NewPieceSchema() ([]byte, error) {
 	schema := map[string]any{
-		"issue_path": "",
-		"name":       "",
+		"issue_path":        "",
+		"name":              "",
+		"skip_switch":       false,
+		"overwrite_session": false,
 	}
 	return json.MarshalIndent(schema, "", "  ")
 }
@@ -89,7 +93,89 @@ func ValidateNewPieceInput(input NewPieceInput) error {
 // WithNewPieceDefaults returns input with whitespace trimmed.
 func WithNewPieceDefaults(input NewPieceInput) NewPieceInput {
 	return NewPieceInput{
-		IssuePath: strings.TrimSpace(input.IssuePath),
-		Name:      strings.TrimSpace(input.Name),
+		IssuePath:        strings.TrimSpace(input.IssuePath),
+		Name:             strings.TrimSpace(input.Name),
+		SkipSwitch:       input.SkipSwitch,
+		OverwriteSession: input.OverwriteSession,
+	}
+}
+
+// SwitchInput holds input for the piece switch command.
+type SwitchInput struct {
+	Name string `json:"name"`
+}
+
+// SwitchSchema returns the JSON schema for piece switch input.
+func SwitchSchema() ([]byte, error) {
+	schema := map[string]any{
+		"name": "",
+	}
+	return json.MarshalIndent(schema, "", "  ")
+}
+
+// ParseSwitchJSON parses JSON input into SwitchInput.
+func ParseSwitchJSON(data []byte) (SwitchInput, error) {
+	var input SwitchInput
+	if err := json.Unmarshal(data, &input); err != nil {
+		return SwitchInput{}, fmt.Errorf("invalid JSON: %w", err)
+	}
+	return input, nil
+}
+
+// ValidateSwitchInput validates the switch input.
+func ValidateSwitchInput(input SwitchInput) error {
+	if strings.TrimSpace(input.Name) == "" {
+		return fmt.Errorf("name is required")
+	}
+	return nil
+}
+
+// WithSwitchDefaults returns input with whitespace trimmed.
+func WithSwitchDefaults(input SwitchInput) SwitchInput {
+	return SwitchInput{
+		Name: strings.TrimSpace(input.Name),
+	}
+}
+
+// AbandonInput holds input for the piece abandon command.
+type AbandonInput struct {
+	Name         string `json:"name"`
+	Force        bool   `json:"force,omitempty"`
+	DeleteBranch bool   `json:"delete_branch,omitempty"`
+}
+
+// AbandonSchema returns the JSON schema for piece abandon input.
+func AbandonSchema() ([]byte, error) {
+	schema := map[string]any{
+		"name":          "",
+		"force":         false,
+		"delete_branch": false,
+	}
+	return json.MarshalIndent(schema, "", "  ")
+}
+
+// ParseAbandonJSON parses JSON input into AbandonInput.
+func ParseAbandonJSON(data []byte) (AbandonInput, error) {
+	var input AbandonInput
+	if err := json.Unmarshal(data, &input); err != nil {
+		return AbandonInput{}, fmt.Errorf("invalid JSON: %w", err)
+	}
+	return input, nil
+}
+
+// ValidateAbandonInput validates the abandon input.
+func ValidateAbandonInput(input AbandonInput) error {
+	if strings.TrimSpace(input.Name) == "" {
+		return fmt.Errorf("name is required")
+	}
+	return nil
+}
+
+// WithAbandonDefaults returns input with whitespace trimmed.
+func WithAbandonDefaults(input AbandonInput) AbandonInput {
+	return AbandonInput{
+		Name:         strings.TrimSpace(input.Name),
+		Force:        input.Force,
+		DeleteBranch: input.DeleteBranch,
 	}
 }
