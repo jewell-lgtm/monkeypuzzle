@@ -236,20 +236,22 @@ func WithUpdateDefaults(input UpdateInput) UpdateInput {
 // MergeInput holds input for the piece merge command.
 type MergeInput struct {
 	MainBranch string `json:"main_branch,omitempty"`
+	Force      bool   `json:"force,omitempty"` // Force merge even if piece has children
 }
 
 // MergeResult contains the result of a merge operation.
 type MergeResult struct {
-	PieceName   string `json:"piece_name"`
-	PieceBranch string `json:"piece_branch"`
-	MainBranch  string `json:"main_branch"`
-	Status      string `json:"status"` // "merged"
+	PieceName    string `json:"piece_name"`
+	PieceBranch  string `json:"piece_branch"`
+	TargetBranch string `json:"target_branch"` // The branch merged into (parent or main)
+	Status       string `json:"status"`        // "merged"
 }
 
 // MergeSchema returns the JSON schema for piece merge input.
 func MergeSchema() ([]byte, error) {
 	schema := map[string]any{
 		"main_branch": "main",
+		"force":       false,
 	}
 	return json.MarshalIndent(schema, "", "  ")
 }
@@ -269,7 +271,7 @@ func WithMergeDefaults(input MergeInput) MergeInput {
 	if mainBranch == "" {
 		mainBranch = "main"
 	}
-	return MergeInput{MainBranch: mainBranch}
+	return MergeInput{MainBranch: mainBranch, Force: input.Force}
 }
 
 // CleanupInput holds input for the piece cleanup command.

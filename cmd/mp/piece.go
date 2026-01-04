@@ -111,6 +111,7 @@ func init() {
 	pieceUpdateCmd.Flags().BoolVar(&flagPieceUpdateSchema, "schema", false, "Output JSON schema and exit")
 	pieceMergeCmd.Flags().StringVar(&flagMainBranch, "main-branch", "main", "Main branch name to merge into (default: main)")
 	pieceMergeCmd.Flags().BoolVar(&flagPieceMergeSchema, "schema", false, "Output JSON schema and exit")
+	pieceMergeCmd.Flags().BoolVar(&flagForce, "force", false, "Force merge even if piece has unmerged children")
 	pieceCleanupCmd.Flags().StringVar(&flagMainBranch, "main-branch", "main", "Main branch name to check for merged status (default: main)")
 	pieceCleanupCmd.Flags().BoolVar(&flagDryRun, "dry-run", false, "Show what would be cleaned without making changes")
 	pieceCleanupCmd.Flags().BoolVar(&flagForce, "force", false, "Skip confirmation prompts")
@@ -524,7 +525,7 @@ func runPieceMerge(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	result, err := handler.MergePiece(ctx, wd, input.MainBranch)
+	result, err := handler.MergePiece(ctx, wd, input)
 	if err != nil {
 		return err
 	}
@@ -542,9 +543,7 @@ func runPieceMerge(cmd *cobra.Command, args []string) error {
 func getMergeInput() (piececmd.MergeInput, error) {
 	var input piececmd.MergeInput
 
-	if flagMainBranch != "" {
-		input = piececmd.MergeInput{MainBranch: flagMainBranch}
-	} else if cli.HasStdinData() {
+	if cli.HasStdinData() {
 		data, err := io.ReadAll(os.Stdin)
 		if err != nil {
 			return piececmd.MergeInput{}, fmt.Errorf("failed to read stdin: %w", err)
@@ -553,6 +552,14 @@ func getMergeInput() (piececmd.MergeInput, error) {
 		if err != nil {
 			return piececmd.MergeInput{}, err
 		}
+	}
+
+	// Flags override JSON input
+	if flagMainBranch != "" {
+		input.MainBranch = flagMainBranch
+	}
+	if flagForce {
+		input.Force = true
 	}
 
 	return piececmd.WithMergeDefaults(input), nil
