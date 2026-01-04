@@ -590,9 +590,11 @@ func (h *Handler) UpdatePiece(ctx context.Context, workDir, mainBranch string) (
 	return result, nil
 }
 
-// MergePiece squash-merges the piece branch back into main as a single commit.
-// Fails if main has commits that are not in the piece worktree.
-func (h *Handler) MergePiece(ctx context.Context, workDir, mainBranch string) (MergeResult, error) {
+// MergePiece squash-merges the piece branch into its target branch.
+// For root pieces (parent=main), merges into main.
+// For child pieces, merges into the parent piece's branch.
+// Blocks if piece has unmerged children unless Force is set.
+func (h *Handler) MergePiece(ctx context.Context, workDir string, input MergeInput) (MergeResult, error) {
 	// Check if we're in a piece worktree
 	status, err := h.Status(ctx, workDir)
 	if err != nil {
@@ -615,12 +617,43 @@ func (h *Handler) MergePiece(ctx context.Context, workDir, mainBranch string) (M
 		return MergeResult{}, fmt.Errorf("failed to get main repo root: %w", err)
 	}
 
+	// Read piece metadata to determine parent
+	pieceMetadata, err := ReadPieceMetadata(status.WorktreePath, h.deps.FS)
+	if err != nil {
+		return MergeResult{}, fmt.Errorf("failed to read piece metadata: %w", err)
+	}
+
+	// Determine target branch: parent piece's branch or main
+	targetBranch := input.MainBranch
+	if pieceMetadata.Parent != "main" && pieceMetadata.Parent != "" {
+		targetBranch = pieceMetadata.Parent
+		h.deps.Output.Write(core.Message{
+			Type:    core.MsgInfo,
+			Content: fmt.Sprintf("Merging into parent piece '%s'", pieceMetadata.Parent),
+		})
+	}
+
+	// Check for children unless Force is set
+	if !input.Force {
+		piecesDir, err := getPiecesDir(mainRepoRoot)
+		if err != nil {
+			return MergeResult{}, fmt.Errorf("failed to get pieces directory: %w", err)
+		}
+		children, err := GetPieceChildren(status.PieceName, piecesDir, h.deps.FS)
+		if err != nil {
+			return MergeResult{}, fmt.Errorf("failed to check for children: %w", err)
+		}
+		if len(children) > 0 {
+			return MergeResult{}, fmt.Errorf("cannot merge: piece has unmerged children: %v. Merge children first, or use --force", children)
+		}
+	}
+
 	// Build hook context
 	hookCtx := HookContext{
 		PieceName:    status.PieceName,
 		WorktreePath: status.WorktreePath,
 		RepoRoot:     mainRepoRoot,
-		MainBranch:   mainBranch,
+		MainBranch:   targetBranch,
 	}
 
 	// Run before-piece-merge hook
@@ -628,18 +661,18 @@ func (h *Handler) MergePiece(ctx context.Context, workDir, mainBranch string) (M
 		return MergeResult{}, fmt.Errorf("before-piece-merge hook failed: %w", err)
 	}
 
-	// Check if main has commits not in the piece branch
-	isAhead, err := h.git.IsMainAhead(ctx, mainRepoRoot, mainBranch, pieceBranch)
+	// Check if target branch has commits not in the piece branch
+	isAhead, err := h.git.IsMainAhead(ctx, mainRepoRoot, targetBranch, pieceBranch)
 	if err != nil {
-		return MergeResult{}, fmt.Errorf("failed to check if main is ahead: %w", err)
+		return MergeResult{}, fmt.Errorf("failed to check if target is ahead: %w", err)
 	}
 
 	if isAhead {
-		return MergeResult{}, fmt.Errorf("cannot merge: main branch has commits not in piece worktree. Run 'mp piece update' first")
+		return MergeResult{}, fmt.Errorf("cannot merge: %s has commits not in piece worktree. Run 'mp piece update' first", targetBranch)
 	}
 
 	// Get commit messages from piece branch for the squash commit message
-	commitMsgs, err := h.git.GetCommitMessages(ctx, mainRepoRoot, mainBranch, pieceBranch)
+	commitMsgs, err := h.git.GetCommitMessages(ctx, mainRepoRoot, targetBranch, pieceBranch)
 	if err != nil {
 		return MergeResult{}, fmt.Errorf("failed to get commit messages: %w", err)
 	}
@@ -647,14 +680,14 @@ func (h *Handler) MergePiece(ctx context.Context, workDir, mainBranch string) (M
 	// Build squash commit message
 	commitMsg := h.buildSquashCommitMessage(status.PieceName, commitMsgs)
 
-	// Switch to main branch
-	if err := h.git.Checkout(ctx, mainRepoRoot, mainBranch); err != nil {
-		return MergeResult{}, fmt.Errorf("failed to checkout main branch: %w", err)
+	// Switch to target branch
+	if err := h.git.Checkout(ctx, mainRepoRoot, targetBranch); err != nil {
+		return MergeResult{}, fmt.Errorf("failed to checkout %s: %w", targetBranch, err)
 	}
 
-	// Squash merge the piece branch into main
+	// Squash merge the piece branch into target
 	if err := h.git.MergeSquash(ctx, mainRepoRoot, pieceBranch); err != nil {
-		return MergeResult{}, fmt.Errorf("failed to squash merge piece branch into main: %w", err)
+		return MergeResult{}, fmt.Errorf("failed to squash merge piece branch into %s: %w", targetBranch, err)
 	}
 
 	// Commit the squashed changes
@@ -668,15 +701,15 @@ func (h *Handler) MergePiece(ctx context.Context, workDir, mainBranch string) (M
 	}
 
 	result := MergeResult{
-		PieceName:   status.PieceName,
-		PieceBranch: pieceBranch,
-		MainBranch:  mainBranch,
-		Status:      "merged",
+		PieceName:    status.PieceName,
+		PieceBranch:  pieceBranch,
+		TargetBranch: targetBranch,
+		Status:       "merged",
 	}
 
 	h.deps.Output.Write(core.Message{
 		Type:    core.MsgSuccess,
-		Content: fmt.Sprintf("Squash merged %s into %s", pieceBranch, mainBranch),
+		Content: fmt.Sprintf("Squash merged %s into %s", pieceBranch, targetBranch),
 		Data:    result,
 	})
 
