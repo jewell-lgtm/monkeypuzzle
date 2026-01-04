@@ -110,13 +110,13 @@ func init() {
 	pieceCmd.AddCommand(pieceAbandonCmd)
 	rootCmd.AddCommand(pieceCmd)
 
-	// Register completion functions
-	pieceSwitchCmd.RegisterFlagCompletionFunc("name", completePieceNames)
-	pieceAbandonCmd.RegisterFlagCompletionFunc("name", completePieceNames)
-	pieceNewCmd.RegisterFlagCompletionFunc("issue", completeIssueFiles)
-	pieceUpdateCmd.RegisterFlagCompletionFunc("main-branch", completeGitBranches)
-	pieceMergeCmd.RegisterFlagCompletionFunc("main-branch", completeGitBranches)
-	pieceCleanupCmd.RegisterFlagCompletionFunc("main-branch", completeGitBranches)
+	// Register completion functions (errors ignored - completion is optional)
+	_ = pieceSwitchCmd.RegisterFlagCompletionFunc("name", completePieceNames)
+	_ = pieceAbandonCmd.RegisterFlagCompletionFunc("name", completePieceNames)
+	_ = pieceNewCmd.RegisterFlagCompletionFunc("issue", completeIssueFiles)
+	_ = pieceUpdateCmd.RegisterFlagCompletionFunc("main-branch", completeGitBranches)
+	_ = pieceMergeCmd.RegisterFlagCompletionFunc("main-branch", completeGitBranches)
+	_ = pieceCleanupCmd.RegisterFlagCompletionFunc("main-branch", completeGitBranches)
 }
 
 func completePieceNames(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
