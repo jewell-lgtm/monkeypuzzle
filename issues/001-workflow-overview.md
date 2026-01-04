@@ -26,10 +26,12 @@ This document describes the complete workflow from creating markdown issues thro
 - MCP server exposing core commands
 - Claude Code skill documentation
 
+### ✅ Recently Completed
+1. **Stack-aware Merge** - Child pieces merge to parent (issue 013) ✅
+2. **Stack-aware PR** - PR base = parent branch (issue 014) ✅
+
 ### ❌ Missing
-1. **Stack-aware Merge** - Child pieces merge to parent (issue 013)
-2. **Stack-aware PR** - PR base = parent branch (issue 014)
-3. **Issue Storage Interface** - Pluggable backends (abstract)
+1. **Issue Storage Interface** - Pluggable backends (abstract)
 
 ## Proposed Complete Workflow
 
