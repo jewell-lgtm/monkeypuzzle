@@ -1345,3 +1345,4 @@ func TestIntegration_CreatePieceWithInput_WithName(t *testing.T) {
 		t.Errorf("expected piece name 'my-manual-piece', got %q", info.Name)
 	}
 }
+
