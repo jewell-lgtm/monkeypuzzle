@@ -1,0 +1,189 @@
+package issue
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+
+	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
+	initcmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/init"
+	"github.com/jewell-lgtm/monkeypuzzle/internal/core/piece"
+)
+
+const defaultFilePerm = 0644
+
+// MarkdownProvider implements Provider using markdown files
+type MarkdownProvider struct {
+	fs        core.FS
+	issuesDir string // Absolute path to issues directory
+}
+
+// NewMarkdownProvider creates a provider for markdown-based issues
+func NewMarkdownProvider(fs core.FS, issuesDir string) *MarkdownProvider {
+	return &MarkdownProvider{
+		fs:        fs,
+		issuesDir: issuesDir,
+	}
+}
+
+// Create creates a new issue markdown file
+func (p *MarkdownProvider) Create(input CreateInput) (Issue, error) {
+	// Ensure issues directory exists
+	if err := p.fs.MkdirAll(p.issuesDir, initcmd.DefaultDirPerm); err != nil {
+		return Issue{}, fmt.Errorf("failed to create issues directory: %w", err)
+	}
+
+	// Generate unique filename
+	baseName := piece.SanitizePieceName(input.Title)
+	filename, err := p.resolveUniqueFilename(baseName)
+	if err != nil {
+		return Issue{}, err
+	}
+
+	// Build markdown content
+	content := buildMarkdownContent(input)
+
+	// Write file
+	filePath := filepath.Join(p.issuesDir, filename)
+	if err := p.fs.WriteFile(filePath, content, defaultFilePerm); err != nil {
+		return Issue{}, fmt.Errorf("failed to write issue file: %w", err)
+	}
+
+	return Issue{
+		ID:          filePath,
+		Title:       input.Title,
+		Status:      piece.StatusTodo,
+		Description: input.Description,
+	}, nil
+}
+
+// List returns issues from the issues directory
+func (p *MarkdownProvider) List(statusFilter []string) ([]Issue, error) {
+	entries, err := p.fs.ReadDir(p.issuesDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []Issue{}, nil
+		}
+		return nil, fmt.Errorf("failed to read issues directory: %w", err)
+	}
+
+	var issues []Issue
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
+			continue
+		}
+
+		filePath := filepath.Join(p.issuesDir, entry.Name())
+
+		issue, err := p.Get(filePath)
+		if err != nil {
+			continue // Skip files with parse errors
+		}
+
+		// Apply status filter
+		if len(statusFilter) > 0 && !containsStatus(statusFilter, issue.Status) {
+			continue
+		}
+
+		issues = append(issues, issue)
+	}
+
+	// Sort by title
+	sort.Slice(issues, func(i, j int) bool {
+		return issues[i].Title < issues[j].Title
+	})
+
+	return issues, nil
+}
+
+// Get returns an issue by its file path
+func (p *MarkdownProvider) Get(id string) (Issue, error) {
+	status, err := piece.ParseStatus(id, p.fs)
+	if err != nil {
+		return Issue{}, fmt.Errorf("failed to parse status: %w", err)
+	}
+
+	title, err := piece.ExtractIssueName(id, p.fs)
+	if err != nil {
+		return Issue{}, fmt.Errorf("failed to extract title: %w", err)
+	}
+
+	return Issue{
+		ID:     id,
+		Title:  title,
+		Status: status,
+	}, nil
+}
+
+// UpdateStatus updates the status in the issue's frontmatter
+func (p *MarkdownProvider) UpdateStatus(id string, status string) error {
+	return piece.UpdateStatus(id, status, p.fs)
+}
+
+// resolveUniqueFilename generates a unique filename, adding numeric suffix if needed
+func (p *MarkdownProvider) resolveUniqueFilename(baseName string) (string, error) {
+	filename := baseName + ".md"
+	path := filepath.Join(p.issuesDir, filename)
+
+	// Check if file exists
+	if _, err := p.fs.Stat(path); err != nil {
+		// File doesn't exist, use this name
+		return filename, nil
+	}
+
+	// Add numeric suffix
+	for i := 1; i <= 1000; i++ {
+		filename = fmt.Sprintf("%s-%d.md", baseName, i)
+		path = filepath.Join(p.issuesDir, filename)
+		if _, err := p.fs.Stat(path); err != nil {
+			return filename, nil
+		}
+	}
+
+	return "", fmt.Errorf("too many issues with similar names")
+}
+
+// buildMarkdownContent creates the markdown file content with YAML frontmatter
+func buildMarkdownContent(input CreateInput) []byte {
+	var b strings.Builder
+
+	// YAML frontmatter
+	b.WriteString("---\n")
+	b.WriteString(fmt.Sprintf("title: %s\n", escapeYAMLString(input.Title)))
+	b.WriteString(fmt.Sprintf("status: %s\n", piece.StatusTodo))
+	if input.Description != "" {
+		b.WriteString(fmt.Sprintf("description: %s\n", escapeYAMLString(input.Description)))
+	}
+	b.WriteString("---\n\n")
+
+	// Markdown body
+	b.WriteString(fmt.Sprintf("# %s\n", input.Title))
+	if input.Description != "" {
+		b.WriteString("\n")
+		b.WriteString(input.Description)
+		b.WriteString("\n")
+	}
+
+	return []byte(b.String())
+}
+
+// escapeYAMLString escapes a string for safe YAML output
+func escapeYAMLString(s string) string {
+	needsQuotes := strings.ContainsAny(s, ":#{}[]!|>\"'`@&*?\\")
+	if needsQuotes {
+		escaped := strings.ReplaceAll(s, `"`, `\"`)
+		return `"` + escaped + `"`
+	}
+	return s
+}
+
+func containsStatus(slice []string, item string) bool {
+	for _, s := range slice {
+		if s == item {
+			return true
+		}
+	}
+	return false
+}
