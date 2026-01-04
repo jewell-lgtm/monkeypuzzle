@@ -1,6 +1,6 @@
 ---
 title: Add CLI integration tests
-status: todo
+status: done
 description: Zero test coverage for cmd/mp/ and internal/tui/. Add integration tests for CLI commands.
 ---
 
