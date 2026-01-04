@@ -112,6 +112,7 @@ func init() {
 	pieceAbandonCmd.Flags().BoolVar(&flagForce, "force", false, "Force removal even with uncommitted changes")
 	pieceAbandonCmd.Flags().BoolVar(&flagDeleteBranch, "delete-branch", false, "Also delete the git branch")
 	pieceAbandonCmd.Flags().BoolVar(&flagPieceAbandonSchema, "schema", false, "Output JSON schema and exit")
+	pieceCmd.Flags().StringVar(&flagMainBranch, "main-branch", "main", "Main branch name (default: main)")
 	pieceCmd.AddCommand(pieceNewCmd)
 	pieceCmd.AddCommand(pieceUpdateCmd)
 	pieceCmd.AddCommand(pieceMergeCmd)
@@ -197,15 +198,69 @@ func runPieceStatus(cmd *cobra.Command, args []string) error {
 	}
 	handler := piececmd.NewHandler(deps)
 
-	status, err := handler.Status(ctx, wd)
+	// Get main branch (default to "main")
+	mainBranch := "main"
+	if flagMainBranch != "" {
+		mainBranch = flagMainBranch
+	}
+
+	status, err := handler.GetPieceHierarchyStatus(ctx, wd, mainBranch)
 	if err != nil {
 		return err
 	}
 
 	// Output to stderr for human-readable text
 	if status.InPiece {
-		fmt.Fprintf(os.Stderr, "Working on piece: %s\n", status.PieceName)
-		fmt.Fprintf(os.Stderr, "Worktree path: %s\n", status.WorktreePath)
+		fmt.Fprintf(os.Stderr, "Current piece: %s\n\n", status.PieceName)
+
+		// Display parent
+		if status.Parent != "" && status.Parent != "main" {
+			fmt.Fprintf(os.Stderr, "Parent: %s\n", status.Parent)
+		} else {
+			fmt.Fprintf(os.Stderr, "Parent: main\n")
+		}
+
+		// Display children
+		if len(status.Children) == 0 {
+			fmt.Fprintf(os.Stderr, "Children: none\n")
+		} else {
+			fmt.Fprintf(os.Stderr, "Children:\n")
+			for _, child := range status.Children {
+				fmt.Fprintf(os.Stderr, "  - %s\n", child)
+			}
+		}
+
+		// Display stack depth
+		if status.StackDepth > 0 {
+			fmt.Fprintf(os.Stderr, "Stack depth: %d\n", status.StackDepth)
+		}
+
+		// Display merge readiness
+		if !status.CanMerge && len(status.Children) > 0 {
+			fmt.Fprintf(os.Stderr, "\n⚠ Cannot merge: has unmerged children\n")
+		}
+
+		// Display issue information if available
+		marker, err := handler.ReadCurrentIssueMarker(status.WorktreePath)
+		if err == nil && marker != nil {
+			fmt.Fprintf(os.Stderr, "\nIssue: %s\n", marker.IssueName)
+
+			// Get issue status
+			if status.RepoRoot != "" {
+				absIssuePath := filepath.Join(status.RepoRoot, marker.IssuePath)
+				issueStatus, err := piececmd.ParseStatus(absIssuePath, deps.FS)
+				if err == nil {
+					fmt.Fprintf(os.Stderr, "Status: %s\n", issueStatus)
+				}
+			}
+		}
+
+		// Display branch information
+		git := adapters.NewGit(deps.Exec)
+		branchName, err := git.CurrentBranch(ctx, status.WorktreePath)
+		if err == nil {
+			fmt.Fprintf(os.Stderr, "Branch: %s\n", branchName)
+		}
 	} else {
 		fmt.Fprintf(os.Stderr, "In main repository\n")
 		if status.RepoRoot != "" {

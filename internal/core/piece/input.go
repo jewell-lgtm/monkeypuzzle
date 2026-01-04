@@ -31,6 +31,20 @@ type PieceStatus struct {
 	RepoRoot string `json:"repo_root,omitempty"`
 }
 
+// PieceHierarchyStatus extends PieceStatus with hierarchy information.
+// It includes parent/child relationships, stack depth, and merge readiness.
+type PieceHierarchyStatus struct {
+	PieceStatus
+	// Parent is the parent piece name, or "main" if this is a root piece
+	Parent string `json:"parent,omitempty"`
+	// Children is the list of child piece names
+	Children []string `json:"children,omitempty"`
+	// StackDepth is the depth of this piece in the stack (1 = direct child of main, 2 = grandchild, etc.)
+	StackDepth int `json:"stack_depth,omitempty"`
+	// CanMerge is true if this piece can be merged (no children, or all children are merged)
+	CanMerge bool `json:"can_merge,omitempty"`
+}
+
 // PieceListItem represents a piece available for switching.
 type PieceListItem struct {
 	Name         string    `json:"name"`

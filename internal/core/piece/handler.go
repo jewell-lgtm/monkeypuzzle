@@ -403,6 +403,109 @@ func (h *Handler) Status(ctx context.Context, workDir string) (PieceStatus, erro
 	}, nil
 }
 
+// GetPieceHierarchyStatus returns piece status with hierarchy information.
+// It includes parent, children, stack depth, and merge readiness.
+func (h *Handler) GetPieceHierarchyStatus(ctx context.Context, workDir, mainBranch string) (PieceHierarchyStatus, error) {
+	status, err := h.Status(ctx, workDir)
+	if err != nil {
+		return PieceHierarchyStatus{}, err
+	}
+
+	result := PieceHierarchyStatus{
+		PieceStatus: status,
+		Children:    []string{},
+		StackDepth:  0,
+		CanMerge:    true,
+	}
+
+	// If not in a piece, return basic status
+	if !status.InPiece {
+		return result, nil
+	}
+
+	// Get pieces directory
+	piecesDir, err := getPiecesDir(status.RepoRoot)
+	if err != nil {
+		return result, fmt.Errorf("failed to get pieces directory: %w", err)
+	}
+
+	// Read piece metadata to get parent
+	metadata, err := ReadPieceMetadata(status.WorktreePath, h.deps.FS)
+	if err != nil {
+		// Non-fatal: use default parent
+		defaultMeta := DefaultPieceMetadata()
+		metadata = &defaultMeta
+	}
+	result.Parent = metadata.Parent
+
+	// Get children
+	children, err := GetPieceChildren(status.PieceName, piecesDir, h.deps.FS)
+	if err != nil {
+		// Non-fatal: continue without children info
+		children = []string{}
+	}
+	result.Children = children
+
+	// Calculate stack depth by traversing up the parent chain
+	result.StackDepth = h.calculateStackDepth(status.PieceName, piecesDir, metadata.Parent)
+
+	// Check if can merge: no children OR all children are merged
+	if len(children) == 0 {
+		result.CanMerge = true
+	} else {
+		// Check if all children are merged
+		allMerged := true
+		for _, childName := range children {
+			childPath := filepath.Join(piecesDir, childName)
+			branchName, err := h.git.CurrentBranch(ctx, childPath)
+			if err != nil {
+				// If we can't get branch, assume not merged
+				allMerged = false
+				break
+			}
+
+			mergeStatus, err := h.IsBranchMerged(ctx, childPath, branchName, mainBranch)
+			if err != nil || !mergeStatus.IsMerged {
+				allMerged = false
+				break
+			}
+		}
+		result.CanMerge = allMerged
+	}
+
+	return result, nil
+}
+
+// calculateStackDepth calculates the stack depth by traversing up the parent chain.
+// Returns 1 for direct children of main, 2 for grandchildren, etc.
+func (h *Handler) calculateStackDepth(pieceName, piecesDir, parent string) int {
+	if parent == "main" {
+		return 1
+	}
+
+	// Traverse up the parent chain
+	depth := 1
+	currentParent := parent
+	visited := make(map[string]bool) // Prevent infinite loops
+
+	for currentParent != "main" && !visited[currentParent] {
+		visited[currentParent] = true
+		depth++
+
+		// Read parent's metadata
+		parentPath := filepath.Join(piecesDir, currentParent)
+		metadata, err := ReadPieceMetadata(parentPath, h.deps.FS)
+		if err != nil {
+			// If we can't read parent metadata, stop traversing
+			break
+		}
+
+		currentParent = metadata.Parent
+	}
+
+	return depth
+}
+
 // GeneratePieceName generates a unique piece name with timestamp and counter
 func (h *Handler) GeneratePieceName(baseDir string) (string, error) {
 	timestamp := time.Now().Format("20060102-150405")
@@ -785,7 +888,7 @@ func (h *Handler) CleanupMergedPieces(ctx context.Context, repoRoot string, opts
 		}
 
 		// Read issue marker if exists
-		marker, err := h.readCurrentIssueMarker(worktreePath)
+		marker, err := h.ReadCurrentIssueMarker(worktreePath)
 		if err == nil && marker != nil {
 			result.IssuePath = marker.IssuePath
 		}
@@ -832,8 +935,8 @@ func (h *Handler) CleanupMergedPieces(ctx context.Context, repoRoot string, opts
 	return results, nil
 }
 
-// readCurrentIssueMarker reads the current issue marker from a piece worktree.
-func (h *Handler) readCurrentIssueMarker(worktreePath string) (*CurrentIssueMarker, error) {
+// ReadCurrentIssueMarker reads the current issue marker from a piece worktree.
+func (h *Handler) ReadCurrentIssueMarker(worktreePath string) (*CurrentIssueMarker, error) {
 	markerPath := filepath.Join(worktreePath, initcmd.DirName, "current-issue.json")
 	data, err := h.deps.FS.ReadFile(markerPath)
 	if err != nil {

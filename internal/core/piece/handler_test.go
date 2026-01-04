@@ -145,6 +145,177 @@ func TestHandler_Status_NotInGitRepo(t *testing.T) {
 	}
 }
 
+func TestHandler_GetPieceHierarchyStatus_InMainRepo(t *testing.T) {
+	// Override data dir for tests
+	paths.SetDataDir("/test-data/monkeypuzzle")
+	t.Cleanup(paths.ResetDataDir)
+
+	fs := adapters.NewMemoryFS()
+	out := adapters.NewBufferOutput()
+	mockExec := adapters.NewMockExec()
+	deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
+	handler := piece.NewHandler(deps)
+
+	// Setup mock responses for main repo
+	gitDir := "/repo/.git"
+	repoRoot := "/repo"
+	mockExec.AddResponse("git", []string{"rev-parse", "--git-dir"}, []byte(gitDir+"\n"), nil)
+	mockExec.AddResponse("git", []string{"rev-parse", "--show-toplevel"}, []byte(repoRoot+"\n"), nil)
+
+	status, err := handler.GetPieceHierarchyStatus(context.Background(), "/repo", "main")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if status.InPiece {
+		t.Error("expected not to be in a piece")
+	}
+
+	if status.RepoRoot != repoRoot {
+		t.Errorf("expected repo root %q, got %q", repoRoot, status.RepoRoot)
+	}
+}
+
+func TestHandler_GetPieceHierarchyStatus_WithParentAndChildren(t *testing.T) {
+	// Override data dir for tests
+	paths.SetDataDir("/test-data/monkeypuzzle")
+	t.Cleanup(paths.ResetDataDir)
+
+	fs := adapters.NewMemoryFS()
+	out := adapters.NewBufferOutput()
+	mockExec := adapters.NewMockExec()
+	deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
+	handler := piece.NewHandler(deps)
+
+	// Setup pieces directory with repo-scoped path
+	repoRoot := "/repo"
+	repoID, err := paths.RepoIdentifier(repoRoot)
+	if err != nil {
+		t.Fatalf("failed to get repo identifier: %v", err)
+	}
+	piecesDir := filepath.Join("/test-data/monkeypuzzle/pieces", repoID)
+	parentPiecePath := filepath.Join(piecesDir, "parent-piece")
+	childPiecePath := filepath.Join(piecesDir, "child-piece")
+	_ = fs.MkdirAll(parentPiecePath, 0755)
+	_ = fs.MkdirAll(childPiecePath, 0755)
+
+	// Create .monkeypuzzle directories
+	_ = fs.MkdirAll(filepath.Join(parentPiecePath, ".monkeypuzzle"), 0755)
+	_ = fs.MkdirAll(filepath.Join(childPiecePath, ".monkeypuzzle"), 0755)
+
+	// Write parent metadata (parent of main)
+	parentMetadata := piece.PieceMetadata{
+		Parent:            "main",
+		CreatedFromBranch: "main",
+	}
+	parentMetadataData, _ := json.MarshalIndent(parentMetadata, "", "  ")
+	_ = fs.WriteFile(filepath.Join(parentPiecePath, ".monkeypuzzle", "piece-metadata.json"), parentMetadataData, 0644)
+
+	// Write child metadata (parent is parent-piece)
+	childMetadata := piece.PieceMetadata{
+		Parent:            "parent-piece",
+		CreatedFromBranch: "parent-piece-branch",
+	}
+	childMetadataData, _ := json.MarshalIndent(childMetadata, "", "  ")
+	_ = fs.WriteFile(filepath.Join(childPiecePath, ".monkeypuzzle", "piece-metadata.json"), childMetadataData, 0644)
+
+	// Setup mock responses for worktree - gitDir path determines main repo root
+	gitDir := repoRoot + "/.git/worktrees/parent-piece"
+	mockExec.AddResponse("git", []string{"rev-parse", "--git-dir"}, []byte(gitDir+"\n"), nil)
+	mockExec.AddResponse("git", []string{"rev-parse", "--show-toplevel"}, []byte(parentPiecePath+"\n"), nil)
+	mockExec.AddResponse("git", []string{"rev-parse", "--abbrev-ref", "HEAD"}, []byte("parent-piece-branch\n"), nil)
+
+	// Mock IsBranchMerged to return merged for child
+	mockExec.AddResponse("git", []string{"branch", "--merged", "main"}, []byte("child-piece-branch\n"), nil)
+
+	status, err := handler.GetPieceHierarchyStatus(context.Background(), parentPiecePath, "main")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if !status.InPiece {
+		t.Error("expected to be in a piece")
+	}
+
+	if status.Parent != "main" {
+		t.Errorf("expected parent 'main', got %q", status.Parent)
+	}
+
+	if len(status.Children) != 1 {
+		t.Errorf("expected 1 child, got %d", len(status.Children))
+	}
+
+	if len(status.Children) > 0 && status.Children[0] != "child-piece" {
+		t.Errorf("expected child 'child-piece', got %q", status.Children[0])
+	}
+
+	if status.StackDepth != 1 {
+		t.Errorf("expected stack depth 1, got %d", status.StackDepth)
+	}
+}
+
+func TestHandler_GetPieceHierarchyStatus_StackDepth(t *testing.T) {
+	// Override data dir for tests
+	paths.SetDataDir("/test-data/monkeypuzzle")
+	t.Cleanup(paths.ResetDataDir)
+
+	fs := adapters.NewMemoryFS()
+	out := adapters.NewBufferOutput()
+	mockExec := adapters.NewMockExec()
+	deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
+	handler := piece.NewHandler(deps)
+
+	// Setup pieces directory with repo-scoped path
+	repoRoot := "/repo"
+	repoID, err := paths.RepoIdentifier(repoRoot)
+	if err != nil {
+		t.Fatalf("failed to get repo identifier: %v", err)
+	}
+	piecesDir := filepath.Join("/test-data/monkeypuzzle/pieces", repoID)
+	parentPiecePath := filepath.Join(piecesDir, "parent-piece")
+	childPiecePath := filepath.Join(piecesDir, "child-piece")
+	_ = fs.MkdirAll(parentPiecePath, 0755)
+	_ = fs.MkdirAll(childPiecePath, 0755)
+
+	// Create .monkeypuzzle directories
+	_ = fs.MkdirAll(filepath.Join(parentPiecePath, ".monkeypuzzle"), 0755)
+	_ = fs.MkdirAll(filepath.Join(childPiecePath, ".monkeypuzzle"), 0755)
+
+	// Write parent metadata (parent of main)
+	parentMetadata := piece.PieceMetadata{
+		Parent:            "main",
+		CreatedFromBranch: "main",
+	}
+	parentMetadataData, _ := json.MarshalIndent(parentMetadata, "", "  ")
+	_ = fs.WriteFile(filepath.Join(parentPiecePath, ".monkeypuzzle", "piece-metadata.json"), parentMetadataData, 0644)
+
+	// Write child metadata (parent is parent-piece)
+	childMetadata := piece.PieceMetadata{
+		Parent:            "parent-piece",
+		CreatedFromBranch: "parent-piece-branch",
+	}
+	childMetadataData, _ := json.MarshalIndent(childMetadata, "", "  ")
+	_ = fs.WriteFile(filepath.Join(childPiecePath, ".monkeypuzzle", "piece-metadata.json"), childMetadataData, 0644)
+
+	// Setup mock responses for child worktree - gitDir path determines main repo root
+	gitDir := repoRoot + "/.git/worktrees/child-piece"
+	mockExec.AddResponse("git", []string{"rev-parse", "--git-dir"}, []byte(gitDir+"\n"), nil)
+	mockExec.AddResponse("git", []string{"rev-parse", "--show-toplevel"}, []byte(childPiecePath+"\n"), nil)
+
+	status, err := handler.GetPieceHierarchyStatus(context.Background(), childPiecePath, "main")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if status.Parent != "parent-piece" {
+		t.Errorf("expected parent 'parent-piece', got %q", status.Parent)
+	}
+
+	if status.StackDepth != 2 {
+		t.Errorf("expected stack depth 2 (main -> parent -> child), got %d", status.StackDepth)
+	}
+}
+
 func TestHandler_GeneratePieceName(t *testing.T) {
 	fs := adapters.NewMemoryFS()
 	out := adapters.NewBufferOutput()
