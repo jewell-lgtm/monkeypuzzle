@@ -1,6 +1,6 @@
 ---
 title: Stack-aware piece merging
-status: todo
+status: done
 ---
 
 # Stack-aware piece merging
