@@ -303,6 +303,180 @@ func TestCreatePR_GhFails(t *testing.T) {
 	}
 }
 
+func TestCreatePR_UsesParentBranchAsBase(t *testing.T) {
+	fs := adapters.NewMemoryFS()
+	mockExec := adapters.NewMockExec()
+	output := adapters.NewBufferOutput()
+
+	worktreePath := "/pieces/child-piece"
+	mainRepoPath := "/repo"
+
+	// Create .monkeypuzzle directories
+	_ = fs.MkdirAll(filepath.Join(worktreePath, ".monkeypuzzle"), 0755)
+	_ = fs.MkdirAll(filepath.Join(mainRepoPath, ".monkeypuzzle"), 0755)
+
+	// Create piece metadata with parent piece
+	pieceMetadata := piece.PieceMetadata{
+		Parent:            "parent-piece",
+		CreatedFromBranch: "parent-piece",
+	}
+	metadataData, _ := json.Marshal(pieceMetadata)
+	_ = fs.WriteFile(filepath.Join(worktreePath, ".monkeypuzzle", "piece-metadata.json"), metadataData, 0644)
+
+	// Mock git commands
+	gitDir := filepath.Join(mainRepoPath, ".git", "worktrees", "child-piece")
+	mockExec.AddResponse("git", []string{"rev-parse", "--git-dir"}, []byte(gitDir+"\n"), nil)
+	mockExec.AddResponse("git", []string{"rev-parse", "--show-toplevel"}, []byte(worktreePath+"\n"), nil)
+	mockExec.AddResponse("git", []string{"rev-parse", "--abbrev-ref", "HEAD"}, []byte("child-piece\n"), nil)
+
+	// Mock git push
+	mockExec.AddResponse("git", []string{"push", "-u", "origin", "HEAD"}, []byte(""), nil)
+
+	// Mock gh pr create - should use parent-piece as base since no explicit base provided
+	mockExec.AddResponse("gh", []string{"pr", "create", "--title", "Child Feature", "--body", "", "--base", "parent-piece"},
+		[]byte("https://github.com/owner/repo/pull/50\n"), nil)
+
+	deps := core.Deps{
+		FS:     fs,
+		Output: output,
+		Exec:   mockExec,
+	}
+
+	handler := pr.NewHandler(deps)
+
+	// Empty base - should auto-detect from parent metadata
+	input := pr.Input{
+		Title: "Child Feature",
+		Body:  "",
+		Base:  "", // Empty means auto-detect
+	}
+
+	result, err := handler.CreatePR(context.Background(), worktreePath, input)
+	if err != nil {
+		t.Fatalf("CreatePR failed: %v", err)
+	}
+
+	if result.PRNumber != 50 {
+		t.Errorf("expected PR number 50, got %d", result.PRNumber)
+	}
+}
+
+func TestCreatePR_ExplicitBaseOverridesParent(t *testing.T) {
+	fs := adapters.NewMemoryFS()
+	mockExec := adapters.NewMockExec()
+	output := adapters.NewBufferOutput()
+
+	worktreePath := "/pieces/child-piece"
+	mainRepoPath := "/repo"
+
+	// Create .monkeypuzzle directories
+	_ = fs.MkdirAll(filepath.Join(worktreePath, ".monkeypuzzle"), 0755)
+	_ = fs.MkdirAll(filepath.Join(mainRepoPath, ".monkeypuzzle"), 0755)
+
+	// Create piece metadata with parent piece
+	pieceMetadata := piece.PieceMetadata{
+		Parent:            "parent-piece",
+		CreatedFromBranch: "parent-piece",
+	}
+	metadataData, _ := json.Marshal(pieceMetadata)
+	_ = fs.WriteFile(filepath.Join(worktreePath, ".monkeypuzzle", "piece-metadata.json"), metadataData, 0644)
+
+	// Mock git commands
+	gitDir := filepath.Join(mainRepoPath, ".git", "worktrees", "child-piece")
+	mockExec.AddResponse("git", []string{"rev-parse", "--git-dir"}, []byte(gitDir+"\n"), nil)
+	mockExec.AddResponse("git", []string{"rev-parse", "--show-toplevel"}, []byte(worktreePath+"\n"), nil)
+	mockExec.AddResponse("git", []string{"rev-parse", "--abbrev-ref", "HEAD"}, []byte("child-piece\n"), nil)
+
+	// Mock git push
+	mockExec.AddResponse("git", []string{"push", "-u", "origin", "HEAD"}, []byte(""), nil)
+
+	// Mock gh pr create - should use explicit base "main" despite parent metadata
+	mockExec.AddResponse("gh", []string{"pr", "create", "--title", "Child Feature", "--body", "", "--base", "main"},
+		[]byte("https://github.com/owner/repo/pull/51\n"), nil)
+
+	deps := core.Deps{
+		FS:     fs,
+		Output: output,
+		Exec:   mockExec,
+	}
+
+	handler := pr.NewHandler(deps)
+
+	// Explicit base overrides parent
+	input := pr.Input{
+		Title: "Child Feature",
+		Body:  "",
+		Base:  "main", // Explicit override
+	}
+
+	result, err := handler.CreatePR(context.Background(), worktreePath, input)
+	if err != nil {
+		t.Fatalf("CreatePR failed: %v", err)
+	}
+
+	if result.PRNumber != 51 {
+		t.Errorf("expected PR number 51, got %d", result.PRNumber)
+	}
+}
+
+func TestCreatePR_MainParentUsesMain(t *testing.T) {
+	fs := adapters.NewMemoryFS()
+	mockExec := adapters.NewMockExec()
+	output := adapters.NewBufferOutput()
+
+	worktreePath := "/pieces/root-piece"
+	mainRepoPath := "/repo"
+
+	// Create .monkeypuzzle directories
+	_ = fs.MkdirAll(filepath.Join(worktreePath, ".monkeypuzzle"), 0755)
+	_ = fs.MkdirAll(filepath.Join(mainRepoPath, ".monkeypuzzle"), 0755)
+
+	// Create piece metadata with main as parent (root piece)
+	pieceMetadata := piece.PieceMetadata{
+		Parent:            "main",
+		CreatedFromBranch: "main",
+	}
+	metadataData, _ := json.Marshal(pieceMetadata)
+	_ = fs.WriteFile(filepath.Join(worktreePath, ".monkeypuzzle", "piece-metadata.json"), metadataData, 0644)
+
+	// Mock git commands
+	gitDir := filepath.Join(mainRepoPath, ".git", "worktrees", "root-piece")
+	mockExec.AddResponse("git", []string{"rev-parse", "--git-dir"}, []byte(gitDir+"\n"), nil)
+	mockExec.AddResponse("git", []string{"rev-parse", "--show-toplevel"}, []byte(worktreePath+"\n"), nil)
+	mockExec.AddResponse("git", []string{"rev-parse", "--abbrev-ref", "HEAD"}, []byte("root-piece\n"), nil)
+
+	// Mock git push
+	mockExec.AddResponse("git", []string{"push", "-u", "origin", "HEAD"}, []byte(""), nil)
+
+	// Mock gh pr create - should use main as base
+	mockExec.AddResponse("gh", []string{"pr", "create", "--title", "Root Feature", "--body", "", "--base", "main"},
+		[]byte("https://github.com/owner/repo/pull/52\n"), nil)
+
+	deps := core.Deps{
+		FS:     fs,
+		Output: output,
+		Exec:   mockExec,
+	}
+
+	handler := pr.NewHandler(deps)
+
+	// Empty base with main parent - should use main
+	input := pr.Input{
+		Title: "Root Feature",
+		Body:  "",
+		Base:  "", // Empty, will use parent which is "main"
+	}
+
+	result, err := handler.CreatePR(context.Background(), worktreePath, input)
+	if err != nil {
+		t.Fatalf("CreatePR failed: %v", err)
+	}
+
+	if result.PRNumber != 52 {
+		t.Errorf("expected PR number 52, got %d", result.PRNumber)
+	}
+}
+
 func TestWithDefaults(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -310,9 +484,9 @@ func TestWithDefaults(t *testing.T) {
 		expected pr.Input
 	}{
 		{
-			name:     "empty base defaults to main",
+			name:     "empty base stays empty for auto-detection",
 			input:    pr.Input{Title: "Test", Body: "Body", Base: ""},
-			expected: pr.Input{Title: "Test", Body: "Body", Base: "main"},
+			expected: pr.Input{Title: "Test", Body: "Body", Base: ""}, // Handler auto-detects from piece parent
 		},
 		{
 			name:     "trims whitespace",

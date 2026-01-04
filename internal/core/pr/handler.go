@@ -51,6 +51,26 @@ func (h *Handler) CreatePR(ctx context.Context, workDir string, input Input) (*P
 		return nil, fmt.Errorf("not in a piece worktree - run this command from within a piece")
 	}
 
+	// Auto-detect base branch from piece metadata if not explicitly provided
+	if input.Base == "" {
+		pieceMetadata, err := piece.ReadPieceMetadata(status.WorktreePath, h.deps.FS)
+		if err != nil {
+			h.deps.Output.Write(core.Message{
+				Type:    core.MsgWarning,
+				Content: fmt.Sprintf("Failed to read piece metadata, defaulting to main: %v", err),
+			})
+			input.Base = "main"
+		} else {
+			input.Base = pieceMetadata.Parent
+			if pieceMetadata.Parent != "main" {
+				h.deps.Output.Write(core.Message{
+					Type:    core.MsgInfo,
+					Content: fmt.Sprintf("Using parent piece '%s' as PR base", pieceMetadata.Parent),
+				})
+			}
+		}
+	}
+
 	// Get current branch
 	branch, err := h.git.CurrentBranch(ctx, workDir)
 	if err != nil {

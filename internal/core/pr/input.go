@@ -29,9 +29,9 @@ var fields = []Field{
 	},
 	{
 		Name:        "base",
-		Description: "Base branch to merge into",
+		Description: "Base branch to merge into (auto-detects from piece parent if not specified)",
 		Required:    false,
-		Default:     "main",
+		Default:     "", // Empty means auto-detect from piece metadata
 	},
 }
 
@@ -65,16 +65,13 @@ func GetDefaults() map[string]string {
 	return defaults
 }
 
-// WithDefaults returns input with defaults applied and whitespace trimmed
+// WithDefaults returns input with defaults applied and whitespace trimmed.
+// Note: Base is NOT defaulted here - the handler auto-detects from piece parent metadata.
 func WithDefaults(input Input) Input {
 	input.Title = strings.TrimSpace(input.Title)
 	input.Body = strings.TrimSpace(input.Body)
 	input.Base = strings.TrimSpace(input.Base)
-
-	if input.Base == "" {
-		input.Base = "main"
-	}
-
+	// Base left empty intentionally - handler will auto-detect from piece parent
 	return input
 }
 
