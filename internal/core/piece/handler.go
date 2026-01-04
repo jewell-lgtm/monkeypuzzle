@@ -82,7 +82,7 @@ func (h *Handler) CreatePiece(ctx context.Context, monkeypuzzleSourceDir string,
 	// Ensure main repo tmux session exists
 	h.ensureMainSession(ctx, repoRoot, opts.OverwriteSession)
 
-	// Get pieces directory
+	// Get pieces directory (scoped to this repo)
 	piecesDir, err := getPiecesDir(repoRoot)
 	if err != nil {
 		return PieceInfo{}, fmt.Errorf("failed to get pieces directory: %w", err)
@@ -595,7 +595,7 @@ func (h *Handler) buildSquashCommitMessage(pieceName string, commitMsgs []string
 	return b.String()
 }
 
-// getPiecesDir returns the directory for storing pieces.
+// getPiecesDir returns the directory for storing pieces scoped to the given repo.
 // Uses GAP (go-app-paths) for platform-appropriate paths.
 func getPiecesDir(repoRoot string) (string, error) {
 	return paths.PiecesDir(repoRoot)
@@ -729,7 +729,7 @@ type CleanupOptions struct {
 // CleanupMergedPieces finds and cleans up pieces whose branches have been merged.
 // It removes worktrees, kills tmux sessions, and updates issue status to done.
 func (h *Handler) CleanupMergedPieces(ctx context.Context, repoRoot string, opts CleanupOptions) ([]CleanupResult, error) {
-	// Get pieces directory
+	// Get pieces directory (scoped to this repo)
 	piecesDir, err := getPiecesDir(repoRoot)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pieces directory: %w", err)
