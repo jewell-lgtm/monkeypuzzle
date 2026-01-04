@@ -45,12 +45,19 @@ func NewHandler(deps core.Deps) *Handler {
 
 // CreatePieceOptions configures piece creation behavior
 type CreatePieceOptions struct {
-	OverwriteSession bool // If true, replace existing main repo session
+	OverwriteSession bool   // If true, replace existing main repo session
+	Parent           string // Parent piece name, defaults to "main"
 }
 
 // CreatePieceWithInput creates a piece from validated input.
 // Routes to CreatePieceFromIssue if IssuePath is set, otherwise CreatePiece.
 func (h *Handler) CreatePieceWithInput(ctx context.Context, srcDir string, input NewPieceInput, opts CreatePieceOptions) (PieceInfo, error) {
+	// Pass parent from input to options
+	opts.Parent = input.Parent
+	if opts.Parent == "" {
+		opts.Parent = "main"
+	}
+
 	if input.IssuePath != "" {
 		return h.CreatePieceFromIssue(ctx, srcDir, input.IssuePath, opts)
 	}
@@ -111,10 +118,28 @@ func (h *Handler) CreatePiece(ctx context.Context, monkeypuzzleSourceDir string,
 		return PieceInfo{}, fmt.Errorf("failed to create pieces directory at %s: %w", piecesDir, err)
 	}
 
+	// Determine parent and start point for worktree
+	parent := opts.Parent
+	if parent == "" {
+		parent = "main"
+	}
+
 	// Create worktree
 	worktreePath := filepath.Join(piecesDir, pieceName)
-	if err := h.git.WorktreeAdd(ctx, repoRoot, worktreePath); err != nil {
-		return PieceInfo{}, fmt.Errorf("failed to create worktree at %s: %w", worktreePath, err)
+	if parent != "main" {
+		// Branching from a parent piece - validate it exists and get its branch
+		parentPath := filepath.Join(piecesDir, parent)
+		if _, err := h.deps.FS.Stat(parentPath); err != nil {
+			return PieceInfo{}, fmt.Errorf("parent piece %q not found", parent)
+		}
+		// The parent's branch name is the same as the piece name
+		if err := h.git.WorktreeAddFrom(ctx, repoRoot, worktreePath, parent); err != nil {
+			return PieceInfo{}, fmt.Errorf("failed to create worktree from parent %s: %w", parent, err)
+		}
+	} else {
+		if err := h.git.WorktreeAdd(ctx, repoRoot, worktreePath); err != nil {
+			return PieceInfo{}, fmt.Errorf("failed to create worktree at %s: %w", worktreePath, err)
+		}
 	}
 
 	// Note: Currently, symlink and tmux creation failures are non-fatal (logged as warnings).
@@ -124,7 +149,7 @@ func (h *Handler) CreatePiece(ctx context.Context, monkeypuzzleSourceDir string,
 
 	// Write piece metadata (parent-child relationship)
 	pieceMetadata := PieceMetadata{
-		Parent:            "main", // Default parent; future issue will add --parent flag
+		Parent:            parent,
 		CreatedFromBranch: currentBranch,
 	}
 	if err := WritePieceMetadata(worktreePath, pieceMetadata, h.deps.FS); err != nil {

@@ -87,6 +87,7 @@ var flagMainBranch string
 var flagSwitchName string
 var flagPieceName string
 var flagIssuePath string
+var flagParent string
 var flagSkipSwitch bool
 var flagDryRun bool
 var flagForce bool
@@ -104,6 +105,7 @@ var flagPieceListFlat bool
 func init() {
 	pieceNewCmd.Flags().StringVar(&flagPieceName, "name", "", "Optional piece name (default: auto-generated)")
 	pieceNewCmd.Flags().StringVar(&flagIssuePath, "issue", "", "Create piece from issue file (e.g., issues/foo.md)")
+	pieceNewCmd.Flags().StringVarP(&flagParent, "parent", "p", "", "Parent piece name to branch from (default: main)")
 	pieceNewCmd.Flags().BoolVar(&flagSkipSwitch, "skip-switch", false, "Don't switch to the new piece after creation")
 	pieceNewCmd.Flags().BoolVar(&flagOverwriteSession, "overwrite-session", false, "Replace existing main repo tmux session")
 	pieceNewCmd.Flags().BoolVar(&flagPieceNewSchema, "schema", false, "Output JSON schema and exit")
@@ -364,6 +366,7 @@ func getPieceNewInput(deps core.Deps, workDir string) (piececmd.NewPieceInput, e
 		input = piececmd.NewPieceInput{
 			IssuePath: flagIssuePath,
 			Name:      flagPieceName,
+			Parent:    flagParent,
 		}
 	} else if cli.HasStdinData() {
 		// Mode 2: Stdin JSON
@@ -386,6 +389,9 @@ func getPieceNewInput(deps core.Deps, workDir string) (piececmd.NewPieceInput, e
 	}
 
 	// Flags override stdin/TUI options (flags take priority)
+	if flagParent != "" {
+		input.Parent = flagParent
+	}
 	if flagSkipSwitch {
 		input.SkipSwitch = true
 	}

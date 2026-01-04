@@ -1,6 +1,6 @@
 ---
 title: Create piece with --parent flag
-status: in-progress
+status: done
 ---
 
 # Create piece with --parent flag

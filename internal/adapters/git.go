@@ -28,6 +28,15 @@ func (g *Git) WorktreeAdd(ctx context.Context, repoRoot, worktreePath string) er
 	return nil
 }
 
+// WorktreeAddFrom creates a new git worktree branching from the specified start point
+func (g *Git) WorktreeAddFrom(ctx context.Context, repoRoot, worktreePath, startPoint string) error {
+	_, err := g.exec.RunWithDir(ctx, repoRoot, "git", "worktree", "add", worktreePath, startPoint)
+	if err != nil {
+		return fmt.Errorf("failed to create worktree at %s from %s: %w", worktreePath, startPoint, err)
+	}
+	return nil
+}
+
 // WorktreeRemove removes a git worktree
 func (g *Git) WorktreeRemove(ctx context.Context, repoRoot, worktreePath string) error {
 	_, err := g.exec.RunWithDir(ctx, repoRoot, "git", "worktree", "remove", worktreePath)
