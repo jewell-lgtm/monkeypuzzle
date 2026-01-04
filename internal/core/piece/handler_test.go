@@ -2028,7 +2028,11 @@ func TestHandler_CreatePiece_WritesPieceMetadata(t *testing.T) {
 
 	repoRoot := "/projects/myrepo"
 	pieceName := "test-feature"
-	piecesDir := "/test-data/monkeypuzzle/pieces"
+	repoID, err := paths.RepoIdentifier(repoRoot)
+	if err != nil {
+		t.Fatalf("failed to get repo ID: %v", err)
+	}
+	piecesDir := filepath.Join("/test-data/monkeypuzzle/pieces", repoID)
 	worktreePath := filepath.Join(piecesDir, pieceName)
 
 	// Mock git repo root
@@ -2080,7 +2084,11 @@ func TestHandler_CreatePiece_WritesPieceMetadata_FromFeatureBranch(t *testing.T)
 
 	repoRoot := "/projects/myrepo"
 	pieceName := "child-feature"
-	piecesDir := "/test-data/monkeypuzzle/pieces"
+	repoID, err := paths.RepoIdentifier(repoRoot)
+	if err != nil {
+		t.Fatalf("failed to get repo ID: %v", err)
+	}
+	piecesDir := filepath.Join("/test-data/monkeypuzzle/pieces", repoID)
 	worktreePath := filepath.Join(piecesDir, pieceName)
 
 	// Mock git repo root
