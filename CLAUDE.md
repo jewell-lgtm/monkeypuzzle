@@ -8,27 +8,8 @@ go test ./...         # Run all tests
 go vet ./...          # Lint
 ```
 
-## Architecture
-
-Clean architecture with dependency injection:
-
-- `internal/core/` - Business logic + interfaces (ports)
-- `internal/adapters/` - Interface implementations (FS, Output)
-- `internal/tui/` - Bubble Tea UI (presentation only)
-- `cmd/mp/` - Cobra CLI wiring
-
-### Adding Commands
-
-1. Create `internal/core/<cmd>/input.go` - Input struct, validation, schema (single source of truth)
-2. Create `internal/core/<cmd>/handler.go` - Business logic, receives `core.Deps`
-3. Create `internal/core/<cmd>/handler_test.go` - Tests with `adapters.MemoryFS` + `adapters.BufferOutput`
-4. Create `cmd/mp/<cmd>.go` - Cobra command, wire dependencies
-
-### Key Patterns
-
-- **Single source of truth**: Field definitions in `input.go` drive both validation AND schema generation
-- **Dependency injection**: `core.Deps{FS, Output}` passed to handlers
-- **Testability**: Use `adapters.MemoryFS` and `adapters.BufferOutput` in tests
+## Workflow
+Dogfood the mp tool whenever possible during its development. Always use outside-in testing, where a single integration test of the happy path exists before starting any feature work, and then edge cases and other situations are covered in unit tests. When performing feature work, always keep the issue markdown file up to date .
 
 ## CLI Modes
 
@@ -39,42 +20,9 @@ All commands should support:
 3. **Flags** - `mp <cmd> --flag value`
 4. **Schema** - `mp <cmd> --schema` outputs expected JSON
 
-## Providers
-
-Valid providers defined in `internal/core/init/input.go`:
-
-- Issue: `markdown`
-- PR: `github`
-
-Add new providers by updating `ValidValues` in field definitions.
-
-## Hooks System
-
-Hooks are executable shell scripts in `.monkeypuzzle/hooks/` that run during piece operations:
-
-- `on-piece-create.sh` - After piece creation
-- `before-piece-update.sh` / `after-piece-update.sh` - Around `mp piece update`
-- `before-piece-merge.sh` / `after-piece-merge.sh` - Around `mp piece merge`
-
-Hooks receive context via `MP_*` environment variables. Non-zero exit aborts the operation.
-
-Key files:
-
-- `internal/core/piece/hooks.go` - HookRunner implementation
-- `internal/core/piece/hooks_test.go` - Unit tests
-
-## Testing
-
-```bash
-# Unit tests with mock FS
-go test ./internal/core/init/... -v
-
-# E2E test
-echo '{"name":"test","issue_provider":"markdown","pr_provider":"github"}' | ./mp init
-```
-
 ## Code Style
 
 - Keep functions small
 - Table-driven tests
 - No error swallowing - propagate or handle explicitly
+- Prefer explicit dependencies
