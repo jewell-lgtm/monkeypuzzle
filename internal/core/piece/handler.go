@@ -72,6 +72,13 @@ func (h *Handler) CreatePiece(ctx context.Context, monkeypuzzleSourceDir string,
 		return PieceInfo{}, fmt.Errorf("not in a git repository: %w", err)
 	}
 
+	// Get current branch before creating worktree (for piece metadata)
+	currentBranch, err := h.git.CurrentBranch(ctx, wd)
+	if err != nil {
+		// Non-fatal: use empty string if we can't determine branch
+		currentBranch = ""
+	}
+
 	// Ensure main repo tmux session exists
 	h.ensureMainSession(ctx, repoRoot, opts.OverwriteSession)
 
@@ -114,6 +121,19 @@ func (h *Handler) CreatePiece(ctx context.Context, monkeypuzzleSourceDir string,
 	// If we decide to make them fatal in the future, we should add cleanup logic here to
 	// remove the worktree if those operations fail. The WorktreeRemove method is available
 	// in the Git adapter for this purpose.
+
+	// Write piece metadata (parent-child relationship)
+	pieceMetadata := PieceMetadata{
+		Parent:            "main", // Default parent; future issue will add --parent flag
+		CreatedFromBranch: currentBranch,
+	}
+	if err := WritePieceMetadata(worktreePath, pieceMetadata, h.deps.FS); err != nil {
+		// Non-fatal: log warning but continue
+		h.deps.Output.Write(core.Message{
+			Type:    core.MsgWarning,
+			Content: fmt.Sprintf("Failed to write piece metadata: %v", err),
+		})
+	}
 
 	// Create symlink to monkeypuzzle source
 	symlinkPath := filepath.Join(worktreePath, symlinkName)
