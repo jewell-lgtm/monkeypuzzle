@@ -24,9 +24,8 @@ type IssueListItem struct {
 
 // Handler executes issue commands
 type Handler struct {
-	deps     core.Deps
-	workDir  string
-	provider Provider
+	deps    core.Deps
+	workDir string
 }
 
 // NewHandler creates a new issue handler with dependencies
@@ -42,10 +41,7 @@ func (h *Handler) Run(input Input) (IssueFile, error) {
 		return IssueFile{}, err
 	}
 
-	issue, err := provider.Create(CreateInput{
-		Title:       input.Title,
-		Description: input.Description,
-	})
+	issue, err := provider.Create(CreateInput(input))
 	if err != nil {
 		return IssueFile{}, err
 	}
