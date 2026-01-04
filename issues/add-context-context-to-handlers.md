@@ -1,6 +1,6 @@
 ---
 title: Add context.Context to handlers
-status: in-progress
+status: done
 description: No context.Context parameters in handlers or Exec interface. Add for cancellation/timeout support.
 ---
 

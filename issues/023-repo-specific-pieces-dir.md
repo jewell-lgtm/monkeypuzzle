@@ -1,6 +1,6 @@
 ---
 title: Repo-specific pieces directory
-status: in-progress
+status: done
 ---
 
 # Repo-specific pieces directory

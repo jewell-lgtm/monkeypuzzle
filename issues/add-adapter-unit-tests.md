@@ -1,6 +1,6 @@
 ---
 title: Add adapter unit tests
-status: in-progress
+status: done
 description: Zero test coverage for internal/adapters/. Add tests for OSFS, Git, GitHub, Tmux adapters.
 ---
 
