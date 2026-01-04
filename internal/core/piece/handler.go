@@ -424,7 +424,7 @@ func (h *Handler) GetPieceHierarchyStatus(ctx context.Context, workDir, mainBran
 	}
 
 	// Get pieces directory
-	piecesDir, err := getPiecesDir()
+	piecesDir, err := getPiecesDir(status.RepoRoot)
 	if err != nil {
 		return result, fmt.Errorf("failed to get pieces directory: %w", err)
 	}
@@ -433,7 +433,8 @@ func (h *Handler) GetPieceHierarchyStatus(ctx context.Context, workDir, mainBran
 	metadata, err := ReadPieceMetadata(status.WorktreePath, h.deps.FS)
 	if err != nil {
 		// Non-fatal: use default parent
-		metadata = DefaultPieceMetadata()
+		defaultMeta := DefaultPieceMetadata()
+		metadata = &defaultMeta
 	}
 	result.Parent = metadata.Parent
 

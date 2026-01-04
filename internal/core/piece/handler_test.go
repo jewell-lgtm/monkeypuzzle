@@ -187,8 +187,13 @@ func TestHandler_GetPieceHierarchyStatus_WithParentAndChildren(t *testing.T) {
 	deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
 	handler := piece.NewHandler(deps)
 
-	// Setup pieces directory
-	piecesDir := "/test-data/monkeypuzzle/pieces"
+	// Setup pieces directory with repo-scoped path
+	repoRoot := "/repo"
+	repoID, err := paths.RepoIdentifier(repoRoot)
+	if err != nil {
+		t.Fatalf("failed to get repo identifier: %v", err)
+	}
+	piecesDir := filepath.Join("/test-data/monkeypuzzle/pieces", repoID)
 	parentPiecePath := filepath.Join(piecesDir, "parent-piece")
 	childPiecePath := filepath.Join(piecesDir, "child-piece")
 	_ = fs.MkdirAll(parentPiecePath, 0755)
@@ -214,8 +219,8 @@ func TestHandler_GetPieceHierarchyStatus_WithParentAndChildren(t *testing.T) {
 	childMetadataData, _ := json.MarshalIndent(childMetadata, "", "  ")
 	_ = fs.WriteFile(filepath.Join(childPiecePath, ".monkeypuzzle", "piece-metadata.json"), childMetadataData, 0644)
 
-	// Setup mock responses for worktree
-	gitDir := "/repo/.git/worktrees/parent-piece"
+	// Setup mock responses for worktree - gitDir path determines main repo root
+	gitDir := repoRoot + "/.git/worktrees/parent-piece"
 	mockExec.AddResponse("git", []string{"rev-parse", "--git-dir"}, []byte(gitDir+"\n"), nil)
 	mockExec.AddResponse("git", []string{"rev-parse", "--show-toplevel"}, []byte(parentPiecePath+"\n"), nil)
 	mockExec.AddResponse("git", []string{"rev-parse", "--abbrev-ref", "HEAD"}, []byte("parent-piece-branch\n"), nil)
@@ -240,7 +245,7 @@ func TestHandler_GetPieceHierarchyStatus_WithParentAndChildren(t *testing.T) {
 		t.Errorf("expected 1 child, got %d", len(status.Children))
 	}
 
-	if status.Children[0] != "child-piece" {
+	if len(status.Children) > 0 && status.Children[0] != "child-piece" {
 		t.Errorf("expected child 'child-piece', got %q", status.Children[0])
 	}
 
@@ -260,8 +265,13 @@ func TestHandler_GetPieceHierarchyStatus_StackDepth(t *testing.T) {
 	deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
 	handler := piece.NewHandler(deps)
 
-	// Setup pieces directory with 3-level hierarchy: main -> parent -> child
-	piecesDir := "/test-data/monkeypuzzle/pieces"
+	// Setup pieces directory with repo-scoped path
+	repoRoot := "/repo"
+	repoID, err := paths.RepoIdentifier(repoRoot)
+	if err != nil {
+		t.Fatalf("failed to get repo identifier: %v", err)
+	}
+	piecesDir := filepath.Join("/test-data/monkeypuzzle/pieces", repoID)
 	parentPiecePath := filepath.Join(piecesDir, "parent-piece")
 	childPiecePath := filepath.Join(piecesDir, "child-piece")
 	_ = fs.MkdirAll(parentPiecePath, 0755)
@@ -287,8 +297,8 @@ func TestHandler_GetPieceHierarchyStatus_StackDepth(t *testing.T) {
 	childMetadataData, _ := json.MarshalIndent(childMetadata, "", "  ")
 	_ = fs.WriteFile(filepath.Join(childPiecePath, ".monkeypuzzle", "piece-metadata.json"), childMetadataData, 0644)
 
-	// Setup mock responses for child worktree
-	gitDir := "/repo/.git/worktrees/child-piece"
+	// Setup mock responses for child worktree - gitDir path determines main repo root
+	gitDir := repoRoot + "/.git/worktrees/child-piece"
 	mockExec.AddResponse("git", []string{"rev-parse", "--git-dir"}, []byte(gitDir+"\n"), nil)
 	mockExec.AddResponse("git", []string{"rev-parse", "--show-toplevel"}, []byte(childPiecePath+"\n"), nil)
 
