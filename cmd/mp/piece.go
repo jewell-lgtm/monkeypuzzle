@@ -32,7 +32,7 @@ var pieceNewCmd = &cobra.Command{
 	Use:   "new",
 	Short: "Create a new puzzle piece",
 	Long: `Create a new puzzle piece by initializing a git worktree and opening a tmux session.
-The worktree will be created in the platform-appropriate data directory (e.g., ~/Library/Application Support/monkeypuzzle/pieces on macOS, ~/.local/share/monkeypuzzle/pieces on Linux).`,
+The worktree will be created in a repo-scoped directory within the platform-appropriate data directory (e.g., ~/Library/Application Support/monkeypuzzle/pieces/{repo-hash}/ on macOS, ~/.local/share/monkeypuzzle/pieces/{repo-hash}/ on Linux).`,
 	RunE: runPieceNew,
 }
 
@@ -137,7 +137,18 @@ func completePieceNames(cmd *cobra.Command, args []string, toComplete string) ([
 	}
 	handler := piececmd.NewHandler(deps)
 
-	pieces, err := handler.ListPieces(cmd.Context())
+	// Get repo root from current directory
+	repoRoot := ""
+	wd, err := os.Getwd()
+	if err == nil {
+		git := adapters.NewGit(deps.Exec)
+		detectedRoot, err := git.RepoRoot(cmd.Context(), wd)
+		if err == nil {
+			repoRoot = detectedRoot
+		}
+	}
+
+	pieces, err := handler.ListPieces(cmd.Context(), repoRoot)
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
@@ -656,7 +667,18 @@ func getAbandonInput(ctx context.Context, handler *piececmd.Handler) (piececmd.A
 }
 
 func runAbandonTUI(ctx context.Context, handler *piececmd.Handler) (piececmd.AbandonInput, error) {
-	pieces, err := handler.ListPieces(ctx)
+	// Get repo root from current directory
+	repoRoot := ""
+	wd, err := os.Getwd()
+	if err == nil {
+		git := adapters.NewGit(adapters.NewOSExec())
+		detectedRoot, err := git.RepoRoot(ctx, wd)
+		if err == nil {
+			repoRoot = detectedRoot
+		}
+	}
+
+	pieces, err := handler.ListPieces(ctx, repoRoot)
 	if err != nil {
 		return piececmd.AbandonInput{}, err
 	}
@@ -790,7 +812,18 @@ func getSwitchInput(ctx context.Context, handler *piececmd.Handler) (piececmd.Sw
 }
 
 func runSwitchTUI(ctx context.Context, handler *piececmd.Handler) (piececmd.SwitchInput, error) {
-	pieces, err := handler.ListPieces(ctx)
+	// Get repo root from current directory
+	repoRoot := ""
+	wd, err := os.Getwd()
+	if err == nil {
+		git := adapters.NewGit(adapters.NewOSExec())
+		detectedRoot, err := git.RepoRoot(ctx, wd)
+		if err == nil {
+			repoRoot = detectedRoot
+		}
+	}
+
+	pieces, err := handler.ListPieces(ctx, repoRoot)
 	if err != nil {
 		return piececmd.SwitchInput{}, err
 	}

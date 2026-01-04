@@ -3,6 +3,8 @@
 package paths
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"path/filepath"
 
 	gap "github.com/muesli/go-app-paths"
@@ -41,13 +43,45 @@ func DataDir() (string, error) {
 	return dirs[0], nil
 }
 
+// RepoIdentifier generates a unique identifier for a repository based on its absolute root path.
+// Returns the first 12 characters of the SHA256 hash of the repo root path.
+func RepoIdentifier(repoRoot string) (string, error) {
+	// Get absolute path to ensure consistency
+	absPath, err := filepath.Abs(repoRoot)
+	if err != nil {
+		return "", err
+	}
+
+	// Compute SHA256 hash
+	hash := sha256.Sum256([]byte(absPath))
+	hexHash := hex.EncodeToString(hash[:])
+
+	// Return first 12 characters
+	return hexHash[:12], nil
+}
+
 // PiecesDir returns the directory for storing piece worktrees.
-func PiecesDir() (string, error) {
+// If repoRoot is empty, returns the global pieces directory (for backward compatibility).
+// If repoRoot is provided, returns a repo-scoped directory: {DataDir}/pieces/{repoIdentifier}/
+func PiecesDir(repoRoot string) (string, error) {
 	dataDir, err := DataDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dataDir, "pieces"), nil
+
+	// If no repo root provided, return global directory for backward compatibility
+	if repoRoot == "" {
+		return filepath.Join(dataDir, "pieces"), nil
+	}
+
+	// Generate repo identifier
+	repoID, err := RepoIdentifier(repoRoot)
+	if err != nil {
+		return "", err
+	}
+
+	// Return repo-scoped directory
+	return filepath.Join(dataDir, "pieces", repoID), nil
 }
 
 // ConfigDir returns the user config directory for monkeypuzzle.

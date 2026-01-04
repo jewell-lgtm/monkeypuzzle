@@ -48,15 +48,15 @@ mp completion powershell | Out-String | Invoke-Expression
 
 ### What completes
 
-| Flag | Completes To |
-|------|-------------|
-| `mp piece switch --name` | Available piece names |
-| `mp piece abandon --name` | Available piece names |
-| `mp piece new --issue` | Files (for issue paths) |
-| `mp init --issue-provider` | `markdown` |
-| `mp init --pr-provider` | `github` |
-| `mp piece update --main-branch` | Git branch names |
-| `mp piece merge --main-branch` | Git branch names |
+| Flag                            | Completes To            |
+| ------------------------------- | ----------------------- |
+| `mp piece switch --name`        | Available piece names   |
+| `mp piece abandon --name`       | Available piece names   |
+| `mp piece new --issue`          | Files (for issue paths) |
+| `mp init --issue-provider`      | `markdown`              |
+| `mp init --pr-provider`         | `github`                |
+| `mp piece update --main-branch` | Git branch names        |
+| `mp piece merge --main-branch`  | Git branch names        |
 
 ---
 
@@ -133,7 +133,7 @@ JSON to stdout:
 {
   "in_piece": true,
   "piece_name": "piece-20241226-143022",
-  "worktree_path": "/home/user/.local/share/monkeypuzzle/pieces/piece-20241226-143022",
+  "worktree_path": "/home/user/.local/share/monkeypuzzle/pieces/abc123def456/piece-20241226-143022",
   "repo_root": "/home/user/projects/myproject"
 }
 ```
@@ -185,18 +185,24 @@ JSON to stdout:
 ```json
 {
   "name": "piece-20241226-143022",
-  "worktree_path": "/home/user/.local/share/monkeypuzzle/pieces/piece-20241226-143022",
+  "worktree_path": "/home/user/.local/share/monkeypuzzle/pieces/abc123def456/piece-20241226-143022",
   "session_name": "mp-piece-piece-20241226-143022"
 }
 ```
 
 ### Piece storage
 
-Pieces stored in XDG data directory:
+Pieces are stored in repo-scoped directories within the XDG data directory:
 
-- Linux: `~/.local/share/monkeypuzzle/pieces/`
-- macOS: `~/Library/Application Support/monkeypuzzle/pieces/`
-- `$XDG_DATA_HOME/monkeypuzzle/pieces/` if set
+- Linux: `~/.local/share/monkeypuzzle/pieces/{repo-hash}/`
+- macOS: `~/Library/Application Support/monkeypuzzle/pieces/{repo-hash}/`
+- `$XDG_DATA_HOME/monkeypuzzle/pieces/{repo-hash}/` if set
+
+The `{repo-hash}` is a unique identifier derived from the repository's absolute root path. This ensures:
+
+- Each repository has its own isolated pieces directory
+- No naming conflicts between different repositories
+- Easier management of pieces per project
 
 ---
 
@@ -288,8 +294,8 @@ cd $(mp piece switch --name foo)   # Change directory to piece
 
 ### Flags
 
-| Flag     | Description            | Default |
-| -------- | ---------------------- | ------- |
+| Flag     | Description             | Default |
+| -------- | ----------------------- | ------- |
 | `--name` | Piece name to switch to | -       |
 
 ### What it does
@@ -309,7 +315,7 @@ When switching via tmux, outputs JSON:
 {
   "piece": {
     "name": "my-feature",
-    "worktree_path": "/home/user/.local/share/monkeypuzzle/pieces/my-feature",
+    "worktree_path": "/home/user/.local/share/monkeypuzzle/pieces/abc123def456/my-feature",
     "session_name": "mp-piece-my-feature",
     "has_session": true
   },
@@ -322,6 +328,7 @@ When printing path (no tmux), outputs just the path to stdout for use with `cd $
 ### TUI Selector
 
 Interactive mode shows:
+
 - Piece names sorted by modification time (newest first)
 - `[tmux]` indicator for pieces with active sessions
 - Navigation: up/down or j/k, enter to select, esc to cancel
@@ -342,11 +349,11 @@ mp piece cleanup --force      # Skip confirmation
 
 ### Flags
 
-| Flag            | Description                                   | Default |
-| --------------- | --------------------------------------------- | ------- |
-| `--dry-run`     | Show what would be cleaned without changes    | `false` |
-| `--force`       | Skip confirmation prompts                     | `false` |
-| `--main-branch` | Main branch to check merge status against     | `main`  |
+| Flag            | Description                                | Default |
+| --------------- | ------------------------------------------ | ------- |
+| `--dry-run`     | Show what would be cleaned without changes | `false` |
+| `--force`       | Skip confirmation prompts                  | `false` |
+| `--main-branch` | Main branch to check merge status against  | `main`  |
 
 ### What it does
 
@@ -372,11 +379,11 @@ mp piece abandon --name foo --delete-branch   # Also delete git branch
 
 ### Flags
 
-| Flag              | Description                               | Default |
-| ----------------- | ----------------------------------------- | ------- |
-| `--name`          | Piece name to abandon                     | -       |
+| Flag              | Description                                 | Default |
+| ----------------- | ------------------------------------------- | ------- |
+| `--name`          | Piece name to abandon                       | -       |
 | `--force`         | Force removal even with uncommitted changes | `false` |
-| `--delete-branch` | Also delete the git branch                | `false` |
+| `--delete-branch` | Also delete the git branch                  | `false` |
 
 ### What it does
 
@@ -390,7 +397,7 @@ mp piece abandon --name foo --delete-branch   # Also delete git branch
 ```json
 {
   "piece_name": "my-feature",
-  "worktree_path": "/home/user/.local/share/monkeypuzzle/pieces/my-feature",
+  "worktree_path": "/home/user/.local/share/monkeypuzzle/pieces/abc123def456/my-feature",
   "branch_name": "my-feature",
   "branch_deleted": true
 }

@@ -82,8 +82,8 @@ func (h *Handler) CreatePiece(ctx context.Context, monkeypuzzleSourceDir string,
 	// Ensure main repo tmux session exists
 	h.ensureMainSession(ctx, repoRoot, opts.OverwriteSession)
 
-	// Get pieces directory
-	piecesDir, err := getPiecesDir()
+	// Get pieces directory (scoped to this repo)
+	piecesDir, err := getPiecesDir(repoRoot)
 	if err != nil {
 		return PieceInfo{}, fmt.Errorf("failed to get pieces directory: %w", err)
 	}
@@ -595,10 +595,10 @@ func (h *Handler) buildSquashCommitMessage(pieceName string, commitMsgs []string
 	return b.String()
 }
 
-// getPiecesDir returns the directory for storing pieces.
+// getPiecesDir returns the directory for storing pieces scoped to the given repo.
 // Uses GAP (go-app-paths) for platform-appropriate paths.
-func getPiecesDir() (string, error) {
-	return paths.PiecesDir()
+func getPiecesDir(repoRoot string) (string, error) {
+	return paths.PiecesDir(repoRoot)
 }
 
 // MergeStatus represents the merge status of a branch
@@ -729,8 +729,8 @@ type CleanupOptions struct {
 // CleanupMergedPieces finds and cleans up pieces whose branches have been merged.
 // It removes worktrees, kills tmux sessions, and updates issue status to done.
 func (h *Handler) CleanupMergedPieces(ctx context.Context, repoRoot string, opts CleanupOptions) ([]CleanupResult, error) {
-	// Get pieces directory
-	piecesDir, err := getPiecesDir()
+	// Get pieces directory (scoped to this repo)
+	piecesDir, err := getPiecesDir(repoRoot)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pieces directory: %w", err)
 	}
@@ -882,8 +882,18 @@ type AbandonResult struct {
 func (h *Handler) AbandonPiece(ctx context.Context, pieceName string, opts AbandonOptions) (AbandonResult, error) {
 	result := AbandonResult{PieceName: pieceName}
 
+	// Detect repo root from current working directory first
+	repoRoot := ""
+	wd, err := os.Getwd()
+	if err == nil {
+		detectedRoot, err := h.git.RepoRoot(ctx, wd)
+		if err == nil {
+			repoRoot = detectedRoot
+		}
+	}
+
 	// Find the piece
-	pieces, err := h.ListPieces(ctx)
+	pieces, err := h.ListPieces(ctx, repoRoot)
 	if err != nil {
 		return result, fmt.Errorf("failed to list pieces: %w", err)
 	}
@@ -919,10 +929,12 @@ func (h *Handler) AbandonPiece(ctx context.Context, pieceName string, opts Aband
 		result.BranchName = branchName
 	}
 
-	repoRoot, err := h.git.GetMainRepoRoot(ctx, target.WorktreePath)
+	// Get repo root from piece worktree (more reliable than current directory)
+	detectedRepoRoot, err := h.git.GetMainRepoRoot(ctx, target.WorktreePath)
 	if err != nil {
 		return result, fmt.Errorf("failed to get repo root: %w", err)
 	}
+	repoRoot = detectedRepoRoot
 
 	// Kill tmux session if exists
 	if target.HasSession {
@@ -1025,8 +1037,24 @@ func (h *Handler) updateIssueStatusToDone(issuePath string) error {
 
 // ListPieces returns all available pieces in the pieces directory.
 // Results are sorted by modification time (newest first).
-func (h *Handler) ListPieces(ctx context.Context) ([]PieceListItem, error) {
-	piecesDir, err := getPiecesDir()
+// If repoRoot is empty, it will be detected from the current working directory.
+func (h *Handler) ListPieces(ctx context.Context, repoRoot string) ([]PieceListItem, error) {
+	// If repoRoot not provided, detect from current working directory
+	if repoRoot == "" {
+		wd, err := os.Getwd()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get working directory: %w", err)
+		}
+		detectedRoot, err := h.git.RepoRoot(ctx, wd)
+		if err != nil {
+			// If not in a git repo, use empty repoRoot (global directory)
+			repoRoot = ""
+		} else {
+			repoRoot = detectedRoot
+		}
+	}
+
+	piecesDir, err := getPiecesDir(repoRoot)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pieces directory: %w", err)
 	}
@@ -1079,7 +1107,17 @@ func (h *Handler) ListPieces(ctx context.Context) ([]PieceListItem, error) {
 // SwitchPiece switches to a piece by name.
 // It tries tmux attach/switch first, falls back to printing path.
 func (h *Handler) SwitchPiece(ctx context.Context, name string) (SwitchResult, error) {
-	pieces, err := h.ListPieces(ctx)
+	// Detect repo root from current working directory or piece worktree
+	repoRoot := ""
+	wd, err := os.Getwd()
+	if err == nil {
+		detectedRoot, err := h.git.RepoRoot(ctx, wd)
+		if err == nil {
+			repoRoot = detectedRoot
+		}
+	}
+
+	pieces, err := h.ListPieces(ctx, repoRoot)
 	if err != nil {
 		return SwitchResult{}, err
 	}
