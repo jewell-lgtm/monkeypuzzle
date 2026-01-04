@@ -32,7 +32,7 @@ var pieceNewCmd = &cobra.Command{
 	Use:   "new",
 	Short: "Create a new puzzle piece",
 	Long: `Create a new puzzle piece by initializing a git worktree and opening a tmux session.
-The worktree will be created in XDG_DATA_HOME/monkeypuzzle/pieces (default: ~/.local/share/monkeypuzzle/pieces).`,
+The worktree will be created in the platform-appropriate data directory (e.g., ~/Library/Application Support/monkeypuzzle/pieces on macOS, ~/.local/share/monkeypuzzle/pieces on Linux).`,
 	RunE: runPieceNew,
 }
 
@@ -110,13 +110,13 @@ func init() {
 	pieceCmd.AddCommand(pieceAbandonCmd)
 	rootCmd.AddCommand(pieceCmd)
 
-	// Register completion functions
-	pieceSwitchCmd.RegisterFlagCompletionFunc("name", completePieceNames)
-	pieceAbandonCmd.RegisterFlagCompletionFunc("name", completePieceNames)
-	pieceNewCmd.RegisterFlagCompletionFunc("issue", completeIssueFiles)
-	pieceUpdateCmd.RegisterFlagCompletionFunc("main-branch", completeGitBranches)
-	pieceMergeCmd.RegisterFlagCompletionFunc("main-branch", completeGitBranches)
-	pieceCleanupCmd.RegisterFlagCompletionFunc("main-branch", completeGitBranches)
+	// Register completion functions (errors ignored - completion is optional)
+	_ = pieceSwitchCmd.RegisterFlagCompletionFunc("name", completePieceNames)
+	_ = pieceAbandonCmd.RegisterFlagCompletionFunc("name", completePieceNames)
+	_ = pieceNewCmd.RegisterFlagCompletionFunc("issue", completeIssueFiles)
+	_ = pieceUpdateCmd.RegisterFlagCompletionFunc("main-branch", completeGitBranches)
+	_ = pieceMergeCmd.RegisterFlagCompletionFunc("main-branch", completeGitBranches)
+	_ = pieceCleanupCmd.RegisterFlagCompletionFunc("main-branch", completeGitBranches)
 }
 
 func completePieceNames(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
