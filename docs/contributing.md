@@ -6,6 +6,8 @@
 
 - Go 1.24+ (use [asdf](https://asdf-vm.com/) for version management)
 - Git
+- tmux (for `mp piece` command)
+- gh CLI (for GitHub PR provider)
 
 ### Clone and build
 
@@ -24,7 +26,9 @@ go build -o mp .
 ### Run tests
 
 ```bash
-go test ./...
+go test ./...                           # Unit tests only
+go test -tags=integration ./...         # All tests including integration
+go test ./internal/core/piece/... -v    # Specific package, verbose
 ```
 
 ### Lint
@@ -33,26 +37,216 @@ go test ./...
 go vet ./...
 ```
 
-## Adding a New Command
+---
 
-### 1. Create input definition
+## Testing Philosophy: Outside-In
 
-`internal/core/<cmd>/input.go`:
+**This is the most important section of this document.**
+
+Monkeypuzzle uses **outside-in testing** (also called London-school TDD). The core principle:
+
+> **Every new feature starts with an integration test that proves the happy path works. Unit tests fill in edge cases and completeness.**
+
+### Why Outside-In?
+
+1. **Integration tests catch real bugs** - unit tests with mocks can pass while the system is broken
+2. **Happy path first** - proves the feature works end-to-end before worrying about edge cases
+3. **Unit tests are for completeness** - edge cases, error handling, boundary conditions
+4. **Faster feedback on architecture** - integration tests reveal integration problems early
+
+### The Testing Pyramid (Inverted)
+
+Traditional wisdom says "many unit tests, few integration tests." We flip this for *starting* new work:
+
+```
+START HERE
+    │
+    ▼
+┌─────────────────────────────────┐
+│   Integration Test (Happy Path) │  ← Write this FIRST
+└─────────────────────────────────┘
+           │
+           ▼
+┌─────────────────────────────────┐
+│   Unit Tests (Edge Cases)       │  ← Fill these in after
+└─────────────────────────────────┘
+```
+
+### Workflow for New Features
+
+1. **Write one integration test** that exercises the happy path
+2. **Make it pass** with the simplest implementation
+3. **Add unit tests** for edge cases, error conditions, boundary conditions
+4. **Refactor** with confidence (tests catch regressions)
+
+### Example: Adding a New Command
+
+**Step 1: Integration test first** (`cmd/mp/cli_integration_test.go`)
 
 ```go
-package cmdname
+//go:build integration
+
+func TestCLI_NewCommand_HappyPath(t *testing.T) {
+    env := setupTestEnv(t)
+    defer env.cleanup()
+
+    env.initProject("test")
+
+    // Exercise the REAL binary, REAL filesystem
+    stdout, _, err := env.run("newcommand", "--flag", "value")
+    if err != nil {
+        t.Fatalf("command failed: %v", err)
+    }
+
+    // Verify real output
+    var result map[string]any
+    json.Unmarshal([]byte(stdout), &result)
+    if result["expected_field"] != "expected_value" {
+        t.Error("happy path broken")
+    }
+}
+```
+
+**Step 2: Make it pass** - implement the feature
+
+**Step 3: Unit tests for edge cases** (`internal/core/newcmd/handler_test.go`)
+
+```go
+func TestHandler_InvalidInput(t *testing.T) {
+    deps := core.Deps{
+        FS:     adapters.NewMemoryFS(),      // Mock filesystem
+        Output: adapters.NewBufferOutput(),   // Mock output
+        Exec:   adapters.NewMockExec(),       // Mock commands
+    }
+
+    handler := newcmd.NewHandler(deps)
+    err := handler.Run(newcmd.Input{Name: ""})
+
+    if err == nil {
+        t.Error("expected error for empty name")
+    }
+}
+
+func TestHandler_FileAlreadyExists(t *testing.T) {
+    fs := adapters.NewMemoryFS()
+    fs.WriteFile("/existing", []byte("content"), 0644)
+
+    deps := core.Deps{FS: fs, Output: adapters.NewBufferOutput()}
+    handler := newcmd.NewHandler(deps)
+
+    err := handler.Run(newcmd.Input{Path: "/existing"})
+    if err == nil {
+        t.Error("expected error for existing file")
+    }
+}
+```
+
+### Test File Organization
+
+```
+internal/core/piece/
+├── handler.go
+├── handler_test.go              # Unit tests (mocked deps)
+├── handler_integration_test.go  # Integration tests (real deps)
+├── input.go
+└── input_test.go                # Unit tests for validation
+```
+
+### Integration vs Unit Tests
+
+| Aspect | Integration Test | Unit Test |
+|--------|-----------------|-----------|
+| **Purpose** | Prove the feature works | Prove edge cases handled |
+| **Dependencies** | Real (filesystem, git, etc.) | Mocked |
+| **Build tag** | `//go:build integration` | None |
+| **Speed** | Slower | Fast |
+| **When to write** | FIRST | After happy path works |
+| **File suffix** | `_integration_test.go` | `_test.go` |
+
+### Running Tests
+
+```bash
+# Fast feedback during development (unit tests only)
+go test ./...
+
+# Full test suite (CI, before PR)
+go test -tags=integration ./...
+
+# Specific integration tests
+go test -tags=integration ./internal/core/piece/... -v -run TestIntegration
+```
+
+### What Makes a Good Integration Test?
+
+1. **Tests the real thing** - actual binary, filesystem, git commands
+2. **Minimal setup** - use helper functions like `setupTestEnv`, `setupGitRepo`
+3. **Focuses on happy path** - save edge cases for unit tests
+4. **Self-contained** - creates temp dirs, cleans up after itself
+5. **Fast enough** - don't test every combination, just prove it works
+
+### What Makes a Good Unit Test?
+
+1. **Tests one thing** - single behavior or edge case
+2. **Uses mocks** - `MemoryFS`, `BufferOutput`, `MockExec`
+3. **Table-driven** for multiple cases:
+
+```go
+func TestValidate(t *testing.T) {
+    tests := []struct {
+        name    string
+        input   Input
+        wantErr bool
+    }{
+        {"valid", Input{Name: "test"}, false},
+        {"empty name", Input{Name: ""}, true},
+        {"invalid chars", Input{Name: "a/b"}, true},
+    }
+
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            err := Validate(tt.input)
+            if (err != nil) != tt.wantErr {
+                t.Errorf("got err=%v, wantErr=%v", err, tt.wantErr)
+            }
+        })
+    }
+}
+```
+
+---
+
+## Adding a New Command
+
+### 1. Write integration test first
+
+`cmd/mp/cli_integration_test.go`:
+
+```go
+//go:build integration
+
+func TestCLI_NewCmd_HappyPath(t *testing.T) {
+    env := setupTestEnv(t)
+    defer env.cleanup()
+    env.initProject("test")
+
+    stdout, _, err := env.run("newcmd", "--name", "test")
+    if err != nil {
+        t.Fatalf("failed: %v", err)
+    }
+    // Assert on real output
+}
+```
+
+### 2. Create input definition
+
+`internal/core/newcmd/input.go`:
+
+```go
+package newcmd
 
 type Input struct {
     Name   string `json:"name"`
     Option string `json:"option"`
-}
-
-type Field struct {
-    Name        string
-    Description string
-    Required    bool
-    Default     string
-    ValidValues []string
 }
 
 var fields = []Field{
@@ -60,31 +254,19 @@ var fields = []Field{
     {Name: "option", Default: "default_value", ValidValues: []string{"a", "b"}},
 }
 
-func Validate(input Input) error {
-    // Validate using fields
-}
-
-func Schema(workDir string) ([]byte, error) {
-    // Generate JSON schema from fields
-}
-
-func WithDefaults(input Input, workDir string) Input {
-    // Apply defaults from fields
-}
-
-func ParseJSON(data []byte) (Input, error) {
-    // Parse JSON into Input
-}
+func Validate(input Input) error { /* use fields */ }
+func Schema(workDir string) ([]byte, error) { /* generate from fields */ }
+func WithDefaults(input Input, workDir string) Input { /* apply defaults */ }
 ```
 
-### 2. Create handler
+### 3. Create handler
 
-`internal/core/<cmd>/handler.go`:
+`internal/core/newcmd/handler.go`:
 
 ```go
-package cmdname
+package newcmd
 
-import "monkeypuzzle/internal/core"
+import "github.com/jewell-lgtm/monkeypuzzle/internal/core"
 
 type Handler struct {
     deps core.Deps
@@ -95,110 +277,62 @@ func NewHandler(deps core.Deps) *Handler {
 }
 
 func (h *Handler) Run(input Input) error {
-    // Business logic here
-    // Use h.deps.FS, h.deps.Output, h.deps.Exec
-
-    h.deps.Output.Write(core.Message{
-        Type:    core.MsgSuccess,
-        Content: "Command completed",
-    })
+    // Business logic using h.deps.FS, h.deps.Output, h.deps.Exec
     return nil
 }
 ```
 
-### 3. Create tests
+### 4. Add unit tests for edge cases
 
-`internal/core/<cmd>/handler_test.go`:
+`internal/core/newcmd/handler_test.go`:
 
 ```go
-package cmdname_test
+package newcmd_test
 
-import (
-    "testing"
-    "monkeypuzzle/internal/adapters"
-    "monkeypuzzle/internal/core"
-    cmdname "monkeypuzzle/internal/core/<cmd>"
-)
-
-func TestHandlerRun(t *testing.T) {
+func TestHandler_EmptyName(t *testing.T) {
     deps := core.Deps{
         FS:     adapters.NewMemoryFS(),
         Output: adapters.NewBufferOutput(),
-        Exec:   adapters.NewMockExec(),
     }
+    handler := newcmd.NewHandler(deps)
 
-    handler := cmdname.NewHandler(deps)
-    input := cmdname.Input{Name: "test"}
-
-    err := handler.Run(input)
-    if err != nil {
-        t.Fatalf("unexpected error: %v", err)
-    }
-
-    // Assert on output
-    out := deps.Output.(*adapters.BufferOutput)
-    if !out.HasSuccess() {
-        t.Error("expected success message")
+    err := handler.Run(newcmd.Input{Name: ""})
+    if err == nil {
+        t.Error("expected error")
     }
 }
 ```
 
-### 4. Wire CLI command
+### 5. Wire CLI command
 
-`cmd/mp/<cmd>.go`:
+`cmd/mp/newcmd.go`:
 
 ```go
 package main
 
-import (
-    "os"
-    "github.com/spf13/cobra"
-    "monkeypuzzle/internal/adapters"
-    "monkeypuzzle/internal/core"
-    cmdname "monkeypuzzle/internal/core/<cmd>"
-)
-
-var cmdCmd = &cobra.Command{
-    Use:   "cmdname",
+var newcmdCmd = &cobra.Command{
+    Use:   "newcmd",
     Short: "Description",
-    RunE:  runCmd,
+    RunE:  runNewCmd,
 }
 
 func init() {
-    rootCmd.AddCommand(cmdCmd)
-    cmdCmd.Flags().StringVar(&flagName, "name", "", "Name")
+    rootCmd.AddCommand(newcmdCmd)
+    newcmdCmd.Flags().StringVar(&flagName, "name", "", "Name")
 }
 
-func runCmd(cmd *cobra.Command, args []string) error {
+func runNewCmd(cmd *cobra.Command, args []string) error {
     deps := core.Deps{
         FS:     adapters.NewOSFS(""),
         Output: adapters.NewTextOutput(os.Stderr),
         Exec:   adapters.NewOSExec(),
     }
-
-    input, err := getInput()
-    if err != nil {
-        return err
-    }
-
-    handler := cmdname.NewHandler(deps)
-    return handler.Run(input)
+    // Handle input modes, run handler
+    return nil
 }
 ```
 
-## Adding a Provider
-
-Providers are defined in field ValidValues:
-
-```go
-// internal/core/init/input.go
-{
-    Name:        "issue_provider",
-    ValidValues: []string{"markdown", "linear"},  // Add new provider
-}
-```
-
-Provider-specific logic goes in the handler.
+---
 
 ## Code Style
 
@@ -208,22 +342,20 @@ Provider-specific logic goes in the handler.
 - Prefer composition over inheritance
 - Use dependency injection for external dependencies
 
-## Testing Guidelines
-
-- All business logic must be testable with mocks
-- Use `adapters.MemoryFS` for filesystem tests
-- Use `adapters.BufferOutput` for output assertions
-- Use `adapters.MockExec` for command execution tests
-- Table-driven tests for validation logic
+---
 
 ## Pull Request Process
 
 1. Fork the repository
 2. Create feature branch
-3. Write tests for new functionality
-4. Ensure all tests pass: `go test ./...`
-5. Ensure linting passes: `go vet ./...`
-6. Submit pull request
+3. **Write integration test for happy path first**
+4. Implement the feature
+5. Add unit tests for edge cases
+6. Ensure all tests pass: `go test -tags=integration ./...`
+7. Ensure linting passes: `go vet ./...`
+8. Submit pull request
+
+---
 
 ## Project Structure Reference
 

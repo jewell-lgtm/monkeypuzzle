@@ -1,5 +1,9 @@
 # Contributing to Monkeypuzzle
 
+> **Testing Philosophy**: We use outside-in testing. Every new feature starts with an integration test that proves the happy path works. Unit tests fill in edge cases. See [docs/contributing.md](docs/contributing.md) for details.
+>
+> **Reviewing**: See [docs/reviewing.md](docs/reviewing.md) for code review guidelines.
+
 ## Development Setup
 
 ### Option 1: Docker (Recommended for Reproducible Issues)
@@ -94,8 +98,11 @@ monkeypuzzle/
 ## Running Tests
 
 ```bash
-# All tests
+# Unit tests only (fast feedback during development)
 go test ./...
+
+# All tests including integration (before PR, CI)
+go test -tags=integration ./...
 
 # Specific package with verbose output
 go test ./internal/core/init/... -v
@@ -103,6 +110,19 @@ go test ./internal/core/init/... -v
 # With coverage
 go test ./... -cover
 ```
+
+### Outside-In Testing
+
+**Every new feature must have an integration test for the happy path.**
+
+1. Write integration test first (`*_integration_test.go`, `//go:build integration`)
+2. Make it pass with simplest implementation
+3. Add unit tests for edge cases (`*_test.go`, mocked deps)
+4. Refactor with confidence
+
+Integration tests use real dependencies (filesystem, git, etc). Unit tests use mocks (`MemoryFS`, `BufferOutput`, `MockExec`).
+
+See [docs/contributing.md](docs/contributing.md) for full testing guide.
 
 ## Code Style
 
@@ -135,11 +155,15 @@ docs: update README with new flags
 ## Pull Requests
 
 1. Create a feature branch from `main`
-2. Make your changes
-3. Ensure tests pass: `go test ./...`
-4. Ensure code is vetted: `go vet ./...`
-5. **If reporting a bug**, include Docker reproduction steps (see [docs/docker-development.md](docs/docker-development.md))
-6. Open a PR with a clear description
+2. **Write integration test for happy path first**
+3. Implement the feature
+4. Add unit tests for edge cases
+5. Ensure all tests pass: `go test -tags=integration ./...`
+6. Ensure code is vetted: `go vet ./...`
+7. **If reporting a bug**, include Docker reproduction steps (see [docs/docker-development.md](docs/docker-development.md))
+8. Open a PR with a clear description
+
+See [docs/reviewing.md](docs/reviewing.md) for what reviewers look for.
 
 ### Creating Reproducible Bug Reports
 
