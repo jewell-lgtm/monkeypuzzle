@@ -158,3 +158,69 @@ func TestTmux_InTmux(t *testing.T) {
 	tmux := NewTmux(NewMockExec())
 	_ = tmux.InTmux()
 }
+
+func TestTmux_IsInstalled(t *testing.T) {
+	tests := []struct {
+		name    string
+		mockErr error
+		want    bool
+	}{
+		{
+			name:    "tmux installed",
+			mockErr: nil,
+			want:    true,
+		},
+		{
+			name:    "tmux not installed",
+			mockErr: MockError("not found"),
+			want:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			exec := NewMockExec()
+			exec.AddResponse("which", []string{"tmux"}, nil, tt.mockErr)
+
+			tmux := NewTmux(exec)
+			got := tmux.IsInstalled(context.Background())
+
+			if got != tt.want {
+				t.Errorf("IsInstalled() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTmux_HasAnySessions(t *testing.T) {
+	tests := []struct {
+		name    string
+		mockErr error
+		want    bool
+	}{
+		{
+			name:    "sessions exist",
+			mockErr: nil,
+			want:    true,
+		},
+		{
+			name:    "no sessions",
+			mockErr: MockError("no server running"),
+			want:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			exec := NewMockExec()
+			exec.AddResponse("tmux", []string{"list-sessions"}, nil, tt.mockErr)
+
+			tmux := NewTmux(exec)
+			got := tmux.HasAnySessions(context.Background())
+
+			if got != tt.want {
+				t.Errorf("HasAnySessions() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

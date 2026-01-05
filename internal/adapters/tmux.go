@@ -67,3 +67,15 @@ func (t *Tmux) SwitchClient(ctx context.Context, sessionName string) error {
 func (t *Tmux) InTmux() bool {
 	return os.Getenv("TMUX") != ""
 }
+
+// IsInstalled returns true if tmux is available on the system.
+func (t *Tmux) IsInstalled(ctx context.Context) bool {
+	_, err := t.exec.Run(ctx, "which", "tmux")
+	return err == nil
+}
+
+// HasAnySessions returns true if any tmux sessions exist.
+func (t *Tmux) HasAnySessions(ctx context.Context) bool {
+	_, err := t.exec.Run(ctx, "tmux", "list-sessions")
+	return err == nil
+}

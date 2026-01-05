@@ -1353,6 +1353,84 @@ func TestIntegration_CreatePieceWithInput_WithName(t *testing.T) {
 	}
 }
 
+func TestIntegration_CreatePiece_AutoStartsTmuxIfNoSessionsRunning(t *testing.T) {
+	// Skip if git is not available
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	// Skip if tmux is not available
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not available")
+	}
+
+	// Override data dir for tests
+	tmpDataHome, err := os.MkdirTemp("", "mp-data-*")
+	if err != nil {
+		t.Fatalf("failed to create temp data dir: %v", err)
+	}
+	t.Cleanup(func() {
+		os.RemoveAll(tmpDataHome)
+		paths.ResetDataDir()
+	})
+	paths.SetDataDir(tmpDataHome)
+
+	// Create temp directory for test repo
+	tmpDir, err := os.MkdirTemp("", "mp-integration-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Initialize git repo
+	setupGitRepo(t, tmpDir)
+
+	// Create monkeypuzzle config
+	setupMonkeypuzzleConfig(t, tmpDir)
+
+	// Change to repo directory
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get working directory: %v", err)
+	}
+	defer func() { _ = os.Chdir(oldWd) }()
+
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("failed to change directory: %v", err)
+	}
+
+	// Create handler
+	deps := core.Deps{
+		FS:     adapters.NewOSFS(""),
+		Output: adapters.NewBufferOutput(),
+		Exec:   adapters.NewOSExec(),
+	}
+	handler := piece.NewHandler(deps)
+
+	// Check if tmux adapter can detect it's installed
+	tmux := adapters.NewTmux(adapters.NewOSExec())
+	if !tmux.IsInstalled(context.Background()) {
+		t.Fatal("tmux.IsInstalled() returned false, but we already verified tmux exists")
+	}
+
+	// Create piece - the session should be created
+	info, err := handler.CreatePiece(context.Background(), tmpDir, "auto-tmux-test", piece.CreatePieceOptions{})
+	if err != nil {
+		t.Fatalf("CreatePiece failed: %v", err)
+	}
+
+	// Verify session was created
+	if !tmux.HasSession(context.Background(), info.SessionName) {
+		t.Errorf("expected tmux session %q to exist", info.SessionName)
+	}
+
+	// Clean up: kill the session
+	_ = tmux.KillSession(context.Background(), info.SessionName)
+	// Also clean up main session if created
+	mainSession := "mp-" + filepath.Base(tmpDir)
+	_ = tmux.KillSession(context.Background(), mainSession)
+}
+
 func TestIntegration_RepoSpecificPieces_Isolation(t *testing.T) {
 	// Skip if git is not available
 	if _, err := exec.LookPath("git"); err != nil {
@@ -1426,7 +1504,7 @@ func TestIntegration_RepoSpecificPieces_Isolation(t *testing.T) {
 	if err := os.Chdir(repoA); err != nil {
 		t.Fatalf("failed to chdir to repo A: %v", err)
 	}
-	piecesA, err := handlerA.ListPieces(context.Background())
+	piecesA, err := handlerA.ListPieces(context.Background(), repoA)
 	if err != nil {
 		t.Fatalf("ListPieces from repo A failed: %v", err)
 	}
@@ -1442,7 +1520,7 @@ func TestIntegration_RepoSpecificPieces_Isolation(t *testing.T) {
 	if err := os.Chdir(repoB); err != nil {
 		t.Fatalf("failed to chdir to repo B: %v", err)
 	}
-	piecesB, err := handlerB.ListPieces(context.Background())
+	piecesB, err := handlerB.ListPieces(context.Background(), repoB)
 	if err != nil {
 		t.Fatalf("ListPieces from repo B failed: %v", err)
 	}

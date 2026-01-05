@@ -67,6 +67,7 @@ func (h *Handler) CreatePieceWithInput(ctx context.Context, srcDir string, input
 // CreatePiece creates a new git worktree with tmux session.
 // If pieceName is provided and non-empty, it will be used (after checking it doesn't exist).
 // If pieceName is empty, a name will be generated automatically.
+// If no tmux sessions were running and tmux is installed, attaches to the new session.
 func (h *Handler) CreatePiece(ctx context.Context, monkeypuzzleSourceDir string, pieceName string, opts CreatePieceOptions) (PieceInfo, error) {
 	wd, err := os.Getwd()
 	if err != nil {
@@ -78,6 +79,12 @@ func (h *Handler) CreatePiece(ctx context.Context, monkeypuzzleSourceDir string,
 	if err != nil {
 		return PieceInfo{}, fmt.Errorf("not in a git repository: %w", err)
 	}
+
+	// Check if we should auto-attach to the new session
+	// Conditions: tmux installed, not already in tmux, no sessions exist
+	shouldAutoAttach := h.tmux.IsInstalled(ctx) &&
+		!h.tmux.InTmux() &&
+		!h.tmux.HasAnySessions(ctx)
 
 	// Get current branch before creating worktree (for piece metadata)
 	currentBranch, err := h.git.CurrentBranch(ctx, wd)
@@ -207,6 +214,16 @@ func (h *Handler) CreatePiece(ctx context.Context, monkeypuzzleSourceDir string,
 		Content: fmt.Sprintf("Created piece: %s at %s", pieceName, worktreePath),
 		Data:    info,
 	})
+
+	// Auto-attach to the new session if no sessions were running before
+	if shouldAutoAttach && tmuxCreated {
+		if err := h.tmux.AttachSession(ctx, sessionName); err != nil {
+			h.deps.Output.Write(core.Message{
+				Type:    core.MsgWarning,
+				Content: fmt.Sprintf("Failed to attach to tmux session: %v", err),
+			})
+		}
+	}
 
 	return info, nil
 }
