@@ -1,14 +1,14 @@
 # monkeypuzzle
 
-**One workflow for humans and AI agents.**
+**Every feature is a piece of the puzzle. Work on them separately, assemble when ready.**
 
-Monkeypuzzle (`mp`) manages atomic "pieces" of work—isolated worktrees with their own tmux sessions, issues, and PRs. Same CLI works interactively for humans or via JSON pipes for agents.
+Monkeypuzzle (`mp`) gives each piece of work its own isolated workspace—git worktree, tmux session, linked issue. Pick up a piece, put it down, pick up another. They all fit when you're ready to merge.
 
 ## Why?
 
-- **Isolation** — Each piece is a separate worktree. No stashing, no branch switching mid-task.
-- **Agent-friendly** — Every command accepts JSON stdin. Agents get schemas, pipe data, stay in flow.
-- **Human-friendly** — Interactive TUI when you want it, flags when you don't.
+- **No context-switching** — Each piece is a separate worktree. No stashing, no branch juggling.
+- **Pick up where you left off** — Dedicated tmux session per piece. Your terminal state survives.
+- **Built for humans and agents** — Interactive TUI for humans, JSON stdin/stdout for AI agents. Same commands, different constraints, one workflow.
 
 ## Quick Start
 
@@ -16,35 +16,43 @@ Monkeypuzzle (`mp`) manages atomic "pieces" of work—isolated worktrees with th
 go install github.com/jewell-lgtm/monkeypuzzle@latest
 
 mp init                    # Interactive setup
-mp piece new               # Start isolated work
+mp piece new               # Start a new piece
 # ... do the thing ...
-mp piece merge             # Ship it
+mp piece merge             # Assemble it into main
 ```
 
-Or let an agent drive:
+## Works With AI Agents
+
+Every command accepts JSON and outputs structured data. Agents can request schemas, pipe data, and stay in flow:
 
 ```bash
-echo '{"name":"my-feature"}' | mp piece new
+mp piece new --schema                     # Get expected input format
+echo '{"name":"my-feature"}' | mp piece new   # Create piece via JSON
+mp piece list                             # JSON output for parsing
 ```
+
+No special "agent mode"—the same CLI that works interactively works programmatically.
 
 ## Commands
 
-| Command         | What it does                        |
-| --------------- | ----------------------------------- |
-| `mp init`       | Initialize project                  |
-| `mp piece new`  | Create worktree + tmux session      |
-| `mp piece`      | Show current piece status           |
-| `mp piece update` | Sync with main                    |
-| `mp piece merge`  | Merge back to main                |
+| Command           | What it does                   |
+| ----------------- | ------------------------------ |
+| `mp init`         | Initialize project             |
+| `mp piece new`    | Create worktree + tmux session |
+| `mp piece list`   | Show all pieces                |
+| `mp piece switch` | Jump to a piece                |
+| `mp piece update` | Sync with main                 |
+| `mp piece merge`  | Assemble piece into main       |
 
 See [docs/commands.md](docs/commands.md) for full reference.
 
 ## Docs
 
-- [Workflow Guide](docs/workflow.md) — Stacked branches, piece lifecycle
+- [Getting Started](docs/getting-started.md) — Installation, first piece
+- [Workflow Guide](docs/workflow.md) — Stacked pieces, lifecycle
 - [Commands Reference](docs/commands.md) — All flags, JSON schemas
 - [Architecture](docs/architecture.md) — How it's built
-- [Contributing](docs/contributing.md) — Dev setup, Docker environment
+- [Contributing](docs/contributing.md) — Dev setup, testing philosophy
 
 ## License
 
