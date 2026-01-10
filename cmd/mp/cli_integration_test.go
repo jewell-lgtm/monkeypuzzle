@@ -446,3 +446,63 @@ func TestCLI_PRCreate_Schema(t *testing.T) {
 		t.Fatalf("invalid JSON schema: %v\noutput: %s", err, stdout)
 	}
 }
+
+// TestCLI_ClaudeSkill tests mp claude skill creates skill file
+func TestCLI_ClaudeSkill(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	env.initProject("test")
+
+	stdout, stderr, err := env.run("claude", "skill")
+	if err != nil {
+		t.Fatalf("claude skill failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+
+	var result map[string]any
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("invalid JSON output: %v\noutput: %s", err, stdout)
+	}
+
+	// Verify skill file was created
+	skillPath := filepath.Join(env.tmpDir, ".claude", "skills", "managing-monkeypuzzle", "SKILL.md")
+	if _, err := os.Stat(skillPath); os.IsNotExist(err) {
+		t.Error("skill file not created")
+	}
+}
+
+// TestCLI_Init_CreatesSkill tests init with create_skill=true creates skill
+func TestCLI_Init_CreatesSkill(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	input := `{"name":"test","issue_provider":"markdown","pr_provider":"github","create_skill":true}`
+	stdout, stderr, err := env.runWithStdin(input, "init")
+	if err != nil {
+		t.Fatalf("init failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+
+	// Verify skill file was created
+	skillPath := filepath.Join(env.tmpDir, ".claude", "skills", "managing-monkeypuzzle", "SKILL.md")
+	if _, err := os.Stat(skillPath); os.IsNotExist(err) {
+		t.Error("skill file not created during init")
+	}
+}
+
+// TestCLI_Init_SkipsSkill tests init with create_skill=false skips skill
+func TestCLI_Init_SkipsSkill(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	input := `{"name":"test","issue_provider":"markdown","pr_provider":"github","create_skill":false}`
+	stdout, stderr, err := env.runWithStdin(input, "init")
+	if err != nil {
+		t.Fatalf("init failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+
+	// Verify skill file was NOT created
+	skillPath := filepath.Join(env.tmpDir, ".claude", "skills", "managing-monkeypuzzle", "SKILL.md")
+	if _, err := os.Stat(skillPath); !os.IsNotExist(err) {
+		t.Error("skill file should not be created when create_skill=false")
+	}
+}

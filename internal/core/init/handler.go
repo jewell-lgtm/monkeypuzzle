@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
+	"github.com/jewell-lgtm/monkeypuzzle/internal/core/claude"
 )
 
 const (
@@ -58,7 +59,7 @@ func (h *Handler) ConfigExists() bool {
 // Run executes the init command with validated input.
 // Expects input to be pre-validated via WithDefaults() and Validate().
 // Returns the created Config for JSON output.
-func (h *Handler) Run(input Input) (Config, error) {
+func (h *Handler) Run(input Input, workDir string) (Config, error) {
 	// Create directories
 	if err := h.deps.FS.MkdirAll(DirName, DefaultDirPerm); err != nil {
 		return Config{}, err
@@ -110,6 +111,18 @@ func (h *Handler) Run(input Input) (Config, error) {
 		Content: "Created " + configPath,
 		Data:    cfg,
 	})
+
+	// Create Claude Code skill if requested
+	if input.CreateSkill != nil && *input.CreateSkill {
+		claudeHandler := claude.NewHandler(h.deps)
+		if _, err := claudeHandler.CreateSkill(workDir); err != nil {
+			// Non-fatal: log warning but don't fail init
+			h.deps.Output.Write(core.Message{
+				Type:    core.MsgWarning,
+				Content: "Failed to create Claude skill: " + err.Error(),
+			})
+		}
+	}
 
 	return cfg, nil
 }

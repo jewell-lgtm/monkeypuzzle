@@ -43,7 +43,7 @@ func TestIntegration_Init_CreatesFullStructure(t *testing.T) {
 		PRProvider:    "github",
 	}
 
-	if _, err := handler.Run(input); err != nil {
+	if _, err := handler.Run(input, tmpDir); err != nil {
 		t.Fatalf("init failed: %v", err)
 	}
 
@@ -171,7 +171,7 @@ func TestIntegration_Init_ConfigExists(t *testing.T) {
 		IssueProvider: "markdown",
 		PRProvider:    "github",
 	}
-	if _, err := handler.Run(input); err != nil {
+	if _, err := handler.Run(input, tmpDir); err != nil {
 		t.Fatalf("init failed: %v", err)
 	}
 
@@ -205,7 +205,7 @@ func TestIntegration_Init_DirectoryPermissions(t *testing.T) {
 		IssueProvider: "markdown",
 		PRProvider:    "github",
 	}
-	if _, err := handler.Run(input); err != nil {
+	if _, err := handler.Run(input, tmpDir); err != nil {
 		t.Fatalf("init failed: %v", err)
 	}
 

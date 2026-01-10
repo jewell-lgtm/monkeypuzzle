@@ -120,7 +120,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	cfg, err := handler.Run(input)
+	cfg, err := handler.Run(input, wd)
 	if err != nil {
 		return err
 	}

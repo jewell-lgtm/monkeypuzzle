@@ -46,6 +46,7 @@ type Input struct {
 	Name          string `json:"name"`
 	IssueProvider string `json:"issue_provider"`
 	PRProvider    string `json:"pr_provider"`
+	CreateSkill   *bool  `json:"create_skill,omitempty"` // nil means default (true)
 }
 
 // Schema returns the JSON schema with defaults for the init command
@@ -60,6 +61,7 @@ func Schema(workDir string) ([]byte, error) {
 		}
 		schema[f.Name] = def
 	}
+	schema["create_skill"] = true
 
 	return json.MarshalIndent(schema, "", "  ")
 }
@@ -153,7 +155,7 @@ func WithDefaults(input Input, workDir string) Input {
 	input.Name = strings.TrimSpace(input.Name)
 	input.IssueProvider = strings.TrimSpace(input.IssueProvider)
 	input.PRProvider = strings.TrimSpace(input.PRProvider)
-	
+
 	if input.Name == "" {
 		input.Name = filepath.Base(workDir)
 	}
@@ -162,6 +164,10 @@ func WithDefaults(input Input, workDir string) Input {
 	}
 	if input.PRProvider == "" {
 		input.PRProvider = "github"
+	}
+	if input.CreateSkill == nil {
+		t := true
+		input.CreateSkill = &t
 	}
 	return input
 }

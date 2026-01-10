@@ -22,7 +22,7 @@ func TestHandler_Run_CreatesConfig(t *testing.T) {
 		PRProvider:    "github",
 	}
 
-	_, err := handler.Run(input)
+	_, err := handler.Run(input, "")
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -64,7 +64,7 @@ func TestHandler_Run_CreatesIssuesDirectory(t *testing.T) {
 		PRProvider:    "github",
 	}
 
-	_, err := handler.Run(input)
+	_, err := handler.Run(input, "")
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -95,7 +95,7 @@ func TestHandler_Run_OutputsSuccessMessage(t *testing.T) {
 		PRProvider:    "github",
 	}
 
-	_, err := handler.Run(input)
+	_, err := handler.Run(input, "")
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -161,7 +161,7 @@ func TestHandler_ConfigExists(t *testing.T) {
 		IssueProvider: "markdown",
 		PRProvider:    "github",
 	}
-	if _, err := handler.Run(input); err != nil {
+	if _, err := handler.Run(input, ""); err != nil {
 		t.Fatalf("failed to create config: %v", err)
 	}
 
@@ -177,7 +177,7 @@ func TestSchema(t *testing.T) {
 		t.Fatalf("expected no error, got %v", err)
 	}
 
-	var data map[string]string
+	var data map[string]any
 	if err := json.Unmarshal(schema, &data); err != nil {
 		t.Fatalf("invalid schema JSON: %v", err)
 	}
@@ -190,6 +190,9 @@ func TestSchema(t *testing.T) {
 	}
 	if data["pr_provider"] != "github" {
 		t.Errorf("expected pr_provider 'github', got %q", data["pr_provider"])
+	}
+	if data["create_skill"] != true {
+		t.Errorf("expected create_skill true, got %v", data["create_skill"])
 	}
 }
 
@@ -237,7 +240,7 @@ func TestHandler_Run_CreatesNestedGitignore(t *testing.T) {
 		PRProvider:    "github",
 	}
 
-	_, err := handler.Run(input)
+	_, err := handler.Run(input, "")
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
