@@ -294,3 +294,155 @@ func TestCLI_IssueList_InvalidStatus(t *testing.T) {
 		t.Error("expected error for invalid status, got nil")
 	}
 }
+
+// initGitRepo initializes a git repo in the temp directory
+func (e *testEnv) initGitRepo() {
+	e.t.Helper()
+	cmd := exec.Command("git", "init")
+	cmd.Dir = e.tmpDir
+	if output, err := cmd.CombinedOutput(); err != nil {
+		e.t.Fatalf("git init failed: %v\n%s", err, output)
+	}
+
+	cmd = exec.Command("git", "config", "user.email", "test@test.com")
+	cmd.Dir = e.tmpDir
+	if output, err := cmd.CombinedOutput(); err != nil {
+		e.t.Fatalf("git config email failed: %v\n%s", err, output)
+	}
+
+	cmd = exec.Command("git", "config", "user.name", "Test")
+	cmd.Dir = e.tmpDir
+	if output, err := cmd.CombinedOutput(); err != nil {
+		e.t.Fatalf("git config name failed: %v\n%s", err, output)
+	}
+
+	// Create initial commit
+	readmePath := filepath.Join(e.tmpDir, "README.md")
+	if err := os.WriteFile(readmePath, []byte("# Test\n"), 0644); err != nil {
+		e.t.Fatalf("failed to write README: %v", err)
+	}
+
+	cmd = exec.Command("git", "add", ".")
+	cmd.Dir = e.tmpDir
+	if output, err := cmd.CombinedOutput(); err != nil {
+		e.t.Fatalf("git add failed: %v\n%s", err, output)
+	}
+
+	cmd = exec.Command("git", "commit", "-m", "initial")
+	cmd.Dir = e.tmpDir
+	if output, err := cmd.CombinedOutput(); err != nil {
+		e.t.Fatalf("git commit failed: %v\n%s", err, output)
+	}
+}
+
+// TestCLI_PieceNew tests mp piece new outputs valid JSON
+func TestCLI_PieceNew(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	env.initGitRepo()
+	env.initProject("test")
+	env.createIssue("add-feature.md", "Add Feature", "todo")
+
+	input := `{"issue_path":"issues/add-feature.md","skip_switch":true}`
+	stdout, stderr, err := env.runWithStdin(input, "piece", "new")
+	if err != nil {
+		t.Fatalf("piece new failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+
+	var result map[string]any
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("invalid JSON output: %v\noutput: %s", err, stdout)
+	}
+}
+
+// TestCLI_PieceNew_WithName tests mp piece new --name outputs valid JSON
+func TestCLI_PieceNew_WithName(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	env.initGitRepo()
+	env.initProject("test")
+
+	stdout, stderr, err := env.run("piece", "new", "--name", "my-piece", "--skip-switch")
+	if err != nil {
+		t.Fatalf("piece new --name failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+
+	var result map[string]any
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("invalid JSON output: %v\noutput: %s", err, stdout)
+	}
+}
+
+// TestCLI_PieceNew_Schema tests mp piece new --schema outputs valid JSON
+func TestCLI_PieceNew_Schema(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	stdout, _, err := env.run("piece", "new", "--schema")
+	if err != nil {
+		t.Fatalf("piece new --schema failed: %v", err)
+	}
+
+	var schema map[string]any
+	if err := json.Unmarshal([]byte(stdout), &schema); err != nil {
+		t.Fatalf("invalid JSON schema: %v\noutput: %s", err, stdout)
+	}
+}
+
+// TestCLI_PieceList tests mp piece list --flat outputs valid JSON
+func TestCLI_PieceList(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	env.initGitRepo()
+	env.initProject("test")
+
+	_, _, err := env.run("piece", "new", "--name", "test-piece", "--skip-switch")
+	if err != nil {
+		t.Fatalf("piece new failed: %v", err)
+	}
+
+	stdout, _, err := env.run("piece", "list", "--flat")
+	if err != nil {
+		t.Fatalf("piece list failed: %v", err)
+	}
+
+	var pieces []map[string]any
+	if err := json.Unmarshal([]byte(stdout), &pieces); err != nil {
+		t.Fatalf("invalid JSON output: %v\noutput: %s", err, stdout)
+	}
+}
+
+// TestCLI_PieceSwitch_Schema tests mp piece switch --schema outputs valid JSON
+func TestCLI_PieceSwitch_Schema(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	stdout, _, err := env.run("piece", "switch", "--schema")
+	if err != nil {
+		t.Fatalf("piece switch --schema failed: %v", err)
+	}
+
+	var schema map[string]any
+	if err := json.Unmarshal([]byte(stdout), &schema); err != nil {
+		t.Fatalf("invalid JSON schema: %v\noutput: %s", err, stdout)
+	}
+}
+
+// TestCLI_PRCreate_Schema tests mp piece pr create --schema outputs valid JSON
+func TestCLI_PRCreate_Schema(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	stdout, _, err := env.run("piece", "pr", "create", "--schema")
+	if err != nil {
+		t.Fatalf("pr create --schema failed: %v", err)
+	}
+
+	var schema map[string]any
+	if err := json.Unmarshal([]byte(stdout), &schema); err != nil {
+		t.Fatalf("invalid JSON schema: %v\noutput: %s", err, stdout)
+	}
+}
