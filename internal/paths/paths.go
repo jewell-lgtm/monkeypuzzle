@@ -52,8 +52,16 @@ func RepoIdentifier(repoRoot string) (string, error) {
 		return "", err
 	}
 
+	// Resolve symlinks to ensure consistent hashing across different path representations
+	// (e.g., /var vs /private/var on macOS)
+	evalPath, err := filepath.EvalSymlinks(absPath)
+	if err != nil {
+		// If symlink resolution fails (e.g., path doesn't exist), use the absolute path
+		evalPath = absPath
+	}
+
 	// Compute SHA256 hash
-	hash := sha256.Sum256([]byte(absPath))
+	hash := sha256.Sum256([]byte(evalPath))
 	hexHash := hex.EncodeToString(hash[:])
 
 	// Return first 12 characters

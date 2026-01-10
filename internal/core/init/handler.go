@@ -133,6 +133,7 @@ func (h *Handler) EnsureGitignore() error {
 	content := `# Piece worktree state (not tracked)
 current-issue.json
 piece-metadata.json
+pr-metadata.json
 `
 	return h.deps.FS.WriteFile(gitignorePath, []byte(content), DefaultFilePerm)
 }

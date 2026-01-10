@@ -487,7 +487,7 @@ This is a great feature.
 	handler := piece.NewHandler(deps)
 
 	relIssuePath := ".monkeypuzzle/issues/my-feature.md"
-	info, err := handler.CreatePieceFromIssue(context.Background(), tmpDir, relIssuePath, piece.CreatePieceOptions{})
+	info, err := handler.CreatePieceFromIssue(context.Background(), relIssuePath, piece.CreatePieceOptions{})
 	if err != nil {
 		t.Fatalf("CreatePieceFromIssue failed: %v", err)
 	}
@@ -584,7 +584,7 @@ This is a great feature.
 	handler := piece.NewHandler(deps)
 
 	relIssuePath := ".monkeypuzzle/issues/my-feature.md"
-	info, err := handler.CreatePieceFromIssue(context.Background(), tmpDir, relIssuePath, piece.CreatePieceOptions{})
+	info, err := handler.CreatePieceFromIssue(context.Background(), relIssuePath, piece.CreatePieceOptions{})
 	if err != nil {
 		t.Fatalf("CreatePieceFromIssue failed: %v", err)
 	}
@@ -661,7 +661,7 @@ No H1 heading.
 	handler := piece.NewHandler(deps)
 
 	relIssuePath := ".monkeypuzzle/issues/my-feature.md"
-	info, err := handler.CreatePieceFromIssue(context.Background(), tmpDir, relIssuePath, piece.CreatePieceOptions{})
+	info, err := handler.CreatePieceFromIssue(context.Background(), relIssuePath, piece.CreatePieceOptions{})
 	if err != nil {
 		t.Fatalf("CreatePieceFromIssue failed: %v", err)
 	}
@@ -740,7 +740,7 @@ Content here.
 	handler := piece.NewHandler(deps)
 
 	relIssuePath := ".monkeypuzzle/issues/my-feature.md"
-	info, err := handler.CreatePieceFromIssue(context.Background(), tmpDir, relIssuePath, piece.CreatePieceOptions{})
+	info, err := handler.CreatePieceFromIssue(context.Background(), relIssuePath, piece.CreatePieceOptions{})
 	if err != nil {
 		t.Fatalf("CreatePieceFromIssue failed: %v", err)
 	}
@@ -893,7 +893,7 @@ Description here.
 	handler := piece.NewHandler(deps)
 
 	relIssuePath := ".monkeypuzzle/issues/my-feature.md"
-	_, err = handler.CreatePieceFromIssue(context.Background(), tmpDir, relIssuePath, piece.CreatePieceOptions{})
+	_, err = handler.CreatePieceFromIssue(context.Background(), relIssuePath, piece.CreatePieceOptions{})
 	if err != nil {
 		t.Fatalf("CreatePieceFromIssue failed: %v", err)
 	}
@@ -977,7 +977,7 @@ status: done
 	handler := piece.NewHandler(deps)
 
 	relIssuePath := ".monkeypuzzle/issues/completed-feature.md"
-	_, err = handler.CreatePieceFromIssue(context.Background(), tmpDir, relIssuePath, piece.CreatePieceOptions{})
+	_, err = handler.CreatePieceFromIssue(context.Background(), relIssuePath, piece.CreatePieceOptions{})
 	if err != nil {
 		t.Fatalf("CreatePieceFromIssue failed: %v", err)
 	}
@@ -1059,12 +1059,12 @@ func TestIntegration_ListPieces_And_SwitchPiece(t *testing.T) {
 	}
 
 	// Create two pieces
-	_, err = handler.CreatePiece(context.Background(), tmpDir, "piece-one", piece.CreatePieceOptions{})
+	_, err = handler.CreatePiece(context.Background(), "piece-one", piece.CreatePieceOptions{})
 	if err != nil {
 		t.Fatalf("CreatePiece failed: %v", err)
 	}
 
-	_, err = handler.CreatePiece(context.Background(), tmpDir, "piece-two", piece.CreatePieceOptions{})
+	_, err = handler.CreatePiece(context.Background(), "piece-two", piece.CreatePieceOptions{})
 	if err != nil {
 		t.Fatalf("CreatePiece failed: %v", err)
 	}
@@ -1170,7 +1170,7 @@ func TestIntegration_CreatePiece_ThenSwitch(t *testing.T) {
 	handler := piece.NewHandler(deps)
 
 	// Create piece
-	info, err := handler.CreatePiece(context.Background(), tmpDir, "auto-switch-test", piece.CreatePieceOptions{})
+	info, err := handler.CreatePiece(context.Background(), "auto-switch-test", piece.CreatePieceOptions{})
 	if err != nil {
 		t.Fatalf("CreatePiece failed: %v", err)
 	}
@@ -1267,7 +1267,7 @@ Description here.
 		IssuePath: ".monkeypuzzle/issues/test-feature.md",
 	}
 
-	info, err := handler.CreatePieceWithInput(context.Background(), tmpDir, input, piece.CreatePieceOptions{})
+	info, err := handler.CreatePieceWithInput(context.Background(), input, piece.CreatePieceOptions{})
 	if err != nil {
 		t.Fatalf("CreatePieceWithInput failed: %v", err)
 	}
@@ -1342,7 +1342,7 @@ func TestIntegration_CreatePieceWithInput_WithName(t *testing.T) {
 		Name: "my-manual-piece",
 	}
 
-	info, err := handler.CreatePieceWithInput(context.Background(), tmpDir, input, piece.CreatePieceOptions{})
+	info, err := handler.CreatePieceWithInput(context.Background(), input, piece.CreatePieceOptions{})
 	if err != nil {
 		t.Fatalf("CreatePieceWithInput failed: %v", err)
 	}
@@ -1414,7 +1414,7 @@ func TestIntegration_CreatePiece_AutoStartsTmuxIfNoSessionsRunning(t *testing.T)
 	}
 
 	// Create piece - the session should be created
-	info, err := handler.CreatePiece(context.Background(), tmpDir, "auto-tmux-test", piece.CreatePieceOptions{})
+	info, err := handler.CreatePiece(context.Background(), "auto-tmux-test", piece.CreatePieceOptions{})
 	if err != nil {
 		t.Fatalf("CreatePiece failed: %v", err)
 	}
@@ -1485,7 +1485,7 @@ func TestIntegration_RepoSpecificPieces_Isolation(t *testing.T) {
 		t.Fatalf("failed to chdir to repo A: %v", err)
 	}
 	handlerA := piece.NewHandler(deps)
-	_, err = handlerA.CreatePiece(context.Background(), repoA, "piece-in-a", piece.CreatePieceOptions{})
+	_, err = handlerA.CreatePiece(context.Background(), "piece-in-a", piece.CreatePieceOptions{})
 	if err != nil {
 		t.Fatalf("CreatePiece in repo A failed: %v", err)
 	}
@@ -1495,7 +1495,7 @@ func TestIntegration_RepoSpecificPieces_Isolation(t *testing.T) {
 		t.Fatalf("failed to chdir to repo B: %v", err)
 	}
 	handlerB := piece.NewHandler(deps)
-	_, err = handlerB.CreatePiece(context.Background(), repoB, "piece-in-b", piece.CreatePieceOptions{})
+	_, err = handlerB.CreatePiece(context.Background(), "piece-in-b", piece.CreatePieceOptions{})
 	if err != nil {
 		t.Fatalf("CreatePiece in repo B failed: %v", err)
 	}
