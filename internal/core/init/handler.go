@@ -101,7 +101,7 @@ func (h *Handler) Run(input Input) (Config, error) {
 	}
 
 	// Ensure .gitignore has correct entries
-	if err := h.ensureGitignore(); err != nil {
+	if err := h.EnsureGitignore(); err != nil {
 		return Config{}, err
 	}
 
@@ -114,9 +114,12 @@ func (h *Handler) Run(input Input) (Config, error) {
 	return cfg, nil
 }
 
-// ensureGitignore creates .monkeypuzzle/.gitignore with worktree-specific entries
-func (h *Handler) ensureGitignore() error {
+// EnsureGitignore creates .monkeypuzzle/.gitignore for piece-specific state.
+func (h *Handler) EnsureGitignore() error {
 	gitignorePath := filepath.Join(DirName, ".gitignore")
-	content := "# Worktree-specific state (not tracked)\ncurrent-issue.json\n"
+	content := `# Piece worktree state (not tracked)
+current-issue.json
+piece-metadata.json
+`
 	return h.deps.FS.WriteFile(gitignorePath, []byte(content), DefaultFilePerm)
 }

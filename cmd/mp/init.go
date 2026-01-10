@@ -19,11 +19,12 @@ import (
 )
 
 var (
-	flagName          string
-	flagIssueProvider string
-	flagPRProvider    string
-	flagYes           bool
-	flagSchema        bool
+	flagName           string
+	flagIssueProvider  string
+	flagPRProvider     string
+	flagYes            bool
+	flagSchema         bool
+	flagInitGitignore  bool
 )
 
 var initCmd = &cobra.Command{
@@ -51,6 +52,7 @@ func init() {
 	initCmd.Flags().StringVar(&flagPRProvider, "pr-provider", "", "PR provider (github)")
 	initCmd.Flags().BoolVarP(&flagYes, "yes", "y", false, "Overwrite existing config without prompting")
 	initCmd.Flags().BoolVar(&flagSchema, "schema", false, "Output JSON schema with defaults and exit")
+	initCmd.Flags().BoolVar(&flagInitGitignore, "gitignore", false, "Regenerate .monkeypuzzle/.gitignore only")
 
 	// Register completion functions (errors ignored - completion is optional)
 	_ = initCmd.RegisterFlagCompletionFunc("issue-provider", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
@@ -84,6 +86,15 @@ func runInit(cmd *cobra.Command, args []string) error {
 		Exec:   adapters.NewOSExec(),
 	}
 	handler := initcmd.NewHandler(deps)
+
+	// --gitignore: regenerate gitignore only
+	if flagInitGitignore {
+		if err := handler.EnsureGitignore(); err != nil {
+			return err
+		}
+		fmt.Fprintln(os.Stderr, "Regenerated .monkeypuzzle/.gitignore")
+		return nil
+	}
 
 	// Check for existing config
 	if handler.ConfigExists() && !flagYes {

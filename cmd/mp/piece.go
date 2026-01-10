@@ -304,16 +304,6 @@ func runPieceNew(cmd *cobra.Command, args []string) error {
 	}
 
 	ctx := cmd.Context()
-	wd, err := os.Getwd()
-	if err != nil {
-		return fmt.Errorf("failed to get working directory: %w", err)
-	}
-
-	// Detect monkeypuzzle source directory
-	monkeypuzzleSourceDir, err := findMonkeypuzzleSource(wd)
-	if err != nil {
-		return fmt.Errorf("failed to find monkeypuzzle source directory: %w", err)
-	}
 
 	deps := core.Deps{
 		FS:     adapters.NewOSFS(""),
@@ -321,6 +311,11 @@ func runPieceNew(cmd *cobra.Command, args []string) error {
 		Exec:   adapters.NewOSExec(),
 	}
 	handler := piececmd.NewHandler(deps)
+
+	wd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("failed to get working directory: %w", err)
+	}
 
 	// Get validated input from flags/stdin/TUI
 	input, err := getPieceNewInput(deps, wd)
@@ -333,7 +328,7 @@ func runPieceNew(cmd *cobra.Command, args []string) error {
 	}
 
 	// Unified handler routes based on input
-	info, err := handler.CreatePieceWithInput(ctx, monkeypuzzleSourceDir, input, opts)
+	info, err := handler.CreatePieceWithInput(ctx, input, opts)
 	if err != nil {
 		return err
 	}
@@ -874,39 +869,6 @@ func formatTimeAgo(t time.Time) string {
 		days := int(duration.Hours() / 24)
 		return fmt.Sprintf("%dd ago", days)
 	}
-}
-
-// findMonkeypuzzleSource tries to find the monkeypuzzle source directory
-// by walking up from the current directory looking for go.mod with monkeypuzzle module
-func findMonkeypuzzleSource(startDir string) (string, error) {
-	dir := startDir
-	for {
-		goModPath := filepath.Join(dir, "go.mod")
-		if data, err := os.ReadFile(goModPath); err == nil {
-			// Check if this is the monkeypuzzle module
-			content := string(data)
-			if containsMonkeypuzzleModule(content) {
-				return dir, nil
-			}
-		}
-
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			// Reached root
-			break
-		}
-		dir = parent
-	}
-
-	// Fallback: return current directory if we can't find it
-	// This allows the command to work even if not in the monkeypuzzle repo
-	return startDir, nil
-}
-
-func containsMonkeypuzzleModule(content string) bool {
-	// Check for monkeypuzzle module name in go.mod
-	return strings.Contains(content, "module github.com/jewell-lgtm/monkeypuzzle") ||
-		strings.Contains(content, "module monkeypuzzle")
 }
 
 func runPieceSwitch(cmd *cobra.Command, args []string) error {

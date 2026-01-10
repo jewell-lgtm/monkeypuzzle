@@ -170,10 +170,9 @@ mp piece new --skip-switch  # Don't auto-switch to new piece
 2. **Creates main repo tmux session** `mp-<repo-name>` if it doesn't exist
 3. Generates piece name: `piece-YYYYMMDD-HHMMSS` (or uses `--name`)
 4. Creates git worktree at `~/.local/share/monkeypuzzle/pieces/<piece-name>`
-5. Creates symlink `.monkeypuzzle-source` to source monkeypuzzle config
-6. Creates tmux session `mp-piece-<piece-name>` (if tmux available)
-7. Runs `on-piece-create.sh` hook (if exists)
-8. **Switches to the new piece** (unless `--skip-switch` is set)
+5. Creates tmux session `mp-piece-<piece-name>` (if tmux available)
+6. Runs `on-piece-create.sh` hook (if exists)
+7. **Switches to the new piece** (unless `--skip-switch` is set)
 
 If the hook fails, the worktree and tmux session are cleaned up automatically.
 The auto-switch uses tmux attach/switch-client if available, otherwise prints the path.

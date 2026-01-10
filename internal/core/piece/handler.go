@@ -17,8 +17,6 @@ import (
 )
 
 const (
-	symlinkName = ".monkeypuzzle-source"
-
 	// DefaultDirPerm is the default permission for directories (0755 = rwxr-xr-x)
 	DefaultDirPerm = 0755
 )
@@ -51,7 +49,7 @@ type CreatePieceOptions struct {
 
 // CreatePieceWithInput creates a piece from validated input.
 // Routes to CreatePieceFromIssue if IssuePath is set, otherwise CreatePiece.
-func (h *Handler) CreatePieceWithInput(ctx context.Context, srcDir string, input NewPieceInput, opts CreatePieceOptions) (PieceInfo, error) {
+func (h *Handler) CreatePieceWithInput(ctx context.Context, input NewPieceInput, opts CreatePieceOptions) (PieceInfo, error) {
 	// Pass parent from input to options
 	opts.Parent = input.Parent
 	if opts.Parent == "" {
@@ -59,16 +57,16 @@ func (h *Handler) CreatePieceWithInput(ctx context.Context, srcDir string, input
 	}
 
 	if input.IssuePath != "" {
-		return h.CreatePieceFromIssue(ctx, srcDir, input.IssuePath, opts)
+		return h.CreatePieceFromIssue(ctx, input.IssuePath, opts)
 	}
-	return h.CreatePiece(ctx, srcDir, input.Name, opts)
+	return h.CreatePiece(ctx, input.Name, opts)
 }
 
 // CreatePiece creates a new git worktree with tmux session.
 // If pieceName is provided and non-empty, it will be used (after checking it doesn't exist).
 // If pieceName is empty, a name will be generated automatically.
 // If no tmux sessions were running and tmux is installed, attaches to the new session.
-func (h *Handler) CreatePiece(ctx context.Context, monkeypuzzleSourceDir string, pieceName string, opts CreatePieceOptions) (PieceInfo, error) {
+func (h *Handler) CreatePiece(ctx context.Context, pieceName string, opts CreatePieceOptions) (PieceInfo, error) {
 	wd, err := os.Getwd()
 	if err != nil {
 		return PieceInfo{}, fmt.Errorf("failed to get working directory: %w", err)
@@ -149,10 +147,9 @@ func (h *Handler) CreatePiece(ctx context.Context, monkeypuzzleSourceDir string,
 		}
 	}
 
-	// Note: Currently, symlink and tmux creation failures are non-fatal (logged as warnings).
+	// Note: Currently, tmux creation failures are non-fatal (logged as warnings).
 	// If we decide to make them fatal in the future, we should add cleanup logic here to
-	// remove the worktree if those operations fail. The WorktreeRemove method is available
-	// in the Git adapter for this purpose.
+	// remove the worktree if those operations fail.
 
 	// Write piece metadata (parent-child relationship)
 	pieceMetadata := PieceMetadata{
@@ -164,16 +161,6 @@ func (h *Handler) CreatePiece(ctx context.Context, monkeypuzzleSourceDir string,
 		h.deps.Output.Write(core.Message{
 			Type:    core.MsgWarning,
 			Content: fmt.Sprintf("Failed to write piece metadata: %v", err),
-		})
-	}
-
-	// Create symlink to monkeypuzzle source
-	symlinkPath := filepath.Join(worktreePath, symlinkName)
-	if err := h.deps.FS.Symlink(monkeypuzzleSourceDir, symlinkPath); err != nil {
-		// If symlink creation fails, log but don't fail the operation
-		h.deps.Output.Write(core.Message{
-			Type:    core.MsgWarning,
-			Content: fmt.Sprintf("Failed to create symlink: %v", err),
 		})
 	}
 
@@ -238,7 +225,7 @@ type CurrentIssueMarker struct {
 // CreatePieceFromIssue creates a new piece from a markdown issue file.
 // It extracts the issue name, sanitizes it for use as a piece name, creates the piece,
 // and writes a marker file in the worktree to track the current issue.
-func (h *Handler) CreatePieceFromIssue(ctx context.Context, monkeypuzzleSourceDir, issuePath string, opts CreatePieceOptions) (PieceInfo, error) {
+func (h *Handler) CreatePieceFromIssue(ctx context.Context, issuePath string, opts CreatePieceOptions) (PieceInfo, error) {
 	wd, err := os.Getwd()
 	if err != nil {
 		return PieceInfo{}, fmt.Errorf("failed to get working directory: %w", err)
@@ -293,7 +280,7 @@ func (h *Handler) CreatePieceFromIssue(ctx context.Context, monkeypuzzleSourceDi
 	pieceName := SanitizePieceName(issueName)
 
 	// Create the piece using the sanitized name
-	info, err := h.CreatePiece(ctx, monkeypuzzleSourceDir, pieceName, opts)
+	info, err := h.CreatePiece(ctx, pieceName, opts)
 	if err != nil {
 		return PieceInfo{}, err
 	}

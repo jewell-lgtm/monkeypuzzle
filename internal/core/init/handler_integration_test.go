@@ -92,13 +92,52 @@ func TestIntegration_Init_CreatesFullStructure(t *testing.T) {
 		t.Error("issues is not a directory")
 	}
 
-	// Verify .gitignore
+	// Verify .monkeypuzzle/.gitignore contains piece-specific entries
 	gitignoreData, err := os.ReadFile(".monkeypuzzle/.gitignore")
 	if err != nil {
 		t.Fatalf(".gitignore not created: %v", err)
 	}
-	if !strings.Contains(string(gitignoreData), "current-issue.json") {
-		t.Error(".gitignore should contain current-issue.json")
+	gitignore := string(gitignoreData)
+	for _, entry := range []string{"current-issue.json", "piece-metadata.json"} {
+		if !strings.Contains(gitignore, entry) {
+			t.Errorf(".monkeypuzzle/.gitignore should contain %s", entry)
+		}
+	}
+}
+
+func TestIntegration_Init_EnsureGitignore_Standalone(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "mp-init-test-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	oldWd, _ := os.Getwd()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("failed to chdir: %v", err)
+	}
+	defer os.Chdir(oldWd)
+
+	// Create .monkeypuzzle dir manually
+	if err := os.MkdirAll(".monkeypuzzle", 0755); err != nil {
+		t.Fatalf("failed to create dir: %v", err)
+	}
+
+	deps := core.Deps{
+		FS:     adapters.NewOSFS(""),
+		Output: adapters.NewBufferOutput(),
+	}
+	handler := initcmd.NewHandler(deps)
+
+	// Call standalone method
+	if err := handler.EnsureGitignore(); err != nil {
+		t.Fatalf("EnsureGitignore failed: %v", err)
+	}
+
+	// Verify file created
+	gitignore, _ := os.ReadFile(".monkeypuzzle/.gitignore")
+	if !strings.Contains(string(gitignore), "piece-metadata.json") {
+		t.Error("should contain piece-metadata.json")
 	}
 }
 
