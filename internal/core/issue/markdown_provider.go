@@ -100,6 +100,92 @@ func (p *MarkdownProvider) List(statusFilter []string) ([]Issue, error) {
 	return issues, nil
 }
 
+// SearchIssues returns issues matching search criteria, sorted by modification time
+func (p *MarkdownProvider) SearchIssues(input SearchInput) ([]Issue, error) {
+	entries, err := p.fs.ReadDir(p.issuesDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []Issue{}, nil
+		}
+		return nil, fmt.Errorf("failed to read issues directory: %w", err)
+	}
+
+	// Collect issues with mod times for sorting
+	type issueWithTime struct {
+		issue   Issue
+		modTime int64
+	}
+	var issues []issueWithTime
+
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
+			continue
+		}
+
+		filePath := filepath.Join(p.issuesDir, entry.Name())
+
+		issue, err := p.Get(filePath)
+		if err != nil {
+			continue
+		}
+
+		// Apply status filter
+		if len(input.Status) > 0 && !containsStatus(input.Status, issue.Status) {
+			continue
+		}
+
+		// Apply query filter (fuzzy match on title)
+		if input.Query != "" && !fuzzyMatch(input.Query, issue.Title) {
+			continue
+		}
+
+		// Get modification time
+		info, err := entry.Info()
+		modTime := int64(0)
+		if err == nil {
+			modTime = info.ModTime().UnixNano()
+		}
+
+		issues = append(issues, issueWithTime{issue: issue, modTime: modTime})
+	}
+
+	// Sort by modification time (most recent first)
+	sort.Slice(issues, func(i, j int) bool {
+		return issues[i].modTime > issues[j].modTime
+	})
+
+	// Apply limit
+	limit := input.Limit
+	if limit <= 0 {
+		limit = DefaultSearchLimit
+	}
+	if len(issues) > limit {
+		issues = issues[:limit]
+	}
+
+	// Extract just the issues
+	result := make([]Issue, len(issues))
+	for i, it := range issues {
+		result[i] = it.issue
+	}
+
+	return result, nil
+}
+
+// fuzzyMatch returns true if query fuzzy-matches target (case-insensitive)
+func fuzzyMatch(query, target string) bool {
+	query = strings.ToLower(query)
+	target = strings.ToLower(target)
+
+	qi := 0
+	for ti := 0; ti < len(target) && qi < len(query); ti++ {
+		if target[ti] == query[qi] {
+			qi++
+		}
+	}
+	return qi == len(query)
+}
+
 // Get returns an issue by its file path
 func (p *MarkdownProvider) Get(id string) (Issue, error) {
 	status, err := piece.ParseStatus(id, p.fs)

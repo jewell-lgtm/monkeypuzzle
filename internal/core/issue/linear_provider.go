@@ -47,6 +47,7 @@ func (p *LinearProvider) Create(input CreateInput) (Issue, error) {
 		issueCreate(input: {title: $title, description: $description, teamId: $teamId}) {
 			issue {
 				id
+				identifier
 				title
 				description
 				state {
@@ -72,6 +73,7 @@ func (p *LinearProvider) Create(input CreateInput) (Issue, error) {
 			IssueCreate struct {
 				Issue struct {
 					ID          string `json:"id"`
+					Identifier  string `json:"identifier"`
 					Title       string `json:"title"`
 					Description string `json:"description"`
 					State       struct {
@@ -89,6 +91,7 @@ func (p *LinearProvider) Create(input CreateInput) (Issue, error) {
 	issue := result.Data.IssueCreate.Issue
 	return Issue{
 		ID:          issue.ID,
+		Number:      issue.Identifier,
 		Title:       issue.Title,
 		Description: issue.Description,
 		Status:      mapLinearStatus(issue.State.Name),
@@ -101,6 +104,7 @@ func (p *LinearProvider) List(statusFilter []string) ([]Issue, error) {
 		issues(filter: {team: {key: {eq: $teamId}}}) {
 			nodes {
 				id
+				identifier
 				title
 				description
 				state {
@@ -124,6 +128,7 @@ func (p *LinearProvider) List(statusFilter []string) ([]Issue, error) {
 			Issues struct {
 				Nodes []struct {
 					ID          string `json:"id"`
+					Identifier  string `json:"identifier"`
 					Title       string `json:"title"`
 					Description string `json:"description"`
 					State       struct {
@@ -149,6 +154,169 @@ func (p *LinearProvider) List(statusFilter []string) ([]Issue, error) {
 
 		issues = append(issues, Issue{
 			ID:          node.ID,
+			Number:      node.Identifier,
+			Title:       node.Title,
+			Description: node.Description,
+			Status:      status,
+		})
+	}
+
+	return issues, nil
+}
+
+// SearchIssues returns issues matching search criteria from Linear
+func (p *LinearProvider) SearchIssues(input SearchInput) ([]Issue, error) {
+	limit := input.Limit
+	if limit <= 0 {
+		limit = DefaultSearchLimit
+	}
+
+	// Use server-side search when query provided
+	if input.Query != "" {
+		return p.searchIssuesWithQuery(input.Query, input.Status, limit)
+	}
+
+	// No query - use regular list with optional status filter
+	return p.listIssuesWithLimit(input.Status, limit)
+}
+
+// searchIssuesWithQuery uses Linear's issues query with title filter for text search
+func (p *LinearProvider) searchIssuesWithQuery(query string, statusFilter []string, limit int) ([]Issue, error) {
+	gql := `query issues($teamKey: String!, $first: Int!, $query: String!) {
+		issues(
+			filter: {
+				team: {key: {eq: $teamKey}}
+				title: {containsIgnoreCase: $query}
+			}
+			first: $first
+			orderBy: updatedAt
+		) {
+			nodes {
+				id
+				identifier
+				title
+				description
+				state {
+					name
+				}
+			}
+		}
+	}`
+
+	variables := map[string]interface{}{
+		"teamKey": p.teamKey,
+		"query":   query,
+		"first":   limit,
+	}
+
+	resp, err := p.doGraphQL(gql, variables)
+	if err != nil {
+		return nil, fmt.Errorf("failed to search issues: %w", err)
+	}
+
+	var result struct {
+		Data struct {
+			Issues struct {
+				Nodes []struct {
+					ID          string `json:"id"`
+					Identifier  string `json:"identifier"`
+					Title       string `json:"title"`
+					Description string `json:"description"`
+					State       struct {
+						Name string `json:"name"`
+					} `json:"state"`
+				} `json:"nodes"`
+			} `json:"issues"`
+		} `json:"data"`
+	}
+
+	if err := json.Unmarshal(resp, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	var issues []Issue
+	for _, node := range result.Data.Issues.Nodes {
+		status := mapLinearStatus(node.State.Name)
+
+		// Apply status filter client-side
+		if len(statusFilter) > 0 && !containsStatus(statusFilter, status) {
+			continue
+		}
+
+		issues = append(issues, Issue{
+			ID:          node.ID,
+			Number:      node.Identifier,
+			Title:       node.Title,
+			Description: node.Description,
+			Status:      status,
+		})
+	}
+
+	return issues, nil
+}
+
+// listIssuesWithLimit fetches issues without text search
+func (p *LinearProvider) listIssuesWithLimit(statusFilter []string, limit int) ([]Issue, error) {
+	gql := `query issues($teamKey: String!, $first: Int!) {
+		issues(
+			filter: {team: {key: {eq: $teamKey}}}
+			first: $first
+			orderBy: createdAt
+		) {
+			nodes {
+				id
+				identifier
+				title
+				description
+				state {
+					name
+				}
+			}
+		}
+	}`
+
+	variables := map[string]interface{}{
+		"teamKey": p.teamKey,
+		"first":   limit,
+	}
+
+	resp, err := p.doGraphQL(gql, variables)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list issues: %w", err)
+	}
+
+	var result struct {
+		Data struct {
+			Issues struct {
+				Nodes []struct {
+					ID          string `json:"id"`
+					Identifier  string `json:"identifier"`
+					Title       string `json:"title"`
+					Description string `json:"description"`
+					State       struct {
+						Name string `json:"name"`
+					} `json:"state"`
+				} `json:"nodes"`
+			} `json:"issues"`
+		} `json:"data"`
+	}
+
+	if err := json.Unmarshal(resp, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	var issues []Issue
+	for _, node := range result.Data.Issues.Nodes {
+		status := mapLinearStatus(node.State.Name)
+
+		// Apply status filter
+		if len(statusFilter) > 0 && !containsStatus(statusFilter, status) {
+			continue
+		}
+
+		issues = append(issues, Issue{
+			ID:          node.ID,
+			Number:      node.Identifier,
 			Title:       node.Title,
 			Description: node.Description,
 			Status:      status,
@@ -163,6 +331,7 @@ func (p *LinearProvider) Get(id string) (Issue, error) {
 	query := `query Issue($id: String!) {
 		issue(id: $id) {
 			id
+			identifier
 			title
 			description
 			state {
@@ -184,6 +353,7 @@ func (p *LinearProvider) Get(id string) (Issue, error) {
 		Data struct {
 			Issue struct {
 				ID          string `json:"id"`
+				Identifier  string `json:"identifier"`
 				Title       string `json:"title"`
 				Description string `json:"description"`
 				State       struct {
@@ -200,6 +370,7 @@ func (p *LinearProvider) Get(id string) (Issue, error) {
 	issue := result.Data.Issue
 	return Issue{
 		ID:          issue.ID,
+		Number:      issue.Identifier,
 		Title:       issue.Title,
 		Description: issue.Description,
 		Status:      mapLinearStatus(issue.State.Name),

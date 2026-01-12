@@ -13,15 +13,19 @@ import (
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core/issue"
 	issueTUI "github.com/jewell-lgtm/monkeypuzzle/internal/tui/issue"
+	"github.com/jewell-lgtm/monkeypuzzle/internal/tui/issuepicker"
 	"github.com/jewell-lgtm/monkeypuzzle/pkg/cli"
 )
 
 var (
-	flagIssueTitle       string
-	flagIssueDescription string
-	flagIssueSchema      bool
-	flagIssueListStatus  []string
-	flagIssueListSchema  bool
+	flagIssueTitle        string
+	flagIssueDescription  string
+	flagIssueSchema       bool
+	flagIssueListStatus   []string
+	flagIssueListSchema   bool
+	flagIssueSearchQuery  string
+	flagIssueSearchStatus []string
+	flagIssueSearchSchema bool
 )
 
 var issueCmd = &cobra.Command{
@@ -65,6 +69,24 @@ Examples:
 	RunE: runIssueList,
 }
 
+var issueSearchCmd = &cobra.Command{
+	Use:   "search",
+	Short: "Search issues interactively",
+	Long: `Search issues with fuzzy matching and live results.
+
+Modes:
+  Interactive (default): TUI with live search
+  Flags/stdin:          Direct query
+  --schema:             Output expected JSON format
+
+Examples:
+  mp issue search                      # Interactive search
+  mp issue search --query "auth"       # Direct search
+  mp issue search --status in-progress # Filter by status
+  echo '{"query":"auth"}' | mp issue search  # Stdin JSON`,
+	RunE: runIssueSearch,
+}
+
 func init() {
 	issueCreateCmd.Flags().StringVar(&flagIssueTitle, "title", "", "Issue title")
 	issueCreateCmd.Flags().StringVar(&flagIssueDescription, "description", "", "Issue description")
@@ -73,8 +95,13 @@ func init() {
 	issueListCmd.Flags().StringSliceVar(&flagIssueListStatus, "status", nil, "Filter by status (todo, in-progress, done)")
 	issueListCmd.Flags().BoolVar(&flagIssueListSchema, "schema", false, "Output JSON schema and exit")
 
+	issueSearchCmd.Flags().StringVar(&flagIssueSearchQuery, "query", "", "Search query (fuzzy match)")
+	issueSearchCmd.Flags().StringSliceVar(&flagIssueSearchStatus, "status", nil, "Filter by status (todo, in-progress, done)")
+	issueSearchCmd.Flags().BoolVar(&flagIssueSearchSchema, "schema", false, "Output JSON schema and exit")
+
 	issueCmd.AddCommand(issueCreateCmd)
 	issueCmd.AddCommand(issueListCmd)
+	issueCmd.AddCommand(issueSearchCmd)
 	rootCmd.AddCommand(issueCmd)
 }
 
@@ -100,6 +127,7 @@ func runIssueCreate(cmd *cobra.Command, args []string) error {
 		adapters.NewTextOutput(os.Stderr),
 		adapters.NewOSExec(),
 		http.DefaultClient,
+		adapters.SetupCLILoading(os.Stderr),
 	)
 	handler := issue.NewHandler(deps, wd)
 
@@ -199,6 +227,7 @@ func runIssueList(cmd *cobra.Command, args []string) error {
 		adapters.NewTextOutput(os.Stderr),
 		adapters.NewOSExec(),
 		http.DefaultClient,
+		adapters.SetupCLILoading(os.Stderr),
 	)
 	handler := issue.NewHandler(deps, wd)
 
@@ -243,4 +272,129 @@ func getIssueListInput() (issue.ListInput, error) {
 	}
 
 	return input, nil
+}
+
+func runIssueSearch(cmd *cobra.Command, args []string) error {
+	// --schema: output template and exit
+	if flagIssueSearchSchema {
+		schema, err := issue.SearchSchema()
+		if err != nil {
+			return err
+		}
+		fmt.Println(string(schema))
+		return nil
+	}
+
+	wd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("failed to get working directory: %w", err)
+	}
+
+	input, interactive, err := getIssueSearchInput()
+	if err != nil {
+		return err
+	}
+
+	// TUI handles its own loading state; CLI mode uses spinner
+	var loading *core.LoadingSignal
+	if !interactive {
+		loading = adapters.SetupCLILoading(os.Stderr)
+	}
+	deps := core.NewDeps(
+		adapters.NewOSFS(""),
+		adapters.NewTextOutput(os.Stderr),
+		adapters.NewOSExec(),
+		http.DefaultClient,
+		loading,
+	)
+	handler := issue.NewHandler(deps, wd)
+
+	// Interactive mode: show TUI picker
+	if interactive {
+		// First load initial issues
+		initialIssues, err := handler.SearchIssues(issue.SearchInput{Limit: 100})
+		if err != nil {
+			return err
+		}
+
+		// Create search function for async fetches
+		searchFn := func(query string) tea.Cmd {
+			return func() tea.Msg {
+				results, err := handler.SearchIssues(issue.SearchInput{
+					Query: query,
+					Limit: 100,
+				})
+				return issuepicker.IssuesLoadedMsg{
+					Query:  query,
+					Issues: results,
+					Err:    err,
+				}
+			}
+		}
+
+		p := tea.NewProgram(issuepicker.NewWithSearch(initialIssues, searchFn))
+		m, err := p.Run()
+		if err != nil {
+			return err
+		}
+
+		model := m.(issuepicker.Model)
+		if model.Cancelled {
+			return fmt.Errorf("cancelled")
+		}
+
+		selected, ok := model.SelectedIssue()
+		if !ok {
+			return fmt.Errorf("no issue selected")
+		}
+
+		return cli.PrintJSON(selected)
+	}
+
+	// Non-interactive: direct search
+	issues, err := handler.SearchIssues(input)
+	if err != nil {
+		return err
+	}
+
+	return cli.PrintJSON(issues)
+}
+
+func getIssueSearchInput() (issue.SearchInput, bool, error) {
+	hasFlagsOrStdin := flagIssueSearchQuery != "" || len(flagIssueSearchStatus) > 0 || cli.HasStdinData()
+
+	// Interactive mode if TTY and no flags/stdin
+	if cli.IsTerminal() && !hasFlagsOrStdin {
+		return issue.SearchInput{}, true, nil
+	}
+
+	var input issue.SearchInput
+
+	switch {
+	case flagIssueSearchQuery != "" || len(flagIssueSearchStatus) > 0:
+		input = issue.SearchInput{
+			Query:  flagIssueSearchQuery,
+			Status: flagIssueSearchStatus,
+		}
+
+	case cli.HasStdinData():
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return issue.SearchInput{}, false, fmt.Errorf("failed to read stdin: %w", err)
+		}
+		input, err = issue.ParseSearchJSON(data)
+		if err != nil {
+			return issue.SearchInput{}, false, err
+		}
+
+	default:
+		// No input - return all
+		input = issue.SearchInput{}
+	}
+
+	if err := issue.ValidateSearchInput(input); err != nil {
+		return issue.SearchInput{}, false, err
+	}
+
+	return input, false, nil
 }

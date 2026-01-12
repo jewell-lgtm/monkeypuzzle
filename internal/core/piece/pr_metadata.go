@@ -19,7 +19,7 @@ type PRMetadata struct {
 	Branch     string    `json:"branch"`
 	BaseBranch string    `json:"base_branch"`
 	CreatedAt  time.Time `json:"created_at"`
-	IssuePath  string    `json:"issue_path,omitempty"` // Set if piece was created from an issue
+	Issue      IssueRef  `json:"issue,omitempty"` // Set if piece was created from an issue
 }
 
 // ReadPRMetadata reads PR metadata from a piece worktree

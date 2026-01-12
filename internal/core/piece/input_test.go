@@ -17,8 +17,8 @@ func TestValidateNewPieceInput_BothEmpty_Error(t *testing.T) {
 
 func TestValidateNewPieceInput_BothSet_Error(t *testing.T) {
 	input := piece.NewPieceInput{
-		IssuePath: "issues/foo.md",
-		Name:      "my-piece",
+		Issue: piece.IssueRef{Provider: "markdown", ID: "issues/foo.md", Title: "Test"},
+		Name:  "my-piece",
 	}
 	err := piece.ValidateNewPieceInput(input)
 	if err == nil {
@@ -26,8 +26,10 @@ func TestValidateNewPieceInput_BothSet_Error(t *testing.T) {
 	}
 }
 
-func TestValidateNewPieceInput_OnlyIssuePath_Valid(t *testing.T) {
-	input := piece.NewPieceInput{IssuePath: "issues/foo.md"}
+func TestValidateNewPieceInput_OnlyIssue_Valid(t *testing.T) {
+	input := piece.NewPieceInput{
+		Issue: piece.IssueRef{Provider: "markdown", ID: "issues/foo.md", Title: "Test"},
+	}
 	err := piece.ValidateNewPieceInput(input)
 	if err != nil {
 		t.Errorf("expected valid, got error: %v", err)
@@ -53,8 +55,8 @@ func TestNewPieceSchema(t *testing.T) {
 		t.Fatalf("invalid JSON: %v", err)
 	}
 
-	if _, ok := data["issue_path"]; !ok {
-		t.Error("expected 'issue_path' in schema")
+	if _, ok := data["issue"]; !ok {
+		t.Error("expected 'issue' in schema")
 	}
 	if _, ok := data["name"]; !ok {
 		t.Error("expected 'name' in schema")
@@ -68,26 +70,25 @@ func TestNewPieceSchema(t *testing.T) {
 }
 
 func TestParseNewPieceJSON(t *testing.T) {
-	jsonData := `{"issue_path":"issues/foo.md"}`
+	jsonData := `{"issue":{"provider":"markdown","id":"issues/foo.md","title":"Test Issue"}}`
 	input, err := piece.ParseNewPieceJSON([]byte(jsonData))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if input.IssuePath != "issues/foo.md" {
-		t.Errorf("expected issue_path 'issues/foo.md', got %q", input.IssuePath)
+	if input.Issue.ID != "issues/foo.md" {
+		t.Errorf("expected issue ID 'issues/foo.md', got %q", input.Issue.ID)
 	}
 }
 
 func TestWithNewPieceDefaults(t *testing.T) {
 	input := piece.NewPieceInput{
-		IssuePath: "  issues/foo.md  ",
-		Name:      "  ",
+		Name: "  my-piece  ",
 	}
 	result := piece.WithNewPieceDefaults(input)
-	if result.IssuePath != "issues/foo.md" {
-		t.Errorf("expected trimmed issue_path, got %q", result.IssuePath)
+	if result.Name != "my-piece" {
+		t.Errorf("expected trimmed name 'my-piece', got %q", result.Name)
 	}
-	if result.Name != "" {
-		t.Errorf("expected empty name after trim, got %q", result.Name)
+	if result.Parent != "main" {
+		t.Errorf("expected default parent 'main', got %q", result.Parent)
 	}
 }

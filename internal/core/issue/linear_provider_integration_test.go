@@ -15,11 +15,11 @@ type mockHTTPClient struct {
 }
 
 func (m *mockHTTPClient) Do(req *http.Request) (*http.Response, error) {
-	m.requests = append(m.requests, req)
-
-	// Read request body to determine operation
+	// Clone request body so it can be read again in tests
 	body, _ := io.ReadAll(req.Body)
 	bodyStr := string(body)
+	req.Body = io.NopCloser(bytes.NewBufferString(bodyStr))
+	m.requests = append(m.requests, req)
 
 	var responseJSON string
 	switch {
@@ -27,11 +27,17 @@ func (m *mockHTTPClient) Do(req *http.Request) (*http.Response, error) {
 		responseJSON = m.responses["createIssue"]
 	case strings.Contains(bodyStr, "issueUpdate"):
 		responseJSON = m.responses["updateIssue"]
+	case strings.Contains(bodyStr, "searchIssues"):
+		responseJSON = m.responses["searchIssues"]
 	case strings.Contains(bodyStr, "issues"):
 		responseJSON = m.responses["issues"]
 	case strings.Contains(bodyStr, "issue"):
 		responseJSON = m.responses["issue"]
 	default:
+		responseJSON = `{"data":{}}`
+	}
+
+	if responseJSON == "" {
 		responseJSON = `{"data":{}}`
 	}
 
@@ -170,5 +176,76 @@ func TestLinearProvider_ListWithStatusFilter(t *testing.T) {
 	}
 	if len(issues) != 1 {
 		t.Errorf("List(in-progress) returned %d issues, want 1", len(issues))
+	}
+}
+
+func TestLinearProvider_SearchIssues_UsesServerSideFilter(t *testing.T) {
+	mockHTTP := &mockHTTPClient{
+		responses: map[string]string{
+			"issues": `{"data":{"issues":{"nodes":[
+				{"id":"match1","identifier":"ENG-123","title":"Auth feature","description":"Add authentication","state":{"name":"Todo"}}
+			]}}}`,
+		},
+	}
+
+	provider := NewLinearProvider(mockHTTP, "key", "TEAM")
+
+	// Search with query should use issues with containsIgnoreCase filter
+	issues, err := provider.SearchIssues(SearchInput{Query: "auth"})
+	if err != nil {
+		t.Fatalf("SearchIssues() error = %v", err)
+	}
+
+	// Verify issues query was called with filter
+	if len(mockHTTP.requests) == 0 {
+		t.Fatal("No requests made")
+	}
+
+	lastReq := mockHTTP.requests[len(mockHTTP.requests)-1]
+	body, _ := io.ReadAll(lastReq.Body)
+	bodyStr := string(body)
+
+	if !strings.Contains(bodyStr, "containsIgnoreCase") {
+		t.Errorf("Expected containsIgnoreCase filter in query, got: %s", bodyStr)
+	}
+
+	// Should return filtered results
+	if len(issues) != 1 {
+		t.Errorf("SearchIssues() returned %d issues, want 1", len(issues))
+	}
+	if len(issues) > 0 && issues[0].ID != "match1" {
+		t.Errorf("SearchIssues() returned wrong issue ID: %v", issues[0].ID)
+	}
+}
+
+func TestLinearProvider_SearchIssues_EmptyQuery_NoFilter(t *testing.T) {
+	mockHTTP := &mockHTTPClient{
+		responses: map[string]string{
+			"issues": `{"data":{"issues":{"nodes":[
+				{"id":"1","identifier":"ENG-1","title":"Issue 1","state":{"name":"Backlog"}},
+				{"id":"2","identifier":"ENG-2","title":"Issue 2","state":{"name":"Todo"}}
+			]}}}`,
+		},
+	}
+
+	provider := NewLinearProvider(mockHTTP, "key", "TEAM")
+
+	// Empty query should use regular issues list without title filter
+	issues, err := provider.SearchIssues(SearchInput{})
+	if err != nil {
+		t.Fatalf("SearchIssues() error = %v", err)
+	}
+
+	if len(issues) != 2 {
+		t.Errorf("SearchIssues() returned %d issues, want 2", len(issues))
+	}
+
+	// Verify issues query was used without containsIgnoreCase filter
+	lastReq := mockHTTP.requests[len(mockHTTP.requests)-1]
+	body, _ := io.ReadAll(lastReq.Body)
+	bodyStr := string(body)
+
+	if strings.Contains(bodyStr, "containsIgnoreCase") {
+		t.Errorf("Empty query should not use title filter, got: %s", bodyStr)
 	}
 }

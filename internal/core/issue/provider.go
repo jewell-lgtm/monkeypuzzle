@@ -2,7 +2,8 @@ package issue
 
 // Issue represents an issue from any provider
 type Issue struct {
-	ID          string `json:"id"`          // Provider-specific identifier (path for markdown, number for GitHub)
+	ID          string `json:"id"`          // Provider-specific identifier (path for markdown, UUID for Linear)
+	Number      string `json:"number"`      // Human-readable issue number (e.g., "ABC-123" for Linear)
 	Title       string `json:"title"`       // Issue title
 	Status      string `json:"status"`      // Status (todo, in-progress, done)
 	Description string `json:"description"` // Issue description/body
@@ -14,13 +15,27 @@ type CreateInput struct {
 	Description string `json:"description"`
 }
 
+// SearchInput holds input for searching issues
+type SearchInput struct {
+	Query  string   `json:"query"`  // Text search query (empty = all)
+	Status []string `json:"status"` // Filter by status (empty = all)
+	Limit  int      `json:"limit"`  // Max results (0 = default 100)
+}
+
+// DefaultSearchLimit is the default max results for SearchIssues
+const DefaultSearchLimit = 100
+
 // Provider abstracts issue storage backends (markdown files, GitHub Issues, Linear, etc.)
 type Provider interface {
 	// Create creates a new issue and returns it
 	Create(input CreateInput) (Issue, error)
 
 	// List returns issues, optionally filtered by status
+	// Deprecated: Use SearchIssues instead
 	List(statusFilter []string) ([]Issue, error)
+
+	// SearchIssues returns issues matching search criteria, sorted by recency
+	SearchIssues(input SearchInput) ([]Issue, error)
 
 	// Get returns an issue by ID
 	Get(id string) (Issue, error)

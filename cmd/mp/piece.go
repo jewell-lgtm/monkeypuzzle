@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -181,6 +180,7 @@ func completePieceNames(cmd *cobra.Command, args []string, toComplete string) ([
 		adapters.NewTextOutput(io.Discard),
 		adapters.NewOSExec(),
 		http.DefaultClient,
+		core.NewLoadingSignal(),
 	)
 	handler := piececmd.NewHandler(deps)
 
@@ -242,6 +242,7 @@ func runPieceStatus(cmd *cobra.Command, args []string) error {
 		adapters.NewTextOutput(os.Stderr),
 		adapters.NewOSExec(),
 		http.DefaultClient,
+		adapters.SetupCLILoading(os.Stderr),
 	)
 	handler := piececmd.NewHandler(deps)
 
@@ -289,16 +290,13 @@ func runPieceStatus(cmd *cobra.Command, args []string) error {
 
 		// Display issue information if available
 		marker, err := handler.ReadCurrentIssueMarker(status.WorktreePath)
-		if err == nil && marker != nil {
-			fmt.Fprintf(os.Stderr, "\nIssue: %s\n", marker.IssueName)
-
-			// Get issue status
-			if status.RepoRoot != "" {
-				absIssuePath := filepath.Join(status.RepoRoot, marker.IssuePath)
-				issueStatus, err := piececmd.ParseStatus(absIssuePath, deps.FS)
-				if err == nil {
-					fmt.Fprintf(os.Stderr, "Status: %s\n", issueStatus)
-				}
+		if err == nil && marker != nil && !marker.Issue.IsEmpty() {
+			fmt.Fprintf(os.Stderr, "\nIssue: %s\n", marker.Issue.DisplayName())
+			if marker.Status != "" {
+				fmt.Fprintf(os.Stderr, "Status: %s\n", marker.Status)
+			}
+			if marker.Dirty {
+				fmt.Fprintf(os.Stderr, "⚠ Unsynced changes (run 'mp issue sync')\n")
 			}
 		}
 
@@ -338,18 +336,26 @@ func runPieceNew(cmd *cobra.Command, args []string) error {
 
 	ctx := cmd.Context()
 
-	deps := core.NewDeps(
-		adapters.NewOSFS(""),
-		adapters.NewTextOutput(os.Stderr),
-		adapters.NewOSExec(),
-		http.DefaultClient,
-	)
-	handler := piececmd.NewHandler(deps)
-
 	wd, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("failed to get working directory: %w", err)
 	}
+
+	// Setup deps with issue sync
+	issueSync := core.NewIssueSyncSignal()
+	deps := core.NewDepsWithSync(
+		adapters.NewOSFS(""),
+		adapters.NewTextOutput(os.Stderr),
+		adapters.NewOSExec(),
+		http.DefaultClient,
+		adapters.SetupCLILoading(os.Stderr),
+		issueSync,
+	)
+
+	// Register issue sync subscriber
+	issueSync.Sub(newIssueSyncSubscriber(wd, deps, os.Stderr))
+
+	handler := piececmd.NewHandler(deps)
 
 	// Get validated input from flags/stdin/TUI
 	input, err := getPieceNewInput(deps, wd)
@@ -393,9 +399,24 @@ func getPieceNewInput(deps core.Deps, workDir string) (piececmd.NewPieceInput, e
 	// Mode 1: Flags provided
 	if flagIssuePath != "" || flagPieceName != "" {
 		input = piececmd.NewPieceInput{
-			IssuePath: flagIssuePath,
-			Name:      flagPieceName,
-			Parent:    flagParent,
+			Name:   flagPieceName,
+			Parent: flagParent,
+		}
+		// Look up issue via provider if --issue flag specified
+		if flagIssuePath != "" {
+			tuiDeps := core.NewDeps(deps.FS, deps.Output, deps.Exec, deps.HTTP, nil)
+			issueHandler := issue.NewHandler(tuiDeps, workDir)
+			issues, err := issueHandler.SearchIssues(issue.SearchInput{
+				Query: flagIssuePath,
+				Limit: 1,
+			})
+			if err != nil {
+				return piececmd.NewPieceInput{}, fmt.Errorf("failed to find issue %q: %w", flagIssuePath, err)
+			}
+			if len(issues) == 0 {
+				return piececmd.NewPieceInput{}, fmt.Errorf("no issue found matching %q", flagIssuePath)
+			}
+			input.Issue = issues[0].ToIssueRef()
 		}
 	} else if cli.HasStdinData() {
 		// Mode 2: Stdin JSON
@@ -438,7 +459,9 @@ func getPieceNewInput(deps core.Deps, workDir string) (piececmd.NewPieceInput, e
 }
 
 func runPieceNewTUI(deps core.Deps, workDir string) (piececmd.NewPieceInput, error) {
-	issueHandler := issue.NewHandler(deps, workDir)
+	// Use nil loading for issue handler - TUI manages its own loading state
+	tuiDeps := core.NewDeps(deps.FS, deps.Output, deps.Exec, deps.HTTP, nil)
+	issueHandler := issue.NewHandler(tuiDeps, workDir)
 	issues, err := issueHandler.ListIssues([]string{piececmd.StatusTodo})
 	if err != nil {
 		// Fall through to error - no issues available
@@ -449,7 +472,23 @@ func runPieceNewTUI(deps core.Deps, workDir string) (piececmd.NewPieceInput, err
 		return piececmd.NewPieceInput{}, fmt.Errorf("no todo issues found; create one with 'mp issue create' or use --name flag")
 	}
 
-	p := tea.NewProgram(issuepicker.New(issues))
+	// Create search function for async issue search
+	searchFn := func(query string) tea.Cmd {
+		return func() tea.Msg {
+			results, err := issueHandler.SearchIssues(issue.SearchInput{
+				Query:  query,
+				Status: []string{piececmd.StatusTodo},
+				Limit:  100,
+			})
+			return issuepicker.IssuesLoadedMsg{
+				Query:  query,
+				Issues: results,
+				Err:    err,
+			}
+		}
+	}
+
+	p := tea.NewProgram(issuepicker.NewWithSearch(issues, searchFn))
 	m, err := p.Run()
 	if err != nil {
 		return piececmd.NewPieceInput{}, fmt.Errorf("TUI error: %w", err)
@@ -466,7 +505,7 @@ func runPieceNewTUI(deps core.Deps, workDir string) (piececmd.NewPieceInput, err
 	}
 
 	return piececmd.NewPieceInput{
-		IssuePath: selectedIssue.Path,
+		Issue: selectedIssue.ToIssueRef(),
 	}, nil
 }
 
@@ -493,6 +532,7 @@ func runPieceUpdate(cmd *cobra.Command, args []string) error {
 		adapters.NewTextOutput(os.Stderr),
 		adapters.NewOSExec(),
 		http.DefaultClient,
+		adapters.SetupCLILoading(os.Stderr),
 	)
 	handler := piececmd.NewHandler(deps)
 
@@ -558,6 +598,7 @@ func runPieceMerge(cmd *cobra.Command, args []string) error {
 		adapters.NewTextOutput(os.Stderr),
 		adapters.NewOSExec(),
 		http.DefaultClient,
+		adapters.SetupCLILoading(os.Stderr),
 	)
 	handler := piececmd.NewHandler(deps)
 
@@ -624,12 +665,20 @@ func runPieceCleanup(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to get working directory: %w", err)
 	}
 
-	deps := core.NewDeps(
+	// Setup deps with issue sync
+	issueSync := core.NewIssueSyncSignal()
+	deps := core.NewDepsWithSync(
 		adapters.NewOSFS(""),
 		adapters.NewTextOutput(os.Stderr),
 		adapters.NewOSExec(),
 		http.DefaultClient,
+		adapters.SetupCLILoading(os.Stderr),
+		issueSync,
 	)
+
+	// Register issue sync subscriber
+	issueSync.Sub(newIssueSyncSubscriber(wd, deps, os.Stderr))
+
 	handler := piececmd.NewHandler(deps)
 
 	// Get input
@@ -711,6 +760,7 @@ func runPieceAbandon(cmd *cobra.Command, args []string) error {
 		adapters.NewTextOutput(os.Stderr),
 		adapters.NewOSExec(),
 		http.DefaultClient,
+		adapters.SetupCLILoading(os.Stderr),
 	)
 	handler := piececmd.NewHandler(deps)
 
@@ -760,12 +810,20 @@ func runPieceDone(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to get working directory: %w", err)
 	}
 
-	deps := core.NewDeps(
+	// Setup deps with issue sync
+	issueSync := core.NewIssueSyncSignal()
+	deps := core.NewDepsWithSync(
 		adapters.NewOSFS(""),
 		adapters.NewTextOutput(os.Stderr),
 		adapters.NewOSExec(),
 		http.DefaultClient,
+		adapters.SetupCLILoading(os.Stderr),
+		issueSync,
 	)
+
+	// Register issue sync subscriber
+	issueSync.Sub(newIssueSyncSubscriber(wd, deps, os.Stderr))
+
 	handler := piececmd.NewHandler(deps)
 
 	// Get input
@@ -828,6 +886,7 @@ func runPieceAdopt(cmd *cobra.Command, args []string) error {
 		adapters.NewTextOutput(os.Stderr),
 		adapters.NewOSExec(),
 		http.DefaultClient,
+		adapters.SetupCLILoading(os.Stderr),
 	)
 	handler := piececmd.NewHandler(deps)
 
@@ -973,6 +1032,7 @@ func runPieceList(cmd *cobra.Command, args []string) error {
 		adapters.NewTextOutput(os.Stderr),
 		adapters.NewOSExec(),
 		http.DefaultClient,
+		adapters.SetupCLILoading(os.Stderr),
 	)
 	handler := piececmd.NewHandler(deps)
 
@@ -1062,6 +1122,30 @@ func formatTimeAgo(t time.Time) string {
 	}
 }
 
+// newIssueSyncSubscriber creates a subscriber that syncs status changes to providers.
+func newIssueSyncSubscriber(workDir string, deps core.Deps, output io.Writer) func(event core.IssueSyncEvent) {
+	return func(event core.IssueSyncEvent) {
+		if event.IssueID == "" {
+			return
+		}
+
+		// Sync to provider
+		handler := issue.NewHandler(deps, workDir)
+		err := handler.SyncStatus(event.IssueID, event.NewStatus)
+		if err != nil {
+			fmt.Fprintf(output, "⚠ Failed to sync: %v\n", err)
+			return
+		}
+
+		// Clear dirty flag
+		if event.WorktreePath != "" {
+			_ = piececmd.ClearIssueDirtyFlag(event.WorktreePath, deps.FS)
+		}
+
+		fmt.Fprintf(output, "✓ Synced %s → %s\n", event.IssueID, event.NewStatus)
+	}
+}
+
 func runPieceSwitch(cmd *cobra.Command, args []string) error {
 	// --schema mode
 	if flagPieceSwitchSchema {
@@ -1079,6 +1163,7 @@ func runPieceSwitch(cmd *cobra.Command, args []string) error {
 		adapters.NewTextOutput(os.Stderr),
 		adapters.NewOSExec(),
 		http.DefaultClient,
+		adapters.SetupCLILoading(os.Stderr),
 	)
 	handler := piececmd.NewHandler(deps)
 

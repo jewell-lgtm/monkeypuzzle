@@ -23,7 +23,11 @@ func TestWriteAndReadPRMetadata(t *testing.T) {
 		Branch:     "feature-branch",
 		BaseBranch: "main",
 		CreatedAt:  time.Date(2025, 1, 27, 10, 0, 0, 0, time.UTC),
-		IssuePath:  "issues/my-issue.md",
+		Issue: piece.IssueRef{
+			Provider: "markdown",
+			ID:       "issues/my-issue.md",
+			Title:    "My Issue",
+		},
 	}
 
 	// Write metadata
@@ -50,8 +54,8 @@ func TestWriteAndReadPRMetadata(t *testing.T) {
 	if readMetadata.BaseBranch != "main" {
 		t.Errorf("expected BaseBranch 'main', got %q", readMetadata.BaseBranch)
 	}
-	if readMetadata.IssuePath != "issues/my-issue.md" {
-		t.Errorf("expected IssuePath 'issues/my-issue.md', got %q", readMetadata.IssuePath)
+	if readMetadata.Issue.ID != "issues/my-issue.md" {
+		t.Errorf("expected Issue.ID 'issues/my-issue.md', got %q", readMetadata.Issue.ID)
 	}
 }
 
@@ -116,7 +120,7 @@ func TestWritePRMetadata_CreatesDirIfMissing(t *testing.T) {
 	}
 }
 
-func TestPRMetadata_WithoutIssuePath(t *testing.T) {
+func TestPRMetadata_WithoutIssue(t *testing.T) {
 	fs := adapters.NewMemoryFS()
 	worktreePath := "/workdir"
 
@@ -126,7 +130,7 @@ func TestPRMetadata_WithoutIssuePath(t *testing.T) {
 		Branch:     "standalone-branch",
 		BaseBranch: "develop",
 		CreatedAt:  time.Now(),
-		// IssuePath intentionally omitted
+		// Issue intentionally omitted
 	}
 
 	if err := piece.WritePRMetadata(worktreePath, metadata, fs); err != nil {
@@ -138,7 +142,7 @@ func TestPRMetadata_WithoutIssuePath(t *testing.T) {
 		t.Fatalf("ReadPRMetadata failed: %v", err)
 	}
 
-	if readMetadata.IssuePath != "" {
-		t.Errorf("expected empty IssuePath, got %q", readMetadata.IssuePath)
+	if !readMetadata.Issue.IsEmpty() {
+		t.Errorf("expected empty Issue, got %+v", readMetadata.Issue)
 	}
 }

@@ -62,19 +62,24 @@ type SwitchResult struct {
 }
 
 // NewPieceInput holds input for the piece new command.
-// Either IssuePath or Name must be provided (mutually exclusive).
+// Either Issue or Name must be provided (mutually exclusive).
 type NewPieceInput struct {
-	IssuePath        string `json:"issue_path,omitempty"`
-	Name             string `json:"name,omitempty"`
-	Parent           string `json:"parent,omitempty"` // Parent piece name, defaults to "main"
-	SkipSwitch       bool   `json:"skip_switch,omitempty"`
-	OverwriteSession bool   `json:"overwrite_session,omitempty"`
+	Issue            IssueRef `json:"issue,omitempty"`
+	Name             string   `json:"name,omitempty"`
+	Parent           string   `json:"parent,omitempty"` // Parent piece name, defaults to "main"
+	SkipSwitch       bool     `json:"skip_switch,omitempty"`
+	OverwriteSession bool     `json:"overwrite_session,omitempty"`
 }
 
 // NewPieceSchema returns the JSON schema for piece new input.
 func NewPieceSchema() ([]byte, error) {
 	schema := map[string]any{
-		"issue_path":        "",
+		"issue": map[string]any{
+			"provider": "",
+			"id":       "",
+			"number":   "",
+			"title":    "",
+		},
 		"name":              "",
 		"parent":            "main",
 		"skip_switch":       false,
@@ -93,16 +98,16 @@ func ParseNewPieceJSON(data []byte) (NewPieceInput, error) {
 }
 
 // ValidateNewPieceInput validates the input.
-// One of IssuePath or Name must be provided, but not both.
+// One of Issue or Name must be provided, but not both.
 func ValidateNewPieceInput(input NewPieceInput) error {
-	hasIssue := strings.TrimSpace(input.IssuePath) != ""
+	hasIssue := !input.Issue.IsEmpty()
 	hasName := strings.TrimSpace(input.Name) != ""
 
 	if hasIssue && hasName {
-		return fmt.Errorf("cannot specify both issue_path and name")
+		return fmt.Errorf("cannot specify both issue and name")
 	}
 	if !hasIssue && !hasName {
-		return fmt.Errorf("must specify either issue_path or name")
+		return fmt.Errorf("must specify either issue or name")
 	}
 	return nil
 }
@@ -114,7 +119,7 @@ func WithNewPieceDefaults(input NewPieceInput) NewPieceInput {
 		parent = "main"
 	}
 	return NewPieceInput{
-		IssuePath:        strings.TrimSpace(input.IssuePath),
+		Issue:            input.Issue,
 		Name:             strings.TrimSpace(input.Name),
 		Parent:           parent,
 		SkipSwitch:       input.SkipSwitch,

@@ -624,3 +624,112 @@ func TestCLI_PieceAbandon_CurrentPiece(t *testing.T) {
 		t.Error("worktree should have been removed")
 	}
 }
+
+// TestCLI_IssueSearch tests mp issue search command with query
+func TestCLI_IssueSearch(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	env.initProject("test")
+	env.createIssue("add-auth.md", "Add authentication", "todo")
+	env.createIssue("fix-auth-bug.md", "Fix authentication bug", "in-progress")
+	env.createIssue("add-logging.md", "Add logging", "todo")
+
+	// Search with query flag
+	stdout, _, err := env.run("issue", "search", "--query", "auth")
+	if err != nil {
+		t.Fatalf("issue search failed: %v", err)
+	}
+
+	var issues []map[string]any
+	if err := json.Unmarshal([]byte(stdout), &issues); err != nil {
+		t.Fatalf("invalid JSON output: %v\noutput: %s", err, stdout)
+	}
+
+	// Should find 2 issues matching "auth"
+	if len(issues) != 2 {
+		t.Errorf("expected 2 issues matching 'auth', got %d", len(issues))
+	}
+}
+
+// TestCLI_IssueSearch_StatusFilter tests mp issue search with status filter
+func TestCLI_IssueSearch_StatusFilter(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	env.initProject("test")
+	env.createIssue("add-auth.md", "Add authentication", "todo")
+	env.createIssue("fix-auth-bug.md", "Fix authentication bug", "in-progress")
+	env.createIssue("add-logging.md", "Add logging", "todo")
+
+	// Search with status filter
+	stdout, _, err := env.run("issue", "search", "--status", "todo")
+	if err != nil {
+		t.Fatalf("issue search --status failed: %v", err)
+	}
+
+	var issues []map[string]any
+	if err := json.Unmarshal([]byte(stdout), &issues); err != nil {
+		t.Fatalf("invalid JSON output: %v\noutput: %s", err, stdout)
+	}
+
+	// Should find 2 todo issues
+	if len(issues) != 2 {
+		t.Errorf("expected 2 todo issues, got %d", len(issues))
+	}
+
+	for _, iss := range issues {
+		if iss["status"] != "todo" {
+			t.Errorf("expected status 'todo', got %v", iss["status"])
+		}
+	}
+}
+
+// TestCLI_IssueSearch_Stdin tests mp issue search with stdin JSON
+func TestCLI_IssueSearch_Stdin(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	env.initProject("test")
+	env.createIssue("add-auth.md", "Add authentication", "todo")
+	env.createIssue("fix-bug.md", "Fix bug", "done")
+
+	// Search with stdin JSON
+	input := `{"query":"auth","status":["todo"]}`
+	stdout, _, err := env.runWithStdin(input, "issue", "search")
+	if err != nil {
+		t.Fatalf("issue search with stdin failed: %v", err)
+	}
+
+	var issues []map[string]any
+	if err := json.Unmarshal([]byte(stdout), &issues); err != nil {
+		t.Fatalf("invalid JSON output: %v\noutput: %s", err, stdout)
+	}
+
+	if len(issues) != 1 {
+		t.Errorf("expected 1 issue, got %d", len(issues))
+	}
+}
+
+// TestCLI_IssueSearch_Schema tests mp issue search --schema
+func TestCLI_IssueSearch_Schema(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	stdout, _, err := env.run("issue", "search", "--schema")
+	if err != nil {
+		t.Fatalf("issue search --schema failed: %v", err)
+	}
+
+	var schema map[string]any
+	if err := json.Unmarshal([]byte(stdout), &schema); err != nil {
+		t.Fatalf("invalid JSON schema: %v\noutput: %s", err, stdout)
+	}
+
+	if _, ok := schema["query"]; !ok {
+		t.Error("schema missing 'query' field")
+	}
+	if _, ok := schema["status"]; !ok {
+		t.Error("schema missing 'status' field")
+	}
+}

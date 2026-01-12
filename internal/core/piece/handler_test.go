@@ -1020,7 +1020,12 @@ Content here.
 	mockExec.AddResponse("tmux", []string{"new-session", "-d", "-s", sessionName, "-c", worktreePath}, nil, nil)
 
 	// Execute
-	info, err := handler.CreatePieceFromIssue(context.Background(),issuePath, piece.CreatePieceOptions{})
+	issueRef := piece.IssueRef{
+		Provider: "markdown",
+		ID:       issuePath,
+		Title:    "My Awesome Feature",
+	}
+	info, err := handler.CreatePieceFromIssue(context.Background(), issueRef, piece.CreatePieceOptions{})
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
@@ -1041,8 +1046,8 @@ Content here.
 		t.Fatalf("failed to unmarshal marker: %v", err)
 	}
 
-	if marker.IssueName != "My Awesome Feature" {
-		t.Errorf("expected issue name 'My Awesome Feature', got %q", marker.IssueName)
+	if marker.Issue.Title != "My Awesome Feature" {
+		t.Errorf("expected issue title 'My Awesome Feature', got %q", marker.Issue.Title)
 	}
 
 	if marker.PieceName != pieceName {
@@ -1098,7 +1103,12 @@ Content here.
 	mockExec.AddResponse("tmux", []string{"new-session", "-d", "-s", sessionName, "-c", worktreePath}, nil, nil)
 
 	// Execute
-	info, err := handler.CreatePieceFromIssue(context.Background(),issuePath, piece.CreatePieceOptions{})
+	issueRef := piece.IssueRef{
+		Provider: "markdown",
+		ID:       issuePath,
+		Title:    "My Feature",
+	}
+	info, err := handler.CreatePieceFromIssue(context.Background(), issueRef, piece.CreatePieceOptions{})
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
@@ -1158,7 +1168,12 @@ Content here.
 	mockExec.AddResponse("tmux", []string{"new-session", "-d", "-s", sessionName, "-c", worktreePath}, nil, nil)
 
 	// Execute
-	info, err := handler.CreatePieceFromIssue(context.Background(),issuePath, piece.CreatePieceOptions{})
+	issueRef := piece.IssueRef{
+		Provider: "markdown",
+		ID:       issuePath,
+		Title:    "My Awesome Feature (v2.0)!",
+	}
+	info, err := handler.CreatePieceFromIssue(context.Background(), issueRef, piece.CreatePieceOptions{})
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
@@ -1168,94 +1183,7 @@ Content here.
 	}
 }
 
-func TestHandler_CreatePieceFromIssue_InvalidIssuePath(t *testing.T) {
-	fs := adapters.NewMemoryFS()
-	out := adapters.NewBufferOutput()
-	mockExec := adapters.NewMockExec()
-	deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
-	handler := piece.NewHandler(deps)
-
-	repoRoot := "/repo"
-	mockExec.AddResponse("git", []string{"rev-parse", "--show-toplevel"}, []byte(repoRoot+"\n"), nil)
-
-	// Create config but no issue file
-	configData := `{
-  "version": "1",
-  "project": {"name": "test-project"},
-  "issues": {
-    "provider": "markdown",
-    "config": {"directory": ".monkeypuzzle/issues"}
-  },
-  "pr": {"provider": "github", "config": {}}
-}`
-	_ = fs.MkdirAll(filepath.Join(repoRoot, ".monkeypuzzle"), 0755)
-	_ = fs.WriteFile(filepath.Join(repoRoot, ".monkeypuzzle/monkeypuzzle.json"), []byte(configData), 0644)
-
-	_, err := handler.CreatePieceFromIssue(context.Background(),".monkeypuzzle/issues/nonexistent.md", piece.CreatePieceOptions{})
-	if err == nil {
-		t.Fatal("expected error when issue file doesn't exist")
-	}
-
-	if !strings.Contains(err.Error(), "issue file not found") {
-		t.Errorf("expected error about issue file not found, got: %v", err)
-	}
-}
-
-func TestHandler_CreatePieceFromIssue_MissingConfig(t *testing.T) {
-	fs := adapters.NewMemoryFS()
-	out := adapters.NewBufferOutput()
-	mockExec := adapters.NewMockExec()
-	deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
-	handler := piece.NewHandler(deps)
-
-	repoRoot := "/repo"
-	mockExec.AddResponse("git", []string{"rev-parse", "--show-toplevel"}, []byte(repoRoot+"\n"), nil)
-
-	// No config file
-	_, err := handler.CreatePieceFromIssue(context.Background(),".monkeypuzzle/issues/test.md", piece.CreatePieceOptions{})
-	if err == nil {
-		t.Fatal("expected error when config file doesn't exist")
-	}
-
-	if !strings.Contains(err.Error(), "config") {
-		t.Errorf("expected error about config, got: %v", err)
-	}
-}
-
-func TestHandler_CreatePieceFromIssue_InvalidProvider(t *testing.T) {
-	fs := adapters.NewMemoryFS()
-	out := adapters.NewBufferOutput()
-	mockExec := adapters.NewMockExec()
-	deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
-	handler := piece.NewHandler(deps)
-
-	repoRoot := "/repo"
-	mockExec.AddResponse("git", []string{"rev-parse", "--show-toplevel"}, []byte(repoRoot+"\n"), nil)
-
-	// Create config with invalid provider
-	configData := `{
-  "version": "1",
-  "project": {"name": "test-project"},
-  "issues": {
-    "provider": "github",
-    "config": {}
-  },
-  "pr": {"provider": "github", "config": {}}
-}`
-	_ = fs.MkdirAll(filepath.Join(repoRoot, ".monkeypuzzle"), 0755)
-	_ = fs.WriteFile(filepath.Join(repoRoot, ".monkeypuzzle/monkeypuzzle.json"), []byte(configData), 0644)
-
-	_, err := handler.CreatePieceFromIssue(context.Background(),".monkeypuzzle/issues/test.md", piece.CreatePieceOptions{})
-	if err == nil {
-		t.Fatal("expected error when issue provider is not markdown")
-	}
-
-	if !strings.Contains(err.Error(), "markdown") {
-		t.Errorf("expected error about markdown provider, got: %v", err)
-	}
-}
-
-func TestHandler_CreatePieceFromIssue_OutsideIssuesDirectory(t *testing.T) {
+func TestHandler_CreatePieceFromIssue_EmptyIssueRef(t *testing.T) {
 	fs := adapters.NewMemoryFS()
 	out := adapters.NewBufferOutput()
 	mockExec := adapters.NewMockExec()
@@ -1278,19 +1206,36 @@ func TestHandler_CreatePieceFromIssue_OutsideIssuesDirectory(t *testing.T) {
 	_ = fs.MkdirAll(filepath.Join(repoRoot, ".monkeypuzzle"), 0755)
 	_ = fs.WriteFile(filepath.Join(repoRoot, ".monkeypuzzle/monkeypuzzle.json"), []byte(configData), 0644)
 
-	// Create issue file outside the issues directory
-	issuePath := "other-dir/issue.md"
-	absIssuePath := filepath.Join(repoRoot, issuePath)
-	_ = fs.MkdirAll(filepath.Dir(absIssuePath), 0755)
-	_ = fs.WriteFile(absIssuePath, []byte("# Issue\n"), 0644)
-
-	_, err := handler.CreatePieceFromIssue(context.Background(),issuePath, piece.CreatePieceOptions{})
+	// Empty IssueRef should fail
+	_, err := handler.CreatePieceFromIssue(context.Background(), piece.IssueRef{}, piece.CreatePieceOptions{})
 	if err == nil {
-		t.Fatal("expected error when issue file is outside issues directory")
+		t.Fatal("expected error when IssueRef is empty")
+	}
+}
+
+func TestHandler_CreatePieceFromIssue_MissingConfig(t *testing.T) {
+	fs := adapters.NewMemoryFS()
+	out := adapters.NewBufferOutput()
+	mockExec := adapters.NewMockExec()
+	deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
+	handler := piece.NewHandler(deps)
+
+	repoRoot := "/repo"
+	mockExec.AddResponse("git", []string{"rev-parse", "--show-toplevel"}, []byte(repoRoot+"\n"), nil)
+
+	// No config file
+	issueRef := piece.IssueRef{
+		Provider: "markdown",
+		ID:       ".monkeypuzzle/issues/test.md",
+		Title:    "Test Issue",
+	}
+	_, err := handler.CreatePieceFromIssue(context.Background(), issueRef, piece.CreatePieceOptions{})
+	if err == nil {
+		t.Fatal("expected error when config file doesn't exist")
 	}
 
-	if !strings.Contains(err.Error(), "within the issues directory") {
-		t.Errorf("expected error about issues directory, got: %v", err)
+	if !strings.Contains(err.Error(), "config") {
+		t.Errorf("expected error about config, got: %v", err)
 	}
 }
 
@@ -1670,22 +1615,10 @@ func TestHandler_CleanupMergedPieces_WithIssue(t *testing.T) {
 	worktreePath := filepath.Join(piecesDir, pieceName)
 	fullWorktreePath := "/" + worktreePath
 
-	// Create piece directory with issue marker
+	// Create piece directory with issue marker (new format with IssueRef)
 	_ = fs.MkdirAll(fullWorktreePath+"/.monkeypuzzle", 0755)
-	issueMarker := `{"issue_path": "issues/test.md", "issue_name": "Test Issue", "piece_name": "issue-piece"}`
+	issueMarker := `{"issue": {"provider": "markdown", "id": "issues/test.md", "title": "Test Issue"}, "piece_name": "issue-piece", "status": "in-progress", "dirty": false}`
 	_ = fs.WriteFile(fullWorktreePath+"/.monkeypuzzle/current-issue.json", []byte(issueMarker), 0644)
-
-	// Create the issue file
-	issuePath := filepath.Join(repoRoot, "issues/test.md")
-	issueContent := `---
-title: Test Issue
-status: in-progress
----
-
-# Test Issue
-`
-	_ = fs.MkdirAll(filepath.Join(repoRoot, "issues"), 0755)
-	_ = fs.WriteFile(issuePath, []byte(issueContent), 0644)
 
 	// Mock git commands for the piece
 	mockExec.AddResponse("git", []string{"rev-parse", "--abbrev-ref", "HEAD"}, []byte(pieceName+"\n"), nil)
@@ -1708,21 +1641,12 @@ status: in-progress
 		t.Fatalf("expected 1 result, got %d", len(results))
 	}
 
-	if results[0].IssuePath != "issues/test.md" {
-		t.Errorf("expected issue path 'issues/test.md', got %q", results[0].IssuePath)
+	if results[0].Issue.ID != "issues/test.md" {
+		t.Errorf("expected issue ID 'issues/test.md', got %q", results[0].Issue.ID)
 	}
 
-	if !results[0].IssueUpdated {
-		t.Error("expected IssueUpdated to be true")
-	}
-
-	// Verify issue status was updated to done
-	issueData, err := fs.ReadFile(issuePath)
-	if err != nil {
-		t.Fatalf("failed to read issue file: %v", err)
-	}
-	if !strings.Contains(string(issueData), "status: done") {
-		t.Errorf("expected issue status to be 'done', got: %s", string(issueData))
+	if results[0].Issue.Provider != "markdown" {
+		t.Errorf("expected issue provider 'markdown', got %q", results[0].Issue.Provider)
 	}
 }
 
@@ -1802,12 +1726,8 @@ func TestHandler_CleanupMergedPieces_NoIssueMarker(t *testing.T) {
 		t.Fatalf("expected 1 result, got %d", len(results))
 	}
 
-	if results[0].IssuePath != "" {
-		t.Errorf("expected empty issue path, got %q", results[0].IssuePath)
-	}
-
-	if results[0].IssueUpdated {
-		t.Error("expected IssueUpdated to be false when no issue marker")
+	if !results[0].Issue.IsEmpty() {
+		t.Errorf("expected empty issue ref, got %+v", results[0].Issue)
 	}
 }
 

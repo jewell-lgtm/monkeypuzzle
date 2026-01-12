@@ -78,11 +78,11 @@ func (h *Handler) CreatePR(ctx context.Context, workDir string, input Input) (*P
 	}
 
 	// Try to read issue marker to get title/body defaults
-	issueMarker, issuePath := h.readIssueMarker(status.WorktreePath)
+	issueMarker := h.readIssueMarker(status.WorktreePath)
 
 	// Use issue title if PR title not provided
 	if input.Title == "" && issueMarker != nil {
-		input.Title = issueMarker.IssueName
+		input.Title = issueMarker.Issue.Title
 	}
 
 	// Fallback to piece name if still no title
@@ -116,13 +116,17 @@ func (h *Handler) CreatePR(ctx context.Context, workDir string, input Input) (*P
 	}
 
 	// Store PR metadata
+	var issueRef piece.IssueRef
+	if issueMarker != nil {
+		issueRef = issueMarker.Issue
+	}
 	metadata := piece.PRMetadata{
 		PRNumber:   prResult.Number,
 		PRURL:      prResult.URL,
 		Branch:     branch,
 		BaseBranch: input.Base,
 		CreatedAt:  time.Now(),
-		IssuePath:  issuePath,
+		Issue:      issueRef,
 	}
 
 	if err := piece.WritePRMetadata(status.WorktreePath, metadata, h.deps.FS); err != nil {
@@ -146,17 +150,17 @@ func (h *Handler) CreatePR(ctx context.Context, workDir string, input Input) (*P
 
 // readIssueMarker reads the current issue marker from the piece worktree.
 // Returns nil if no marker exists.
-func (h *Handler) readIssueMarker(worktreePath string) (*piece.CurrentIssueMarker, string) {
+func (h *Handler) readIssueMarker(worktreePath string) *piece.CurrentIssueMarker {
 	markerPath := filepath.Join(worktreePath, initcmd.DirName, "current-issue.json")
 	data, err := h.deps.FS.ReadFile(markerPath)
 	if err != nil {
-		return nil, ""
+		return nil
 	}
 
 	var marker piece.CurrentIssueMarker
 	if err := json.Unmarshal(data, &marker); err != nil {
-		return nil, ""
+		return nil
 	}
 
-	return &marker, marker.IssuePath
+	return &marker
 }

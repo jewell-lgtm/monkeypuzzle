@@ -57,6 +57,7 @@ func runClaudeSkill(cmd *cobra.Command, args []string) error {
 		adapters.NewTextOutput(os.Stderr),
 		adapters.NewOSExec(),
 		http.DefaultClient,
+		adapters.SetupCLILoading(os.Stderr),
 	)
 	handler := claudecmd.NewHandler(deps)
 

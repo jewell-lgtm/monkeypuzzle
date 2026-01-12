@@ -109,3 +109,35 @@ func ValidateListInput(in ListInput) error {
 	}
 	return nil
 }
+
+// SearchSchema returns the JSON schema for issue search input
+func SearchSchema() ([]byte, error) {
+	return input.GenerateSchema([]input.Field{
+		{Name: "query", Description: "Search query (fuzzy match)", Default: ""},
+		{Name: "status", Description: "Filter by status", Default: ""},
+		{Name: "limit", Description: "Max results (default 100)", Default: "100"},
+	})
+}
+
+// ParseSearchJSON parses JSON input into SearchInput
+func ParseSearchJSON(data []byte) (SearchInput, error) {
+	return input.ParseJSON[SearchInput](data)
+}
+
+// ValidateSearchInput validates the search input
+func ValidateSearchInput(in SearchInput) error {
+	valid := ValidStatuses()
+	for _, s := range in.Status {
+		found := false
+		for _, v := range valid {
+			if s == v {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("invalid status %q (valid: %v)", s, valid)
+		}
+	}
+	return nil
+}

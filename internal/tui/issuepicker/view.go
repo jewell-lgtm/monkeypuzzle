@@ -20,13 +20,28 @@ func (m Model) View() string {
 	b.WriteString(m.Input.View())
 	b.WriteString("\n\n")
 
+	// Show error if any
+	if m.Error != "" {
+		b.WriteString(styles.Subtle.Render("Error: " + m.Error))
+		b.WriteString("\n\n")
+	}
+
+	// Show loading indicator
+	if m.Loading {
+		b.WriteString(styles.Subtle.Render("Loading..."))
+		b.WriteString("\n\n")
+	}
+
 	if len(m.Filtered) == 0 {
-		if m.Input.Value() == "" {
+		if m.Loading {
+			// Don't show "no matches" while loading
+		} else if m.Input.Value() == "" {
 			b.WriteString(styles.Subtle.Render("No todo issues found. Create one with 'mp issue create'."))
+			b.WriteString("\n")
 		} else {
 			b.WriteString(styles.Subtle.Render("No matches found."))
+			b.WriteString("\n")
 		}
-		b.WriteString("\n")
 	} else {
 		// Show count if filtering
 		if m.Input.Value() != "" {
