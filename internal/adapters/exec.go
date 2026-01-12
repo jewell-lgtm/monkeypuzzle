@@ -124,7 +124,8 @@ func (m *MockExec) RunWithDir(ctx context.Context, dir, name string, args ...str
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	dir, _ = filepath.Abs(dir)
+	// filepath.Abs only fails if cwd cannot be determined; in tests, paths are controlled
+	dir, _ = filepath.Abs(dir) //nolint:errcheck // test mock, paths are controlled
 	m.calls = append(m.calls, CallRecord{
 		Name: name,
 		Args: args,
@@ -146,7 +147,8 @@ func (m *MockExec) RunWithEnv(ctx context.Context, dir string, env []string, nam
 	defer m.mu.Unlock()
 
 	if dir != "" {
-		dir, _ = filepath.Abs(dir)
+		// filepath.Abs only fails if cwd cannot be determined; in tests, paths are controlled
+		dir, _ = filepath.Abs(dir) //nolint:errcheck // test mock, paths are controlled
 	}
 	m.calls = append(m.calls, CallRecord{
 		Name: name,

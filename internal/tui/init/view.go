@@ -17,6 +17,10 @@ func (m Model) View() string {
 		return m.viewProjectName()
 	case StepIssueMethod:
 		return m.viewIssueMethod()
+	case StepLinearAPIKey:
+		return m.viewLinearAPIKey()
+	case StepLinearTeam:
+		return m.viewLinearTeam()
 	case StepPRMethod:
 		return m.viewPRMethod()
 	case StepConfirm:
@@ -44,7 +48,28 @@ func (m Model) viewIssueMethod() string {
 		styles.Label.Render("Issue/feature management:"),
 		renderOptions([]string{
 			"Markdown files in issues/",
+			"Linear (external issue tracker)",
 		}, m.IssueMethod),
+		styles.Subtle.Render("↑/↓ to select • enter to continue • esc to cancel"),
+	)
+}
+
+func (m Model) viewLinearAPIKey() string {
+	return fmt.Sprintf(
+		"%s\n\n%s\n%s\n\n%s",
+		styles.Title.Render("Monkeypuzzle Init"),
+		styles.Label.Render("Linear API key:"),
+		m.LinearAPIKey.View(),
+		styles.Subtle.Render("leave blank to use LINEAR_API_KEY env var • enter to continue"),
+	)
+}
+
+func (m Model) viewLinearTeam() string {
+	return fmt.Sprintf(
+		"%s\n\n%s\n%s\n\n%s",
+		styles.Title.Render("Monkeypuzzle Init"),
+		styles.Label.Render("Linear team key:"),
+		m.LinearTeam.View(),
 		styles.Subtle.Render("enter to continue • esc to cancel"),
 	)
 }
@@ -66,15 +91,25 @@ func (m Model) viewConfirm() string {
 	if name == "" {
 		name = m.ProjectName.Placeholder
 	}
-	// Note: IssueProvider and PRProvider are set from defaults in runInteractiveMode
-	// For display, we show the defaults that will be used
+
+	issueProvider := IssueProviders[m.IssueMethod]
+	issueInfo := issueProvider
+	if issueProvider == "linear" {
+		team := m.LinearTeam.Value()
+		apiKeyInfo := "(from env var)"
+		if m.LinearAPIKey.Value() != "" {
+			apiKeyInfo = "(configured)"
+		}
+		issueInfo = fmt.Sprintf("linear (team: %s, api key: %s)", team, apiKeyInfo)
+	}
+
 	return fmt.Sprintf(
 		"%s\n\n%s\n  Project: %s\n  Issues:  %s\n  PR:      %s\n\n%s",
 		styles.Title.Render("Monkeypuzzle Init"),
 		styles.Label.Render("Configuration:"),
 		name,
-		"markdown", // Will be replaced by actual value from field definitions
-		"github",   // Will be replaced by actual value from field definitions
+		issueInfo,
+		"github",
 		styles.Subtle.Render("enter to create config • esc to cancel"),
 	)
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -175,11 +176,12 @@ func init() {
 }
 
 func completePieceNames(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-	deps := core.Deps{
-		FS:     adapters.NewOSFS(""),
-		Output: adapters.NewTextOutput(io.Discard),
-		Exec:   adapters.NewOSExec(),
-	}
+	deps := core.NewDeps(
+		adapters.NewOSFS(""),
+		adapters.NewTextOutput(io.Discard),
+		adapters.NewOSExec(),
+		http.DefaultClient,
+	)
 	handler := piececmd.NewHandler(deps)
 
 	// Get repo root from current directory
@@ -235,11 +237,12 @@ func runPieceStatus(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to get working directory: %w", err)
 	}
 
-	deps := core.Deps{
-		FS:     adapters.NewOSFS(""),
-		Output: adapters.NewTextOutput(os.Stderr),
-		Exec:   adapters.NewOSExec(),
-	}
+	deps := core.NewDeps(
+		adapters.NewOSFS(""),
+		adapters.NewTextOutput(os.Stderr),
+		adapters.NewOSExec(),
+		http.DefaultClient,
+	)
 	handler := piececmd.NewHandler(deps)
 
 	// Get main branch (default to "main")
@@ -335,11 +338,12 @@ func runPieceNew(cmd *cobra.Command, args []string) error {
 
 	ctx := cmd.Context()
 
-	deps := core.Deps{
-		FS:     adapters.NewOSFS(""),
-		Output: adapters.NewTextOutput(os.Stderr),
-		Exec:   adapters.NewOSExec(),
-	}
+	deps := core.NewDeps(
+		adapters.NewOSFS(""),
+		adapters.NewTextOutput(os.Stderr),
+		adapters.NewOSExec(),
+		http.DefaultClient,
+	)
 	handler := piececmd.NewHandler(deps)
 
 	wd, err := os.Getwd()
@@ -479,11 +483,12 @@ func runPieceUpdate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to get working directory: %w", err)
 	}
 
-	deps := core.Deps{
-		FS:     adapters.NewOSFS(""),
-		Output: adapters.NewTextOutput(os.Stderr),
-		Exec:   adapters.NewOSExec(),
-	}
+	deps := core.NewDeps(
+		adapters.NewOSFS(""),
+		adapters.NewTextOutput(os.Stderr),
+		adapters.NewOSExec(),
+		http.DefaultClient,
+	)
 	handler := piececmd.NewHandler(deps)
 
 	// Get input
@@ -543,11 +548,12 @@ func runPieceMerge(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to get working directory: %w", err)
 	}
 
-	deps := core.Deps{
-		FS:     adapters.NewOSFS(""),
-		Output: adapters.NewTextOutput(os.Stderr),
-		Exec:   adapters.NewOSExec(),
-	}
+	deps := core.NewDeps(
+		adapters.NewOSFS(""),
+		adapters.NewTextOutput(os.Stderr),
+		adapters.NewOSExec(),
+		http.DefaultClient,
+	)
 	handler := piececmd.NewHandler(deps)
 
 	// Get input
@@ -613,11 +619,12 @@ func runPieceCleanup(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to get working directory: %w", err)
 	}
 
-	deps := core.Deps{
-		FS:     adapters.NewOSFS(""),
-		Output: adapters.NewTextOutput(os.Stderr),
-		Exec:   adapters.NewOSExec(),
-	}
+	deps := core.NewDeps(
+		adapters.NewOSFS(""),
+		adapters.NewTextOutput(os.Stderr),
+		adapters.NewOSExec(),
+		http.DefaultClient,
+	)
 	handler := piececmd.NewHandler(deps)
 
 	// Get input
@@ -694,11 +701,12 @@ func runPieceAbandon(cmd *cobra.Command, args []string) error {
 	}
 
 	ctx := cmd.Context()
-	deps := core.Deps{
-		FS:     adapters.NewOSFS(""),
-		Output: adapters.NewTextOutput(os.Stderr),
-		Exec:   adapters.NewOSExec(),
-	}
+	deps := core.NewDeps(
+		adapters.NewOSFS(""),
+		adapters.NewTextOutput(os.Stderr),
+		adapters.NewOSExec(),
+		http.DefaultClient,
+	)
 	handler := piececmd.NewHandler(deps)
 
 	// Get validated input
@@ -747,11 +755,12 @@ func runPieceDone(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to get working directory: %w", err)
 	}
 
-	deps := core.Deps{
-		FS:     adapters.NewOSFS(""),
-		Output: adapters.NewTextOutput(os.Stderr),
-		Exec:   adapters.NewOSExec(),
-	}
+	deps := core.NewDeps(
+		adapters.NewOSFS(""),
+		adapters.NewTextOutput(os.Stderr),
+		adapters.NewOSExec(),
+		http.DefaultClient,
+	)
 	handler := piececmd.NewHandler(deps)
 
 	// Get input
@@ -809,11 +818,12 @@ func runPieceAdopt(cmd *cobra.Command, args []string) error {
 	}
 
 	ctx := cmd.Context()
-	deps := core.Deps{
-		FS:     adapters.NewOSFS(""),
-		Output: adapters.NewTextOutput(os.Stderr),
-		Exec:   adapters.NewOSExec(),
-	}
+	deps := core.NewDeps(
+		adapters.NewOSFS(""),
+		adapters.NewTextOutput(os.Stderr),
+		adapters.NewOSExec(),
+		http.DefaultClient,
+	)
 	handler := piececmd.NewHandler(deps)
 
 	// Get input
@@ -953,11 +963,12 @@ func runAbandonTUI(ctx context.Context, handler *piececmd.Handler) (piececmd.Aba
 
 func runPieceList(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
-	deps := core.Deps{
-		FS:     adapters.NewOSFS(""),
-		Output: adapters.NewTextOutput(os.Stderr),
-		Exec:   adapters.NewOSExec(),
-	}
+	deps := core.NewDeps(
+		adapters.NewOSFS(""),
+		adapters.NewTextOutput(os.Stderr),
+		adapters.NewOSExec(),
+		http.DefaultClient,
+	)
 	handler := piececmd.NewHandler(deps)
 
 	pieces, err := handler.ListPieces(ctx, "")
@@ -1058,11 +1069,12 @@ func runPieceSwitch(cmd *cobra.Command, args []string) error {
 	}
 
 	ctx := cmd.Context()
-	deps := core.Deps{
-		FS:     adapters.NewOSFS(""),
-		Output: adapters.NewTextOutput(os.Stderr),
-		Exec:   adapters.NewOSExec(),
-	}
+	deps := core.NewDeps(
+		adapters.NewOSFS(""),
+		adapters.NewTextOutput(os.Stderr),
+		adapters.NewOSExec(),
+		http.DefaultClient,
+	)
 	handler := piececmd.NewHandler(deps)
 
 	// Get validated input

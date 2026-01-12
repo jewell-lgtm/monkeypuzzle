@@ -1,9 +1,9 @@
 package mp
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -40,7 +40,7 @@ var (
 func init() {
 	prCreateCmd.Flags().StringVar(&flagPRTitle, "title", "", "PR title (default: issue title or piece name)")
 	prCreateCmd.Flags().StringVar(&flagPRBody, "body", "", "PR description")
-	prCreateCmd.Flags().StringVar(&flagPRBase, "base", "main", "Base branch to merge into")
+	prCreateCmd.Flags().StringVar(&flagPRBase, "base", "", "Base branch to merge into (default: auto-detect from parent)")
 	prCreateCmd.Flags().BoolVar(&flagPRSchema, "schema", false, "Output JSON schema and exit")
 	prCmd.AddCommand(prCreateCmd)
 	pieceCmd.AddCommand(prCmd)
@@ -63,11 +63,12 @@ func runPRCreate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to get working directory: %w", err)
 	}
 
-	deps := core.Deps{
-		FS:     adapters.NewOSFS(""),
-		Output: adapters.NewTextOutput(os.Stderr),
-		Exec:   adapters.NewOSExec(),
-	}
+	deps := core.NewDeps(
+		adapters.NewOSFS(""),
+		adapters.NewTextOutput(os.Stderr),
+		adapters.NewOSExec(),
+		http.DefaultClient,
+	)
 	handler := prcmd.NewHandler(deps)
 
 	// Get validated input
@@ -82,20 +83,14 @@ func runPRCreate(cmd *cobra.Command, args []string) error {
 	}
 
 	// Output JSON to stdout
-	jsonData, err := json.MarshalIndent(result, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to marshal result: %w", err)
-	}
-	fmt.Println(string(jsonData))
-
-	return nil
+	return cli.PrintJSON(result)
 }
 
 func getPRInput() (prcmd.Input, error) {
 	var input prcmd.Input
 
-	// Flags always take priority
-	if flagPRTitle != "" || flagPRBody != "" || flagPRBase != "" {
+	// Flags always take priority (base not included since it auto-detects)
+	if flagPRTitle != "" || flagPRBody != "" {
 		input = prcmd.Input{
 			Title: flagPRTitle,
 			Body:  flagPRBody,

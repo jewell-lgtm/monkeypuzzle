@@ -1,6 +1,6 @@
 ---
 title: Add actual validation to PR Validate function
-status: todo
+status: done
 priority: low
 ---
 

@@ -1,6 +1,6 @@
 ---
 title: Fix SwitchPiece bypassing structured output
-status: todo
+status: done
 priority: medium
 ---
 

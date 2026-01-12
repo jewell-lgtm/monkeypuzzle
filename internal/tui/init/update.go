@@ -20,9 +20,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	if m.Step == StepProjectName {
+	// Handle text input steps
+	switch m.Step {
+	case StepProjectName:
 		var cmd tea.Cmd
 		m.ProjectName, cmd = m.ProjectName.Update(msg)
+		return m, cmd
+	case StepLinearAPIKey:
+		var cmd tea.Cmd
+		m.LinearAPIKey, cmd = m.LinearAPIKey.Update(msg)
+		return m, cmd
+	case StepLinearTeam:
+		var cmd tea.Cmd
+		m.LinearTeam, cmd = m.LinearTeam.Update(msg)
 		return m, cmd
 	}
 
@@ -36,8 +46,9 @@ func (m Model) moveCursor(dir int) Model {
 		if m.IssueMethod < 0 {
 			m.IssueMethod = 0
 		}
-		if m.IssueMethod > 0 {
-			m.IssueMethod = 0
+		maxIssue := len(IssueProviders) - 1
+		if m.IssueMethod > maxIssue {
+			m.IssueMethod = maxIssue
 		}
 	case StepPRMethod:
 		m.PRMethod += dir
@@ -56,6 +67,17 @@ func (m Model) nextStep() (tea.Model, tea.Cmd) {
 	case StepProjectName:
 		m.Step = StepIssueMethod
 	case StepIssueMethod:
+		// If linear selected, go to API key step
+		if IssueProviders[m.IssueMethod] == "linear" {
+			m.Step = StepLinearAPIKey
+			m.LinearAPIKey.Focus()
+		} else {
+			m.Step = StepPRMethod
+		}
+	case StepLinearAPIKey:
+		m.Step = StepLinearTeam
+		m.LinearTeam.Focus()
+	case StepLinearTeam:
 		m.Step = StepPRMethod
 	case StepPRMethod:
 		m.Step = StepConfirm

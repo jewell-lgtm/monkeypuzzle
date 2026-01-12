@@ -126,10 +126,7 @@ func (h *Handler) CreatePR(ctx context.Context, workDir string, input Input) (*P
 	}
 
 	if err := piece.WritePRMetadata(status.WorktreePath, metadata, h.deps.FS); err != nil {
-		h.deps.Output.Write(core.Message{
-			Type:    core.MsgWarning,
-			Content: fmt.Sprintf("Failed to write PR metadata: %v", err),
-		})
+		return nil, fmt.Errorf("failed to write PR metadata: %w", err)
 	}
 
 	result := &PRCreateResult{

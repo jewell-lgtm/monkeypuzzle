@@ -1,6 +1,6 @@
 ---
 title: Fix ListPieces not populating Parent field
-status: todo
+status: done
 priority: critical
 ---
 

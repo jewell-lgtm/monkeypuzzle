@@ -1,6 +1,6 @@
 ---
 title: Fix PR base flag default triggering mode detection
-status: todo
+status: done
 priority: high
 ---
 

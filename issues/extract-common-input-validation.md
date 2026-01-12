@@ -1,6 +1,6 @@
 ---
 title: Extract common input validation code
-status: todo
+status: done
 priority: low
 ---
 

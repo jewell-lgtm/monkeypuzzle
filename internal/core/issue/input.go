@@ -1,22 +1,14 @@
 package issue
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/jewell-lgtm/monkeypuzzle/internal/core/input"
 )
 
-// Field defines a single input field with validation rules
-type Field struct {
-	Name        string   `json:"name"`
-	Description string   `json:"description"`
-	Required    bool     `json:"required"`
-	Default     string   `json:"default,omitempty"`
-	ValidValues []string `json:"valid_values,omitempty"`
-}
-
 // fields defines all input fields - single source of truth for validation + schema
-var fields = []Field{
+var fields = []input.Field{
 	{
 		Name:        "title",
 		Description: "Issue title",
@@ -38,32 +30,24 @@ type Input struct {
 
 // Schema returns the JSON schema with defaults for issue create
 func Schema() ([]byte, error) {
-	schema := map[string]any{}
-	for _, f := range fields {
-		schema[f.Name] = f.Default
-	}
-	return json.MarshalIndent(schema, "", "  ")
+	return input.GenerateSchema(fields)
 }
 
 // Fields returns field definitions for TUI generation
-func Fields() []Field {
+func Fields() []input.Field {
 	return fields
 }
 
 // GetDefaults returns default values for all fields.
 func GetDefaults() map[string]string {
-	defaults := make(map[string]string)
-	for _, f := range fields {
-		defaults[f.Name] = f.Default
-	}
-	return defaults
+	return input.GetDefaults(fields)
 }
 
 // Validate validates input and returns errors for invalid fields
-func Validate(input Input) error {
+func Validate(in Input) error {
 	var errs []string
 
-	title := strings.TrimSpace(input.Title)
+	title := strings.TrimSpace(in.Title)
 	if title == "" {
 		errs = append(errs, "title is required")
 	}
@@ -75,19 +59,15 @@ func Validate(input Input) error {
 }
 
 // WithDefaults returns input with defaults applied and whitespace trimmed
-func WithDefaults(input Input) Input {
-	input.Title = strings.TrimSpace(input.Title)
-	input.Description = strings.TrimSpace(input.Description)
-	return input
+func WithDefaults(in Input) Input {
+	in.Title = strings.TrimSpace(in.Title)
+	in.Description = strings.TrimSpace(in.Description)
+	return in
 }
 
 // ParseJSON parses JSON input into Input struct
 func ParseJSON(data []byte) (Input, error) {
-	var input Input
-	if err := json.Unmarshal(data, &input); err != nil {
-		return Input{}, fmt.Errorf("invalid JSON: %w", err)
-	}
-	return input, nil
+	return input.ParseJSON[Input](data)
 }
 
 // ListInput holds input for issue list command
@@ -97,19 +77,14 @@ type ListInput struct {
 
 // ListSchema returns the JSON schema for issue list input
 func ListSchema() ([]byte, error) {
-	schema := map[string]any{
-		"status": []string{},
-	}
-	return json.MarshalIndent(schema, "", "  ")
+	return input.GenerateSchema([]input.Field{
+		{Name: "status", Description: "Filter by status", Default: ""},
+	})
 }
 
 // ParseListJSON parses JSON input into ListInput
 func ParseListJSON(data []byte) (ListInput, error) {
-	var input ListInput
-	if err := json.Unmarshal(data, &input); err != nil {
-		return ListInput{}, fmt.Errorf("invalid JSON: %w", err)
-	}
-	return input, nil
+	return input.ParseJSON[ListInput](data)
 }
 
 // ValidStatuses returns valid status values for filtering
@@ -118,9 +93,9 @@ func ValidStatuses() []string {
 }
 
 // ValidateListInput validates the list input
-func ValidateListInput(input ListInput) error {
+func ValidateListInput(in ListInput) error {
 	valid := ValidStatuses()
-	for _, s := range input.Status {
+	for _, s := range in.Status {
 		found := false
 		for _, v := range valid {
 			if s == v {

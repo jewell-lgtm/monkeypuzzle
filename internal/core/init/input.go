@@ -30,7 +30,7 @@ var fields = []Field{
 		Description: "How issues/features are managed",
 		Required:    true,
 		Default:     "markdown",
-		ValidValues: []string{"markdown"},
+		ValidValues: []string{"markdown", "linear"},
 	},
 	{
 		Name:        "pr_provider",
@@ -43,10 +43,11 @@ var fields = []Field{
 
 // Input holds validated input for the init command
 type Input struct {
-	Name          string `json:"name"`
-	IssueProvider string `json:"issue_provider"`
-	PRProvider    string `json:"pr_provider"`
-	CreateSkill   *bool  `json:"create_skill,omitempty"` // nil means default (true)
+	Name          string            `json:"name"`
+	IssueProvider string            `json:"issue_provider"`
+	IssueConfig   map[string]string `json:"issue_config,omitempty"` // provider-specific config (e.g., api_key, team for linear)
+	PRProvider    string            `json:"pr_provider"`
+	CreateSkill   *bool             `json:"create_skill,omitempty"` // nil means default (true)
 }
 
 // Schema returns the JSON schema with defaults for the init command
@@ -118,6 +119,17 @@ func Validate(input Input) error {
 			if !valid {
 				errs = append(errs, fmt.Sprintf("%s must be one of: %v", f.Name, f.ValidValues))
 			}
+		}
+	}
+
+	// Linear provider requires team config
+	if input.IssueProvider == "linear" {
+		team := ""
+		if input.IssueConfig != nil {
+			team = input.IssueConfig["team"]
+		}
+		if team == "" {
+			errs = append(errs, "linear provider requires 'team' config")
 		}
 	}
 

@@ -1,21 +1,15 @@
 package pr
 
 import (
-	"encoding/json"
+	"fmt"
+	"regexp"
 	"strings"
+
+	"github.com/jewell-lgtm/monkeypuzzle/internal/core/input"
 )
 
-// Field defines a single input field with validation rules
-type Field struct {
-	Name        string   `json:"name"`
-	Description string   `json:"description"`
-	Required    bool     `json:"required"`
-	Default     string   `json:"default,omitempty"`
-	ValidValues []string `json:"valid_values,omitempty"`
-}
-
 // fields defines all input fields - single source of truth for validation + schema
-var fields = []Field{
+var fields = []input.Field{
 	{
 		Name:        "title",
 		Description: "PR title",
@@ -44,48 +38,64 @@ type Input struct {
 
 // Schema returns the JSON schema with defaults for PR create
 func Schema() ([]byte, error) {
-	schema := map[string]any{}
-	for _, f := range fields {
-		schema[f.Name] = f.Default
-	}
-	return json.MarshalIndent(schema, "", "  ")
+	return input.GenerateSchema(fields)
 }
 
 // Fields returns field definitions for TUI generation
-func Fields() []Field {
+func Fields() []input.Field {
 	return fields
 }
 
 // GetDefaults returns default values for all fields.
 func GetDefaults() map[string]string {
-	defaults := make(map[string]string)
-	for _, f := range fields {
-		defaults[f.Name] = f.Default
-	}
-	return defaults
+	return input.GetDefaults(fields)
 }
 
 // WithDefaults returns input with defaults applied and whitespace trimmed.
 // Note: Base is NOT defaulted here - the handler auto-detects from piece parent metadata.
-func WithDefaults(input Input) Input {
-	input.Title = strings.TrimSpace(input.Title)
-	input.Body = strings.TrimSpace(input.Body)
-	input.Base = strings.TrimSpace(input.Base)
+func WithDefaults(in Input) Input {
+	in.Title = strings.TrimSpace(in.Title)
+	in.Body = strings.TrimSpace(in.Body)
+	in.Base = strings.TrimSpace(in.Base)
 	// Base left empty intentionally - handler will auto-detect from piece parent
-	return input
+	return in
 }
 
 // ParseJSON parses JSON input into Input struct
 func ParseJSON(data []byte) (Input, error) {
-	var input Input
-	if err := json.Unmarshal(data, &input); err != nil {
-		return Input{}, err
-	}
-	return input, nil
+	return input.ParseJSON[Input](data)
 }
 
+// MaxTitleLength is the maximum allowed PR title length
+const MaxTitleLength = 256
+
+// branchNameRegex validates git branch names
+// Disallows: spaces, ~, ^, :, \, ?, *, [, .., @{, leading/trailing dots or slashes
+var branchNameRegex = regexp.MustCompile(`^[a-zA-Z0-9][-a-zA-Z0-9._/]*[a-zA-Z0-9]$|^[a-zA-Z0-9]$`)
+
 // Validate validates the input (title is optional, derived from issue if not provided)
-func Validate(input Input) error {
-	// All fields are optional - title can be derived from issue
+func Validate(in Input) error {
+	if in.Title != "" && len(in.Title) > MaxTitleLength {
+		return fmt.Errorf("title too long (max %d chars, got %d)", MaxTitleLength, len(in.Title))
+	}
+	if in.Base != "" && !isValidBranchName(in.Base) {
+		return fmt.Errorf("invalid base branch name: %q", in.Base)
+	}
 	return nil
+}
+
+// isValidBranchName checks if a string is a valid git branch name
+func isValidBranchName(name string) bool {
+	if name == "" {
+		return false
+	}
+	// Check for invalid patterns
+	if strings.Contains(name, "..") ||
+		strings.Contains(name, "@{") ||
+		strings.HasPrefix(name, "/") ||
+		strings.HasSuffix(name, "/") ||
+		strings.HasSuffix(name, ".lock") {
+		return false
+	}
+	return branchNameRegex.MatchString(name)
 }

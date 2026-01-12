@@ -1,8 +1,8 @@
 package mp
 
 import (
-	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -10,6 +10,7 @@ import (
 	"github.com/jewell-lgtm/monkeypuzzle/internal/adapters"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
 	claudecmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/claude"
+	"github.com/jewell-lgtm/monkeypuzzle/pkg/cli"
 )
 
 var claudeCmd = &cobra.Command{
@@ -51,11 +52,12 @@ func runClaudeSkill(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to get working directory: %w", err)
 	}
 
-	deps := core.Deps{
-		FS:     adapters.NewOSFS(""),
-		Output: adapters.NewTextOutput(os.Stderr),
-		Exec:   adapters.NewOSExec(),
-	}
+	deps := core.NewDeps(
+		adapters.NewOSFS(""),
+		adapters.NewTextOutput(os.Stderr),
+		adapters.NewOSExec(),
+		http.DefaultClient,
+	)
 	handler := claudecmd.NewHandler(deps)
 
 	result, err := handler.CreateSkill(wd)
@@ -63,11 +65,5 @@ func runClaudeSkill(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	jsonData, err := json.MarshalIndent(result, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to marshal result: %w", err)
-	}
-	fmt.Println(string(jsonData))
-
-	return nil
+	return cli.PrintJSON(result)
 }

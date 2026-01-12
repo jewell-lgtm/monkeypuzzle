@@ -1,6 +1,6 @@
 ---
 title: Fix filepath.Abs errors being ignored
-status: todo
+status: done
 priority: medium
 ---
 

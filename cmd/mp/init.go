@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"strings"
 
@@ -22,6 +23,8 @@ var (
 	flagName           string
 	flagIssueProvider  string
 	flagPRProvider     string
+	flagLinearAPIKey   string
+	flagLinearTeam     string
 	flagYes            bool
 	flagSchema         bool
 	flagInitGitignore  bool
@@ -48,15 +51,17 @@ Examples:
 func init() {
 	rootCmd.AddCommand(initCmd)
 	initCmd.Flags().StringVar(&flagName, "name", "", "Project name")
-	initCmd.Flags().StringVar(&flagIssueProvider, "issue-provider", "", "Issue provider (markdown)")
+	initCmd.Flags().StringVar(&flagIssueProvider, "issue-provider", "", "Issue provider (markdown, linear)")
 	initCmd.Flags().StringVar(&flagPRProvider, "pr-provider", "", "PR provider (github)")
+	initCmd.Flags().StringVar(&flagLinearAPIKey, "linear-api-key", "", "Linear API key (or use LINEAR_API_KEY env var)")
+	initCmd.Flags().StringVar(&flagLinearTeam, "linear-team", "", "Linear team key (required for linear provider)")
 	initCmd.Flags().BoolVarP(&flagYes, "yes", "y", false, "Overwrite existing config without prompting")
 	initCmd.Flags().BoolVar(&flagSchema, "schema", false, "Output JSON schema with defaults and exit")
 	initCmd.Flags().BoolVar(&flagInitGitignore, "gitignore", false, "Regenerate .monkeypuzzle/.gitignore only")
 
 	// Register completion functions (errors ignored - completion is optional)
 	_ = initCmd.RegisterFlagCompletionFunc("issue-provider", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-		return []string{"markdown"}, cobra.ShellCompDirectiveNoFileComp
+		return []string{"markdown", "linear"}, cobra.ShellCompDirectiveNoFileComp
 	})
 	_ = initCmd.RegisterFlagCompletionFunc("pr-provider", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		return []string{"github"}, cobra.ShellCompDirectiveNoFileComp
@@ -80,11 +85,12 @@ func runInit(cmd *cobra.Command, args []string) error {
 	}
 
 	// Create dependencies
-	deps := core.Deps{
-		FS:     adapters.NewOSFS(""),
-		Output: adapters.NewTextOutput(os.Stderr),
-		Exec:   adapters.NewOSExec(),
-	}
+	deps := core.NewDeps(
+		adapters.NewOSFS(""),
+		adapters.NewTextOutput(os.Stderr),
+		adapters.NewOSExec(),
+		http.DefaultClient,
+	)
 	handler := initcmd.NewHandler(deps)
 
 	// --gitignore: regenerate gitignore only
@@ -148,6 +154,16 @@ func getInput(workDir string) (initcmd.Input, error) {
 			IssueProvider: flagIssueProvider,
 			PRProvider:    flagPRProvider,
 		}
+		// Build issue config from flags
+		if flagIssueProvider == "linear" {
+			input.IssueConfig = make(map[string]string)
+			if flagLinearTeam != "" {
+				input.IssueConfig["team"] = flagLinearTeam
+			}
+			if flagLinearAPIKey != "" {
+				input.IssueConfig["api_key"] = flagLinearAPIKey
+			}
+		}
 
 	case cli.HasStdinData():
 		data, err := io.ReadAll(os.Stdin)
@@ -196,22 +212,36 @@ func runInteractiveMode(workDir string) (initcmd.Input, error) {
 		name = finalModel.ProjectName.Placeholder
 	}
 
-	// Get defaults from field definitions
+	// Get issue provider from selection
+	issueProvider := initTUI.IssueProviders[finalModel.IssueMethod]
+
+	// Get PR provider default
 	fields := initcmd.Fields()
-	var issueProvider, prProvider string
+	var prProvider string
 	for _, f := range fields {
-		switch f.Name {
-		case "issue_provider":
-			issueProvider = f.Default
-		case "pr_provider":
+		if f.Name == "pr_provider" {
 			prProvider = f.Default
+			break
 		}
 	}
 
-	return initcmd.Input{
+	input := initcmd.Input{
 		Name:          name,
 		IssueProvider: issueProvider,
 		PRProvider:    prProvider,
-	}, nil
+	}
+
+	// Build issue config for linear provider
+	if issueProvider == "linear" {
+		input.IssueConfig = make(map[string]string)
+		if team := finalModel.LinearTeam.Value(); team != "" {
+			input.IssueConfig["team"] = team
+		}
+		if apiKey := finalModel.LinearAPIKey.Value(); apiKey != "" {
+			input.IssueConfig["api_key"] = apiKey
+		}
+	}
+
+	return input, nil
 }
 

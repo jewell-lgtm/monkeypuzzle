@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"io/fs"
+	"net/http"
 	"os"
 )
 
@@ -46,9 +47,21 @@ type Exec interface {
 	RunWithEnv(ctx context.Context, dir string, env []string, name string, args ...string) ([]byte, error)
 }
 
+// HTTPClient abstracts HTTP requests for testability
+type HTTPClient interface {
+	Do(req *http.Request) (*http.Response, error)
+}
+
 // Deps holds all injectable dependencies for handlers
 type Deps struct {
 	FS     FS
 	Output Output
 	Exec   Exec
+	HTTP   HTTPClient
+}
+
+// NewDeps creates Deps with all required dependencies.
+// Using this constructor ensures the compiler catches missing dependencies.
+func NewDeps(fs FS, output Output, exec Exec, http HTTPClient) Deps {
+	return Deps{FS: fs, Output: output, Exec: exec, HTTP: http}
 }

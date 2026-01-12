@@ -1,6 +1,6 @@
 ---
 title: Add missing CLI input validation
-status: todo
+status: done
 priority: high
 ---
 

@@ -2,15 +2,11 @@ package issue
 
 import (
 	"fmt"
-	"net/http"
 	"path/filepath"
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core/piece"
 )
-
-// defaultHTTPClient is used when no HTTP client is explicitly provided
-var defaultHTTPClient = http.DefaultClient
 
 // IssueFile represents created issue file info (kept for backwards compatibility)
 type IssueFile struct {
@@ -29,19 +25,12 @@ type IssueListItem struct {
 // Handler executes issue commands
 type Handler struct {
 	deps    core.Deps
-	http    core.HTTPClient
 	workDir string
 }
 
 // NewHandler creates a new issue handler with dependencies
 func NewHandler(deps core.Deps, workDir string) *Handler {
-	return &Handler{deps: deps, workDir: workDir, http: defaultHTTPClient}
-}
-
-// WithHTTP sets the HTTP client for providers that need it (e.g., Linear)
-func (h *Handler) WithHTTP(http core.HTTPClient) *Handler {
-	h.http = http
-	return h
+	return &Handler{deps: deps, workDir: workDir}
 }
 
 // Run creates an issue file with the given input.
@@ -131,7 +120,7 @@ func (h *Handler) getProvider() (Provider, string, error) {
 		Config:       providerCfg,
 		Deps: ProviderDeps{
 			FS:   h.deps.FS,
-			HTTP: h.http,
+			HTTP: h.deps.HTTP,
 		},
 	})
 	if err != nil {

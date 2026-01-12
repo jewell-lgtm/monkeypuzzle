@@ -86,6 +86,13 @@ func (h *Handler) Run(input Input, workDir string) (Config, error) {
 		},
 	}
 
+	// Copy issue config from input
+	if input.IssueConfig != nil {
+		for k, v := range input.IssueConfig {
+			cfg.Issues.Config[k] = v
+		}
+	}
+
 	if input.IssueProvider == "markdown" {
 		cfg.Issues.Config["directory"] = issuesDir
 	}

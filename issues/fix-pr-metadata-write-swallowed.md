@@ -1,6 +1,6 @@
 ---
 title: Fix PR metadata write failure being swallowed
-status: todo
+status: done
 priority: high
 ---
 

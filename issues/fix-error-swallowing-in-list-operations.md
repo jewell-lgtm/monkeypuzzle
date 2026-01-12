@@ -1,6 +1,6 @@
 ---
 title: Fix error swallowing in list operations
-status: todo
+status: done
 priority: medium
 ---
 

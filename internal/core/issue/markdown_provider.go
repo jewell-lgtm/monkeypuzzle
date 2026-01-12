@@ -79,7 +79,9 @@ func (p *MarkdownProvider) List(statusFilter []string) ([]Issue, error) {
 
 		issue, err := p.Get(filePath)
 		if err != nil {
-			continue // Skip files with parse errors
+			// Log warning for unexpected errors (file read or parse issues)
+			fmt.Fprintf(os.Stderr, "warning: skipping %s: %v\n", entry.Name(), err)
+			continue
 		}
 
 		// Apply status filter

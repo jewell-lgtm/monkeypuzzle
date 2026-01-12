@@ -1,6 +1,6 @@
 ---
 title: Fix IsBranchMerged returning success with empty Method
-status: todo
+status: done
 priority: critical
 ---
 

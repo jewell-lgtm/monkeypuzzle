@@ -1,9 +1,9 @@
 package mp
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -95,11 +95,12 @@ func runIssueCreate(cmd *cobra.Command, args []string) error {
 	}
 
 	// Create dependencies
-	deps := core.Deps{
-		FS:     adapters.NewOSFS(""),
-		Output: adapters.NewTextOutput(os.Stderr),
-		Exec:   adapters.NewOSExec(),
-	}
+	deps := core.NewDeps(
+		adapters.NewOSFS(""),
+		adapters.NewTextOutput(os.Stderr),
+		adapters.NewOSExec(),
+		http.DefaultClient,
+	)
 	handler := issue.NewHandler(deps, wd)
 
 	// Get input based on mode
@@ -114,13 +115,7 @@ func runIssueCreate(cmd *cobra.Command, args []string) error {
 	}
 
 	// Output JSON to stdout
-	jsonData, err := json.MarshalIndent(result, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to marshal result: %w", err)
-	}
-	fmt.Println(string(jsonData))
-
-	return nil
+	return cli.PrintJSON(result)
 }
 
 func getIssueInput() (issue.Input, error) {
@@ -199,11 +194,12 @@ func runIssueList(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to get working directory: %w", err)
 	}
 
-	deps := core.Deps{
-		FS:     adapters.NewOSFS(""),
-		Output: adapters.NewTextOutput(os.Stderr),
-		Exec:   adapters.NewOSExec(),
-	}
+	deps := core.NewDeps(
+		adapters.NewOSFS(""),
+		adapters.NewTextOutput(os.Stderr),
+		adapters.NewOSExec(),
+		http.DefaultClient,
+	)
 	handler := issue.NewHandler(deps, wd)
 
 	input, err := getIssueListInput()
@@ -217,13 +213,7 @@ func runIssueList(cmd *cobra.Command, args []string) error {
 	}
 
 	// Output JSON to stdout
-	jsonData, err := json.MarshalIndent(issues, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to marshal result: %w", err)
-	}
-	fmt.Println(string(jsonData))
-
-	return nil
+	return cli.PrintJSON(issues)
 }
 
 func getIssueListInput() (issue.ListInput, error) {

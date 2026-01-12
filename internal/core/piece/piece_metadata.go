@@ -93,7 +93,8 @@ func GetPieceChildren(pieceName string, piecesDir string, fs core.FS) ([]string,
 
 		metadata, err := ReadPieceMetadata(candidatePath, fs)
 		if err != nil {
-			// Skip pieces with unreadable metadata (error parsing)
+			// Log warning for unexpected errors (ReadPieceMetadata returns default if file doesn't exist)
+			fmt.Fprintf(os.Stderr, "warning: skipping %s: %v\n", candidateName, err)
 			continue
 		}
 

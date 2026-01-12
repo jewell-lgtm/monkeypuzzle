@@ -1484,8 +1484,8 @@ func TestHandler_IsBranchMerged_NotMerged(t *testing.T) {
 	if status.IsMerged {
 		t.Error("expected IsMerged to be false")
 	}
-	if status.Method != "" {
-		t.Errorf("expected empty method, got %q", status.Method)
+	if status.Method != "none" {
+		t.Errorf("expected method 'none', got %q", status.Method)
 	}
 	if !status.ExistsOnRemote {
 		t.Error("expected ExistsOnRemote to be true")
@@ -1923,6 +1923,74 @@ func TestHandler_ListPieces_WithPieces(t *testing.T) {
 		t.Error("expected to find piece-two")
 	} else if foundTwo.HasSession {
 		t.Error("expected piece-two to NOT have session")
+	}
+}
+
+func TestHandler_ListPieces_WithParentMetadata(t *testing.T) {
+	fs := adapters.NewMemoryFS()
+	out := adapters.NewBufferOutput()
+	mockExec := adapters.NewMockExec()
+	deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
+	handler := piece.NewHandler(deps)
+
+	// Override data dir for tests
+	paths.SetDataDir("/test-data/monkeypuzzle")
+	t.Cleanup(paths.ResetDataDir)
+
+	// Create pieces directory with pieces (using repo-scoped path)
+	repoRoot := "/test-repo"
+	repoID, err := paths.RepoIdentifier(repoRoot)
+	if err != nil {
+		t.Fatalf("failed to get repo identifier: %v", err)
+	}
+	piecesDir := filepath.Join("/test-data/monkeypuzzle/pieces", repoID)
+
+	// Create piece-one with parent metadata pointing to piece-two
+	pieceOnePath := filepath.Join(piecesDir, "piece-one")
+	_ = fs.MkdirAll(filepath.Join(pieceOnePath, ".monkeypuzzle"), 0755)
+	_ = fs.WriteFile(filepath.Join(pieceOnePath, ".monkeypuzzle", "piece-metadata.json"),
+		[]byte(`{"parent": "piece-two", "created_from_branch": "piece-two-branch"}`), 0644)
+
+	// Create piece-two with parent=main (default)
+	pieceTwoPath := filepath.Join(piecesDir, "piece-two")
+	_ = fs.MkdirAll(filepath.Join(pieceTwoPath, ".monkeypuzzle"), 0755)
+	_ = fs.WriteFile(filepath.Join(pieceTwoPath, ".monkeypuzzle", "piece-metadata.json"),
+		[]byte(`{"parent": "main", "created_from_branch": "main"}`), 0644)
+
+	// Create piece-three with no metadata file (should default to "main")
+	pieceThreePath := filepath.Join(piecesDir, "piece-three")
+	_ = fs.MkdirAll(pieceThreePath, 0755)
+
+	// Mock tmux has-session for each piece
+	mockExec.AddResponse("tmux", []string{"has-session", "-t", "mp-piece-piece-one"}, nil, fmt.Errorf("no session"))
+	mockExec.AddResponse("tmux", []string{"has-session", "-t", "mp-piece-piece-two"}, nil, fmt.Errorf("no session"))
+	mockExec.AddResponse("tmux", []string{"has-session", "-t", "mp-piece-piece-three"}, nil, fmt.Errorf("no session"))
+
+	pieces, err := handler.ListPieces(context.Background(), repoRoot)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	if len(pieces) != 3 {
+		t.Fatalf("expected 3 pieces, got %d", len(pieces))
+	}
+
+	// Find pieces by name and check parent
+	for _, p := range pieces {
+		switch p.Name {
+		case "piece-one":
+			if p.Parent != "piece-two" {
+				t.Errorf("piece-one: expected parent 'piece-two', got %q", p.Parent)
+			}
+		case "piece-two":
+			if p.Parent != "main" {
+				t.Errorf("piece-two: expected parent 'main', got %q", p.Parent)
+			}
+		case "piece-three":
+			if p.Parent != "main" {
+				t.Errorf("piece-three: expected parent 'main' (default), got %q", p.Parent)
+			}
+		}
 	}
 }
 
