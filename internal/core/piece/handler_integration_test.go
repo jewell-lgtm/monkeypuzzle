@@ -1876,3 +1876,79 @@ func TestIntegration_AdoptPiece_CreatesTmuxSessions(t *testing.T) {
 	_ = tmux.KillSession(context.Background(), info.SessionName)
 	_ = tmux.KillSession(context.Background(), mainSession)
 }
+
+func TestIntegration_SwitchPiece_Main(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	tmpDataHome, err := os.MkdirTemp("", "mp-data-*")
+	if err != nil {
+		t.Fatalf("failed to create temp data dir: %v", err)
+	}
+	t.Cleanup(func() {
+		os.RemoveAll(tmpDataHome)
+		paths.ResetDataDir()
+	})
+	paths.SetDataDir(tmpDataHome)
+
+	tmpDir, err := os.MkdirTemp("", "mp-integration-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Resolve symlinks for macOS /var -> /private/var
+	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
+
+	setupGitRepo(t, tmpDir)
+	setupMonkeypuzzleConfig(t, tmpDir)
+
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get working directory: %v", err)
+	}
+	defer func() { _ = os.Chdir(oldWd) }()
+
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("failed to change directory: %v", err)
+	}
+
+	deps := core.Deps{
+		FS:     adapters.NewOSFS(""),
+		Output: adapters.NewBufferOutput(),
+		Exec:   adapters.NewOSExec(),
+	}
+	handler := piece.NewHandler(deps)
+
+	// Switch to "main" should work even with no pieces
+	result, err := handler.SwitchPiece(context.Background(), "main")
+	if err != nil {
+		t.Fatalf("SwitchPiece(main) failed: %v", err)
+	}
+
+	if result.Piece.Name != "main" {
+		t.Errorf("expected piece name 'main', got %q", result.Piece.Name)
+	}
+
+	// Compare resolved paths to handle macOS symlinks
+	resultPath, _ := filepath.EvalSymlinks(result.Piece.WorktreePath)
+	if resultPath != tmpDir {
+		t.Errorf("expected worktree path %q, got %q", tmpDir, resultPath)
+	}
+
+	// Method should be "path" since no tmux session
+	if result.Method != "path" {
+		t.Errorf("expected method 'path', got %q", result.Method)
+	}
+
+	// "master" should also work
+	result, err = handler.SwitchPiece(context.Background(), "master")
+	if err != nil {
+		t.Fatalf("SwitchPiece(master) failed: %v", err)
+	}
+
+	if result.Piece.Name != "master" {
+		t.Errorf("expected piece name 'master', got %q", result.Piece.Name)
+	}
+}

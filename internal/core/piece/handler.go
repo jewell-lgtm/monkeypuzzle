@@ -1641,18 +1641,30 @@ func findOrCreateNode(root *TreeNode, pieceName string, pieceMap map[string]*Pie
 
 // SwitchPiece switches to a piece by name.
 // It tries tmux attach/switch first, falls back to printing path.
+// Special case: "main" or "master" switches to the main repo session.
 func (h *Handler) SwitchPiece(ctx context.Context, name string) (SwitchResult, error) {
 	// Detect repo root from current working directory or piece worktree
-	repoRoot := ""
 	wd, err := os.Getwd()
-	if err == nil {
-		detectedRoot, err := h.git.RepoRoot(ctx, wd)
-		if err == nil {
-			repoRoot = detectedRoot
+	if err != nil {
+		return SwitchResult{}, fmt.Errorf("failed to get working directory: %w", err)
+	}
+
+	// Get main repo root (handles being inside a worktree)
+	mainRepoRoot, err := h.git.GetMainRepoRoot(ctx, wd)
+	if err != nil {
+		// Fallback to regular repo root
+		mainRepoRoot, err = h.git.RepoRoot(ctx, wd)
+		if err != nil {
+			return SwitchResult{}, fmt.Errorf("not in a git repository: %w", err)
 		}
 	}
 
-	pieces, err := h.ListPieces(ctx, repoRoot)
+	// Special handling for "main" or "master" - switch to main repo
+	if name == "main" || name == "master" {
+		return h.switchToMain(ctx, mainRepoRoot, name)
+	}
+
+	pieces, err := h.ListPieces(ctx, mainRepoRoot)
 	if err != nil {
 		return SwitchResult{}, err
 	}
@@ -1711,6 +1723,52 @@ func (h *Handler) SwitchPiece(ctx context.Context, name string) (SwitchResult, e
 	// Fallback: print path for cd $(mp piece switch --name foo)
 	result.Method = "path"
 	fmt.Println(target.WorktreePath)
+
+	return result, nil
+}
+
+// switchToMain switches to the main repo session.
+func (h *Handler) switchToMain(ctx context.Context, mainRepoRoot, name string) (SwitchResult, error) {
+	sessionName := getMainSessionName(mainRepoRoot)
+
+	// Build result with main repo info
+	result := SwitchResult{
+		Piece: PieceListItem{
+			Name:         name,
+			WorktreePath: mainRepoRoot,
+			SessionName:  sessionName,
+			HasSession:   h.tmux.HasSession(ctx, sessionName),
+		},
+	}
+
+	// Try tmux if session exists
+	if result.Piece.HasSession {
+		if h.tmux.InTmux() {
+			if err := h.tmux.SwitchClient(ctx, sessionName); err == nil {
+				result.Method = "tmux-switch"
+				h.deps.Output.Write(core.Message{
+					Type:    core.MsgSuccess,
+					Content: fmt.Sprintf("Switched to %s", name),
+					Data:    result,
+				})
+				return result, nil
+			}
+		} else {
+			if err := h.tmux.AttachSession(ctx, sessionName); err == nil {
+				result.Method = "tmux-attach"
+				h.deps.Output.Write(core.Message{
+					Type:    core.MsgSuccess,
+					Content: fmt.Sprintf("Attached to %s", name),
+					Data:    result,
+				})
+				return result, nil
+			}
+		}
+	}
+
+	// Fallback: print path
+	result.Method = "path"
+	fmt.Println(mainRepoRoot)
 
 	return result, nil
 }
