@@ -72,6 +72,33 @@ func (e *testEnv) runWithStdin(stdin string, args ...string) (string, string, er
 	return stdout.String(), stderr.String(), err
 }
 
+// runInDir executes mp command from a specific directory
+func (e *testEnv) runInDir(dir string, args ...string) (string, string, error) {
+	cmd := exec.Command(e.binPath, args...)
+	cmd.Dir = dir
+
+	var stdout, stderr strings.Builder
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+	return stdout.String(), stderr.String(), err
+}
+
+// runInDirWithStdin executes mp command from a specific directory with stdin
+func (e *testEnv) runInDirWithStdin(dir, stdin string, args ...string) (string, string, error) {
+	cmd := exec.Command(e.binPath, args...)
+	cmd.Dir = dir
+	cmd.Stdin = strings.NewReader(stdin)
+
+	var stdout, stderr strings.Builder
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+	return stdout.String(), stderr.String(), err
+}
+
 // initProject initializes monkeypuzzle in the temp directory
 func (e *testEnv) initProject(name string) {
 	e.t.Helper()
@@ -504,5 +531,96 @@ func TestCLI_Init_SkipsSkill(t *testing.T) {
 	skillPath := filepath.Join(env.tmpDir, ".claude", "skills", "managing-monkeypuzzle", "SKILL.md")
 	if _, err := os.Stat(skillPath); !os.IsNotExist(err) {
 		t.Error("skill file should not be created when create_skill=false")
+	}
+}
+
+// TestCLI_PieceDone_FromMergedPiece tests mp piece done from inside merged piece
+func TestCLI_PieceDone_FromMergedPiece(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	env.initGitRepo()
+	env.initProject("test")
+
+	// Create a piece
+	stdout, stderr, err := env.run("piece", "new", "--name", "test-done", "--skip-switch")
+	if err != nil {
+		t.Fatalf("piece new failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+
+	var newResult map[string]any
+	if err := json.Unmarshal([]byte(stdout), &newResult); err != nil {
+		t.Fatalf("invalid JSON from piece new: %v", err)
+	}
+	worktreePath := newResult["worktree_path"].(string)
+
+	// Simulate merge: merge piece branch into main
+	cmd := exec.Command("git", "merge", "test-done", "--no-edit")
+	cmd.Dir = env.tmpDir
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git merge failed: %v\n%s", err, output)
+	}
+
+	// Run piece done from the worktree
+	stdout, stderr, err = env.runInDirWithStdin(worktreePath, "{}", "piece", "done")
+	if err != nil {
+		t.Fatalf("piece done failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+
+	var result map[string]any
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("invalid JSON output: %v\noutput: %s", err, stdout)
+	}
+
+	// Verify output has main_path
+	if result["main_path"] == nil {
+		t.Error("result missing main_path")
+	}
+
+	// Verify worktree was removed
+	if _, err := os.Stat(worktreePath); !os.IsNotExist(err) {
+		t.Error("worktree should have been removed")
+	}
+}
+
+// TestCLI_PieceAbandon_CurrentPiece tests mp piece abandon from current piece without --name
+func TestCLI_PieceAbandon_CurrentPiece(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	env.initGitRepo()
+	env.initProject("test")
+
+	// Create a piece
+	stdout, stderr, err := env.run("piece", "new", "--name", "test-abandon", "--skip-switch")
+	if err != nil {
+		t.Fatalf("piece new failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+
+	var newResult map[string]any
+	if err := json.Unmarshal([]byte(stdout), &newResult); err != nil {
+		t.Fatalf("invalid JSON from piece new: %v", err)
+	}
+	worktreePath := newResult["worktree_path"].(string)
+
+	// Run piece abandon from the worktree (no --name, detect current)
+	stdout, stderr, err = env.runInDirWithStdin(worktreePath, `{"force":true}`, "piece", "abandon")
+	if err != nil {
+		t.Fatalf("piece abandon failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+
+	var result map[string]any
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("invalid JSON output: %v\noutput: %s", err, stdout)
+	}
+
+	// Verify output has main_path
+	if result["main_path"] == nil {
+		t.Error("result missing main_path")
+	}
+
+	// Verify worktree was removed
+	if _, err := os.Stat(worktreePath); !os.IsNotExist(err) {
+		t.Error("worktree should have been removed")
 	}
 }

@@ -1028,6 +1028,21 @@ func (h *Handler) removePiece(ctx context.Context, repoRoot, pieceName, worktree
 	return nil
 }
 
+// removePieceForce removes a piece worktree forcefully (for removing from inside the worktree).
+func (h *Handler) removePieceForce(ctx context.Context, repoRoot, pieceName, worktreePath string) error {
+	sessionName := fmt.Sprintf("mp-piece-%s", pieceName)
+
+	// Kill tmux session (ignore errors - session may not exist)
+	_ = h.tmux.KillSession(ctx, sessionName)
+
+	// Force remove worktree (needed when running from inside the worktree)
+	if err := h.git.WorktreeRemoveForce(ctx, repoRoot, worktreePath); err != nil {
+		return fmt.Errorf("failed to remove worktree: %w", err)
+	}
+
+	return nil
+}
+
 // AbandonOptions configures the abandon behavior
 type AbandonOptions struct {
 	Force        bool // Force removal even with uncommitted changes
@@ -1040,6 +1055,7 @@ type AbandonResult struct {
 	WorktreePath  string `json:"worktree_path"`
 	BranchName    string `json:"branch_name,omitempty"`
 	BranchDeleted bool   `json:"branch_deleted,omitempty"`
+	MainPath      string `json:"main_path,omitempty"`
 }
 
 // AbandonPiece removes a piece worktree, tmux session, and optionally the branch.
@@ -1048,11 +1064,19 @@ func (h *Handler) AbandonPiece(ctx context.Context, pieceName string, opts Aband
 	result := AbandonResult{PieceName: pieceName}
 
 	// Detect repo root from current working directory first
+	// Use GetMainRepoRoot to handle running from within a worktree
 	repoRoot := ""
 	wd, err := os.Getwd()
 	if err == nil {
-		detectedRoot, err := h.git.RepoRoot(ctx, wd)
-		if err == nil {
+		// Try GetMainRepoRoot first (handles worktrees)
+		detectedRoot, err := h.git.GetMainRepoRoot(ctx, wd)
+		if err != nil {
+			// Fallback to RepoRoot
+			detectedRoot, err = h.git.RepoRoot(ctx, wd)
+			if err == nil {
+				repoRoot = detectedRoot
+			}
+		} else {
 			repoRoot = detectedRoot
 		}
 	}
@@ -1134,9 +1158,83 @@ func (h *Handler) AbandonPiece(ctx context.Context, pieceName string, opts Aband
 		}
 	}
 
+	// Set main repo path for caller to navigate to
+	result.MainPath = repoRoot
+
 	h.deps.Output.Write(core.Message{
 		Type:    core.MsgSuccess,
 		Content: fmt.Sprintf("Abandoned piece: %s", pieceName),
+		Data:    result,
+	})
+
+	return result, nil
+}
+
+// DonePiece cleans up the current piece after it has been merged.
+// Must be run from within a piece worktree. Verifies the piece is merged before cleanup.
+func (h *Handler) DonePiece(ctx context.Context, workDir string, input DoneInput) (DoneResult, error) {
+	// Check if we're in a piece worktree
+	status, err := h.Status(ctx, workDir)
+	if err != nil {
+		return DoneResult{}, fmt.Errorf("failed to get piece status: %w", err)
+	}
+
+	if !status.InPiece {
+		return DoneResult{}, fmt.Errorf("not in a piece worktree; run this from inside a piece")
+	}
+
+	// Get main repo root
+	mainRepoRoot, err := h.git.GetMainRepoRoot(ctx, workDir)
+	if err != nil {
+		return DoneResult{}, fmt.Errorf("failed to get main repo root: %w", err)
+	}
+
+	// Get current branch
+	branchName, err := h.git.CurrentBranch(ctx, workDir)
+	if err != nil {
+		return DoneResult{}, fmt.Errorf("failed to get current branch: %w", err)
+	}
+
+	// Verify piece is merged
+	mergeStatus, err := h.IsBranchMerged(ctx, status.WorktreePath, branchName, input.MainBranch)
+	if err != nil {
+		return DoneResult{}, fmt.Errorf("failed to check merge status: %w", err)
+	}
+
+	if !mergeStatus.IsMerged {
+		return DoneResult{}, fmt.Errorf("piece is not merged; use 'mp piece abandon' to remove unmerged pieces")
+	}
+
+	result := DoneResult{
+		PieceName:    status.PieceName,
+		WorktreePath: status.WorktreePath,
+		MainPath:     mainRepoRoot,
+	}
+
+	// Read issue marker if exists (for status update)
+	marker, _ := h.ReadCurrentIssueMarker(status.WorktreePath)
+
+	// Remove the piece (force removal since we're likely inside the worktree)
+	if err := h.removePieceForce(ctx, mainRepoRoot, status.PieceName, status.WorktreePath); err != nil {
+		return result, fmt.Errorf("failed to cleanup piece: %w", err)
+	}
+
+	result.Cleaned = true
+
+	// Update issue status to done if marker exists
+	if marker != nil && marker.IssuePath != "" {
+		absIssuePath := filepath.Join(mainRepoRoot, marker.IssuePath)
+		if err := h.updateIssueStatusToDone(absIssuePath); err != nil {
+			h.deps.Output.Write(core.Message{
+				Type:    core.MsgWarning,
+				Content: fmt.Sprintf("Failed to update issue status: %v", err),
+			})
+		}
+	}
+
+	h.deps.Output.Write(core.Message{
+		Type:    core.MsgSuccess,
+		Content: fmt.Sprintf("Done with piece: %s", status.PieceName),
 		Data:    result,
 	})
 
@@ -1210,10 +1308,17 @@ func (h *Handler) ListPieces(ctx context.Context, repoRoot string) ([]PieceListI
 		if err != nil {
 			return nil, fmt.Errorf("failed to get working directory: %w", err)
 		}
-		detectedRoot, err := h.git.RepoRoot(ctx, wd)
+		// Use GetMainRepoRoot to handle worktrees correctly
+		detectedRoot, err := h.git.GetMainRepoRoot(ctx, wd)
 		if err != nil {
-			// If not in a git repo, use empty repoRoot (global directory)
-			repoRoot = ""
+			// Fallback to RepoRoot if not in a worktree
+			detectedRoot, err = h.git.RepoRoot(ctx, wd)
+			if err != nil {
+				// If not in a git repo, use empty repoRoot (global directory)
+				repoRoot = ""
+			} else {
+				repoRoot = detectedRoot
+			}
 		} else {
 			repoRoot = detectedRoot
 		}

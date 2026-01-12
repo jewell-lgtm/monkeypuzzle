@@ -72,8 +72,18 @@ var pieceAbandonCmd = &cobra.Command{
 	Short: "Abandon an unmerged piece",
 	Long: `Remove a piece worktree, kill its tmux session, and optionally delete the branch.
 Use --force to discard uncommitted changes.
-Use --delete-branch to also remove the git branch.`,
+Use --delete-branch to also remove the git branch.
+If no --name is provided and run from within a piece, abandons the current piece.`,
 	RunE: runPieceAbandon,
+}
+
+var pieceDoneCmd = &cobra.Command{
+	Use:   "done",
+	Short: "Cleanup current piece after merge",
+	Long: `Remove the current piece worktree and tmux session after the branch has been merged.
+Must be run from within a piece worktree. Verifies the piece is merged before cleanup.
+Use 'mp piece abandon' for unmerged pieces.`,
+	RunE: runPieceDone,
 }
 
 var pieceListCmd = &cobra.Command{
@@ -100,6 +110,7 @@ var flagPieceMergeSchema bool
 var flagPieceCleanupSchema bool
 var flagPieceSwitchSchema bool
 var flagPieceAbandonSchema bool
+var flagPieceDoneSchema bool
 var flagPieceListFlat bool
 
 func init() {
@@ -120,10 +131,12 @@ func init() {
 	pieceCleanupCmd.Flags().BoolVar(&flagPieceCleanupSchema, "schema", false, "Output JSON schema and exit")
 	pieceSwitchCmd.Flags().StringVar(&flagSwitchName, "name", "", "Piece name to switch to")
 	pieceSwitchCmd.Flags().BoolVar(&flagPieceSwitchSchema, "schema", false, "Output JSON schema and exit")
-	pieceAbandonCmd.Flags().StringVar(&flagAbandonName, "name", "", "Piece name to abandon")
+	pieceAbandonCmd.Flags().StringVar(&flagAbandonName, "name", "", "Piece name to abandon (optional if in piece)")
 	pieceAbandonCmd.Flags().BoolVar(&flagForce, "force", false, "Force removal even with uncommitted changes")
 	pieceAbandonCmd.Flags().BoolVar(&flagDeleteBranch, "delete-branch", false, "Also delete the git branch")
 	pieceAbandonCmd.Flags().BoolVar(&flagPieceAbandonSchema, "schema", false, "Output JSON schema and exit")
+	pieceDoneCmd.Flags().StringVar(&flagMainBranch, "main-branch", "main", "Main branch to check merge status against")
+	pieceDoneCmd.Flags().BoolVar(&flagPieceDoneSchema, "schema", false, "Output JSON schema and exit")
 	pieceCmd.Flags().StringVar(&flagMainBranch, "main-branch", "main", "Main branch name (default: main)")
 	pieceListCmd.Flags().BoolVar(&flagPieceListFlat, "flat", false, "Display pieces in a flat list instead of tree view")
 	pieceCmd.AddCommand(pieceNewCmd)
@@ -132,6 +145,7 @@ func init() {
 	pieceCmd.AddCommand(pieceCleanupCmd)
 	pieceCmd.AddCommand(pieceSwitchCmd)
 	pieceCmd.AddCommand(pieceAbandonCmd)
+	pieceCmd.AddCommand(pieceDoneCmd)
 	pieceCmd.AddCommand(pieceListCmd)
 	rootCmd.AddCommand(pieceCmd)
 
@@ -700,6 +714,73 @@ func runPieceAbandon(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+func runPieceDone(cmd *cobra.Command, args []string) error {
+	// --schema mode
+	if flagPieceDoneSchema {
+		schema, err := piececmd.DoneSchema()
+		if err != nil {
+			return err
+		}
+		fmt.Println(string(schema))
+		return nil
+	}
+
+	ctx := cmd.Context()
+	wd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("failed to get working directory: %w", err)
+	}
+
+	deps := core.Deps{
+		FS:     adapters.NewOSFS(""),
+		Output: adapters.NewTextOutput(os.Stderr),
+		Exec:   adapters.NewOSExec(),
+	}
+	handler := piececmd.NewHandler(deps)
+
+	// Get input
+	input, err := getDoneInput()
+	if err != nil {
+		return err
+	}
+
+	result, err := handler.DonePiece(ctx, wd, input)
+	if err != nil {
+		return err
+	}
+
+	// Output JSON to stdout
+	jsonData, err := json.MarshalIndent(result, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal result: %w", err)
+	}
+	fmt.Println(string(jsonData))
+
+	return nil
+}
+
+func getDoneInput() (piececmd.DoneInput, error) {
+	var input piececmd.DoneInput
+
+	if cli.HasStdinData() {
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return piececmd.DoneInput{}, fmt.Errorf("failed to read stdin: %w", err)
+		}
+		input, err = piececmd.ParseDoneJSON(data)
+		if err != nil {
+			return piececmd.DoneInput{}, err
+		}
+	}
+
+	// Flags override stdin
+	if flagMainBranch != "" {
+		input.MainBranch = flagMainBranch
+	}
+
+	return piececmd.WithDoneDefaults(input), nil
+}
+
 func getAbandonInput(ctx context.Context, handler *piececmd.Handler) (piececmd.AbandonInput, error) {
 	var input piececmd.AbandonInput
 	var err error
@@ -720,8 +801,6 @@ func getAbandonInput(ctx context.Context, handler *piececmd.Handler) (piececmd.A
 		if err != nil {
 			return piececmd.AbandonInput{}, err
 		}
-	} else {
-		return piececmd.AbandonInput{}, fmt.Errorf("no input provided; use --name flag or run interactively")
 	}
 
 	// Flags override stdin/TUI options
@@ -730,6 +809,21 @@ func getAbandonInput(ctx context.Context, handler *piececmd.Handler) (piececmd.A
 	}
 	if flagDeleteBranch {
 		input.DeleteBranch = true
+	}
+
+	// If name is still empty, try to detect from current piece
+	if input.Name == "" {
+		wd, err := os.Getwd()
+		if err != nil {
+			return piececmd.AbandonInput{}, fmt.Errorf("failed to get working directory: %w", err)
+		}
+		status, err := handler.Status(ctx, wd)
+		if err != nil {
+			return piececmd.AbandonInput{}, fmt.Errorf("failed to get piece status: %w", err)
+		}
+		if status.InPiece {
+			input.Name = status.PieceName
+		}
 	}
 
 	input = piececmd.WithAbandonDefaults(input)

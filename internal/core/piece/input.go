@@ -319,3 +319,42 @@ func WithCleanupDefaults(input CleanupInput) CleanupInput {
 		Force:      input.Force,
 	}
 }
+
+// DoneInput holds input for the piece done command.
+type DoneInput struct {
+	MainBranch string `json:"main_branch,omitempty"`
+}
+
+// DoneResult contains the result of a done operation.
+type DoneResult struct {
+	PieceName    string `json:"piece_name"`
+	WorktreePath string `json:"worktree_path"`
+	MainPath     string `json:"main_path"`
+	Cleaned      bool   `json:"cleaned"`
+}
+
+// DoneSchema returns the JSON schema for piece done input.
+func DoneSchema() ([]byte, error) {
+	schema := map[string]any{
+		"main_branch": "main",
+	}
+	return json.MarshalIndent(schema, "", "  ")
+}
+
+// ParseDoneJSON parses JSON input into DoneInput.
+func ParseDoneJSON(data []byte) (DoneInput, error) {
+	var input DoneInput
+	if err := json.Unmarshal(data, &input); err != nil {
+		return DoneInput{}, fmt.Errorf("invalid JSON: %w", err)
+	}
+	return input, nil
+}
+
+// WithDoneDefaults returns input with defaults applied.
+func WithDoneDefaults(input DoneInput) DoneInput {
+	mainBranch := strings.TrimSpace(input.MainBranch)
+	if mainBranch == "" {
+		mainBranch = "main"
+	}
+	return DoneInput{MainBranch: mainBranch}
+}
