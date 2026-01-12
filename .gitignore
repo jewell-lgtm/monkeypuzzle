@@ -41,3 +41,6 @@ Thumbs.db
 # Debug
 __debug_bin*
 /mp-mcp
+
+# Piece metadata (worktree-specific)
+.monkeypuzzle/piece-metadata.json
