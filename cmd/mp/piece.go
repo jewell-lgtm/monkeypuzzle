@@ -86,6 +86,15 @@ Use 'mp piece abandon' for unmerged pieces.`,
 	RunE: runPieceDone,
 }
 
+var pieceAdoptCmd = &cobra.Command{
+	Use:   "adopt",
+	Short: "Convert existing branch to piece",
+	Long: `Convert the current git branch into a piece worktree.
+Must be run from the main repo on a non-main/master branch.
+Creates a worktree for the current branch and returns to main.`,
+	RunE: runPieceAdopt,
+}
+
 var pieceListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all pieces",
@@ -111,6 +120,9 @@ var flagPieceCleanupSchema bool
 var flagPieceSwitchSchema bool
 var flagPieceAbandonSchema bool
 var flagPieceDoneSchema bool
+var flagPieceAdoptName string
+var flagPieceAdoptParent string
+var flagPieceAdoptSchema bool
 var flagPieceListFlat bool
 
 func init() {
@@ -137,6 +149,9 @@ func init() {
 	pieceAbandonCmd.Flags().BoolVar(&flagPieceAbandonSchema, "schema", false, "Output JSON schema and exit")
 	pieceDoneCmd.Flags().StringVar(&flagMainBranch, "main-branch", "main", "Main branch to check merge status against")
 	pieceDoneCmd.Flags().BoolVar(&flagPieceDoneSchema, "schema", false, "Output JSON schema and exit")
+	pieceAdoptCmd.Flags().StringVar(&flagPieceAdoptName, "name", "", "Override piece name (defaults to branch name)")
+	pieceAdoptCmd.Flags().StringVarP(&flagPieceAdoptParent, "parent", "p", "main", "Parent piece name (default: main)")
+	pieceAdoptCmd.Flags().BoolVar(&flagPieceAdoptSchema, "schema", false, "Output JSON schema and exit")
 	pieceCmd.Flags().StringVar(&flagMainBranch, "main-branch", "main", "Main branch name (default: main)")
 	pieceListCmd.Flags().BoolVar(&flagPieceListFlat, "flat", false, "Display pieces in a flat list instead of tree view")
 	pieceCmd.AddCommand(pieceNewCmd)
@@ -146,6 +161,7 @@ func init() {
 	pieceCmd.AddCommand(pieceSwitchCmd)
 	pieceCmd.AddCommand(pieceAbandonCmd)
 	pieceCmd.AddCommand(pieceDoneCmd)
+	pieceCmd.AddCommand(pieceAdoptCmd)
 	pieceCmd.AddCommand(pieceListCmd)
 	rootCmd.AddCommand(pieceCmd)
 
@@ -779,6 +795,71 @@ func getDoneInput() (piececmd.DoneInput, error) {
 	}
 
 	return piececmd.WithDoneDefaults(input), nil
+}
+
+func runPieceAdopt(cmd *cobra.Command, args []string) error {
+	// --schema mode
+	if flagPieceAdoptSchema {
+		schema, err := piececmd.AdoptPieceSchema()
+		if err != nil {
+			return err
+		}
+		fmt.Println(string(schema))
+		return nil
+	}
+
+	ctx := cmd.Context()
+	deps := core.Deps{
+		FS:     adapters.NewOSFS(""),
+		Output: adapters.NewTextOutput(os.Stderr),
+		Exec:   adapters.NewOSExec(),
+	}
+	handler := piececmd.NewHandler(deps)
+
+	// Get input
+	input, err := getAdoptInput()
+	if err != nil {
+		return err
+	}
+
+	info, err := handler.AdoptPiece(ctx, input)
+	if err != nil {
+		return err
+	}
+
+	// Output JSON to stdout
+	jsonData, err := json.MarshalIndent(info, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal result: %w", err)
+	}
+	fmt.Println(string(jsonData))
+
+	return nil
+}
+
+func getAdoptInput() (piececmd.AdoptPieceInput, error) {
+	var input piececmd.AdoptPieceInput
+
+	if cli.HasStdinData() {
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return piececmd.AdoptPieceInput{}, fmt.Errorf("failed to read stdin: %w", err)
+		}
+		input, err = piececmd.ParseAdoptPieceJSON(data)
+		if err != nil {
+			return piececmd.AdoptPieceInput{}, err
+		}
+	}
+
+	// Flags override stdin
+	if flagPieceAdoptName != "" {
+		input.Name = flagPieceAdoptName
+	}
+	if flagPieceAdoptParent != "" {
+		input.Parent = flagPieceAdoptParent
+	}
+
+	return piececmd.WithAdoptPieceDefaults(input), nil
 }
 
 func getAbandonInput(ctx context.Context, handler *piececmd.Handler) (piececmd.AbandonInput, error) {

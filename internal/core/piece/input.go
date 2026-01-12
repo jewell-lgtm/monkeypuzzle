@@ -358,3 +358,40 @@ func WithDoneDefaults(input DoneInput) DoneInput {
 	}
 	return DoneInput{MainBranch: mainBranch}
 }
+
+// AdoptPieceInput holds input for the piece adopt command.
+// Converts an existing git branch to a piece.
+type AdoptPieceInput struct {
+	Name   string `json:"name,omitempty"`   // Override piece name (defaults to branch name)
+	Parent string `json:"parent,omitempty"` // Parent piece name (defaults to "main")
+}
+
+// AdoptPieceSchema returns the JSON schema for piece adopt input.
+func AdoptPieceSchema() ([]byte, error) {
+	schema := map[string]any{
+		"name":   "",
+		"parent": "main",
+	}
+	return json.MarshalIndent(schema, "", "  ")
+}
+
+// ParseAdoptPieceJSON parses JSON input into AdoptPieceInput.
+func ParseAdoptPieceJSON(data []byte) (AdoptPieceInput, error) {
+	var input AdoptPieceInput
+	if err := json.Unmarshal(data, &input); err != nil {
+		return AdoptPieceInput{}, fmt.Errorf("invalid JSON: %w", err)
+	}
+	return input, nil
+}
+
+// WithAdoptPieceDefaults returns input with defaults applied.
+func WithAdoptPieceDefaults(input AdoptPieceInput) AdoptPieceInput {
+	parent := strings.TrimSpace(input.Parent)
+	if parent == "" {
+		parent = "main"
+	}
+	return AdoptPieceInput{
+		Name:   strings.TrimSpace(input.Name),
+		Parent: parent,
+	}
+}

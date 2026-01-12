@@ -37,6 +37,16 @@ func (g *Git) WorktreeAddFrom(ctx context.Context, repoRoot, worktreePath, start
 	return nil
 }
 
+// WorktreeAddExisting creates a worktree for an existing branch.
+// The branch must not be currently checked out anywhere.
+func (g *Git) WorktreeAddExisting(ctx context.Context, repoRoot, worktreePath, branchName string) error {
+	_, err := g.exec.RunWithDir(ctx, repoRoot, "git", "worktree", "add", worktreePath, branchName)
+	if err != nil {
+		return fmt.Errorf("failed to create worktree for branch %s at %s: %w", branchName, worktreePath, err)
+	}
+	return nil
+}
+
 // WorktreeRemove removes a git worktree
 func (g *Git) WorktreeRemove(ctx context.Context, repoRoot, worktreePath string) error {
 	_, err := g.exec.RunWithDir(ctx, repoRoot, "git", "worktree", "remove", worktreePath)
@@ -264,4 +274,13 @@ func (g *Git) IsCommitInBranch(ctx context.Context, workDir, commit, branch stri
 		return false, fmt.Errorf("failed to check commit ancestry: %w", err)
 	}
 	return true, nil
+}
+
+// IsClean checks if the working directory has no uncommitted changes.
+func (g *Git) IsClean(ctx context.Context, workDir string) (bool, error) {
+	output, err := g.exec.RunWithDir(ctx, workDir, "git", "status", "--porcelain")
+	if err != nil {
+		return false, fmt.Errorf("failed to check git status: %w", err)
+	}
+	return strings.TrimSpace(string(output)) == "", nil
 }
