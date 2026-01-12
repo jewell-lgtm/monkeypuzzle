@@ -230,6 +230,11 @@ func (h *Handler) AdoptPiece(ctx context.Context, input AdoptPieceInput) (PieceI
 		return PieceInfo{}, fmt.Errorf("not in a git repository: %w", err)
 	}
 
+	// Check if we should auto-attach to the new session
+	shouldAutoAttach := h.tmux.IsInstalled(ctx) &&
+		!h.tmux.InTmux() &&
+		!h.tmux.HasAnySessions(ctx)
+
 	// Check if we're already in a worktree (piece)
 	gitDir, err := h.git.RevParseGitDir(ctx, wd)
 	if err != nil {
@@ -315,6 +320,9 @@ func (h *Handler) AdoptPiece(ctx context.Context, input AdoptPieceInput) (PieceI
 		})
 	}
 
+	// Ensure main repo tmux session exists
+	h.ensureMainSession(ctx, repoRoot, false)
+
 	// Create tmux session
 	sessionName := fmt.Sprintf("mp-piece-%s", pieceName)
 	tmuxCreated := false
@@ -352,6 +360,16 @@ func (h *Handler) AdoptPiece(ctx context.Context, input AdoptPieceInput) (PieceI
 		Content: fmt.Sprintf("Adopted branch %s as piece: %s at %s", currentBranch, pieceName, worktreePath),
 		Data:    info,
 	})
+
+	// Auto-attach to the new session if no sessions were running before
+	if shouldAutoAttach && tmuxCreated {
+		if err := h.tmux.AttachSession(ctx, sessionName); err != nil {
+			h.deps.Output.Write(core.Message{
+				Type:    core.MsgWarning,
+				Content: fmt.Sprintf("Failed to attach to tmux session: %v", err),
+			})
+		}
+	}
 
 	return info, nil
 }
@@ -979,6 +997,7 @@ func (h *Handler) IsBranchMerged(ctx context.Context, repoRoot, branchName, main
 		return status, nil
 	}
 
+	status.Method = "none"
 	return status, nil
 }
 
@@ -1498,12 +1517,19 @@ func (h *Handler) ListPieces(ctx context.Context, repoRoot string) ([]PieceListI
 		// Check if tmux session exists
 		hasSession := h.tmux.HasSession(ctx, sessionName)
 
+		// Read piece metadata for parent info
+		parent := "main"
+		if metadata, err := ReadPieceMetadata(worktreePath, h.deps.FS); err == nil {
+			parent = metadata.Parent
+		}
+
 		pieces = append(pieces, PieceListItem{
 			Name:         name,
 			WorktreePath: worktreePath,
 			SessionName:  sessionName,
 			HasSession:   hasSession,
 			ModTime:      modTime,
+			Parent:       parent,
 		})
 	}
 

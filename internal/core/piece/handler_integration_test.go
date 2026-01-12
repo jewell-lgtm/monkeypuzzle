@@ -1788,3 +1788,91 @@ func TestIntegration_AdoptPiece_WithCustomName(t *testing.T) {
 		t.Errorf("expected piece name 'nice-piece-name', got %q", info.Name)
 	}
 }
+
+func TestIntegration_AdoptPiece_CreatesTmuxSessions(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not available")
+	}
+
+	tmpDataHome, err := os.MkdirTemp("", "mp-data-*")
+	if err != nil {
+		t.Fatalf("failed to create temp data dir: %v", err)
+	}
+	t.Cleanup(func() {
+		os.RemoveAll(tmpDataHome)
+		paths.ResetDataDir()
+	})
+	paths.SetDataDir(tmpDataHome)
+
+	tmpDir, err := os.MkdirTemp("", "mp-integration-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	setupGitRepo(t, tmpDir)
+	setupMonkeypuzzleConfig(t, tmpDir)
+
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get working directory: %v", err)
+	}
+	defer func() { _ = os.Chdir(oldWd) }()
+
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("failed to change directory: %v", err)
+	}
+
+	// Create feature branch with commit
+	cmd := exec.Command("git", "checkout", "-b", "adopt-tmux-test")
+	cmd.Dir = tmpDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git checkout -b failed: %v\n%s", err, out)
+	}
+
+	testFile := filepath.Join(tmpDir, "feature.txt")
+	if err := os.WriteFile(testFile, []byte("feature"), 0644); err != nil {
+		t.Fatalf("failed to write feature file: %v", err)
+	}
+	cmd = exec.Command("git", "add", ".")
+	cmd.Dir = tmpDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git add failed: %v\n%s", err, out)
+	}
+	cmd = exec.Command("git", "commit", "-m", "feature commit")
+	cmd.Dir = tmpDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git commit failed: %v\n%s", err, out)
+	}
+
+	deps := core.Deps{
+		FS:     adapters.NewOSFS(""),
+		Output: adapters.NewBufferOutput(),
+		Exec:   adapters.NewOSExec(),
+	}
+	handler := piece.NewHandler(deps)
+	tmux := adapters.NewTmux(adapters.NewOSExec())
+
+	info, err := handler.AdoptPiece(context.Background(), piece.AdoptPieceInput{})
+	if err != nil {
+		t.Fatalf("AdoptPiece failed: %v", err)
+	}
+
+	// Verify piece session created
+	if !tmux.HasSession(context.Background(), info.SessionName) {
+		t.Errorf("expected piece tmux session %q to exist", info.SessionName)
+	}
+
+	// Verify main repo session created
+	mainSession := "mp-" + filepath.Base(tmpDir)
+	if !tmux.HasSession(context.Background(), mainSession) {
+		t.Errorf("expected main repo tmux session %q to exist", mainSession)
+	}
+
+	// Cleanup
+	_ = tmux.KillSession(context.Background(), info.SessionName)
+	_ = tmux.KillSession(context.Background(), mainSession)
+}
