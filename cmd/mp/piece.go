@@ -460,8 +460,13 @@ func runPieceNewTUI(deps core.Deps, workDir string) (piececmd.NewPieceInput, err
 		return piececmd.NewPieceInput{}, fmt.Errorf("cancelled")
 	}
 
+	selectedIssue, ok := finalModel.SelectedIssue()
+	if !ok {
+		return piececmd.NewPieceInput{}, fmt.Errorf("no issue selected")
+	}
+
 	return piececmd.NewPieceInput{
-		IssuePath: issues[finalModel.Selected].Path,
+		IssuePath: selectedIssue.Path,
 	}, nil
 }
 
