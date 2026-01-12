@@ -2,11 +2,15 @@ package issue
 
 import (
 	"fmt"
+	"net/http"
 	"path/filepath"
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core/piece"
 )
+
+// defaultHTTPClient is used when no HTTP client is explicitly provided
+var defaultHTTPClient = http.DefaultClient
 
 // IssueFile represents created issue file info (kept for backwards compatibility)
 type IssueFile struct {
@@ -25,12 +29,19 @@ type IssueListItem struct {
 // Handler executes issue commands
 type Handler struct {
 	deps    core.Deps
+	http    core.HTTPClient
 	workDir string
 }
 
 // NewHandler creates a new issue handler with dependencies
 func NewHandler(deps core.Deps, workDir string) *Handler {
-	return &Handler{deps: deps, workDir: workDir}
+	return &Handler{deps: deps, workDir: workDir, http: defaultHTTPClient}
+}
+
+// WithHTTP sets the HTTP client for providers that need it (e.g., Linear)
+func (h *Handler) WithHTTP(http core.HTTPClient) *Handler {
+	h.http = http
+	return h
 }
 
 // Run creates an issue file with the given input.
@@ -100,17 +111,32 @@ func (h *Handler) getProvider() (Provider, string, error) {
 		return nil, "", fmt.Errorf("failed to read config (run mp init first): %w", err)
 	}
 
-	if cfg.Issues.Provider != "markdown" {
-		return nil, "", fmt.Errorf("unsupported issue provider: %s (only 'markdown' supported)", cfg.Issues.Provider)
-	}
-
 	issuesDir, ok := cfg.Issues.Config["directory"]
 	if !ok || issuesDir == "" {
 		issuesDir = "issues"
 	}
 
-	fullIssuesDir := filepath.Join(h.workDir, issuesDir)
-	provider := NewMarkdownProvider(h.deps.FS, fullIssuesDir)
+	// Build config with absolute paths for markdown provider
+	providerCfg := cfg.Issues.Config
+	if cfg.Issues.Provider == "markdown" {
+		providerCfg = make(map[string]string)
+		for k, v := range cfg.Issues.Config {
+			providerCfg[k] = v
+		}
+		providerCfg["directory"] = filepath.Join(h.workDir, issuesDir)
+	}
+
+	provider, err := NewProvider(ProviderConfig{
+		ProviderType: cfg.Issues.Provider,
+		Config:       providerCfg,
+		Deps: ProviderDeps{
+			FS:   h.deps.FS,
+			HTTP: h.http,
+		},
+	})
+	if err != nil {
+		return nil, "", err
+	}
 
 	return provider, issuesDir, nil
 }
