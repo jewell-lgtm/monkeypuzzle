@@ -1,6 +1,6 @@
 ---
 title: convert-branch-to-piece
-status: in-progress
+status: done
 description: Add ability to convert existing git branch to piece. User on branch not created via mp should be able to run command to adopt it as piece, creating worktree entry and metadata.
 ---
 
