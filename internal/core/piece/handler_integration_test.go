@@ -1532,3 +1532,259 @@ func TestIntegration_RepoSpecificPieces_Isolation(t *testing.T) {
 		t.Errorf("repo B: expected piece 'piece-in-b', got %q", piecesB[0].Name)
 	}
 }
+
+func TestIntegration_AdoptPiece_HappyPath(t *testing.T) {
+	// Skip if git is not available
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	// Override data dir for tests
+	tmpDataHome, err := os.MkdirTemp("", "mp-data-*")
+	if err != nil {
+		t.Fatalf("failed to create temp data dir: %v", err)
+	}
+	t.Cleanup(func() {
+		os.RemoveAll(tmpDataHome)
+		paths.ResetDataDir()
+	})
+	paths.SetDataDir(tmpDataHome)
+
+	// Create temp directory for test repo
+	tmpDir, err := os.MkdirTemp("", "mp-integration-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Initialize git repo
+	setupGitRepo(t, tmpDir)
+	setupMonkeypuzzleConfig(t, tmpDir)
+
+	// Change to repo directory
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get working directory: %v", err)
+	}
+	defer func() { _ = os.Chdir(oldWd) }()
+
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("failed to change directory: %v", err)
+	}
+
+	// Create a feature branch manually (not through mp)
+	cmd := exec.Command("git", "checkout", "-b", "my-feature-branch")
+	cmd.Dir = tmpDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git checkout -b failed: %v\n%s", err, out)
+	}
+
+	// Make a commit on the feature branch
+	testFile := filepath.Join(tmpDir, "feature.txt")
+	if err := os.WriteFile(testFile, []byte("feature content"), 0644); err != nil {
+		t.Fatalf("failed to write feature file: %v", err)
+	}
+	cmd = exec.Command("git", "add", ".")
+	cmd.Dir = tmpDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git add failed: %v\n%s", err, out)
+	}
+	cmd = exec.Command("git", "commit", "-m", "feature commit")
+	cmd.Dir = tmpDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git commit failed: %v\n%s", err, out)
+	}
+
+	// Create handler and adopt the branch as a piece
+	deps := core.Deps{
+		FS:     adapters.NewOSFS(""),
+		Output: adapters.NewBufferOutput(),
+		Exec:   adapters.NewOSExec(),
+	}
+	handler := piece.NewHandler(deps)
+
+	info, err := handler.AdoptPiece(context.Background(), piece.AdoptPieceInput{})
+	if err != nil {
+		t.Fatalf("AdoptPiece failed: %v", err)
+	}
+
+	// Verify piece name matches branch name
+	if info.Name != "my-feature-branch" {
+		t.Errorf("expected piece name 'my-feature-branch', got %q", info.Name)
+	}
+
+	// Verify worktree was created
+	if _, err := os.Stat(info.WorktreePath); err != nil {
+		t.Errorf("worktree not created at %s: %v", info.WorktreePath, err)
+	}
+
+	// Verify piece-metadata.json exists with correct parent
+	metadataPath := filepath.Join(info.WorktreePath, ".monkeypuzzle", "piece-metadata.json")
+	metadataData, err := os.ReadFile(metadataPath)
+	if err != nil {
+		t.Fatalf("metadata file not found: %v", err)
+	}
+
+	var metadata piece.PieceMetadata
+	if err := json.Unmarshal(metadataData, &metadata); err != nil {
+		t.Fatalf("failed to unmarshal metadata: %v", err)
+	}
+
+	if metadata.Parent != "main" {
+		t.Errorf("expected parent 'main', got %q", metadata.Parent)
+	}
+
+	// Verify piece shows up in list
+	git := adapters.NewGit(adapters.NewOSExec())
+	repoRoot, _ := git.RepoRoot(context.Background(), tmpDir)
+	pieces, err := handler.ListPieces(context.Background(), repoRoot)
+	if err != nil {
+		t.Fatalf("ListPieces failed: %v", err)
+	}
+
+	var foundPiece bool
+	for _, p := range pieces {
+		if p.Name == "my-feature-branch" {
+			foundPiece = true
+			break
+		}
+	}
+	if !foundPiece {
+		t.Error("adopted piece not found in ListPieces")
+	}
+}
+
+func TestIntegration_AdoptPiece_ErrorOnMainBranch(t *testing.T) {
+	// Skip if git is not available
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	// Override data dir for tests
+	tmpDataHome, err := os.MkdirTemp("", "mp-data-*")
+	if err != nil {
+		t.Fatalf("failed to create temp data dir: %v", err)
+	}
+	t.Cleanup(func() {
+		os.RemoveAll(tmpDataHome)
+		paths.ResetDataDir()
+	})
+	paths.SetDataDir(tmpDataHome)
+
+	// Create temp directory for test repo
+	tmpDir, err := os.MkdirTemp("", "mp-integration-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Initialize git repo (stays on main branch)
+	setupGitRepo(t, tmpDir)
+	setupMonkeypuzzleConfig(t, tmpDir)
+
+	// Change to repo directory
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get working directory: %v", err)
+	}
+	defer func() { _ = os.Chdir(oldWd) }()
+
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("failed to change directory: %v", err)
+	}
+
+	// Try to adopt while on main branch - should fail
+	deps := core.Deps{
+		FS:     adapters.NewOSFS(""),
+		Output: adapters.NewBufferOutput(),
+		Exec:   adapters.NewOSExec(),
+	}
+	handler := piece.NewHandler(deps)
+
+	_, err = handler.AdoptPiece(context.Background(), piece.AdoptPieceInput{})
+	if err == nil {
+		t.Fatal("expected error when adopting main branch")
+	}
+	if !strings.Contains(err.Error(), "main") && !strings.Contains(err.Error(), "master") {
+		t.Errorf("expected error about main/master branch, got: %v", err)
+	}
+}
+
+func TestIntegration_AdoptPiece_WithCustomName(t *testing.T) {
+	// Skip if git is not available
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	// Override data dir for tests
+	tmpDataHome, err := os.MkdirTemp("", "mp-data-*")
+	if err != nil {
+		t.Fatalf("failed to create temp data dir: %v", err)
+	}
+	t.Cleanup(func() {
+		os.RemoveAll(tmpDataHome)
+		paths.ResetDataDir()
+	})
+	paths.SetDataDir(tmpDataHome)
+
+	// Create temp directory for test repo
+	tmpDir, err := os.MkdirTemp("", "mp-integration-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Initialize git repo
+	setupGitRepo(t, tmpDir)
+	setupMonkeypuzzleConfig(t, tmpDir)
+
+	// Change to repo directory
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get working directory: %v", err)
+	}
+	defer func() { _ = os.Chdir(oldWd) }()
+
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("failed to change directory: %v", err)
+	}
+
+	// Commit the monkeypuzzle config so working dir is clean
+	cmd := exec.Command("git", "add", ".")
+	cmd.Dir = tmpDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git add failed: %v\n%s", err, out)
+	}
+	cmd = exec.Command("git", "commit", "-m", "add monkeypuzzle config")
+	cmd.Dir = tmpDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git commit failed: %v\n%s", err, out)
+	}
+
+	// Create a feature branch
+	cmd = exec.Command("git", "checkout", "-b", "ugly-branch-name")
+	cmd.Dir = tmpDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git checkout -b failed: %v\n%s", err, out)
+	}
+
+	// Adopt with custom name
+	deps := core.Deps{
+		FS:     adapters.NewOSFS(""),
+		Output: adapters.NewBufferOutput(),
+		Exec:   adapters.NewOSExec(),
+	}
+	handler := piece.NewHandler(deps)
+
+	info, err := handler.AdoptPiece(context.Background(), piece.AdoptPieceInput{
+		Name: "nice-piece-name",
+	})
+	if err != nil {
+		t.Fatalf("AdoptPiece failed: %v", err)
+	}
+
+	// Verify custom name was used
+	if info.Name != "nice-piece-name" {
+		t.Errorf("expected piece name 'nice-piece-name', got %q", info.Name)
+	}
+}

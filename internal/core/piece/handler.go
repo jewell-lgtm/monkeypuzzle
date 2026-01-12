@@ -215,6 +215,147 @@ func (h *Handler) CreatePiece(ctx context.Context, pieceName string, opts Create
 	return info, nil
 }
 
+// AdoptPiece converts an existing git branch into a piece.
+// Must be run from the main repo (not a worktree) on a non-main branch.
+// Creates a worktree for the current branch and sets up piece metadata.
+func (h *Handler) AdoptPiece(ctx context.Context, input AdoptPieceInput) (PieceInfo, error) {
+	wd, err := os.Getwd()
+	if err != nil {
+		return PieceInfo{}, fmt.Errorf("failed to get working directory: %w", err)
+	}
+
+	// Detect git repo root
+	repoRoot, err := h.git.RepoRoot(ctx, wd)
+	if err != nil {
+		return PieceInfo{}, fmt.Errorf("not in a git repository: %w", err)
+	}
+
+	// Check if we're already in a worktree (piece)
+	gitDir, err := h.git.RevParseGitDir(ctx, wd)
+	if err != nil {
+		return PieceInfo{}, fmt.Errorf("failed to get git dir: %w", err)
+	}
+	if h.git.IsWorktree(gitDir) {
+		return PieceInfo{}, fmt.Errorf("cannot adopt from within a piece worktree, run from main repo")
+	}
+
+	// Get current branch
+	currentBranch, err := h.git.CurrentBranch(ctx, wd)
+	if err != nil {
+		return PieceInfo{}, fmt.Errorf("failed to get current branch: %w", err)
+	}
+
+	// Disallow adopting main/master branches
+	if currentBranch == "main" || currentBranch == "master" {
+		return PieceInfo{}, fmt.Errorf("cannot adopt main or master branch as a piece")
+	}
+
+	// Check if working directory is clean
+	clean, err := h.git.IsClean(ctx, wd)
+	if err != nil {
+		return PieceInfo{}, fmt.Errorf("failed to check working directory status: %w", err)
+	}
+	if !clean {
+		return PieceInfo{}, fmt.Errorf("working directory has uncommitted changes, please commit or stash first")
+	}
+
+	// Determine piece name (use input.Name or branch name)
+	pieceName := input.Name
+	if pieceName == "" {
+		pieceName = SanitizePieceName(currentBranch)
+	} else {
+		pieceName = SanitizePieceName(pieceName)
+	}
+
+	// Get pieces directory
+	piecesDir, err := getPiecesDir(repoRoot)
+	if err != nil {
+		return PieceInfo{}, fmt.Errorf("failed to get pieces directory: %w", err)
+	}
+
+	// Check if piece name already exists
+	piecePath := filepath.Join(piecesDir, pieceName)
+	if _, err := h.deps.FS.Stat(piecePath); err == nil {
+		return PieceInfo{}, fmt.Errorf("piece name %q already exists at %s", pieceName, piecePath)
+	}
+
+	// Create pieces directory if it doesn't exist
+	if err := h.deps.FS.MkdirAll(piecesDir, DefaultDirPerm); err != nil {
+		return PieceInfo{}, fmt.Errorf("failed to create pieces directory: %w", err)
+	}
+
+	// Determine parent
+	parent := input.Parent
+	if parent == "" {
+		parent = "main"
+	}
+
+	// Checkout main branch so we can create worktree for current branch
+	if err := h.git.Checkout(ctx, wd, parent); err != nil {
+		return PieceInfo{}, fmt.Errorf("failed to checkout %s: %w", parent, err)
+	}
+
+	// Create worktree for the existing branch
+	worktreePath := filepath.Join(piecesDir, pieceName)
+	if err := h.git.WorktreeAddExisting(ctx, repoRoot, worktreePath, currentBranch); err != nil {
+		// Try to recover by checking out the original branch
+		_ = h.git.Checkout(ctx, wd, currentBranch)
+		return PieceInfo{}, fmt.Errorf("failed to create worktree for branch %s: %w", currentBranch, err)
+	}
+
+	// Write piece metadata
+	pieceMetadata := PieceMetadata{
+		Parent:            parent,
+		CreatedFromBranch: currentBranch,
+	}
+	if err := WritePieceMetadata(worktreePath, pieceMetadata, h.deps.FS); err != nil {
+		h.deps.Output.Write(core.Message{
+			Type:    core.MsgWarning,
+			Content: fmt.Sprintf("Failed to write piece metadata: %v", err),
+		})
+	}
+
+	// Create tmux session
+	sessionName := fmt.Sprintf("mp-piece-%s", pieceName)
+	tmuxCreated := false
+	if err := h.tmux.NewSession(ctx, sessionName, worktreePath); err != nil {
+		h.deps.Output.Write(core.Message{
+			Type:    core.MsgWarning,
+			Content: fmt.Sprintf("Failed to create tmux session: %v", err),
+		})
+	} else {
+		tmuxCreated = true
+	}
+
+	info := PieceInfo{
+		Name:         pieceName,
+		WorktreePath: worktreePath,
+		SessionName:  sessionName,
+	}
+
+	// Run on-piece-create hook
+	hookCtx := HookContext{
+		PieceName:    pieceName,
+		WorktreePath: worktreePath,
+		RepoRoot:     repoRoot,
+		SessionName:  sessionName,
+	}
+	if err := h.hooks.RunHook(ctx, repoRoot, HookOnPieceCreate, hookCtx); err != nil {
+		h.cleanupPiece(ctx, repoRoot, worktreePath, sessionName, tmuxCreated)
+		// Try to recover original state
+		_ = h.git.Checkout(ctx, wd, currentBranch)
+		return PieceInfo{}, fmt.Errorf("on-piece-create hook failed: %w", err)
+	}
+
+	h.deps.Output.Write(core.Message{
+		Type:    core.MsgSuccess,
+		Content: fmt.Sprintf("Adopted branch %s as piece: %s at %s", currentBranch, pieceName, worktreePath),
+		Data:    info,
+	})
+
+	return info, nil
+}
+
 // CurrentIssueMarker represents the current issue marker file structure
 type CurrentIssueMarker struct {
 	IssuePath string `json:"issue_path"` // Relative path from repo root
