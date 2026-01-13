@@ -733,3 +733,107 @@ func TestCLI_IssueSearch_Schema(t *testing.T) {
 		t.Error("schema missing 'status' field")
 	}
 }
+
+// runWithEnv executes mp command with custom environment variables
+func (e *testEnv) runWithEnv(env map[string]string, args ...string) (string, string, error) {
+	cmd := exec.Command(e.binPath, args...)
+	cmd.Dir = e.tmpDir
+	cmd.Env = os.Environ()
+	for k, v := range env {
+		cmd.Env = append(cmd.Env, k+"="+v)
+	}
+
+	var stdout, stderr strings.Builder
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+	return stdout.String(), stderr.String(), err
+}
+
+// TestCLI_ConfigGet tests mp config get returns default value
+func TestCLI_ConfigGet(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	// Use temp dir for XDG_CONFIG_HOME to isolate config
+	configHome := filepath.Join(env.tmpDir, "config")
+
+	stdout, stderr, err := env.runWithEnv(map[string]string{"XDG_CONFIG_HOME": configHome}, "config", "get", "multiplexer")
+	if err != nil {
+		t.Fatalf("config get failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+
+	var result map[string]any
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("invalid JSON output: %v\noutput: %s", err, stdout)
+	}
+
+	// Default value is "none"
+	if result["value"] != "none" {
+		t.Errorf("expected default multiplexer 'none', got %v", result["value"])
+	}
+}
+
+// TestCLI_ConfigSet tests mp config set changes value
+func TestCLI_ConfigSet(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	configHome := filepath.Join(env.tmpDir, "config")
+
+	// Set multiplexer to tmux
+	stdout, stderr, err := env.runWithEnv(map[string]string{"XDG_CONFIG_HOME": configHome}, "config", "set", "multiplexer", "tmux")
+	if err != nil {
+		t.Fatalf("config set failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+
+	var result map[string]any
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("invalid JSON output: %v\noutput: %s", err, stdout)
+	}
+
+	if result["value"] != "tmux" {
+		t.Errorf("expected set value 'tmux', got %v", result["value"])
+	}
+
+	// Verify get returns new value
+	stdout, stderr, err = env.runWithEnv(map[string]string{"XDG_CONFIG_HOME": configHome}, "config", "get", "multiplexer")
+	if err != nil {
+		t.Fatalf("config get after set failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("invalid JSON output: %v\noutput: %s", err, stdout)
+	}
+
+	if result["value"] != "tmux" {
+		t.Errorf("expected 'tmux' after set, got %v", result["value"])
+	}
+}
+
+// TestCLI_ConfigSet_InvalidKey tests mp config set with unknown key
+func TestCLI_ConfigSet_InvalidKey(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	configHome := filepath.Join(env.tmpDir, "config")
+
+	_, _, err := env.runWithEnv(map[string]string{"XDG_CONFIG_HOME": configHome}, "config", "set", "unknown_key", "value")
+	if err == nil {
+		t.Error("expected error for unknown key, got nil")
+	}
+}
+
+// TestCLI_ConfigSet_InvalidValue tests mp config set with invalid value
+func TestCLI_ConfigSet_InvalidValue(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	configHome := filepath.Join(env.tmpDir, "config")
+
+	_, _, err := env.runWithEnv(map[string]string{"XDG_CONFIG_HOME": configHome}, "config", "set", "multiplexer", "invalid")
+	if err == nil {
+		t.Error("expected error for invalid multiplexer value, got nil")
+	}
+}
