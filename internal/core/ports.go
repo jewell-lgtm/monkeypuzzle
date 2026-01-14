@@ -53,6 +53,24 @@ type HTTPClient interface {
 	Do(req *http.Request) (*http.Response, error)
 }
 
+// Multiplexer abstracts terminal multiplexer operations (tmux, zellij, etc.)
+type Multiplexer interface {
+	// SwitchTo switches to (or creates) a session for the given piece
+	SwitchTo(ctx context.Context, sessionName, workDir string) error
+
+	// Kill terminates a session
+	Kill(ctx context.Context, sessionName string) error
+
+	// Exists checks if session is running
+	Exists(ctx context.Context, sessionName string) bool
+
+	// InSession returns true if inside a managed session
+	InSession() bool
+
+	// IsInstalled returns true if multiplexer is available
+	IsInstalled(ctx context.Context) bool
+}
+
 // LoadingSignal provides pub/sub for loading state.
 // Handlers publish loading state changes, UI layers subscribe to display feedback.
 type LoadingSignal struct {

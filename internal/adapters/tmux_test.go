@@ -5,82 +5,39 @@ import (
 	"testing"
 )
 
-func TestTmux_NewSession(t *testing.T) {
-	tests := []struct {
-		name        string
-		sessionName string
-		workDir     string
-		mockErr     error
-		wantErr     bool
-	}{
-		{
-			name:        "success",
-			sessionName: "mp-piece-test",
-			workDir:     "/path/to/worktree",
-			mockErr:     nil,
-			wantErr:     false,
-		},
-		{
-			name:        "failure",
-			sessionName: "mp-piece-test",
-			workDir:     "/path/to/worktree",
-			mockErr:     MockError("duplicate session"),
-			wantErr:     true,
-		},
-	}
+func TestTmuxMultiplexer_SwitchTo_CreatesAndAttaches(t *testing.T) {
+	exec := NewMockExec()
+	// Session doesn't exist
+	exec.AddResponse("tmux", []string{"has-session", "-t", "test-session"}, nil, MockError("no session"))
+	// Create session
+	exec.AddResponse("tmux", []string{"new-session", "-d", "-s", "test-session", "-c", "/work/dir"}, nil, nil)
+	// Attach (not in tmux)
+	exec.AddResponse("tmux", []string{"attach-session", "-t", "test-session"}, nil, nil)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			exec := NewMockExec()
-			exec.AddResponse("tmux", []string{"new-session", "-d", "-s", tt.sessionName, "-c", tt.workDir}, nil, tt.mockErr)
+	mux := NewTmuxMultiplexer(exec)
+	err := mux.SwitchTo(context.Background(), "test-session", "/work/dir")
 
-			tmux := NewTmux(exec)
-			err := tmux.NewSession(context.Background(), tt.sessionName, tt.workDir)
-
-			if (err != nil) != tt.wantErr {
-				t.Errorf("NewSession() error = %v, wantErr %v", err, tt.wantErr)
-			}
-		})
+	if err != nil {
+		t.Errorf("SwitchTo() error = %v", err)
 	}
 }
 
-func TestTmux_HasSession(t *testing.T) {
-	tests := []struct {
-		name        string
-		sessionName string
-		mockErr     error
-		want        bool
-	}{
-		{
-			name:        "session exists",
-			sessionName: "mp-piece-test",
-			mockErr:     nil,
-			want:        true,
-		},
-		{
-			name:        "session not found",
-			sessionName: "mp-piece-test",
-			mockErr:     MockError("session not found"),
-			want:        false,
-		},
-	}
+func TestTmuxMultiplexer_SwitchTo_ExistingSession(t *testing.T) {
+	exec := NewMockExec()
+	// Session exists
+	exec.AddResponse("tmux", []string{"has-session", "-t", "test-session"}, nil, nil)
+	// Attach (not in tmux)
+	exec.AddResponse("tmux", []string{"attach-session", "-t", "test-session"}, nil, nil)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			exec := NewMockExec()
-			exec.AddResponse("tmux", []string{"has-session", "-t", tt.sessionName}, nil, tt.mockErr)
+	mux := NewTmuxMultiplexer(exec)
+	err := mux.SwitchTo(context.Background(), "test-session", "/work/dir")
 
-			tmux := NewTmux(exec)
-			got := tmux.HasSession(context.Background(), tt.sessionName)
-
-			if got != tt.want {
-				t.Errorf("HasSession() = %v, want %v", got, tt.want)
-			}
-		})
+	if err != nil {
+		t.Errorf("SwitchTo() error = %v", err)
 	}
 }
 
-func TestTmux_KillSession(t *testing.T) {
+func TestTmuxMultiplexer_Kill(t *testing.T) {
 	tests := []struct {
 		name        string
 		sessionName string
@@ -89,13 +46,13 @@ func TestTmux_KillSession(t *testing.T) {
 	}{
 		{
 			name:        "success",
-			sessionName: "mp-piece-test",
+			sessionName: "test-session",
 			mockErr:     nil,
 			wantErr:     false,
 		},
 		{
 			name:        "session not found",
-			sessionName: "mp-piece-test",
+			sessionName: "test-session",
 			mockErr:     MockError("session not found"),
 			wantErr:     true,
 		},
@@ -106,60 +63,60 @@ func TestTmux_KillSession(t *testing.T) {
 			exec := NewMockExec()
 			exec.AddResponse("tmux", []string{"kill-session", "-t", tt.sessionName}, nil, tt.mockErr)
 
-			tmux := NewTmux(exec)
-			err := tmux.KillSession(context.Background(), tt.sessionName)
+			mux := NewTmuxMultiplexer(exec)
+			err := mux.Kill(context.Background(), tt.sessionName)
 
 			if (err != nil) != tt.wantErr {
-				t.Errorf("KillSession() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("Kill() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
 	}
 }
 
-func TestTmux_SwitchClient(t *testing.T) {
+func TestTmuxMultiplexer_Exists(t *testing.T) {
 	tests := []struct {
 		name        string
 		sessionName string
 		mockErr     error
-		wantErr     bool
+		want        bool
 	}{
 		{
-			name:        "success",
-			sessionName: "mp-piece-test",
+			name:        "session exists",
+			sessionName: "test-session",
 			mockErr:     nil,
-			wantErr:     false,
+			want:        true,
 		},
 		{
-			name:        "failure",
-			sessionName: "mp-piece-test",
-			mockErr:     MockError("no clients attached"),
-			wantErr:     true,
+			name:        "session not found",
+			sessionName: "test-session",
+			mockErr:     MockError("session not found"),
+			want:        false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			exec := NewMockExec()
-			exec.AddResponse("tmux", []string{"switch-client", "-t", tt.sessionName}, nil, tt.mockErr)
+			exec.AddResponse("tmux", []string{"has-session", "-t", tt.sessionName}, nil, tt.mockErr)
 
-			tmux := NewTmux(exec)
-			err := tmux.SwitchClient(context.Background(), tt.sessionName)
+			mux := NewTmuxMultiplexer(exec)
+			got := mux.Exists(context.Background(), tt.sessionName)
 
-			if (err != nil) != tt.wantErr {
-				t.Errorf("SwitchClient() error = %v, wantErr %v", err, tt.wantErr)
+			if got != tt.want {
+				t.Errorf("Exists() = %v, want %v", got, tt.want)
 			}
 		})
 	}
 }
 
-func TestTmux_InTmux(t *testing.T) {
+func TestTmuxMultiplexer_InSession(t *testing.T) {
 	// Can't easily test environment variable without modifying global state
 	// Just verify it doesn't panic
-	tmux := NewTmux(NewMockExec())
-	_ = tmux.InTmux()
+	mux := NewTmuxMultiplexer(NewMockExec())
+	_ = mux.InSession()
 }
 
-func TestTmux_IsInstalled(t *testing.T) {
+func TestTmuxMultiplexer_IsInstalled(t *testing.T) {
 	tests := []struct {
 		name    string
 		mockErr error
@@ -182,44 +139,11 @@ func TestTmux_IsInstalled(t *testing.T) {
 			exec := NewMockExec()
 			exec.AddResponse("which", []string{"tmux"}, nil, tt.mockErr)
 
-			tmux := NewTmux(exec)
-			got := tmux.IsInstalled(context.Background())
+			mux := NewTmuxMultiplexer(exec)
+			got := mux.IsInstalled(context.Background())
 
 			if got != tt.want {
 				t.Errorf("IsInstalled() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestTmux_HasAnySessions(t *testing.T) {
-	tests := []struct {
-		name    string
-		mockErr error
-		want    bool
-	}{
-		{
-			name:    "sessions exist",
-			mockErr: nil,
-			want:    true,
-		},
-		{
-			name:    "no sessions",
-			mockErr: MockError("no server running"),
-			want:    false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			exec := NewMockExec()
-			exec.AddResponse("tmux", []string{"list-sessions"}, nil, tt.mockErr)
-
-			tmux := NewTmux(exec)
-			got := tmux.HasAnySessions(context.Background())
-
-			if got != tt.want {
-				t.Errorf("HasAnySessions() = %v, want %v", got, tt.want)
 			}
 		})
 	}

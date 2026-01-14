@@ -16,10 +16,6 @@ import (
 )
 
 func TestHandler_CreatePiece(t *testing.T) {
-	// Override data dir for tests
-	paths.SetDataDir("/test-data/monkeypuzzle")
-	t.Cleanup(paths.ResetDataDir)
-
 	fs := adapters.NewMemoryFS()
 	out := adapters.NewBufferOutput()
 	mockExec := adapters.NewMockExec()
@@ -33,7 +29,7 @@ func TestHandler_CreatePiece(t *testing.T) {
 	// Execute - will fail at worktree creation since we didn't mock it, but that's ok
 	// We're testing the flow, not end-to-end success
 	// Use a deterministic piece name for testing
-	_, err := handler.CreatePiece(context.Background(),"test-piece-1", piece.CreatePieceOptions{})
+	_, err := handler.CreatePiece(context.Background(), "test-piece-1", piece.CreatePieceOptions{})
 
 	// We expect an error at worktree creation since we didn't mock the exact path
 	if err == nil {
@@ -54,12 +50,10 @@ func TestHandler_CreatePiece(t *testing.T) {
 	}
 
 	// Verify pieces directory was created (MemoryFS stores relative paths)
-	// Note: With repo-scoped directories, the path includes the repo identifier
+	// Pieces directory is now {repoRoot}/.monkeypuzzle/pieces
 	dirs := fs.Dirs()
 	found := false
-	// The directory will be test-data/monkeypuzzle/pieces/{repoID}
-	// We check for the base pieces directory
-	expectedBaseDir := "test-data/monkeypuzzle/pieces" // MemoryFS cleans paths
+	expectedBaseDir := "repo/.monkeypuzzle/pieces" // MemoryFS cleans leading slash
 	for _, d := range dirs {
 		if strings.HasPrefix(d, expectedBaseDir) {
 			found = true
@@ -187,13 +181,9 @@ func TestHandler_GetPieceHierarchyStatus_WithParentAndChildren(t *testing.T) {
 	deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
 	handler := piece.NewHandler(deps)
 
-	// Setup pieces directory with repo-scoped path
+	// Setup pieces directory
 	repoRoot := "/repo"
-	repoID, err := paths.RepoIdentifier(repoRoot)
-	if err != nil {
-		t.Fatalf("failed to get repo identifier: %v", err)
-	}
-	piecesDir := filepath.Join("/test-data/monkeypuzzle/pieces", repoID)
+	piecesDir := filepath.Join(repoRoot, ".monkeypuzzle", "pieces")
 	parentPiecePath := filepath.Join(piecesDir, "parent-piece")
 	childPiecePath := filepath.Join(piecesDir, "child-piece")
 	_ = fs.MkdirAll(parentPiecePath, 0755)
@@ -265,13 +255,9 @@ func TestHandler_GetPieceHierarchyStatus_StackDepth(t *testing.T) {
 	deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
 	handler := piece.NewHandler(deps)
 
-	// Setup pieces directory with repo-scoped path
+	// Setup pieces directory
 	repoRoot := "/repo"
-	repoID, err := paths.RepoIdentifier(repoRoot)
-	if err != nil {
-		t.Fatalf("failed to get repo identifier: %v", err)
-	}
-	piecesDir := filepath.Join("/test-data/monkeypuzzle/pieces", repoID)
+	piecesDir := filepath.Join(repoRoot, ".monkeypuzzle", "pieces")
 	parentPiecePath := filepath.Join(piecesDir, "parent-piece")
 	childPiecePath := filepath.Join(piecesDir, "child-piece")
 	_ = fs.MkdirAll(parentPiecePath, 0755)
@@ -423,8 +409,7 @@ func TestHandler_CreatePiece_SanitizesName(t *testing.T) {
 	expectedSanitized := "remote-functions-for-auth"
 
 	// Mock the worktree creation with the sanitized name
-	// Pieces dir now includes repo hash (816fc349d3fa for /repo)
-	piecesDir := "/test-data/monkeypuzzle/pieces/816fc349d3fa"
+	piecesDir := filepath.Join(repoRoot, ".monkeypuzzle", "pieces")
 	worktreePath := filepath.Join(piecesDir, expectedSanitized)
 	mockExec.AddResponse("git", []string{"worktree", "add", worktreePath}, nil, nil)
 	mockExec.AddResponse("tmux", []string{"new-session", "-d", "-s", "mp-piece-" + expectedSanitized, "-c", worktreePath}, nil, nil)
@@ -454,13 +439,8 @@ func TestHandler_CreatePiece_NameAlreadyExists(t *testing.T) {
 	repoRoot := "/repo"
 	mockExec.AddResponse("git", []string{"rev-parse", "--show-toplevel"}, []byte(repoRoot+"\n"), nil)
 
-	// Get the actual pieces directory that will be used (repo-scoped)
-	// This matches what getPiecesDir(repoRoot) returns
-	repoID, err := paths.RepoIdentifier(repoRoot)
-	if err != nil {
-		t.Fatalf("failed to get repo identifier: %v", err)
-	}
-	piecesDir := filepath.Join("/test-data/monkeypuzzle/pieces", repoID)
+	// Get the actual pieces directory that will be used
+	piecesDir := filepath.Join(repoRoot, ".monkeypuzzle", "pieces")
 	existingPiecePath := filepath.Join(piecesDir, "existing-piece")
 
 	// Create the pieces directory structure first
@@ -469,7 +449,7 @@ func TestHandler_CreatePiece_NameAlreadyExists(t *testing.T) {
 	_ = fs.MkdirAll(existingPiecePath, 0755)
 
 	// Try to create a piece with the same name
-	_, err = handler.CreatePiece(context.Background(),"existing-piece", piece.CreatePieceOptions{})
+	_, err := handler.CreatePiece(context.Background(), "existing-piece", piece.CreatePieceOptions{})
 	if err == nil {
 		t.Fatal("expected error when piece name already exists")
 	}
@@ -699,9 +679,8 @@ func TestHandler_MergePiece_BlockedByChildren(t *testing.T) {
 	repoRoot := "/repo"
 	worktreePath := "/pieces/parent-piece"
 
-	// Get repo ID for pieces dir
-	repoID, _ := paths.RepoIdentifier(repoRoot)
-	piecesDir := filepath.Join("/test-data/monkeypuzzle/pieces", repoID)
+	// Get pieces dir
+	piecesDir := filepath.Join(repoRoot, ".monkeypuzzle", "pieces")
 
 	// Setup mock responses for worktree status
 	gitDir := repoRoot + "/.git/worktrees/parent-piece"
@@ -749,9 +728,8 @@ func TestHandler_MergePiece_ForceOverridesChildren(t *testing.T) {
 	repoRoot := "/repo"
 	worktreePath := "/pieces/parent-piece"
 
-	// Get repo ID for pieces dir
-	repoID, _ := paths.RepoIdentifier(repoRoot)
-	piecesDir := filepath.Join("/test-data/monkeypuzzle/pieces", repoID)
+	// Get pieces dir
+	piecesDir := filepath.Join(repoRoot, ".monkeypuzzle", "pieces")
 
 	// Setup mock responses for worktree status
 	gitDir := repoRoot + "/.git/worktrees/parent-piece"
@@ -921,13 +899,10 @@ func TestHandler_CreatePiece_OnPieceCreateHookFails_CleansUp(t *testing.T) {
 	// Setup mock responses
 	repoRoot := "/repo"
 	pieceName := "test-piece"
-	// Pieces dir now includes repo hash (816fc349d3fa for /repo)
-	worktreePath := "/test-data/monkeypuzzle/pieces/816fc349d3fa/" + pieceName
-	sessionName := "mp-piece-" + pieceName
+	worktreePath := filepath.Join(repoRoot, ".monkeypuzzle", "pieces", pieceName)
 
 	mockExec.AddResponse("git", []string{"rev-parse", "--show-toplevel"}, []byte(repoRoot+"\n"), nil)
 	mockExec.AddResponse("git", []string{"worktree", "add", worktreePath}, nil, nil)
-	mockExec.AddResponse("tmux", []string{"new-session", "-d", "-s", sessionName, "-c", worktreePath}, nil, nil)
 
 	// Create the hook file so RunHook will try to execute it
 	hookPath := "repo/.monkeypuzzle/hooks/" + piece.HookOnPieceCreate
@@ -938,8 +913,7 @@ func TestHandler_CreatePiece_OnPieceCreateHookFails_CleansUp(t *testing.T) {
 	fullHookPath := filepath.Join(repoRoot, ".monkeypuzzle/hooks", piece.HookOnPieceCreate)
 	mockExec.AddResponse("bash", []string{fullHookPath}, []byte("hook failed"), fmt.Errorf("exit status 1"))
 
-	// Mock cleanup commands
-	mockExec.AddResponse("tmux", []string{"kill-session", "-t", sessionName}, nil, nil)
+	// Mock cleanup commands - only worktree removal, no session (sessions not created at piece creation)
 	mockExec.AddResponse("git", []string{"worktree", "remove", worktreePath}, nil, nil)
 
 	// Execute
@@ -952,11 +926,6 @@ func TestHandler_CreatePiece_OnPieceCreateHookFails_CleansUp(t *testing.T) {
 
 	if !strings.Contains(err.Error(), "on-piece-create hook failed") {
 		t.Errorf("expected error about hook failure, got: %v", err)
-	}
-
-	// Verify cleanup was called - tmux kill-session
-	if !mockExec.WasCalled("tmux", "kill-session", "-t", sessionName) {
-		t.Error("expected tmux kill-session to be called for cleanup")
 	}
 
 	// Verify cleanup was called - git worktree remove
@@ -1011,8 +980,7 @@ Content here.
 	_ = fs.WriteFile(absIssuePath, []byte(issueContent), 0644)
 
 	// Setup mocks
-	// Pieces dir now includes repo hash (816fc349d3fa for /repo)
-	worktreePath := "/test-data/monkeypuzzle/pieces/816fc349d3fa/" + pieceName
+	worktreePath := filepath.Join(repoRoot, ".monkeypuzzle", "pieces", pieceName)
 	sessionName := "mp-piece-" + pieceName
 
 	mockExec.AddResponse("git", []string{"rev-parse", "--show-toplevel"}, []byte(repoRoot+"\n"), nil)
@@ -1094,8 +1062,7 @@ Content here.
 	_ = fs.WriteFile(absIssuePath, []byte(issueContent), 0644)
 
 	// Setup mocks
-	// Pieces dir now includes repo hash (816fc349d3fa for /repo)
-	worktreePath := "/test-data/monkeypuzzle/pieces/816fc349d3fa/" + pieceName
+	worktreePath := filepath.Join(repoRoot, ".monkeypuzzle", "pieces", pieceName)
 	sessionName := "mp-piece-" + pieceName
 
 	mockExec.AddResponse("git", []string{"rev-parse", "--show-toplevel"}, []byte(repoRoot+"\n"), nil)
@@ -1159,8 +1126,7 @@ Content here.
 	_ = fs.WriteFile(absIssuePath, []byte(issueContent), 0644)
 
 	// Setup mocks
-	// Pieces dir now includes repo hash (816fc349d3fa for /repo)
-	worktreePath := "/test-data/monkeypuzzle/pieces/816fc349d3fa/" + pieceName
+	worktreePath := filepath.Join(repoRoot, ".monkeypuzzle", "pieces", pieceName)
 	sessionName := "mp-piece-" + pieceName
 
 	mockExec.AddResponse("git", []string{"rev-parse", "--show-toplevel"}, []byte(repoRoot+"\n"), nil)
@@ -1544,17 +1510,14 @@ func TestHandler_CleanupMergedPieces_NoPieces(t *testing.T) {
 }
 
 func TestHandler_CleanupMergedPieces_DryRun(t *testing.T) {
-	paths.SetDataDir("/test-data/monkeypuzzle")
-	t.Cleanup(paths.ResetDataDir)
-
 	fs := adapters.NewMemoryFS()
 	out := adapters.NewBufferOutput()
 	mockExec := adapters.NewMockExec()
 	deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
 	handler := piece.NewHandler(deps)
 
-	// Pieces dir now includes repo hash (816fc349d3fa for /repo)
-	piecesDir := "test-data/monkeypuzzle/pieces/816fc349d3fa"
+	repoRoot := "/repo"
+	piecesDir := filepath.Join(repoRoot, ".monkeypuzzle", "pieces")
 	pieceName := "merged-piece"
 	worktreePath := filepath.Join(piecesDir, pieceName)
 
@@ -1562,7 +1525,7 @@ func TestHandler_CleanupMergedPieces_DryRun(t *testing.T) {
 	_ = fs.MkdirAll(worktreePath, 0755)
 
 	// Mock git commands for the piece
-	fullWorktreePath := "/" + worktreePath
+	fullWorktreePath := worktreePath
 	mockExec.AddResponse("git", []string{"rev-parse", "--abbrev-ref", "HEAD"}, []byte(pieceName+"\n"), nil)
 
 	// Mock branch check - no PR metadata, use git method
@@ -1609,11 +1572,10 @@ func TestHandler_CleanupMergedPieces_WithIssue(t *testing.T) {
 	handler := piece.NewHandler(deps)
 
 	repoRoot := "/repo"
-	// Pieces dir now includes repo hash (816fc349d3fa for /repo)
-	piecesDir := "test-data/monkeypuzzle/pieces/816fc349d3fa"
+	piecesDir := filepath.Join(repoRoot, ".monkeypuzzle", "pieces")
 	pieceName := "issue-piece"
 	worktreePath := filepath.Join(piecesDir, pieceName)
-	fullWorktreePath := "/" + worktreePath
+	fullWorktreePath := worktreePath
 
 	// Create piece directory with issue marker (new format with IssueRef)
 	_ = fs.MkdirAll(fullWorktreePath+"/.monkeypuzzle", 0755)
@@ -1660,8 +1622,8 @@ func TestHandler_CleanupMergedPieces_SkipsUnmerged(t *testing.T) {
 	deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
 	handler := piece.NewHandler(deps)
 
-	// Pieces dir now includes repo hash (816fc349d3fa for /repo)
-	piecesDir := "test-data/monkeypuzzle/pieces/816fc349d3fa"
+	repoRoot := "/repo"
+	piecesDir := filepath.Join(repoRoot, ".monkeypuzzle", "pieces")
 	pieceName := "unmerged-piece"
 	worktreePath := filepath.Join(piecesDir, pieceName)
 
@@ -1698,11 +1660,11 @@ func TestHandler_CleanupMergedPieces_NoIssueMarker(t *testing.T) {
 	deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
 	handler := piece.NewHandler(deps)
 
-	// Pieces dir now includes repo hash (816fc349d3fa for /repo)
-	piecesDir := "test-data/monkeypuzzle/pieces/816fc349d3fa"
+	repoRoot := "/repo"
+	piecesDir := filepath.Join(repoRoot, ".monkeypuzzle", "pieces")
 	pieceName := "no-issue-piece"
 	worktreePath := filepath.Join(piecesDir, pieceName)
-	fullWorktreePath := "/" + worktreePath
+	fullWorktreePath := worktreePath
 
 	// Create piece directory WITHOUT issue marker
 	_ = fs.MkdirAll(worktreePath, 0755)
@@ -1771,11 +1733,7 @@ func TestHandler_ListPieces_EmptyDir(t *testing.T) {
 
 	// Create empty pieces directory (using repo-scoped path)
 	repoRoot := "/test-repo"
-	repoID, err := paths.RepoIdentifier(repoRoot)
-	if err != nil {
-		t.Fatalf("failed to get repo identifier: %v", err)
-	}
-	piecesDir := filepath.Join("/test-data/monkeypuzzle/pieces", repoID)
+	piecesDir := filepath.Join(repoRoot, ".monkeypuzzle", "pieces")
 	_ = fs.MkdirAll(piecesDir, 0755)
 
 	pieces, err := handler.ListPieces(context.Background(), repoRoot)
@@ -1793,7 +1751,9 @@ func TestHandler_ListPieces_WithPieces(t *testing.T) {
 	out := adapters.NewBufferOutput()
 	mockExec := adapters.NewMockExec()
 	deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
-	handler := piece.NewHandler(deps)
+	// Use TmuxMultiplexer to test session detection
+	mux := adapters.NewTmuxMultiplexer(mockExec)
+	handler := piece.NewHandlerWithMultiplexer(deps, mux)
 
 	// Override data dir for tests
 	paths.SetDataDir("/test-data/monkeypuzzle")
@@ -1801,11 +1761,7 @@ func TestHandler_ListPieces_WithPieces(t *testing.T) {
 
 	// Create pieces directory with pieces (using repo-scoped path)
 	repoRoot := "/test-repo"
-	repoID, err := paths.RepoIdentifier(repoRoot)
-	if err != nil {
-		t.Fatalf("failed to get repo identifier: %v", err)
-	}
-	piecesDir := filepath.Join("/test-data/monkeypuzzle/pieces", repoID)
+	piecesDir := filepath.Join(repoRoot, ".monkeypuzzle", "pieces")
 	_ = fs.MkdirAll(filepath.Join(piecesDir, "piece-one"), 0755)
 	_ = fs.MkdirAll(filepath.Join(piecesDir, "piece-two"), 0755)
 
@@ -1859,11 +1815,7 @@ func TestHandler_ListPieces_WithParentMetadata(t *testing.T) {
 
 	// Create pieces directory with pieces (using repo-scoped path)
 	repoRoot := "/test-repo"
-	repoID, err := paths.RepoIdentifier(repoRoot)
-	if err != nil {
-		t.Fatalf("failed to get repo identifier: %v", err)
-	}
-	piecesDir := filepath.Join("/test-data/monkeypuzzle/pieces", repoID)
+	piecesDir := filepath.Join(repoRoot, ".monkeypuzzle", "pieces")
 
 	// Create piece-one with parent metadata pointing to piece-two
 	pieceOnePath := filepath.Join(piecesDir, "piece-one")
@@ -1925,11 +1877,11 @@ func TestHandler_SwitchPiece_NotFound(t *testing.T) {
 	paths.SetDataDir("/test-data/monkeypuzzle")
 	t.Cleanup(paths.ResetDataDir)
 
-	// Mock git repo root (hash of /projects/myrepo = da65402b5e2c)
+	// Mock git repo root
 	mockExec.AddResponse("git", []string{"rev-parse", "--show-toplevel"}, []byte("/projects/myrepo\n"), nil)
 
-	// Create pieces directory with one piece (repo-scoped)
-	piecesDir := "/test-data/monkeypuzzle/pieces/da65402b5e2c"
+	// Create pieces directory with one piece
+	piecesDir := "/projects/myrepo/.monkeypuzzle/pieces"
 	_ = fs.MkdirAll(filepath.Join(piecesDir, "existing-piece"), 0755)
 
 	// Mock tmux has-session
@@ -1958,11 +1910,11 @@ func TestHandler_SwitchPiece_PrintsPath_NoSession(t *testing.T) {
 	paths.SetDataDir("/test-data/monkeypuzzle")
 	t.Cleanup(paths.ResetDataDir)
 
-	// Mock git repo root (hash of /projects/myrepo = da65402b5e2c)
+	// Mock git repo root
 	mockExec.AddResponse("git", []string{"rev-parse", "--show-toplevel"}, []byte("/projects/myrepo\n"), nil)
 
-	// Create pieces directory with one piece (repo-scoped)
-	piecesDir := "/test-data/monkeypuzzle/pieces/da65402b5e2c"
+	// Create pieces directory with one piece
+	piecesDir := "/projects/myrepo/.monkeypuzzle/pieces"
 	_ = fs.MkdirAll(filepath.Join(piecesDir, "my-piece"), 0755)
 
 	// Mock tmux has-session - no session exists
@@ -2008,163 +1960,6 @@ func TestHandler_SwitchPiece_NoPiecesExist(t *testing.T) {
 }
 
 // ============================================================================
-// Main Repo Session Tests
-// ============================================================================
-
-func TestHandler_CreatePiece_CreatesMainRepoSession(t *testing.T) {
-	paths.SetDataDir("/test-data/monkeypuzzle")
-	t.Cleanup(paths.ResetDataDir)
-
-	fs := adapters.NewMemoryFS()
-	out := adapters.NewBufferOutput()
-	mockExec := adapters.NewMockExec()
-	deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
-	handler := piece.NewHandler(deps)
-
-	repoRoot := "/projects/myrepo"
-	pieceName := "test-feature"
-	// Pieces dir now includes repo hash (da65402b5e2c for /projects/myrepo)
-	piecesDir := "/test-data/monkeypuzzle/pieces/da65402b5e2c"
-	worktreePath := filepath.Join(piecesDir, pieceName)
-
-	// Mock git repo root
-	mockExec.AddResponse("git", []string{"rev-parse", "--show-toplevel"}, []byte(repoRoot+"\n"), nil)
-	// Mock worktree creation
-	mockExec.AddResponse("git", []string{"worktree", "add", worktreePath}, nil, nil)
-	// Mock main repo session check - doesn't exist yet
-	mockExec.AddResponse("tmux", []string{"has-session", "-t", "mp-myrepo"}, nil, fmt.Errorf("no session"))
-	// Mock main repo session creation
-	mockExec.AddResponse("tmux", []string{"new-session", "-d", "-s", "mp-myrepo", "-c", repoRoot}, nil, nil)
-	// Mock piece session creation
-	mockExec.AddResponse("tmux", []string{"new-session", "-d", "-s", "mp-piece-" + pieceName, "-c", worktreePath}, nil, nil)
-
-	info, err := handler.CreatePiece(context.Background(),pieceName, piece.CreatePieceOptions{})
-	if err != nil {
-		t.Fatalf("expected no error, got: %v", err)
-	}
-
-	if info.Name != pieceName {
-		t.Errorf("expected piece name %q, got %q", pieceName, info.Name)
-	}
-
-	// Verify main repo session was created
-	calls := mockExec.GetCalls()
-	foundMainSession := false
-	for _, call := range calls {
-		if call.Name == "tmux" && len(call.Args) >= 4 &&
-			call.Args[0] == "new-session" && call.Args[3] == "mp-myrepo" {
-			foundMainSession = true
-			break
-		}
-	}
-	if !foundMainSession {
-		t.Error("expected main repo session 'mp-myrepo' to be created")
-	}
-}
-
-func TestHandler_CreatePiece_MainSessionAlreadyExists_Skips(t *testing.T) {
-	paths.SetDataDir("/test-data/monkeypuzzle")
-	t.Cleanup(paths.ResetDataDir)
-
-	fs := adapters.NewMemoryFS()
-	out := adapters.NewBufferOutput()
-	mockExec := adapters.NewMockExec()
-	deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
-	handler := piece.NewHandler(deps)
-
-	repoRoot := "/projects/myrepo"
-	pieceName := "test-feature"
-	// Pieces dir now includes repo hash (da65402b5e2c for /projects/myrepo)
-	piecesDir := "/test-data/monkeypuzzle/pieces/da65402b5e2c"
-	worktreePath := filepath.Join(piecesDir, pieceName)
-
-	// Mock git repo root
-	mockExec.AddResponse("git", []string{"rev-parse", "--show-toplevel"}, []byte(repoRoot+"\n"), nil)
-	// Mock worktree creation
-	mockExec.AddResponse("git", []string{"worktree", "add", worktreePath}, nil, nil)
-	// Mock main repo session check - already exists
-	mockExec.AddResponse("tmux", []string{"has-session", "-t", "mp-myrepo"}, nil, nil)
-	// Mock piece session creation
-	mockExec.AddResponse("tmux", []string{"new-session", "-d", "-s", "mp-piece-" + pieceName, "-c", worktreePath}, nil, nil)
-
-	_, err := handler.CreatePiece(context.Background(),pieceName, piece.CreatePieceOptions{})
-	if err != nil {
-		t.Fatalf("expected no error, got: %v", err)
-	}
-
-	// Verify main repo session was NOT created (only has-session check)
-	calls := mockExec.GetCalls()
-	mainSessionCreated := false
-	for _, call := range calls {
-		if call.Name == "tmux" && len(call.Args) >= 4 &&
-			call.Args[0] == "new-session" && call.Args[3] == "mp-myrepo" {
-			mainSessionCreated = true
-			break
-		}
-	}
-	if mainSessionCreated {
-		t.Error("main repo session should not be created when it already exists")
-	}
-}
-
-func TestHandler_CreatePiece_OverwriteSession(t *testing.T) {
-	paths.SetDataDir("/test-data/monkeypuzzle")
-	t.Cleanup(paths.ResetDataDir)
-
-	fs := adapters.NewMemoryFS()
-	out := adapters.NewBufferOutput()
-	mockExec := adapters.NewMockExec()
-	deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
-	handler := piece.NewHandler(deps)
-
-	repoRoot := "/projects/myrepo"
-	pieceName := "test-feature"
-	// Pieces dir now includes repo hash (da65402b5e2c for /projects/myrepo)
-	piecesDir := "/test-data/monkeypuzzle/pieces/da65402b5e2c"
-	worktreePath := filepath.Join(piecesDir, pieceName)
-
-	// Mock git repo root
-	mockExec.AddResponse("git", []string{"rev-parse", "--show-toplevel"}, []byte(repoRoot+"\n"), nil)
-	// Mock worktree creation
-	mockExec.AddResponse("git", []string{"worktree", "add", worktreePath}, nil, nil)
-	// Mock main repo session check - already exists
-	mockExec.AddResponse("tmux", []string{"has-session", "-t", "mp-myrepo"}, nil, nil)
-	// Mock kill existing session
-	mockExec.AddResponse("tmux", []string{"kill-session", "-t", "mp-myrepo"}, nil, nil)
-	// Mock main repo session creation
-	mockExec.AddResponse("tmux", []string{"new-session", "-d", "-s", "mp-myrepo", "-c", repoRoot}, nil, nil)
-	// Mock piece session creation
-	mockExec.AddResponse("tmux", []string{"new-session", "-d", "-s", "mp-piece-" + pieceName, "-c", worktreePath}, nil, nil)
-
-	opts := piece.CreatePieceOptions{OverwriteSession: true}
-	_, err := handler.CreatePiece(context.Background(),pieceName, opts)
-	if err != nil {
-		t.Fatalf("expected no error, got: %v", err)
-	}
-
-	// Verify old session was killed and new one created
-	calls := mockExec.GetCalls()
-	killedSession := false
-	createdSession := false
-	for _, call := range calls {
-		if call.Name == "tmux" && len(call.Args) >= 3 &&
-			call.Args[0] == "kill-session" && call.Args[2] == "mp-myrepo" {
-			killedSession = true
-		}
-		if call.Name == "tmux" && len(call.Args) >= 4 &&
-			call.Args[0] == "new-session" && call.Args[3] == "mp-myrepo" {
-			createdSession = true
-		}
-	}
-	if !killedSession {
-		t.Error("expected existing session to be killed")
-	}
-	if !createdSession {
-		t.Error("expected new session to be created")
-	}
-}
-
-// ============================================================================
 // Piece Metadata Integration Tests
 // ============================================================================
 
@@ -2180,11 +1975,7 @@ func TestHandler_CreatePiece_WritesPieceMetadata(t *testing.T) {
 
 	repoRoot := "/projects/myrepo"
 	pieceName := "test-feature"
-	repoID, err := paths.RepoIdentifier(repoRoot)
-	if err != nil {
-		t.Fatalf("failed to get repo ID: %v", err)
-	}
-	piecesDir := filepath.Join("/test-data/monkeypuzzle/pieces", repoID)
+	piecesDir := filepath.Join(repoRoot, ".monkeypuzzle", "pieces")
 	worktreePath := filepath.Join(piecesDir, pieceName)
 
 	// Mock git repo root
@@ -2236,11 +2027,7 @@ func TestHandler_CreatePiece_WritesPieceMetadata_FromFeatureBranch(t *testing.T)
 
 	repoRoot := "/projects/myrepo"
 	pieceName := "child-feature"
-	repoID, err := paths.RepoIdentifier(repoRoot)
-	if err != nil {
-		t.Fatalf("failed to get repo ID: %v", err)
-	}
-	piecesDir := filepath.Join("/test-data/monkeypuzzle/pieces", repoID)
+	piecesDir := filepath.Join(repoRoot, ".monkeypuzzle", "pieces")
 	worktreePath := filepath.Join(piecesDir, pieceName)
 
 	// Mock git repo root

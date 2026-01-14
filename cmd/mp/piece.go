@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/adapters"
+	"github.com/jewell-lgtm/monkeypuzzle/internal/config"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core/issue"
 	piececmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/piece"
@@ -59,7 +60,7 @@ var pieceCleanupCmd = &cobra.Command{
 }
 
 var pieceSwitchCmd = &cobra.Command{
-	Use:   "switch",
+	Use:   "switch [name]",
 	Short: "Switch to an existing piece",
 	Long: `Switch to an existing piece worktree.
 Tries to attach to the tmux session first, falls back to printing the path.
@@ -174,6 +175,23 @@ func init() {
 	_ = pieceCleanupCmd.RegisterFlagCompletionFunc("main-branch", completeGitBranches)
 }
 
+// newPieceHandler creates a piece handler with multiplexer based on user config.
+func newPieceHandler(deps core.Deps) *piececmd.Handler {
+	userCfg, err := config.LoadUserConfig()
+	if err != nil {
+		// Fall back to noop on config error
+		return newPieceHandler(deps)
+	}
+
+	mux, err := adapters.NewMultiplexer(userCfg.Multiplexer, deps.Exec)
+	if err != nil {
+		// Fall back to noop on unknown provider
+		return newPieceHandler(deps)
+	}
+
+	return piececmd.NewHandlerWithMultiplexer(deps, mux)
+}
+
 func completePieceNames(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	deps := core.NewDeps(
 		adapters.NewOSFS(""),
@@ -182,7 +200,7 @@ func completePieceNames(cmd *cobra.Command, args []string, toComplete string) ([
 		http.DefaultClient,
 		core.NewLoadingSignal(),
 	)
-	handler := piececmd.NewHandler(deps)
+	handler := newPieceHandler(deps)
 
 	// Get repo root from current directory
 	repoRoot := ""
@@ -244,7 +262,7 @@ func runPieceStatus(cmd *cobra.Command, args []string) error {
 		http.DefaultClient,
 		adapters.SetupCLILoading(os.Stderr),
 	)
-	handler := piececmd.NewHandler(deps)
+	handler := newPieceHandler(deps)
 
 	// Get main branch (default to "main")
 	mainBranch := "main"
@@ -355,7 +373,7 @@ func runPieceNew(cmd *cobra.Command, args []string) error {
 	// Register issue sync subscriber
 	issueSync.Sub(newIssueSyncSubscriber(wd, deps, os.Stderr))
 
-	handler := piececmd.NewHandler(deps)
+	handler := newPieceHandler(deps)
 
 	// Get validated input from flags/stdin/TUI
 	input, err := getPieceNewInput(deps, wd)
@@ -534,7 +552,7 @@ func runPieceUpdate(cmd *cobra.Command, args []string) error {
 		http.DefaultClient,
 		adapters.SetupCLILoading(os.Stderr),
 	)
-	handler := piececmd.NewHandler(deps)
+	handler := newPieceHandler(deps)
 
 	// Get input
 	input, err := getUpdateInput()
@@ -600,7 +618,7 @@ func runPieceMerge(cmd *cobra.Command, args []string) error {
 		http.DefaultClient,
 		adapters.SetupCLILoading(os.Stderr),
 	)
-	handler := piececmd.NewHandler(deps)
+	handler := newPieceHandler(deps)
 
 	// Get input
 	input, err := getMergeInput()
@@ -679,7 +697,7 @@ func runPieceCleanup(cmd *cobra.Command, args []string) error {
 	// Register issue sync subscriber
 	issueSync.Sub(newIssueSyncSubscriber(wd, deps, os.Stderr))
 
-	handler := piececmd.NewHandler(deps)
+	handler := newPieceHandler(deps)
 
 	// Get input
 	input, err := getCleanupInput()
@@ -762,7 +780,7 @@ func runPieceAbandon(cmd *cobra.Command, args []string) error {
 		http.DefaultClient,
 		adapters.SetupCLILoading(os.Stderr),
 	)
-	handler := piececmd.NewHandler(deps)
+	handler := newPieceHandler(deps)
 
 	// Get validated input
 	input, err := getAbandonInput(ctx, handler)
@@ -824,7 +842,7 @@ func runPieceDone(cmd *cobra.Command, args []string) error {
 	// Register issue sync subscriber
 	issueSync.Sub(newIssueSyncSubscriber(wd, deps, os.Stderr))
 
-	handler := piececmd.NewHandler(deps)
+	handler := newPieceHandler(deps)
 
 	// Get input
 	input, err := getDoneInput()
@@ -888,7 +906,7 @@ func runPieceAdopt(cmd *cobra.Command, args []string) error {
 		http.DefaultClient,
 		adapters.SetupCLILoading(os.Stderr),
 	)
-	handler := piececmd.NewHandler(deps)
+	handler := newPieceHandler(deps)
 
 	// Get input
 	input, err := getAdoptInput()
@@ -990,12 +1008,15 @@ func getAbandonInput(ctx context.Context, handler *piececmd.Handler) (piececmd.A
 }
 
 func runAbandonTUI(ctx context.Context, handler *piececmd.Handler) (piececmd.AbandonInput, error) {
-	// Get repo root from current directory
+	// Get repo root from current directory (use GetMainRepoRoot for worktree support)
 	repoRoot := ""
 	wd, err := os.Getwd()
 	if err == nil {
 		git := adapters.NewGit(adapters.NewOSExec())
-		detectedRoot, err := git.RepoRoot(ctx, wd)
+		detectedRoot, err := git.GetMainRepoRoot(ctx, wd)
+		if err != nil {
+			detectedRoot, err = git.RepoRoot(ctx, wd)
+		}
 		if err == nil {
 			repoRoot = detectedRoot
 		}
@@ -1034,7 +1055,7 @@ func runPieceList(cmd *cobra.Command, args []string) error {
 		http.DefaultClient,
 		adapters.SetupCLILoading(os.Stderr),
 	)
-	handler := piececmd.NewHandler(deps)
+	handler := newPieceHandler(deps)
 
 	pieces, err := handler.ListPieces(ctx, "")
 	if err != nil {
@@ -1157,6 +1178,11 @@ func runPieceSwitch(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	// Positional arg takes precedence over --name flag
+	if len(args) > 0 && flagSwitchName == "" {
+		flagSwitchName = args[0]
+	}
+
 	ctx := cmd.Context()
 	deps := core.NewDeps(
 		adapters.NewOSFS(""),
@@ -1165,7 +1191,7 @@ func runPieceSwitch(cmd *cobra.Command, args []string) error {
 		http.DefaultClient,
 		adapters.SetupCLILoading(os.Stderr),
 	)
-	handler := piececmd.NewHandler(deps)
+	handler := newPieceHandler(deps)
 
 	// Get validated input
 	input, err := getSwitchInput(ctx, handler)
@@ -1224,12 +1250,15 @@ func getSwitchInput(ctx context.Context, handler *piececmd.Handler) (piececmd.Sw
 }
 
 func runSwitchTUI(ctx context.Context, handler *piececmd.Handler) (piececmd.SwitchInput, error) {
-	// Get repo root from current directory
+	// Get repo root from current directory (use GetMainRepoRoot for worktree support)
 	repoRoot := ""
 	wd, err := os.Getwd()
 	if err == nil {
 		git := adapters.NewGit(adapters.NewOSExec())
-		detectedRoot, err := git.RepoRoot(ctx, wd)
+		detectedRoot, err := git.GetMainRepoRoot(ctx, wd)
+		if err != nil {
+			detectedRoot, err = git.RepoRoot(ctx, wd)
+		}
 		if err == nil {
 			repoRoot = detectedRoot
 		}

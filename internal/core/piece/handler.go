@@ -26,17 +26,23 @@ type Handler struct {
 	deps   core.Deps
 	git    *adapters.Git
 	github *adapters.GitHub
-	tmux   *adapters.Tmux
+	mux    core.Multiplexer
 	hooks  *HookRunner
 }
 
-// NewHandler creates a new piece handler with dependencies
+// NewHandler creates a new piece handler with dependencies.
+// Uses NoopMultiplexer by default. Use NewHandlerWithMultiplexer to specify a multiplexer.
 func NewHandler(deps core.Deps) *Handler {
+	return NewHandlerWithMultiplexer(deps, adapters.NewNoopMultiplexer())
+}
+
+// NewHandlerWithMultiplexer creates a new piece handler with a specific multiplexer.
+func NewHandlerWithMultiplexer(deps core.Deps, mux core.Multiplexer) *Handler {
 	return &Handler{
 		deps:   deps,
 		git:    adapters.NewGit(deps.Exec),
 		github: adapters.NewGitHub(deps.Exec),
-		tmux:   adapters.NewTmux(deps.Exec),
+		mux:    mux,
 		hooks:  NewHookRunner(deps),
 	}
 }
@@ -62,10 +68,10 @@ func (h *Handler) CreatePieceWithInput(ctx context.Context, input NewPieceInput,
 	return h.CreatePiece(ctx, input.Name, opts)
 }
 
-// CreatePiece creates a new git worktree with tmux session.
+// CreatePiece creates a new git worktree for a piece.
 // If pieceName is provided and non-empty, it will be used (after checking it doesn't exist).
 // If pieceName is empty, a name will be generated automatically.
-// If no tmux sessions were running and tmux is installed, attaches to the new session.
+// Session management is handled separately by SwitchPiece.
 func (h *Handler) CreatePiece(ctx context.Context, pieceName string, opts CreatePieceOptions) (PieceInfo, error) {
 	wd, err := os.Getwd()
 	if err != nil {
@@ -78,21 +84,12 @@ func (h *Handler) CreatePiece(ctx context.Context, pieceName string, opts Create
 		return PieceInfo{}, fmt.Errorf("not in a git repository: %w", err)
 	}
 
-	// Check if we should auto-attach to the new session
-	// Conditions: tmux installed, not already in tmux, no sessions exist
-	shouldAutoAttach := h.tmux.IsInstalled(ctx) &&
-		!h.tmux.InTmux() &&
-		!h.tmux.HasAnySessions(ctx)
-
 	// Get current branch before creating worktree (for piece metadata)
 	currentBranch, err := h.git.CurrentBranch(ctx, wd)
 	if err != nil {
 		// Non-fatal: use empty string if we can't determine branch
 		currentBranch = ""
 	}
-
-	// Ensure main repo tmux session exists
-	h.ensureMainSession(ctx, repoRoot, opts.OverwriteSession)
 
 	// Get pieces directory (scoped to this repo)
 	piecesDir, err := getPiecesDir(repoRoot)
@@ -147,10 +144,6 @@ func (h *Handler) CreatePiece(ctx context.Context, pieceName string, opts Create
 		}
 	}
 
-	// Note: Currently, tmux creation failures are non-fatal (logged as warnings).
-	// If we decide to make them fatal in the future, we should add cleanup logic here to
-	// remove the worktree if those operations fail.
-
 	// Write piece metadata (parent-child relationship)
 	pieceMetadata := PieceMetadata{
 		Parent:            parent,
@@ -164,19 +157,7 @@ func (h *Handler) CreatePiece(ctx context.Context, pieceName string, opts Create
 		})
 	}
 
-	// Create tmux session
 	sessionName := fmt.Sprintf("mp-piece-%s", pieceName)
-	tmuxCreated := false
-	if err := h.tmux.NewSession(ctx, sessionName, worktreePath); err != nil {
-		// If tmux fails, log but don't fail the operation
-		h.deps.Output.Write(core.Message{
-			Type:    core.MsgWarning,
-			Content: fmt.Sprintf("Failed to create tmux session: %v", err),
-		})
-	} else {
-		tmuxCreated = true
-	}
-
 	info := PieceInfo{
 		Name:         pieceName,
 		WorktreePath: worktreePath,
@@ -191,8 +172,8 @@ func (h *Handler) CreatePiece(ctx context.Context, pieceName string, opts Create
 		SessionName:  sessionName,
 	}
 	if err := h.hooks.RunHook(ctx, repoRoot, HookOnPieceCreate, hookCtx); err != nil {
-		// Cleanup: remove worktree and tmux session on hook failure
-		h.cleanupPiece(ctx, repoRoot, worktreePath, sessionName, tmuxCreated)
+		// Cleanup: remove worktree on hook failure
+		h.cleanupPiece(ctx, repoRoot, worktreePath, sessionName, false)
 		return PieceInfo{}, fmt.Errorf("on-piece-create hook failed: %w", err)
 	}
 
@@ -201,16 +182,6 @@ func (h *Handler) CreatePiece(ctx context.Context, pieceName string, opts Create
 		Content: fmt.Sprintf("Created piece: %s at %s", pieceName, worktreePath),
 		Data:    info,
 	})
-
-	// Auto-attach to the new session if no sessions were running before
-	if shouldAutoAttach && tmuxCreated {
-		if err := h.tmux.AttachSession(ctx, sessionName); err != nil {
-			h.deps.Output.Write(core.Message{
-				Type:    core.MsgWarning,
-				Content: fmt.Sprintf("Failed to attach to tmux session: %v", err),
-			})
-		}
-	}
 
 	return info, nil
 }
@@ -229,11 +200,6 @@ func (h *Handler) AdoptPiece(ctx context.Context, input AdoptPieceInput) (PieceI
 	if err != nil {
 		return PieceInfo{}, fmt.Errorf("not in a git repository: %w", err)
 	}
-
-	// Check if we should auto-attach to the new session
-	shouldAutoAttach := h.tmux.IsInstalled(ctx) &&
-		!h.tmux.InTmux() &&
-		!h.tmux.HasAnySessions(ctx)
 
 	// Check if we're already in a worktree (piece)
 	gitDir, err := h.git.RevParseGitDir(ctx, wd)
@@ -320,21 +286,7 @@ func (h *Handler) AdoptPiece(ctx context.Context, input AdoptPieceInput) (PieceI
 		})
 	}
 
-	// Ensure main repo tmux session exists
-	h.ensureMainSession(ctx, repoRoot, false)
-
-	// Create tmux session
 	sessionName := fmt.Sprintf("mp-piece-%s", pieceName)
-	tmuxCreated := false
-	if err := h.tmux.NewSession(ctx, sessionName, worktreePath); err != nil {
-		h.deps.Output.Write(core.Message{
-			Type:    core.MsgWarning,
-			Content: fmt.Sprintf("Failed to create tmux session: %v", err),
-		})
-	} else {
-		tmuxCreated = true
-	}
-
 	info := PieceInfo{
 		Name:         pieceName,
 		WorktreePath: worktreePath,
@@ -349,7 +301,7 @@ func (h *Handler) AdoptPiece(ctx context.Context, input AdoptPieceInput) (PieceI
 		SessionName:  sessionName,
 	}
 	if err := h.hooks.RunHook(ctx, repoRoot, HookOnPieceCreate, hookCtx); err != nil {
-		h.cleanupPiece(ctx, repoRoot, worktreePath, sessionName, tmuxCreated)
+		h.cleanupPiece(ctx, repoRoot, worktreePath, sessionName, false)
 		// Try to recover original state
 		_ = h.git.Checkout(ctx, wd, currentBranch)
 		return PieceInfo{}, fmt.Errorf("on-piece-create hook failed: %w", err)
@@ -360,16 +312,6 @@ func (h *Handler) AdoptPiece(ctx context.Context, input AdoptPieceInput) (PieceI
 		Content: fmt.Sprintf("Adopted branch %s as piece: %s at %s", currentBranch, pieceName, worktreePath),
 		Data:    info,
 	})
-
-	// Auto-attach to the new session if no sessions were running before
-	if shouldAutoAttach && tmuxCreated {
-		if err := h.tmux.AttachSession(ctx, sessionName); err != nil {
-			h.deps.Output.Write(core.Message{
-				Type:    core.MsgWarning,
-				Content: fmt.Sprintf("Failed to attach to tmux session: %v", err),
-			})
-		}
-	}
 
 	return info, nil
 }
@@ -480,15 +422,15 @@ func (h *Handler) updateIssueStatusToInProgress(issuePath string) {
 	}
 }
 
-// cleanupPiece removes a partially created piece (worktree and tmux session).
+// cleanupPiece removes a partially created piece (worktree and session).
 // Errors during cleanup are logged as warnings but not returned.
-func (h *Handler) cleanupPiece(ctx context.Context, repoRoot, worktreePath, sessionName string, tmuxCreated bool) {
-	// Kill tmux session if it was created
-	if tmuxCreated {
-		if err := h.tmux.KillSession(ctx, sessionName); err != nil {
+func (h *Handler) cleanupPiece(ctx context.Context, repoRoot, worktreePath, sessionName string, _ bool) {
+	// Kill session if it exists
+	if h.mux.Exists(ctx, sessionName) {
+		if err := h.mux.Kill(ctx, sessionName); err != nil {
 			h.deps.Output.Write(core.Message{
 				Type:    core.MsgWarning,
-				Content: fmt.Sprintf("Failed to cleanup tmux session: %v", err),
+				Content: fmt.Sprintf("Failed to cleanup session: %v", err),
 			})
 		}
 	}
@@ -1160,12 +1102,12 @@ func ClearIssueDirtyFlag(worktreePath string, fs core.FS) error {
 	return nil
 }
 
-// removePiece removes a piece worktree and associated tmux session.
+// removePiece removes a piece worktree and associated session.
 func (h *Handler) removePiece(ctx context.Context, repoRoot, pieceName, worktreePath string) error {
 	sessionName := fmt.Sprintf("mp-piece-%s", pieceName)
 
-	// Kill tmux session (ignore errors - session may not exist)
-	_ = h.tmux.KillSession(ctx, sessionName)
+	// Kill session (ignore errors - session may not exist)
+	_ = h.mux.Kill(ctx, sessionName)
 
 	// Remove worktree
 	if err := h.git.WorktreeRemove(ctx, repoRoot, worktreePath); err != nil {
@@ -1179,8 +1121,8 @@ func (h *Handler) removePiece(ctx context.Context, repoRoot, pieceName, worktree
 func (h *Handler) removePieceForce(ctx context.Context, repoRoot, pieceName, worktreePath string) error {
 	sessionName := fmt.Sprintf("mp-piece-%s", pieceName)
 
-	// Kill tmux session (ignore errors - session may not exist)
-	_ = h.tmux.KillSession(ctx, sessionName)
+	// Kill session (ignore errors - session may not exist)
+	_ = h.mux.Kill(ctx, sessionName)
 
 	// Force remove worktree (needed when running from inside the worktree)
 	if err := h.git.WorktreeRemoveForce(ctx, repoRoot, worktreePath); err != nil {
@@ -1272,12 +1214,12 @@ func (h *Handler) AbandonPiece(ctx context.Context, pieceName string, opts Aband
 	}
 	repoRoot = detectedRepoRoot
 
-	// Kill tmux session if exists
+	// Kill session if exists
 	if target.HasSession {
-		if err := h.tmux.KillSession(ctx, target.SessionName); err != nil {
+		if err := h.mux.Kill(ctx, target.SessionName); err != nil {
 			h.deps.Output.Write(core.Message{
 				Type:    core.MsgWarning,
-				Content: fmt.Sprintf("Failed to kill tmux session: %v", err),
+				Content: fmt.Sprintf("Failed to kill session: %v", err),
 			})
 		}
 	}
@@ -1394,35 +1336,6 @@ func getMainSessionName(repoRoot string) string {
 	return fmt.Sprintf("mp-%s", repoName)
 }
 
-// ensureMainSession creates a tmux session for the main repo if it doesn't exist.
-// If overwrite is true, kills existing session and creates a new one.
-// Errors are logged as warnings but don't fail the operation.
-func (h *Handler) ensureMainSession(ctx context.Context, repoRoot string, overwrite bool) {
-	sessionName := getMainSessionName(repoRoot)
-
-	// Check if session already exists
-	if h.tmux.HasSession(ctx, sessionName) {
-		if !overwrite {
-			return
-		}
-		// Kill existing session before recreating
-		if err := h.tmux.KillSession(ctx, sessionName); err != nil {
-			h.deps.Output.Write(core.Message{
-				Type:    core.MsgWarning,
-				Content: fmt.Sprintf("Failed to kill existing session: %v", err),
-			})
-		}
-	}
-
-	// Create the session
-	if err := h.tmux.NewSession(ctx, sessionName, repoRoot); err != nil {
-		h.deps.Output.Write(core.Message{
-			Type:    core.MsgWarning,
-			Content: fmt.Sprintf("Failed to create main repo session: %v", err),
-		})
-	}
-}
-
 // updateIssueStatusToDone updates the issue status to done if currently in-progress.
 func (h *Handler) updateIssueStatusToDone(issuePath string) error {
 	// Check current status
@@ -1500,8 +1413,8 @@ func (h *Handler) ListPieces(ctx context.Context, repoRoot string) ([]PieceListI
 			modTime = info.ModTime()
 		}
 
-		// Check if tmux session exists
-		hasSession := h.tmux.HasSession(ctx, sessionName)
+		// Check if session exists
+		hasSession := h.mux.Exists(ctx, sessionName)
 
 		// Read piece metadata for parent info
 		parent := "main"
@@ -1626,7 +1539,7 @@ func findOrCreateNode(root *TreeNode, pieceName string, pieceMap map[string]*Pie
 }
 
 // SwitchPiece switches to a piece by name.
-// It tries tmux attach/switch first, falls back to printing path.
+// Uses multiplexer to switch/attach, falls back to printing path.
 // Special case: "main" or "master" switches to the main repo session.
 func (h *Handler) SwitchPiece(ctx context.Context, name string) (SwitchResult, error) {
 	// Detect repo root from current working directory or piece worktree
@@ -1677,33 +1590,23 @@ func (h *Handler) SwitchPiece(ctx context.Context, name string) (SwitchResult, e
 
 	result := SwitchResult{Piece: *target}
 
-	// Try tmux if session exists
-	if target.HasSession {
-		if h.tmux.InTmux() {
-			// Already in tmux, use switch-client
-			if err := h.tmux.SwitchClient(ctx, target.SessionName); err == nil {
-				result.Method = "tmux-switch"
-				h.deps.Output.Write(core.Message{
-					Type:    core.MsgSuccess,
-					Content: fmt.Sprintf("Switched to piece: %s", name),
-					Data:    result,
-				})
-				return result, nil
-			}
-			// Fall through to path on error
-		} else {
-			// Not in tmux, use attach-session
-			if err := h.tmux.AttachSession(ctx, target.SessionName); err == nil {
-				result.Method = "tmux-attach"
-				h.deps.Output.Write(core.Message{
-					Type:    core.MsgSuccess,
-					Content: fmt.Sprintf("Attached to piece: %s", name),
-					Data:    result,
-				})
-				return result, nil
-			}
-			// Fall through to path on error
-		}
+	// Check if multiplexer is noop (no session management)
+	if adapters.IsNoopMultiplexer(h.mux) {
+		result.Method = "path"
+		fmt.Println(target.WorktreePath)
+		return result, nil
+	}
+
+	// Try to switch using multiplexer (creates session if needed)
+	if err := h.mux.SwitchTo(ctx, target.SessionName, target.WorktreePath); err == nil {
+		result.Method = "multiplexer"
+		result.Piece.HasSession = true
+		h.deps.Output.Write(core.Message{
+			Type:    core.MsgSuccess,
+			Content: fmt.Sprintf("Switched to piece: %s", name),
+			Data:    result,
+		})
+		return result, nil
 	}
 
 	// Fallback: print path for cd $(mp piece switch --name foo)
@@ -1723,33 +1626,27 @@ func (h *Handler) switchToMain(ctx context.Context, mainRepoRoot, name string) (
 			Name:         name,
 			WorktreePath: mainRepoRoot,
 			SessionName:  sessionName,
-			HasSession:   h.tmux.HasSession(ctx, sessionName),
+			HasSession:   h.mux.Exists(ctx, sessionName),
 		},
 	}
 
-	// Try tmux if session exists
-	if result.Piece.HasSession {
-		if h.tmux.InTmux() {
-			if err := h.tmux.SwitchClient(ctx, sessionName); err == nil {
-				result.Method = "tmux-switch"
-				h.deps.Output.Write(core.Message{
-					Type:    core.MsgSuccess,
-					Content: fmt.Sprintf("Switched to %s", name),
-					Data:    result,
-				})
-				return result, nil
-			}
-		} else {
-			if err := h.tmux.AttachSession(ctx, sessionName); err == nil {
-				result.Method = "tmux-attach"
-				h.deps.Output.Write(core.Message{
-					Type:    core.MsgSuccess,
-					Content: fmt.Sprintf("Attached to %s", name),
-					Data:    result,
-				})
-				return result, nil
-			}
-		}
+	// Check if multiplexer is noop (no session management)
+	if adapters.IsNoopMultiplexer(h.mux) {
+		result.Method = "path"
+		fmt.Println(mainRepoRoot)
+		return result, nil
+	}
+
+	// Try to switch using multiplexer (creates session if needed)
+	if err := h.mux.SwitchTo(ctx, sessionName, mainRepoRoot); err == nil {
+		result.Method = "multiplexer"
+		result.Piece.HasSession = true
+		h.deps.Output.Write(core.Message{
+			Type:    core.MsgSuccess,
+			Content: fmt.Sprintf("Switched to %s", name),
+			Data:    result,
+		})
+		return result, nil
 	}
 
 	// Fallback: print path

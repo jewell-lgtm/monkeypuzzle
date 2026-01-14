@@ -141,6 +141,9 @@ func (h *Handler) EnsureGitignore() error {
 current-issue.json
 piece-metadata.json
 pr-metadata.json
+
+# Piece worktrees
+pieces/
 `
 	return h.deps.FS.WriteFile(gitignorePath, []byte(content), DefaultFilePerm)
 }
