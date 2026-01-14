@@ -1,2 +1,5 @@
 # Worktree-specific state (not tracked)
 current-issue.json
+
+# Claude Code local settings (per-worktree)
+**/settings.local.json
