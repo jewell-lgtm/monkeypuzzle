@@ -13,7 +13,7 @@ Expand the monkeypuzzle Claude Code skill (`.claude/skills/monkeypuzzle/SKILL.md
 
 The skill only documents `mp init`. Missing:
 - `mp piece` - Check piece status
-- `mp piece new` - Create new piece/worktree
+- `mp piece create` - Create new piece/worktree
 - `mp piece update` - Sync piece with main branch
 - `mp piece merge` - Merge piece back to main
 
@@ -35,17 +35,17 @@ mp piece
 # Output: {"in_piece":true,"piece_name":"feature-x","worktree_path":"/path","repo_root":"/repo"}
 ```
 
-### mp piece new
+### mp piece create
 
 ```bash
 # From issue file
-mp piece new --issue .monkeypuzzle/issues/feature.md
+mp piece create --issue .monkeypuzzle/issues/feature.md
 
 # With custom name
-mp piece new --name my-feature
+mp piece create --name my-feature
 
 # JSON stdin
-echo '{"issue":".monkeypuzzle/issues/feature.md"}' | mp piece new
+echo '{"issue":".monkeypuzzle/issues/feature.md"}' | mp piece create
 ```
 
 Flags:

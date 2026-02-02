@@ -7,11 +7,11 @@ status: done
 
 ## Description
 
-Add `--parent` flag to `mp piece new` to create child pieces. Depends on 016 (metadata).
+Add `--parent` flag to `mp piece create` to create child pieces. Depends on 016 (metadata).
 
 ## Requirements
 
-- `mp piece new --parent <piece-name>` creates child of that piece
+- `mp piece create --parent <piece-name>` creates child of that piece
 - Child branches from parent's current commit (not main)
 - Writes parent to piece metadata
 - Validates parent piece exists

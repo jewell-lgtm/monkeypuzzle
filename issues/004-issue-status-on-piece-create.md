@@ -7,7 +7,7 @@ status: done
 
 ## Description
 
-When creating a piece from an issue using `mp piece new --issue <path>`, automatically update the issue status from `todo` to `in-progress`.
+When creating a piece from an issue using `mp piece create --issue <path>`, automatically update the issue status from `todo` to `in-progress`.
 
 ## Requirements
 

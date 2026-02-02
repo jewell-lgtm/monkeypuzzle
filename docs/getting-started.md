@@ -4,7 +4,7 @@
 
 - **Go 1.24+** - Required for building
 - **Git** - Required for version control operations
-- **tmux** (optional) - For automatic session management with `mp piece new`
+- **tmux** (optional) - For automatic session management with `mp piece create`
 
 ## Installation
 

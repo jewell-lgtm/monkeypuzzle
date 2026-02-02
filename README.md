@@ -16,7 +16,7 @@ Monkeypuzzle (`mp`) gives each piece of work its own isolated workspace—git wo
 go install github.com/jewell-lgtm/monkeypuzzle@latest
 
 mp init                    # Interactive setup
-mp piece new               # Start a new piece
+mp piece create               # Start a new piece
 # ... do the thing ...
 mp piece merge             # Assemble it into main
 ```
@@ -26,8 +26,8 @@ mp piece merge             # Assemble it into main
 Every command accepts JSON and outputs structured data. Agents can request schemas, pipe data, and stay in flow:
 
 ```bash
-mp piece new --schema                     # Get expected input format
-echo '{"name":"my-feature"}' | mp piece new   # Create piece via JSON
+mp piece create --schema                     # Get expected input format
+echo '{"name":"my-feature"}' | mp piece create   # Create piece via JSON
 mp piece list                             # JSON output for parsing
 ```
 
@@ -38,7 +38,7 @@ No special "agent mode"—the same CLI that works interactively works programmat
 | Command           | What it does                   |
 | ----------------- | ------------------------------ |
 | `mp init`         | Initialize project             |
-| `mp piece new`    | Create worktree + tmux session |
+| `mp piece create`    | Create worktree + tmux session |
 | `mp piece list`   | Show all pieces                |
 | `mp piece switch` | Jump to a piece                |
 | `mp piece update` | Sync with main                 |

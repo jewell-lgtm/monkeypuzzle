@@ -61,7 +61,7 @@ type SwitchResult struct {
 	Method string        `json:"method"` // "tmux-switch", "tmux-attach", "path"
 }
 
-// NewPieceInput holds input for the piece new command.
+// NewPieceInput holds input for the piece create command.
 // Either Issue or Name must be provided (mutually exclusive).
 type NewPieceInput struct {
 	Issue            IssueRef `json:"issue,omitempty"`
@@ -71,7 +71,7 @@ type NewPieceInput struct {
 	OverwriteSession bool     `json:"overwrite_session,omitempty"`
 }
 
-// NewPieceSchema returns the JSON schema for piece new input.
+// NewPieceSchema returns the JSON schema for piece create input.
 func NewPieceSchema() ([]byte, error) {
 	schema := map[string]any{
 		"issue": map[string]any{

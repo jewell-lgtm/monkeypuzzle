@@ -14,7 +14,7 @@ This document describes the complete workflow from creating markdown issues thro
 ### ✅ Implemented
 - `mp init` - Initialize project with markdown issues provider
 - `mp issue create` - Create markdown issue files
-- `mp piece new --issue <path>` - Create piece from issue, update status to in-progress
+- `mp piece create --issue <path>` - Create piece from issue, update status to in-progress
 - `mp piece status` - Show current piece status
 - `mp piece update` - Merge main into piece
 - `mp piece merge` - Merge piece back to main locally
@@ -39,7 +39,7 @@ This document describes the complete workflow from creating markdown issues thro
 1. mp issue create --title "Feature X"
    → Creates .monkeypuzzle/issues/feature-x.md (status: todo)
 
-2. mp piece new --issue .monkeypuzzle/issues/feature-x.md
+2. mp piece create --issue .monkeypuzzle/issues/feature-x.md
    → Creates piece worktree
    → Updates issue status: todo → in-progress
    → Creates .monkeypuzzle/current-issue.json

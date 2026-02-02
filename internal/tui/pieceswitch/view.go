@@ -16,7 +16,7 @@ func (m Model) View() string {
 		return fmt.Sprintf(
 			"%s\n\n%s\n",
 			styles.Title.Render("Switch Piece"),
-			styles.Subtle.Render("No pieces found. Use 'mp piece new' to create one."),
+			styles.Subtle.Render("No pieces found. Use 'mp piece create' to create one."),
 		)
 	}
 

@@ -34,7 +34,7 @@ mp init
 ### 2. Start a new feature
 
 ```bash
-mp piece new
+mp piece create
 ```
 
 This creates:
@@ -86,11 +86,11 @@ Work on multiple features simultaneously:
 
 ```bash
 # From main repo, create first piece
-mp piece new --name feature-a
+mp piece create --name feature-a
 # Work on feature A...
 
 # From main repo, create second piece
-mp piece new --name feature-b
+mp piece create --name feature-b
 # Work on feature B...
 
 # Switch between pieces
@@ -112,7 +112,7 @@ Recommended workflow:
 
 ```bash
 # Create piece
-mp piece new
+mp piece create
 
 # Work on feature, commit changes
 git add . && git commit -m "feat: new feature"
@@ -128,7 +128,7 @@ git push origin main
 
 ## Tmux Integration
 
-`mp piece new` creates tmux sessions automatically:
+`mp piece create` creates tmux sessions automatically:
 
 - **Main repo session**: `mp-<repo-name>` (created once, reused)
 - **Piece session**: `mp-piece-<piece-name>` (one per piece)
@@ -191,7 +191,7 @@ sudo dnf install tmux
 
 ```bash
 # Create piece (auto-creates tmux session)
-mp piece new --name my-feature
+mp piece create --name my-feature
 
 # You're now in session "mp-piece-my-feature"
 # Work on code, then detach:

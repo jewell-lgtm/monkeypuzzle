@@ -52,7 +52,7 @@ mp completion powershell | Out-String | Invoke-Expression
 | ------------------------------- | ----------------------- |
 | `mp piece switch --name`        | Available piece names   |
 | `mp piece abandon --name`       | Available piece names   |
-| `mp piece new --issue`          | Files (for issue paths) |
+| `mp piece create --issue`          | Files (for issue paths) |
 | `mp init --issue-provider`      | `markdown`              |
 | `mp init --pr-provider`         | `github`                |
 | `mp piece update --main-branch` | Git branch names        |
@@ -142,17 +142,17 @@ Human-readable message to stderr.
 
 ---
 
-## mp piece new
+## mp piece create
 
 Create a new piece (git worktree + tmux session).
 
 ### Usage
 
 ```bash
-mp piece new
-mp piece new --name my-feature
-mp piece new --issue issues/my-feature.md
-mp piece new --skip-switch  # Don't auto-switch to new piece
+mp piece create
+mp piece create --name my-feature
+mp piece create --issue issues/my-feature.md
+mp piece create --skip-switch  # Don't auto-switch to new piece
 ```
 
 ### Flags
@@ -463,7 +463,7 @@ STATUS=$(mp piece)
 IN_PIECE=$(echo "$STATUS" | jq -r '.in_piece')
 
 # Parse piece creation output
-OUTPUT=$(mp piece new)
+OUTPUT=$(mp piece create)
 WORKTREE=$(echo "$OUTPUT" | jq -r '.worktree_path')
 ```
 

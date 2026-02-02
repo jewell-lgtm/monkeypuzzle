@@ -33,13 +33,13 @@ mp piece list
 echo '{"flat":true}' | mp piece list
 
 # Create new piece from issue (via --issue flag)
-mp piece new --issue issues/feat.md --skip-switch
+mp piece create --issue issues/feat.md --skip-switch
 
 # Create new piece by name
-echo '{"name":"my-feature","skip_switch":true}' | mp piece new
+echo '{"name":"my-feature","skip_switch":true}' | mp piece create
 
 # Create stacked piece (child of another piece)
-echo '{"name":"child-feat","parent":"parent-piece"}' | mp piece new
+echo '{"name":"child-feat","parent":"parent-piece"}' | mp piece create
 
 # Switch to existing piece
 echo '{"name":"my-feature"}' | mp piece switch
@@ -86,7 +86,7 @@ mp config set multiplexer tmux  # tmux, zellij, or none
 ## Workflow
 
 1. `mp issue create` or find existing issue
-2. `mp piece new --issue issues/foo.md` creates worktree
+2. `mp piece create --issue issues/foo.md` creates worktree
 3. Work in worktree, commit changes
 4. `mp piece pr create` pushes and creates PR
 5. After PR merged: `mp piece done` or `mp piece cleanup`

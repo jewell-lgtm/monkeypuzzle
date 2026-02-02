@@ -30,12 +30,12 @@ var pieceCmd = &cobra.Command{
 	RunE:  runPieceStatus,
 }
 
-var pieceNewCmd = &cobra.Command{
-	Use:   "new",
+var pieceCreateCmd = &cobra.Command{
+	Use:   "create",
 	Short: "Create a new puzzle piece",
 	Long: `Create a new puzzle piece by initializing a git worktree and opening a tmux session.
 The worktree will be created in a repo-scoped directory within the platform-appropriate data directory (e.g., ~/Library/Application Support/monkeypuzzle/pieces/{repo-hash}/ on macOS, ~/.local/share/monkeypuzzle/pieces/{repo-hash}/ on Linux).`,
-	RunE: runPieceNew,
+	RunE: runPieceCreate,
 }
 
 var pieceUpdateCmd = &cobra.Command{
@@ -114,7 +114,7 @@ var flagForce bool
 var flagAbandonName string
 var flagDeleteBranch bool
 var flagOverwriteSession bool
-var flagPieceNewSchema bool
+var flagPieceCreateSchema bool
 var flagPieceUpdateSchema bool
 var flagPieceMergeSchema bool
 var flagPieceCleanupSchema bool
@@ -127,12 +127,12 @@ var flagPieceAdoptSchema bool
 var flagPieceListFlat bool
 
 func init() {
-	pieceNewCmd.Flags().StringVar(&flagPieceName, "name", "", "Optional piece name (default: auto-generated)")
-	pieceNewCmd.Flags().StringVar(&flagIssuePath, "issue", "", "Create piece from issue file (e.g., issues/foo.md)")
-	pieceNewCmd.Flags().StringVarP(&flagParent, "parent", "p", "", "Parent piece name to branch from (default: main)")
-	pieceNewCmd.Flags().BoolVar(&flagSkipSwitch, "skip-switch", false, "Don't switch to the new piece after creation")
-	pieceNewCmd.Flags().BoolVar(&flagOverwriteSession, "overwrite-session", false, "Replace existing main repo tmux session")
-	pieceNewCmd.Flags().BoolVar(&flagPieceNewSchema, "schema", false, "Output JSON schema and exit")
+	pieceCreateCmd.Flags().StringVar(&flagPieceName, "name", "", "Optional piece name (default: auto-generated)")
+	pieceCreateCmd.Flags().StringVar(&flagIssuePath, "issue", "", "Create piece from issue file (e.g., issues/foo.md)")
+	pieceCreateCmd.Flags().StringVarP(&flagParent, "parent", "p", "", "Parent piece name to branch from (default: main)")
+	pieceCreateCmd.Flags().BoolVar(&flagSkipSwitch, "skip-switch", false, "Don't switch to the new piece after creation")
+	pieceCreateCmd.Flags().BoolVar(&flagOverwriteSession, "overwrite-session", false, "Replace existing main repo tmux session")
+	pieceCreateCmd.Flags().BoolVar(&flagPieceCreateSchema, "schema", false, "Output JSON schema and exit")
 	pieceUpdateCmd.Flags().StringVar(&flagMainBranch, "main-branch", "main", "Main branch name to merge (default: main)")
 	pieceUpdateCmd.Flags().BoolVar(&flagPieceUpdateSchema, "schema", false, "Output JSON schema and exit")
 	pieceMergeCmd.Flags().StringVar(&flagMainBranch, "main-branch", "main", "Main branch name to merge into (default: main)")
@@ -155,7 +155,7 @@ func init() {
 	pieceAdoptCmd.Flags().BoolVar(&flagPieceAdoptSchema, "schema", false, "Output JSON schema and exit")
 	pieceCmd.Flags().StringVar(&flagMainBranch, "main-branch", "main", "Main branch name (default: main)")
 	pieceListCmd.Flags().BoolVar(&flagPieceListFlat, "flat", false, "Display pieces in a flat list instead of tree view")
-	pieceCmd.AddCommand(pieceNewCmd)
+	pieceCmd.AddCommand(pieceCreateCmd)
 	pieceCmd.AddCommand(pieceUpdateCmd)
 	pieceCmd.AddCommand(pieceMergeCmd)
 	pieceCmd.AddCommand(pieceCleanupCmd)
@@ -169,7 +169,7 @@ func init() {
 	// Register completion functions (errors ignored - completion is optional)
 	_ = pieceSwitchCmd.RegisterFlagCompletionFunc("name", completePieceNames)
 	_ = pieceAbandonCmd.RegisterFlagCompletionFunc("name", completePieceNames)
-	_ = pieceNewCmd.RegisterFlagCompletionFunc("issue", completeIssueFiles)
+	_ = pieceCreateCmd.RegisterFlagCompletionFunc("issue", completeIssueFiles)
 	_ = pieceUpdateCmd.RegisterFlagCompletionFunc("main-branch", completeGitBranches)
 	_ = pieceMergeCmd.RegisterFlagCompletionFunc("main-branch", completeGitBranches)
 	_ = pieceCleanupCmd.RegisterFlagCompletionFunc("main-branch", completeGitBranches)
@@ -341,9 +341,9 @@ func runPieceStatus(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func runPieceNew(cmd *cobra.Command, args []string) error {
+func runPieceCreate(cmd *cobra.Command, args []string) error {
 	// --schema mode: output JSON schema and exit
-	if flagPieceNewSchema {
+	if flagPieceCreateSchema {
 		schema, err := piececmd.NewPieceSchema()
 		if err != nil {
 			return err
@@ -376,7 +376,7 @@ func runPieceNew(cmd *cobra.Command, args []string) error {
 	handler := newPieceHandler(deps)
 
 	// Get validated input from flags/stdin/TUI
-	input, err := getPieceNewInput(deps, wd)
+	input, err := getPieceCreateInput(deps, wd)
 	if err != nil {
 		return err
 	}
@@ -410,7 +410,7 @@ func runPieceNew(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func getPieceNewInput(deps core.Deps, workDir string) (piececmd.NewPieceInput, error) {
+func getPieceCreateInput(deps core.Deps, workDir string) (piececmd.NewPieceInput, error) {
 	var input piececmd.NewPieceInput
 	var err error
 
@@ -448,7 +448,7 @@ func getPieceNewInput(deps core.Deps, workDir string) (piececmd.NewPieceInput, e
 		}
 	} else if cli.IsTerminal() {
 		// Mode 3: Interactive TUI
-		input, err = runPieceNewTUI(deps, workDir)
+		input, err = runPieceCreateTUI(deps, workDir)
 		if err != nil {
 			return piececmd.NewPieceInput{}, err
 		}
@@ -476,7 +476,7 @@ func getPieceNewInput(deps core.Deps, workDir string) (piececmd.NewPieceInput, e
 	return input, nil
 }
 
-func runPieceNewTUI(deps core.Deps, workDir string) (piececmd.NewPieceInput, error) {
+func runPieceCreateTUI(deps core.Deps, workDir string) (piececmd.NewPieceInput, error) {
 	// Use nil loading for issue handler - TUI manages its own loading state
 	tuiDeps := core.NewDeps(deps.FS, deps.Output, deps.Exec, deps.HTTP, nil)
 	issueHandler := issue.NewHandler(tuiDeps, workDir)
@@ -1270,7 +1270,7 @@ func runSwitchTUI(ctx context.Context, handler *piececmd.Handler) (piececmd.Swit
 	}
 
 	if len(pieces) == 0 {
-		fmt.Fprintln(os.Stderr, "No pieces found. Use 'mp piece new' to create one.")
+		fmt.Fprintln(os.Stderr, "No pieces found. Use 'mp piece create' to create one.")
 		return piececmd.SwitchInput{}, fmt.Errorf("no pieces")
 	}
 

@@ -152,7 +152,7 @@ docker run -it --rm \
 mp init --name myproject --issue-provider markdown --pr-provider github
 
 # Create a new piece
-mp piece new
+mp piece create
 
 # This will create a git worktree and tmux session
 ```

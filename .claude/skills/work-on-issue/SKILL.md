@@ -21,7 +21,7 @@ Complete workflow for implementing an issue from start to PR.
 mp issue list --status todo
 
 # Create piece from issue (get worktree path)
-mp piece new --issue <issue-path> --skip-switch
+mp piece create --issue <issue-path> --skip-switch
 
 # Navigate to worktree
 cd <worktree-path>
@@ -139,7 +139,7 @@ Issue status automatically updates to `done`.
 ```bash
 # Full workflow
 mp issue list --status todo                           # Find issue
-mp piece new --issue issues/foo.md --skip-switch      # Start work
+mp piece create --issue issues/foo.md --skip-switch      # Start work
 cd $(cat /dev/stdin | jq -r .worktree_path)           # Enter worktree
 
 # ... do work with outside-in testing ...

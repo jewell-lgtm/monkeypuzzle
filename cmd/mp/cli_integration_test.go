@@ -362,8 +362,8 @@ func (e *testEnv) initGitRepo() {
 	}
 }
 
-// TestCLI_PieceNew tests mp piece new outputs valid JSON
-func TestCLI_PieceNew(t *testing.T) {
+// TestCLI_PieceCreate tests mp piece create outputs valid JSON
+func TestCLI_PieceCreate(t *testing.T) {
 	env := setupTestEnv(t)
 	defer env.cleanup()
 
@@ -372,9 +372,9 @@ func TestCLI_PieceNew(t *testing.T) {
 	env.createIssue("add-feature.md", "Add Feature", "todo")
 
 	input := `{"issue_path":"issues/add-feature.md","skip_switch":true}`
-	stdout, stderr, err := env.runWithStdin(input, "piece", "new")
+	stdout, stderr, err := env.runWithStdin(input, "piece", "create")
 	if err != nil {
-		t.Fatalf("piece new failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+		t.Fatalf("piece create failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
 	}
 
 	var result map[string]any
@@ -383,17 +383,17 @@ func TestCLI_PieceNew(t *testing.T) {
 	}
 }
 
-// TestCLI_PieceNew_WithName tests mp piece new --name outputs valid JSON
-func TestCLI_PieceNew_WithName(t *testing.T) {
+// TestCLI_PieceCreate_WithName tests mp piece create --name outputs valid JSON
+func TestCLI_PieceCreate_WithName(t *testing.T) {
 	env := setupTestEnv(t)
 	defer env.cleanup()
 
 	env.initGitRepo()
 	env.initProject("test")
 
-	stdout, stderr, err := env.run("piece", "new", "--name", "my-piece", "--skip-switch")
+	stdout, stderr, err := env.run("piece", "create", "--name", "my-piece", "--skip-switch")
 	if err != nil {
-		t.Fatalf("piece new --name failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+		t.Fatalf("piece create --name failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
 	}
 
 	var result map[string]any
@@ -402,14 +402,14 @@ func TestCLI_PieceNew_WithName(t *testing.T) {
 	}
 }
 
-// TestCLI_PieceNew_Schema tests mp piece new --schema outputs valid JSON
-func TestCLI_PieceNew_Schema(t *testing.T) {
+// TestCLI_PieceCreate_Schema tests mp piece create --schema outputs valid JSON
+func TestCLI_PieceCreate_Schema(t *testing.T) {
 	env := setupTestEnv(t)
 	defer env.cleanup()
 
-	stdout, _, err := env.run("piece", "new", "--schema")
+	stdout, _, err := env.run("piece", "create", "--schema")
 	if err != nil {
-		t.Fatalf("piece new --schema failed: %v", err)
+		t.Fatalf("piece create --schema failed: %v", err)
 	}
 
 	var schema map[string]any
@@ -426,9 +426,9 @@ func TestCLI_PieceList(t *testing.T) {
 	env.initGitRepo()
 	env.initProject("test")
 
-	_, _, err := env.run("piece", "new", "--name", "test-piece", "--skip-switch")
+	_, _, err := env.run("piece", "create", "--name", "test-piece", "--skip-switch")
 	if err != nil {
-		t.Fatalf("piece new failed: %v", err)
+		t.Fatalf("piece create failed: %v", err)
 	}
 
 	stdout, _, err := env.run("piece", "list", "--flat")
@@ -543,14 +543,14 @@ func TestCLI_PieceDone_FromMergedPiece(t *testing.T) {
 	env.initProject("test")
 
 	// Create a piece
-	stdout, stderr, err := env.run("piece", "new", "--name", "test-done", "--skip-switch")
+	stdout, stderr, err := env.run("piece", "create", "--name", "test-done", "--skip-switch")
 	if err != nil {
-		t.Fatalf("piece new failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+		t.Fatalf("piece create failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
 	}
 
 	var newResult map[string]any
 	if err := json.Unmarshal([]byte(stdout), &newResult); err != nil {
-		t.Fatalf("invalid JSON from piece new: %v", err)
+		t.Fatalf("invalid JSON from piece create: %v", err)
 	}
 	worktreePath := newResult["worktree_path"].(string)
 
@@ -592,14 +592,14 @@ func TestCLI_PieceAbandon_CurrentPiece(t *testing.T) {
 	env.initProject("test")
 
 	// Create a piece
-	stdout, stderr, err := env.run("piece", "new", "--name", "test-abandon", "--skip-switch")
+	stdout, stderr, err := env.run("piece", "create", "--name", "test-abandon", "--skip-switch")
 	if err != nil {
-		t.Fatalf("piece new failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+		t.Fatalf("piece create failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
 	}
 
 	var newResult map[string]any
 	if err := json.Unmarshal([]byte(stdout), &newResult); err != nil {
-		t.Fatalf("invalid JSON from piece new: %v", err)
+		t.Fatalf("invalid JSON from piece create: %v", err)
 	}
 	worktreePath := newResult["worktree_path"].(string)
 

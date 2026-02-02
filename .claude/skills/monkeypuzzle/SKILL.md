@@ -21,7 +21,7 @@ CLI tool for git worktree-based development workflow. Binary: `mp`
 |---------|----------------|-------|
 | `mp issue list` | ✅ | JSON output, stdin filter |
 | `mp issue create` | ✅ | JSON stdin or flags |
-| `mp piece new` | ✅ | Use `--skip-switch` flag |
+| `mp piece create` | ✅ | Use `--skip-switch` flag |
 | `mp piece list --flat` | ✅ | JSON output |
 | `mp piece update` | ✅ | Run from worktree |
 | `mp piece merge` | ✅ | Run from worktree |
@@ -77,22 +77,22 @@ mp issue create --schema
 {"path": "issues/add-feature.md", "title": "Add feature", "filename": "add-feature.md"}
 ```
 
-## mp piece new
+## mp piece create
 
 Create new piece (git worktree). **Use `--skip-switch` for agents.**
 
 ```bash
 # From issue (recommended)
-mp piece new --issue issues/add-login.md --skip-switch
+mp piece create --issue issues/add-login.md --skip-switch
 
 # With name
-mp piece new --name my-feature --skip-switch
+mp piece create --name my-feature --skip-switch
 
 # JSON stdin
-echo '{"issue_path":"issues/add-login.md","skip_switch":true}' | mp piece new
+echo '{"issue_path":"issues/add-login.md","skip_switch":true}' | mp piece create
 
 # Schema
-mp piece new --schema
+mp piece create --schema
 ```
 
 **Output:**
@@ -202,7 +202,7 @@ mp init --schema
 mp issue list --status todo
 
 # 2. Create piece from issue
-echo '{"issue_path":"issues/add-login.md","skip_switch":true}' | mp piece new
+echo '{"issue_path":"issues/add-login.md","skip_switch":true}' | mp piece create
 
 # 3. Work in the worktree path returned
 cd /path/to/worktree
