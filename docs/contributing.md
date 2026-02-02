@@ -4,7 +4,7 @@
 
 ### Prerequisites
 
-- Go 1.24+ (use [asdf](https://asdf-vm.com/) for version management)
+- Go 1.24+ (use [mise](https://mise.jdx.dev/) for version management)
 - Git
 - tmux (for `mp piece` command)
 - gh CLI (for GitHub PR provider)
@@ -12,9 +12,8 @@
 ### Clone and build
 
 ```bash
-# Install Go via asdf (recommended)
-asdf plugin add golang
-asdf install
+# Install Go via mise (recommended)
+mise install
 ```
 
 ```bash
