@@ -10,7 +10,7 @@ const { title, description = 'One workflow for humans and AI agents' } = Astro.p
 ---
 
 <!doctype html>
-<html lang="en" class="bg-neutral-950 text-neutral-100">
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
@@ -27,9 +27,21 @@ const { title, description = 'One workflow for humans and AI agents' } = Astro.p
     <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500&family=Ubuntu:wght@700&display=swap"
+      rel="stylesheet"
+    />
+
+    <!-- Squircle Paint Worklet -->
+    <script>
+      if ("paintWorklet" in CSS) {
+        CSS.paintWorklet.addModule(
+          "https://www.unpkg.com/css-houdini-squircle@0.3.0/squircle.min.js",
+        );
+      }
+    </script>
   </head>
-  <body class="min-h-screen font-sans antialiased">
+  <body class="min-h-screen flex flex-col font-sans antialiased">
     <slot />
   </body>
 </html>
