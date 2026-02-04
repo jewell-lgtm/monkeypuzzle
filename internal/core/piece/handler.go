@@ -187,8 +187,9 @@ func (h *Handler) CreatePiece(ctx context.Context, pieceName string, opts Create
 }
 
 // AdoptPiece converts an existing git branch into a piece.
-// Must be run from the main repo (not a worktree) on a non-main branch.
-// Creates a worktree for the current branch and sets up piece metadata.
+// Must be run from the main repo (not a worktree).
+// If input.Branch is provided, adopts that branch; otherwise uses current branch.
+// Creates a worktree for the branch and sets up piece metadata.
 func (h *Handler) AdoptPiece(ctx context.Context, input AdoptPieceInput) (PieceInfo, error) {
 	wd, err := os.Getwd()
 	if err != nil {
@@ -210,14 +211,17 @@ func (h *Handler) AdoptPiece(ctx context.Context, input AdoptPieceInput) (PieceI
 		return PieceInfo{}, fmt.Errorf("cannot adopt from within a piece worktree, run from main repo")
 	}
 
-	// Get current branch
-	currentBranch, err := h.git.CurrentBranch(ctx, wd)
-	if err != nil {
-		return PieceInfo{}, fmt.Errorf("failed to get current branch: %w", err)
+	// Determine branch to adopt: use input.Branch if provided, else current branch
+	branchToAdopt := input.Branch
+	if branchToAdopt == "" {
+		branchToAdopt, err = h.git.CurrentBranch(ctx, wd)
+		if err != nil {
+			return PieceInfo{}, fmt.Errorf("failed to get current branch: %w", err)
+		}
 	}
 
 	// Disallow adopting main/master branches
-	if currentBranch == "main" || currentBranch == "master" {
+	if branchToAdopt == "main" || branchToAdopt == "master" {
 		return PieceInfo{}, fmt.Errorf("cannot adopt main or master branch as a piece")
 	}
 
@@ -233,7 +237,7 @@ func (h *Handler) AdoptPiece(ctx context.Context, input AdoptPieceInput) (PieceI
 	// Determine piece name (use input.Name or branch name)
 	pieceName := input.Name
 	if pieceName == "" {
-		pieceName = SanitizePieceName(currentBranch)
+		pieceName = SanitizePieceName(branchToAdopt)
 	} else {
 		pieceName = SanitizePieceName(pieceName)
 	}
@@ -268,16 +272,16 @@ func (h *Handler) AdoptPiece(ctx context.Context, input AdoptPieceInput) (PieceI
 
 	// Create worktree for the existing branch
 	worktreePath := filepath.Join(piecesDir, pieceName)
-	if err := h.git.WorktreeAddExisting(ctx, repoRoot, worktreePath, currentBranch); err != nil {
+	if err := h.git.WorktreeAddExisting(ctx, repoRoot, worktreePath, branchToAdopt); err != nil {
 		// Try to recover by checking out the original branch
-		_ = h.git.Checkout(ctx, wd, currentBranch)
-		return PieceInfo{}, fmt.Errorf("failed to create worktree for branch %s: %w", currentBranch, err)
+		_ = h.git.Checkout(ctx, wd, branchToAdopt)
+		return PieceInfo{}, fmt.Errorf("failed to create worktree for branch %s: %w", branchToAdopt, err)
 	}
 
 	// Write piece metadata
 	pieceMetadata := PieceMetadata{
 		Parent:            parent,
-		CreatedFromBranch: currentBranch,
+		CreatedFromBranch: branchToAdopt,
 	}
 	if err := WritePieceMetadata(worktreePath, pieceMetadata, h.deps.FS); err != nil {
 		h.deps.Output.Write(core.Message{
@@ -303,13 +307,13 @@ func (h *Handler) AdoptPiece(ctx context.Context, input AdoptPieceInput) (PieceI
 	if err := h.hooks.RunHook(ctx, repoRoot, HookOnPieceCreate, hookCtx); err != nil {
 		h.cleanupPiece(ctx, repoRoot, worktreePath, sessionName, false)
 		// Try to recover original state
-		_ = h.git.Checkout(ctx, wd, currentBranch)
+		_ = h.git.Checkout(ctx, wd, branchToAdopt)
 		return PieceInfo{}, fmt.Errorf("on-piece-create hook failed: %w", err)
 	}
 
 	h.deps.Output.Write(core.Message{
 		Type:    core.MsgSuccess,
-		Content: fmt.Sprintf("Adopted branch %s as piece: %s at %s", currentBranch, pieceName, worktreePath),
+		Content: fmt.Sprintf("Adopted branch %s as piece: %s at %s", branchToAdopt, pieceName, worktreePath),
 		Data:    info,
 	})
 

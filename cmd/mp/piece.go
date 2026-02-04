@@ -88,11 +88,11 @@ Use 'mp piece abandon' for unmerged pieces.`,
 }
 
 var pieceAdoptCmd = &cobra.Command{
-	Use:   "adopt",
+	Use:   "adopt [branch]",
 	Short: "Convert existing branch to piece",
-	Long: `Convert the current git branch into a piece worktree.
-Must be run from the main repo on a non-main/master branch.
-Creates a worktree for the current branch and returns to main.`,
+	Long: `Convert a git branch into a piece worktree.
+Must be run from the main repo. If no branch is specified, uses the current branch.
+Creates a worktree for the branch and returns to main.`,
 	RunE: runPieceAdopt,
 }
 
@@ -121,6 +121,7 @@ var flagPieceCleanupSchema bool
 var flagPieceSwitchSchema bool
 var flagPieceAbandonSchema bool
 var flagPieceDoneSchema bool
+var flagPieceAdoptBranch string
 var flagPieceAdoptName string
 var flagPieceAdoptParent string
 var flagPieceAdoptSchema bool
@@ -150,6 +151,7 @@ func init() {
 	pieceAbandonCmd.Flags().BoolVar(&flagPieceAbandonSchema, "schema", false, "Output JSON schema and exit")
 	pieceDoneCmd.Flags().StringVar(&flagMainBranch, "main-branch", "main", "Main branch to check merge status against")
 	pieceDoneCmd.Flags().BoolVar(&flagPieceDoneSchema, "schema", false, "Output JSON schema and exit")
+	pieceAdoptCmd.Flags().StringVarP(&flagPieceAdoptBranch, "branch", "b", "", "Branch to adopt (defaults to current branch)")
 	pieceAdoptCmd.Flags().StringVar(&flagPieceAdoptName, "name", "", "Override piece name (defaults to branch name)")
 	pieceAdoptCmd.Flags().StringVarP(&flagPieceAdoptParent, "parent", "p", "main", "Parent piece name (default: main)")
 	pieceAdoptCmd.Flags().BoolVar(&flagPieceAdoptSchema, "schema", false, "Output JSON schema and exit")
@@ -898,6 +900,11 @@ func runPieceAdopt(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	// Positional arg takes precedence over --branch flag
+	if len(args) > 0 && flagPieceAdoptBranch == "" {
+		flagPieceAdoptBranch = args[0]
+	}
+
 	ctx := cmd.Context()
 	deps := core.NewDeps(
 		adapters.NewOSFS(""),
@@ -944,6 +951,9 @@ func getAdoptInput() (piececmd.AdoptPieceInput, error) {
 	}
 
 	// Flags override stdin
+	if flagPieceAdoptBranch != "" {
+		input.Branch = flagPieceAdoptBranch
+	}
 	if flagPieceAdoptName != "" {
 		input.Name = flagPieceAdoptName
 	}
