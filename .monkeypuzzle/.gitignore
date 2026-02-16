@@ -1,5 +1,10 @@
-# Worktree-specific state (not tracked)
+# Piece worktree state (not tracked)
 current-issue.json
+piece-metadata.json
+pr-metadata.json
 
-# Claude Code local settings (per-worktree)
-**/settings.local.json
+# Piece worktrees
+pieces/
+
+# Claude Code local settings (per-worktree, catches files missed by pieces/)
+**/.claude/settings.local.json

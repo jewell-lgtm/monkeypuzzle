@@ -1,5 +1,6 @@
 # Binaries
 /mp
+/monkeypuzzle
 *.exe
 *.exe~
 *.dll
