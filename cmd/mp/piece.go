@@ -19,7 +19,9 @@ import (
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core/issue"
 	piececmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/piece"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/tui/issuepicker"
+	"github.com/jewell-lgtm/monkeypuzzle/internal/tui/modepicker"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/tui/pieceswitch"
+	"github.com/jewell-lgtm/monkeypuzzle/internal/tui/promptinput"
 	"github.com/jewell-lgtm/monkeypuzzle/pkg/cli"
 )
 
@@ -125,11 +127,13 @@ var flagPieceAdoptBranch string
 var flagPieceAdoptName string
 var flagPieceAdoptParent string
 var flagPieceAdoptSchema bool
+var flagPiecePrompt string
 var flagPieceListFlat bool
 
 func init() {
 	pieceCreateCmd.Flags().StringVar(&flagPieceName, "name", "", "Optional piece name (default: auto-generated)")
 	pieceCreateCmd.Flags().StringVar(&flagIssuePath, "issue", "", "Create piece from issue file (e.g., issues/foo.md)")
+	pieceCreateCmd.Flags().StringVar(&flagPiecePrompt, "prompt", "", "Create piece from prompt (e.g., \"add dark mode\")")
 	pieceCreateCmd.Flags().StringVarP(&flagParent, "parent", "p", "", "Parent piece name to branch from (default: main)")
 	pieceCreateCmd.Flags().BoolVar(&flagSkipSwitch, "skip-switch", false, "Don't switch to the new piece after creation")
 	pieceCreateCmd.Flags().BoolVar(&flagOverwriteSession, "overwrite-session", false, "Replace existing main repo tmux session")
@@ -308,6 +312,12 @@ func runPieceStatus(cmd *cobra.Command, args []string) error {
 			fmt.Fprintf(os.Stderr, "\n⚠ Cannot merge: has unmerged children\n")
 		}
 
+		// Display piece.md information if available
+		pieceMd, pmdErr := piececmd.ReadPieceMd(status.WorktreePath, deps.FS)
+		if pmdErr == nil && pieceMd != nil {
+			fmt.Fprintf(os.Stderr, "\nPrompt: %s\n", pieceMd.Body)
+		}
+
 		// Display issue information if available
 		marker, err := handler.ReadCurrentIssueMarker(status.WorktreePath)
 		if err == nil && marker != nil && !marker.Issue.IsEmpty() {
@@ -417,9 +427,10 @@ func getPieceCreateInput(deps core.Deps, workDir string) (piececmd.NewPieceInput
 	var err error
 
 	// Mode 1: Flags provided
-	if flagIssuePath != "" || flagPieceName != "" {
+	if flagIssuePath != "" || flagPieceName != "" || flagPiecePrompt != "" {
 		input = piececmd.NewPieceInput{
 			Name:   flagPieceName,
+			Prompt: flagPiecePrompt,
 			Parent: flagParent,
 		}
 		// Look up issue via provider if --issue flag specified
@@ -479,20 +490,32 @@ func getPieceCreateInput(deps core.Deps, workDir string) (piececmd.NewPieceInput
 }
 
 func runPieceCreateTUI(deps core.Deps, workDir string) (piececmd.NewPieceInput, error) {
-	// Use nil loading for issue handler - TUI manages its own loading state
 	tuiDeps := core.NewDeps(deps.FS, deps.Output, deps.Exec, deps.HTTP, nil)
 	issueHandler := issue.NewHandler(tuiDeps, workDir)
-	issues, err := issueHandler.ListIssues([]string{piececmd.StatusTodo})
-	if err != nil {
-		// Fall through to error - no issues available
-		return piececmd.NewPieceInput{}, fmt.Errorf("failed to list issues: %w", err)
-	}
+	issues, _ := issueHandler.ListIssues([]string{piececmd.StatusTodo})
 
+	// If no issues, skip straight to prompt input
 	if len(issues) == 0 {
-		return piececmd.NewPieceInput{}, fmt.Errorf("no todo issues found; create one with 'mp issue create' or use --name flag")
+		return runPromptInputTUI()
 	}
 
-	// Create search function for async issue search
+	// Show mode picker: "From issue" or "From prompt"
+	p := tea.NewProgram(modepicker.New())
+	m, err := p.Run()
+	if err != nil {
+		return piececmd.NewPieceInput{}, fmt.Errorf("TUI error: %w", err)
+	}
+
+	picker := m.(modepicker.Model)
+	if picker.Cancelled {
+		return piececmd.NewPieceInput{}, fmt.Errorf("cancelled")
+	}
+
+	if picker.Chosen == modepicker.ModePrompt {
+		return runPromptInputTUI()
+	}
+
+	// Issue picker flow
 	searchFn := func(query string) tea.Cmd {
 		return func() tea.Msg {
 			results, err := issueHandler.SearchIssues(issue.SearchInput{
@@ -508,13 +531,13 @@ func runPieceCreateTUI(deps core.Deps, workDir string) (piececmd.NewPieceInput, 
 		}
 	}
 
-	p := tea.NewProgram(issuepicker.NewWithSearch(issues, searchFn))
-	m, err := p.Run()
+	ip := tea.NewProgram(issuepicker.NewWithSearch(issues, searchFn))
+	im, err := ip.Run()
 	if err != nil {
 		return piececmd.NewPieceInput{}, fmt.Errorf("TUI error: %w", err)
 	}
 
-	finalModel := m.(issuepicker.Model)
+	finalModel := im.(issuepicker.Model)
 	if finalModel.Cancelled {
 		return piececmd.NewPieceInput{}, fmt.Errorf("cancelled")
 	}
@@ -526,6 +549,23 @@ func runPieceCreateTUI(deps core.Deps, workDir string) (piececmd.NewPieceInput, 
 
 	return piececmd.NewPieceInput{
 		Issue: selectedIssue.ToIssueRef(),
+	}, nil
+}
+
+func runPromptInputTUI() (piececmd.NewPieceInput, error) {
+	p := tea.NewProgram(promptinput.New())
+	m, err := p.Run()
+	if err != nil {
+		return piececmd.NewPieceInput{}, fmt.Errorf("TUI error: %w", err)
+	}
+
+	model := m.(promptinput.Model)
+	if model.Cancelled {
+		return piececmd.NewPieceInput{}, fmt.Errorf("cancelled")
+	}
+
+	return piececmd.NewPieceInput{
+		Prompt: model.Value,
 	}, nil
 }
 

@@ -62,10 +62,12 @@ type SwitchResult struct {
 }
 
 // NewPieceInput holds input for the piece create command.
-// Either Issue or Name must be provided (mutually exclusive).
+// Must provide one of: Issue, Name, or Prompt.
+// Issue and Prompt are mutually exclusive. Name can coexist with Prompt.
 type NewPieceInput struct {
 	Issue            IssueRef `json:"issue,omitempty"`
 	Name             string   `json:"name,omitempty"`
+	Prompt           string   `json:"prompt,omitempty"`
 	Parent           string   `json:"parent,omitempty"` // Parent piece name, defaults to "main"
 	SkipSwitch       bool     `json:"skip_switch,omitempty"`
 	OverwriteSession bool     `json:"overwrite_session,omitempty"`
@@ -81,6 +83,7 @@ func NewPieceSchema() ([]byte, error) {
 			"title":    "",
 		},
 		"name":              "",
+		"prompt":            "",
 		"parent":            "main",
 		"skip_switch":       false,
 		"overwrite_session": false,
@@ -98,29 +101,44 @@ func ParseNewPieceJSON(data []byte) (NewPieceInput, error) {
 }
 
 // ValidateNewPieceInput validates the input.
-// One of Issue or Name must be provided, but not both.
+// Must provide one of: Issue, Name, or Prompt.
+// Issue and Prompt are mutually exclusive. Name can coexist with Prompt.
 func ValidateNewPieceInput(input NewPieceInput) error {
 	hasIssue := !input.Issue.IsEmpty()
 	hasName := strings.TrimSpace(input.Name) != ""
+	hasPrompt := strings.TrimSpace(input.Prompt) != ""
 
+	if hasIssue && hasPrompt {
+		return fmt.Errorf("cannot specify both issue and prompt")
+	}
 	if hasIssue && hasName {
 		return fmt.Errorf("cannot specify both issue and name")
 	}
-	if !hasIssue && !hasName {
-		return fmt.Errorf("must specify either issue or name")
+	if !hasIssue && !hasName && !hasPrompt {
+		return fmt.Errorf("must specify issue, name, or prompt")
 	}
 	return nil
 }
 
 // WithNewPieceDefaults returns input with whitespace trimmed and defaults applied.
+// When Prompt is set and Name is empty, derives name from prompt.
 func WithNewPieceDefaults(input NewPieceInput) NewPieceInput {
 	parent := strings.TrimSpace(input.Parent)
 	if parent == "" {
 		parent = "main"
 	}
+	prompt := strings.TrimSpace(input.Prompt)
+	name := strings.TrimSpace(input.Name)
+
+	// Derive name from prompt if not explicitly set
+	if prompt != "" && name == "" {
+		name = SanitizePieceName(prompt)
+	}
+
 	return NewPieceInput{
 		Issue:            input.Issue,
-		Name:             strings.TrimSpace(input.Name),
+		Name:             name,
+		Prompt:           prompt,
 		Parent:           parent,
 		SkipSwitch:       input.SkipSwitch,
 		OverwriteSession: input.OverwriteSession,

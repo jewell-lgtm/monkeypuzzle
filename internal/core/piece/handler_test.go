@@ -2066,3 +2066,86 @@ func TestHandler_CreatePiece_WritesPieceMetadata_FromFeatureBranch(t *testing.T)
 		t.Errorf("expected CreatedFromBranch 'parent-feature', got %q", metadata.CreatedFromBranch)
 	}
 }
+
+func TestWriteAndReadPieceMd(t *testing.T) {
+	fs := adapters.NewMemoryFS()
+	dir := "/tmp/test-piece"
+	_ = fs.MkdirAll(dir, 0755)
+
+	md := piece.PieceMd{
+		Title:  "add-dark-mode",
+		Status: "in-progress",
+		Body:   "add dark mode support",
+	}
+
+	err := piece.WritePieceMd(dir, md, fs)
+	if err != nil {
+		t.Fatalf("failed to write piece.md: %v", err)
+	}
+
+	got, err := piece.ReadPieceMd(dir, fs)
+	if err != nil {
+		t.Fatalf("failed to read piece.md: %v", err)
+	}
+
+	if got.Title != "add-dark-mode" {
+		t.Errorf("expected title 'add-dark-mode', got %q", got.Title)
+	}
+	if got.Status != "in-progress" {
+		t.Errorf("expected status 'in-progress', got %q", got.Status)
+	}
+	if got.Body != "# add-dark-mode\n\nadd dark mode support" {
+		t.Errorf("unexpected body: %q", got.Body)
+	}
+}
+
+func TestReadPieceMd_NotExist(t *testing.T) {
+	fs := adapters.NewMemoryFS()
+	_, err := piece.ReadPieceMd("/nonexistent", fs)
+	if err == nil {
+		t.Error("expected error for missing piece.md")
+	}
+}
+
+func TestHandler_CreatePieceFromPrompt(t *testing.T) {
+	fs := adapters.NewMemoryFS()
+	out := adapters.NewBufferOutput()
+	mockExec := adapters.NewMockExec()
+	deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
+	handler := piece.NewHandler(deps)
+
+	// Setup mocks for CreatePiece flow
+	repoRoot := "/repo"
+	piecesDir := filepath.Join(repoRoot, ".monkeypuzzle", "pieces")
+	worktreePath := filepath.Join(piecesDir, "add-dark-mode")
+
+	mockExec.AddResponse("git", []string{"rev-parse", "--show-toplevel"}, []byte(repoRoot+"\n"), nil)
+	mockExec.AddResponse("git", []string{"rev-parse", "--abbrev-ref", "HEAD"}, []byte("main\n"), nil)
+	mockExec.AddResponse("git", []string{"worktree", "add", worktreePath}, []byte(""), nil)
+
+	info, err := handler.CreatePieceFromPrompt(
+		context.Background(),
+		"", // name empty - derived from prompt
+		"add dark mode",
+		piece.CreatePieceOptions{},
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if info.Name != "add-dark-mode" {
+		t.Errorf("expected name 'add-dark-mode', got %q", info.Name)
+	}
+
+	// Verify piece.md was written
+	md, err := piece.ReadPieceMd(info.WorktreePath, fs)
+	if err != nil {
+		t.Fatalf("failed to read piece.md: %v", err)
+	}
+	if md.Title != "add-dark-mode" {
+		t.Errorf("expected title 'add-dark-mode', got %q", md.Title)
+	}
+	if md.Status != "in-progress" {
+		t.Errorf("expected status 'in-progress', got %q", md.Status)
+	}
+}
