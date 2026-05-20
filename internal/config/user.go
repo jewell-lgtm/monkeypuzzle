@@ -55,6 +55,26 @@ func LoadUserConfig() (UserConfig, error) {
 	return cfg, nil
 }
 
+// UserConfigPath returns the path where the user config would be stored.
+// The file may not exist; use UserConfigExists to check.
+func UserConfigPath() (string, error) {
+	configDir, err := paths.ConfigDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(configDir, configFileName), nil
+}
+
+// UserConfigExists reports whether the user config file is present on disk.
+func UserConfigExists() bool {
+	path, err := UserConfigPath()
+	if err != nil {
+		return false
+	}
+	_, err = os.Stat(path)
+	return err == nil
+}
+
 // SaveUserConfig writes user config to ~/.config/monkeypuzzle/config.json.
 func SaveUserConfig(cfg UserConfig) error {
 	configDir, err := paths.ConfigDir()

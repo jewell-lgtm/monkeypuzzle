@@ -5,8 +5,9 @@ import (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "mp",
-	Short: "Monkeypuzzle - development workflow CLI",
+	Use:               "mp",
+	Short:             "Monkeypuzzle - development workflow CLI",
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error { return ensureUserConfig(cmd) },
 }
 
 func Execute() error {
