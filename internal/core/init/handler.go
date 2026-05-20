@@ -2,6 +2,7 @@ package init
 
 import (
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
@@ -139,6 +140,48 @@ func (h *Handler) Run(input Input, workDir string) (Config, error) {
 			})
 		}
 	}
+
+	return cfg, nil
+}
+
+// Refresh re-runs the idempotent parts of init for an already-configured repo:
+// re-writes <mpDir>/.gitignore (entries do drift between mp versions) and
+// regenerates the Claude skill. monkeypuzzle.json is read but not modified —
+// switching providers is an explicit reconfigure via Run.
+//
+// Returns the existing config so callers can emit it just like Run does.
+func (h *Handler) Refresh(workDir, mpDir string) (Config, error) {
+	if mpDir == "" {
+		mpDir = DirName
+	}
+
+	configPath := filepath.Join(mpDir, ConfigFile)
+	data, err := h.deps.FS.ReadFile(configPath)
+	if err != nil {
+		return Config{}, fmt.Errorf("no existing config at %s: %w", configPath, err)
+	}
+	var cfg Config
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return Config{}, fmt.Errorf("failed to parse existing config: %w", err)
+	}
+
+	if err := h.EnsureGitignore(mpDir); err != nil {
+		return Config{}, err
+	}
+
+	claudeHandler := claude.NewHandler(h.deps)
+	if _, err := claudeHandler.CreateSkill(workDir); err != nil {
+		h.deps.Output.Write(core.Message{
+			Type:    core.MsgWarning,
+			Content: "Failed to refresh Claude skill: " + err.Error(),
+		})
+	}
+
+	h.deps.Output.Write(core.Message{
+		Type:    core.MsgSuccess,
+		Content: "Refreshed " + mpDir + " (gitignore + Claude skill); monkeypuzzle.json left untouched",
+		Data:    cfg,
+	})
 
 	return cfg, nil
 }

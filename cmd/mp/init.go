@@ -1,14 +1,12 @@
 package mp
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
@@ -41,24 +39,42 @@ var (
 
 var initCmd = &cobra.Command{
 	Use:   "init",
-	Short: "Initialize monkeypuzzle in current directory",
-	Long: `Initialize monkeypuzzle in current directory.
+	Short: "Initialize or refresh monkeypuzzle in current directory",
+	Long: `Initialize or refresh monkeypuzzle in the current directory.
+
+Re-running ` + "`mp init`" + ` in an already-configured repo is idempotent: it refreshes
+.monkeypuzzle/.gitignore and the Claude skill but leaves monkeypuzzle.json
+alone. ` + "`mp reinit`" + ` is an alias for the same operation. To reconfigure providers,
+pass flags / stdin JSON / --yes — explicit input signals an overwrite.
 
 Modes:
-  Interactive (default): TUI wizard for humans
-  Stdin JSON:            Pipe JSON config to stdin
-  All flags provided:    Direct mode, no prompts
+  Interactive (default): TUI wizard for humans (first-time only)
+  Stdin JSON:            Pipe JSON config to stdin (overwrites)
+  All flags provided:    Direct mode, no prompts (overwrites)
   --schema:              Output expected JSON format
 
 Examples:
-  mp init                                    # Interactive wizard
-  mp init --schema | jq '.name = "foo"' | mp init  # Pipe JSON
-  mp init --name foo --issue-provider markdown --pr-provider github`,
+  mp init                                    # First time: wizard. Already set up: refresh.
+  mp reinit                                  # Synonym for the refresh case.
+  mp init --schema | jq '.name = "foo"' | mp init  # Pipe JSON (reconfigure)
+  mp init --name foo --issue-provider markdown --pr-provider github  # Reconfigure`,
 	RunE: runInit,
+}
+
+// reinitCmd is a pure synonym for init — same flags, same handler. Lets users
+// type the verb that matches their intent ("refresh this repo's mp setup").
+var reinitCmd = &cobra.Command{
+	Use:   "reinit",
+	Short: "Alias for `mp init` — refresh scaffolding in an existing repo",
+	Long:  initCmd.Long,
+	RunE:  runInit,
 }
 
 func init() {
 	rootCmd.AddCommand(initCmd)
+	rootCmd.AddCommand(reinitCmd)
+	// reinit shares init's flags so behaviour stays identical.
+	reinitCmd.Flags().AddFlagSet(initCmd.Flags())
 	initCmd.Flags().StringVar(&flagName, "name", "", "Project name")
 	initCmd.Flags().StringVar(&flagIssueProvider, "issue-provider", "", "Issue provider (markdown, linear, plane)")
 	initCmd.Flags().StringVar(&flagPRProvider, "pr-provider", "", "PR provider (github)")
@@ -128,20 +144,24 @@ func runInit(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Check for existing config
-	if handler.ConfigExists(mpDir) && !flagYes {
-		if !cli.IsTerminal() {
-			return fmt.Errorf("config already exists, use --yes to overwrite")
-		}
-		fmt.Print("Config already exists. Overwrite? [y/N] ")
-		reader := bufio.NewReader(os.Stdin)
-		answer, err := reader.ReadString('\n')
-		if err != nil {
-			return fmt.Errorf("failed to read input: %w", err)
-		}
-		answer = strings.TrimSpace(strings.ToLower(answer))
-		if answer != "y" && answer != "yes" {
-			fmt.Println("Cancelled.")
+	// Existing repo: bare `mp init` / `mp reinit` is a refresh (regenerate
+	// gitignore + Claude skill, keep monkeypuzzle.json). Explicit reconfigure
+	// intent is signalled by --yes, any provider flag, or piped JSON.
+	if handler.ConfigExists(mpDir) {
+		explicitReconfigure := flagYes ||
+			flagName != "" || flagIssueProvider != "" || flagPRProvider != "" ||
+			cli.HasStdinData()
+
+		if !explicitReconfigure {
+			cfg, err := handler.Refresh(wd, mpDir)
+			if err != nil {
+				return err
+			}
+			jsonData, err := json.MarshalIndent(cfg, "", "  ")
+			if err != nil {
+				return fmt.Errorf("failed to marshal config: %w", err)
+			}
+			fmt.Println(string(jsonData))
 			return nil
 		}
 	}

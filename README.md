@@ -87,7 +87,7 @@ The key rule: **non-interactive invocations (flags or JSON) fail loudly on genui
 
 | Command | What it does |
 | --- | --- |
-| `mp init` | Configure issue + pr provider for this repo |
+| `mp init` / `mp reinit` | Configure providers (first run) or refresh `.gitignore` + Claude skill (re-run) |
 | `mp` / `mp dash` | Cross-project dashboard |
 | `mp create` | Spawn worktree + tmux session (+ `--issue <id>` to link) |
 | `mp adopt <branch>` | Bring an existing branch into mp |
