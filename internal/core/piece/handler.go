@@ -201,48 +201,65 @@ func (h *Handler) AdoptPiece(ctx context.Context, input AdoptPieceInput) (PieceI
 		return PieceInfo{}, fmt.Errorf("failed to get working directory: %w", err)
 	}
 
-	// Detect git repo root
-	repoRoot, err := h.git.RepoRoot(ctx, wd)
+	// Detect main repo root (works from inside a piece worktree too)
+	repoRoot, err := h.git.GetMainRepoRoot(ctx, wd)
 	if err != nil {
-		return PieceInfo{}, fmt.Errorf("not in a git repository: %w", err)
+		repoRoot, err = h.git.RepoRoot(ctx, wd)
+		if err != nil {
+			return PieceInfo{}, fmt.Errorf("not in a git repository: %w", err)
+		}
 	}
 
-	// Check if we're already in a worktree (piece)
+	// Detect if we're inside a worktree — affects defaulting and clean check
 	gitDir, err := h.git.RevParseGitDir(ctx, wd)
 	if err != nil {
 		return PieceInfo{}, fmt.Errorf("failed to get git dir: %w", err)
 	}
-	if h.git.IsWorktree(gitDir) {
-		return PieceInfo{}, fmt.Errorf("cannot adopt from within a piece worktree, run from main repo")
-	}
+	inWorktree := h.git.IsWorktree(gitDir)
 
-	// Determine branch to adopt: use input.Branch if provided, else current branch
-	branchToAdopt := input.Branch
+	// Determine branch to adopt. From a worktree, the current branch is the
+	// piece's own branch (already a piece), so require an explicit --branch.
+	branchToAdopt := strings.TrimSpace(input.Branch)
 	if branchToAdopt == "" {
+		if inWorktree {
+			return PieceInfo{}, fmt.Errorf("--branch is required when running from inside a piece worktree")
+		}
 		branchToAdopt, err = h.git.CurrentBranch(ctx, wd)
 		if err != nil {
 			return PieceInfo{}, fmt.Errorf("failed to get current branch: %w", err)
 		}
 	}
 
-	// Disallow adopting main/master branches
-	if branchToAdopt == "main" || branchToAdopt == "master" {
+	// Resolve remote-ref form (e.g. "origin/foo") by consulting the actual remotes.
+	remoteName, remoteBranch := h.detectRemoteRef(ctx, repoRoot, branchToAdopt)
+	isRemote := remoteName != ""
+
+	// Disallow adopting main/master branches (after stripping the remote prefix).
+	plainBranch := branchToAdopt
+	if isRemote {
+		plainBranch = remoteBranch
+	}
+	if plainBranch == "main" || plainBranch == "master" {
 		return PieceInfo{}, fmt.Errorf("cannot adopt main or master branch as a piece")
 	}
 
-	// Check if working directory is clean
-	clean, err := h.git.IsClean(ctx, wd)
-	if err != nil {
-		return PieceInfo{}, fmt.Errorf("failed to check working directory status: %w", err)
-	}
-	if !clean {
-		return PieceInfo{}, fmt.Errorf("working directory has uncommitted changes, please commit or stash first")
+	// Only enforce a clean working directory when running from the main repo,
+	// since the adopt path used to checkout there. From a worktree we don't
+	// touch wd at all.
+	if !inWorktree {
+		clean, err := h.git.IsClean(ctx, wd)
+		if err != nil {
+			return PieceInfo{}, fmt.Errorf("failed to check working directory status: %w", err)
+		}
+		if !clean {
+			return PieceInfo{}, fmt.Errorf("working directory has uncommitted changes, please commit or stash first")
+		}
 	}
 
-	// Determine piece name (use input.Name or branch name)
+	// Determine piece name (use input.Name or branch name).
 	pieceName := input.Name
 	if pieceName == "" {
-		pieceName = SanitizePieceName(branchToAdopt)
+		pieceName = SanitizePieceName(plainBranch)
 	} else {
 		pieceName = SanitizePieceName(pieceName)
 	}
@@ -270,17 +287,31 @@ func (h *Handler) AdoptPiece(ctx context.Context, input AdoptPieceInput) (PieceI
 		parent = "main"
 	}
 
-	// Checkout main branch so we can create worktree for current branch
-	if err := h.git.Checkout(ctx, wd, parent); err != nil {
-		return PieceInfo{}, fmt.Errorf("failed to checkout %s: %w", parent, err)
-	}
-
-	// Create worktree for the existing branch
 	worktreePath := filepath.Join(piecesDir, pieceName)
-	if err := h.git.WorktreeAddExisting(ctx, repoRoot, worktreePath, branchToAdopt); err != nil {
-		// Try to recover by checking out the original branch
-		_ = h.git.Checkout(ctx, wd, branchToAdopt)
-		return PieceInfo{}, fmt.Errorf("failed to create worktree for branch %s: %w", branchToAdopt, err)
+
+	if isRemote {
+		// Fetch the remote branch, then add a worktree with a new local branch
+		// tracking it.
+		if err := h.git.Fetch(ctx, repoRoot, remoteName, remoteBranch); err != nil {
+			return PieceInfo{}, err
+		}
+		if h.git.LocalBranchExists(ctx, repoRoot, remoteBranch) {
+			return PieceInfo{}, fmt.Errorf("local branch %q already exists; pass --name to adopt under a different piece name, or adopt the local branch directly", remoteBranch)
+		}
+		if err := h.git.WorktreeAddTracking(ctx, repoRoot, worktreePath, remoteBranch, branchToAdopt); err != nil {
+			return PieceInfo{}, err
+		}
+		// Record the local branch we just created as the adopted branch for
+		// metadata + the success message.
+		branchToAdopt = remoteBranch
+	} else {
+		// Local branch path. If the branch is currently checked out in the main
+		// repo (the historical default), the old code would checkout main on wd
+		// first; now we just surface git's own error so the user can sort it
+		// out. From a worktree we don't touch wd.
+		if err := h.git.WorktreeAddExisting(ctx, repoRoot, worktreePath, branchToAdopt); err != nil {
+			return PieceInfo{}, fmt.Errorf("failed to create worktree for branch %s: %w", branchToAdopt, err)
+		}
 	}
 
 	// Write piece metadata
@@ -311,8 +342,6 @@ func (h *Handler) AdoptPiece(ctx context.Context, input AdoptPieceInput) (PieceI
 	}
 	if err := h.hooks.RunHook(ctx, repoRoot, HookOnPieceCreate, hookCtx); err != nil {
 		h.cleanupPiece(ctx, repoRoot, worktreePath, sessionName, false)
-		// Try to recover original state
-		_ = h.git.Checkout(ctx, wd, branchToAdopt)
 		return PieceInfo{}, fmt.Errorf("on-piece-create hook failed: %w", err)
 	}
 
@@ -323,6 +352,28 @@ func (h *Handler) AdoptPiece(ctx context.Context, input AdoptPieceInput) (PieceI
 	})
 
 	return info, nil
+}
+
+// detectRemoteRef checks if branchRef has the form "<remote>/<name>" where
+// <remote> is a configured git remote. Returns the remote and branch name when
+// it matches; otherwise returns ("", "") so the caller treats branchRef as a
+// local branch (which may itself contain slashes, e.g. "feature/foo").
+func (h *Handler) detectRemoteRef(ctx context.Context, repoRoot, branchRef string) (string, string) {
+	idx := strings.Index(branchRef, "/")
+	if idx <= 0 || idx == len(branchRef)-1 {
+		return "", ""
+	}
+	candidate := branchRef[:idx]
+	remotes, err := h.git.Remotes(ctx, repoRoot)
+	if err != nil {
+		return "", ""
+	}
+	for _, r := range remotes {
+		if r == candidate {
+			return candidate, branchRef[idx+1:]
+		}
+	}
+	return "", ""
 }
 
 // CurrentIssueMarker represents the current issue marker file structure
@@ -1298,6 +1349,50 @@ func (h *Handler) removePieceForce(ctx context.Context, repoRoot, pieceName, wor
 	return nil
 }
 
+// switchClientToMainIfInside moves the active multiplexer client to the main
+// repo session when the caller is running from inside the worktree about to
+// be removed. Without this, abandoning/finishing the piece you're currently
+// attached to strands the client in a dying session.
+func (h *Handler) switchClientToMainIfInside(ctx context.Context, mainRepoRoot, worktreePath string) {
+	if adapters.IsNoopMultiplexer(h.mux) || !h.mux.InSession() {
+		return
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		return
+	}
+	if !isPathInside(wd, worktreePath) {
+		return
+	}
+	mainSession := h.mainSessionName(mainRepoRoot)
+	if err := h.mux.SwitchTo(ctx, mainSession, mainRepoRoot); err != nil {
+		h.deps.Output.Write(core.Message{
+			Type:    core.MsgWarning,
+			Content: fmt.Sprintf("Failed to switch to main session: %v", err),
+		})
+	}
+}
+
+// isPathInside reports whether child is the same as or nested under parent.
+func isPathInside(child, parent string) bool {
+	absChild, err := filepath.Abs(child)
+	if err != nil {
+		return false
+	}
+	absParent, err := filepath.Abs(parent)
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(absParent, absChild)
+	if err != nil {
+		return false
+	}
+	if rel == "." {
+		return true
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
 // AbandonOptions configures the abandon behavior
 type AbandonOptions struct {
 	Force        bool // Force removal even with uncommitted changes
@@ -1379,6 +1474,10 @@ func (h *Handler) AbandonPiece(ctx context.Context, pieceName string, opts Aband
 		return result, fmt.Errorf("failed to get repo root: %w", err)
 	}
 	repoRoot = detectedRepoRoot
+
+	// If we're running inside the worktree being removed, switch the active
+	// client to the main repo session before killing this one.
+	h.switchClientToMainIfInside(ctx, repoRoot, target.WorktreePath)
 
 	// Kill session if exists
 	if target.HasSession {
@@ -1478,6 +1577,10 @@ func (h *Handler) DonePiece(ctx context.Context, workDir string, input DoneInput
 			WorktreePath: status.WorktreePath,
 		})
 	}
+
+	// If we're running inside the worktree being removed, switch the active
+	// client to the main repo session before removePieceForce kills it.
+	h.switchClientToMainIfInside(ctx, mainRepoRoot, status.WorktreePath)
 
 	// Remove the piece (force removal since we're likely inside the worktree)
 	if err := h.removePieceForce(ctx, mainRepoRoot, status.PieceName, status.WorktreePath); err != nil {

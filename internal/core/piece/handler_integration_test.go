@@ -1590,6 +1590,13 @@ func TestIntegration_AdoptPiece_HappyPath(t *testing.T) {
 		t.Fatalf("git commit failed: %v\n%s", err, out)
 	}
 
+	// Switch back to main — AdoptPiece no longer auto-checks-out main.
+	cmd = exec.Command("git", "checkout", "main")
+	cmd.Dir = tmpDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git checkout main failed: %v\n%s", err, out)
+	}
+
 	// Create handler and adopt the branch as a piece
 	deps := core.Deps{
 		FS:     adapters.NewOSFS(""),
@@ -1598,7 +1605,7 @@ func TestIntegration_AdoptPiece_HappyPath(t *testing.T) {
 	}
 	handler := piece.NewHandler(deps)
 
-	info, err := handler.AdoptPiece(context.Background(), piece.AdoptPieceInput{})
+	info, err := handler.AdoptPiece(context.Background(), piece.AdoptPieceInput{Branch: "my-feature-branch"})
 	if err != nil {
 		t.Fatalf("AdoptPiece failed: %v", err)
 	}
@@ -1763,6 +1770,13 @@ func TestIntegration_AdoptPiece_WithCustomName(t *testing.T) {
 		t.Fatalf("git checkout -b failed: %v\n%s", err, out)
 	}
 
+	// Switch back to main — AdoptPiece no longer auto-checks-out main.
+	cmd = exec.Command("git", "checkout", "main")
+	cmd.Dir = tmpDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git checkout main failed: %v\n%s", err, out)
+	}
+
 	// Adopt with custom name
 	deps := core.Deps{
 		FS:     adapters.NewOSFS(""),
@@ -1772,7 +1786,8 @@ func TestIntegration_AdoptPiece_WithCustomName(t *testing.T) {
 	handler := piece.NewHandler(deps)
 
 	info, err := handler.AdoptPiece(context.Background(), piece.AdoptPieceInput{
-		Name: "nice-piece-name",
+		Branch: "ugly-branch-name",
+		Name:   "nice-piece-name",
 	})
 	if err != nil {
 		t.Fatalf("AdoptPiece failed: %v", err)
@@ -1970,4 +1985,188 @@ func depsWithMarkdownSync(_ *testing.T) core.Deps {
 		_ = issue.NewHandler(deps, "").SyncStatus(ev.IssueID, ev.NewStatus)
 	})
 	return deps
+}
+
+// recordingMux is a test multiplexer that records calls. It reports as a
+// managed (non-noop) multiplexer with a configurable InSession value, so
+// tests can exercise the "switch to main before killing" branch without
+// needing a real tmux server.
+type recordingMux struct {
+	inSession bool
+	switchTos []switchToCall
+	killed    []string
+	sessions  map[string]bool
+}
+
+type switchToCall struct {
+	sessionName string
+	workDir     string
+}
+
+func newRecordingMux(inSession bool) *recordingMux {
+	return &recordingMux{inSession: inSession, sessions: map[string]bool{}}
+}
+
+func (r *recordingMux) SwitchTo(_ context.Context, sessionName, workDir string) error {
+	r.switchTos = append(r.switchTos, switchToCall{sessionName: sessionName, workDir: workDir})
+	r.sessions[sessionName] = true
+	return nil
+}
+
+func (r *recordingMux) Kill(_ context.Context, sessionName string) error {
+	r.killed = append(r.killed, sessionName)
+	delete(r.sessions, sessionName)
+	return nil
+}
+
+func (r *recordingMux) Exists(_ context.Context, sessionName string) bool {
+	return r.sessions[sessionName]
+}
+
+func (r *recordingMux) InSession() bool                   { return r.inSession }
+func (r *recordingMux) IsInstalled(_ context.Context) bool { return true }
+
+func TestIntegration_AbandonPiece_SwitchesToMainSessionWhenInsideWorktree(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	tmpDataHome, err := os.MkdirTemp("", "mp-data-*")
+	if err != nil {
+		t.Fatalf("failed to create temp data dir: %v", err)
+	}
+	t.Cleanup(func() {
+		os.RemoveAll(tmpDataHome)
+		paths.ResetDataDir()
+	})
+	paths.SetDataDir(tmpDataHome)
+
+	tmpDir, err := os.MkdirTemp("", "mp-abandon-switch-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	setupGitRepo(t, tmpDir)
+	setupMonkeypuzzleConfig(t, tmpDir)
+
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get working directory: %v", err)
+	}
+	defer func() { _ = os.Chdir(oldWd) }()
+
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("failed to change directory: %v", err)
+	}
+
+	deps := core.Deps{
+		FS:     adapters.NewOSFS(""),
+		Output: adapters.NewBufferOutput(),
+		Exec:   adapters.NewOSExec(),
+	}
+	mux := newRecordingMux(true)
+	handler := piece.NewHandlerWithMultiplexer(deps, mux)
+
+	info, err := handler.CreatePiece(context.Background(), "switch-on-abandon", piece.CreatePieceOptions{})
+	if err != nil {
+		t.Fatalf("CreatePiece failed: %v", err)
+	}
+
+	// Pretend the active client is attached to the piece's session.
+	mux.sessions[info.SessionName] = true
+
+	// Move into the worktree before abandoning — this is the case where
+	// killing the piece session would otherwise strand the user.
+	if err := os.Chdir(info.WorktreePath); err != nil {
+		t.Fatalf("failed to chdir into worktree: %v", err)
+	}
+
+	_, err = handler.AbandonPiece(context.Background(), "switch-on-abandon", piece.AbandonOptions{Force: true})
+	if err != nil {
+		t.Fatalf("AbandonPiece failed: %v", err)
+	}
+
+	if len(mux.switchTos) != 1 {
+		t.Fatalf("expected exactly one SwitchTo call, got %d: %#v", len(mux.switchTos), mux.switchTos)
+	}
+	got := mux.switchTos[0]
+	wantSession := "mp/test-project"
+	if got.sessionName != wantSession {
+		t.Errorf("SwitchTo session = %q, want %q", got.sessionName, wantSession)
+	}
+	wantWorkDir, _ := filepath.EvalSymlinks(tmpDir)
+	gotWorkDir, _ := filepath.EvalSymlinks(got.workDir)
+	if gotWorkDir != wantWorkDir {
+		t.Errorf("SwitchTo workDir = %q, want %q", got.workDir, tmpDir)
+	}
+
+	// The switch must happen before the piece session is killed, otherwise
+	// the user is briefly stranded.
+	if len(mux.killed) == 0 || mux.killed[0] != info.SessionName {
+		t.Errorf("expected piece session %q to be killed; killed = %v", info.SessionName, mux.killed)
+	}
+}
+
+func TestIntegration_AbandonPiece_DoesNotSwitchWhenNotInSession(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	tmpDataHome, err := os.MkdirTemp("", "mp-data-*")
+	if err != nil {
+		t.Fatalf("failed to create temp data dir: %v", err)
+	}
+	t.Cleanup(func() {
+		os.RemoveAll(tmpDataHome)
+		paths.ResetDataDir()
+	})
+	paths.SetDataDir(tmpDataHome)
+
+	tmpDir, err := os.MkdirTemp("", "mp-abandon-noswitch-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	setupGitRepo(t, tmpDir)
+	setupMonkeypuzzleConfig(t, tmpDir)
+
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get working directory: %v", err)
+	}
+	defer func() { _ = os.Chdir(oldWd) }()
+
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("failed to change directory: %v", err)
+	}
+
+	deps := core.Deps{
+		FS:     adapters.NewOSFS(""),
+		Output: adapters.NewBufferOutput(),
+		Exec:   adapters.NewOSExec(),
+	}
+	// Not in a managed session — the helper should not call SwitchTo even
+	// though we are inside the worktree being removed.
+	mux := newRecordingMux(false)
+	handler := piece.NewHandlerWithMultiplexer(deps, mux)
+
+	info, err := handler.CreatePiece(context.Background(), "no-switch", piece.CreatePieceOptions{})
+	if err != nil {
+		t.Fatalf("CreatePiece failed: %v", err)
+	}
+
+	if err := os.Chdir(info.WorktreePath); err != nil {
+		t.Fatalf("failed to chdir into worktree: %v", err)
+	}
+
+	_, err = handler.AbandonPiece(context.Background(), "no-switch", piece.AbandonOptions{Force: true})
+	if err != nil {
+		t.Fatalf("AbandonPiece failed: %v", err)
+	}
+
+	if len(mux.switchTos) != 0 {
+		t.Errorf("expected no SwitchTo calls when InSession() is false, got %#v", mux.switchTos)
+	}
 }

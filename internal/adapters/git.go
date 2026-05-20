@@ -49,6 +49,52 @@ func (g *Git) WorktreeAddExisting(ctx context.Context, repoRoot, worktreePath, b
 	return nil
 }
 
+// WorktreeAddTracking creates a worktree with a new local branch tracking a remote ref.
+// Equivalent to: git worktree add -b <localBranch> --track <worktreePath> <remoteRef>.
+func (g *Git) WorktreeAddTracking(ctx context.Context, repoRoot, worktreePath, localBranch, remoteRef string) error {
+	_, err := g.exec.RunWithDir(ctx, repoRoot, "git", "worktree", "add", "-b", localBranch, "--track", worktreePath, remoteRef)
+	if err != nil {
+		return fmt.Errorf("failed to create tracking worktree for %s at %s: %w", remoteRef, worktreePath, err)
+	}
+	return nil
+}
+
+// Fetch runs `git fetch <remote> <ref>` (or `git fetch <remote>` when ref is empty).
+func (g *Git) Fetch(ctx context.Context, workDir, remote, ref string) error {
+	args := []string{"fetch", remote}
+	if ref != "" {
+		args = append(args, ref)
+	}
+	_, err := g.exec.RunWithDir(ctx, workDir, "git", args...)
+	if err != nil {
+		return fmt.Errorf("failed to fetch %s/%s: %w", remote, ref, err)
+	}
+	return nil
+}
+
+// Remotes lists configured git remotes for the repo.
+func (g *Git) Remotes(ctx context.Context, workDir string) ([]string, error) {
+	output, err := g.exec.RunWithDir(ctx, workDir, "git", "remote")
+	if err != nil {
+		return nil, fmt.Errorf("failed to list remotes: %w", err)
+	}
+	raw := strings.Split(strings.TrimSpace(string(output)), "\n")
+	remotes := make([]string, 0, len(raw))
+	for _, r := range raw {
+		r = strings.TrimSpace(r)
+		if r != "" {
+			remotes = append(remotes, r)
+		}
+	}
+	return remotes, nil
+}
+
+// LocalBranchExists checks if a local branch exists.
+func (g *Git) LocalBranchExists(ctx context.Context, workDir, branchName string) bool {
+	_, err := g.exec.RunWithDir(ctx, workDir, "git", "show-ref", "--verify", "--quiet", "refs/heads/"+branchName)
+	return err == nil
+}
+
 // WorktreeRemove removes a git worktree
 func (g *Git) WorktreeRemove(ctx context.Context, repoRoot, worktreePath string) error {
 	_, err := g.exec.RunWithDir(ctx, repoRoot, "git", "worktree", "remove", worktreePath)

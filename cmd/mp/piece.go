@@ -31,12 +31,14 @@ var pieceCmd = &cobra.Command{
 	Use:   "piece",
 	Short: "Manage puzzle pieces",
 	Long:  `Show piece status or create new pieces.`,
+	Args:  cobra.NoArgs,
 	RunE:  runPieceStatus,
 }
 
 var pieceCreateCmd = &cobra.Command{
-	Use:   "create",
-	Short: "Create a new puzzle piece",
+	Use:     "create",
+	Aliases: []string{"new"},
+	Short:   "Create a new puzzle piece",
 	Long: `Create a new puzzle piece by initializing a git worktree and opening a tmux session.
 The worktree will be created in a repo-scoped directory within the platform-appropriate data directory (e.g., ~/Library/Application Support/monkeypuzzle/pieces/{repo-hash}/ on macOS, ~/.local/share/monkeypuzzle/pieces/{repo-hash}/ on Linux).`,
 	RunE: runPieceCreate,
@@ -95,8 +97,10 @@ var pieceAdoptCmd = &cobra.Command{
 	Use:   "adopt [branch]",
 	Short: "Convert existing branch to piece",
 	Long: `Convert a git branch into a piece worktree.
-Must be run from the main repo. If no branch is specified, uses the current branch.
-Creates a worktree for the branch and returns to main.`,
+Accepts a local branch name, or a remote ref like "origin/foo" — remote refs are
+fetched and a new local branch is created tracking the remote. When run from the
+main repo with no branch specified, the current branch is used. From inside a
+piece worktree, --branch is required.`,
 	RunE: runPieceAdopt,
 }
 
@@ -162,7 +166,7 @@ func init() {
 	pieceAbandonCmd.Flags().BoolVar(&flagPieceAbandonSchema, "schema", false, "Output JSON schema and exit")
 	pieceDoneCmd.Flags().StringVar(&flagMainBranch, "main-branch", "main", "Main branch to check merge status against")
 	pieceDoneCmd.Flags().BoolVar(&flagPieceDoneSchema, "schema", false, "Output JSON schema and exit")
-	pieceAdoptCmd.Flags().StringVarP(&flagPieceAdoptBranch, "branch", "b", "", "Branch to adopt (defaults to current branch)")
+	pieceAdoptCmd.Flags().StringVarP(&flagPieceAdoptBranch, "branch", "b", "", "Branch to adopt; local name or remote ref like origin/foo (defaults to current branch when on main)")
 	pieceAdoptCmd.Flags().StringVar(&flagPieceAdoptName, "name", "", "Override piece name (defaults to branch name)")
 	pieceAdoptCmd.Flags().StringVarP(&flagPieceAdoptParent, "parent", "p", "main", "Parent piece name (default: main)")
 	pieceAdoptCmd.Flags().BoolVar(&flagPieceAdoptSchema, "schema", false, "Output JSON schema and exit")
