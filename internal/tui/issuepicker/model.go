@@ -1,12 +1,12 @@
 package issuepicker
 
 import (
-	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core/issue"
+	"github.com/jewell-lgtm/monkeypuzzle/pkg/fuzzy"
 )
 
 // SearchFn is a function that performs async issue search
@@ -92,20 +92,6 @@ func (m Model) HasAsyncSearch() bool {
 	return m.SearchFunc != nil
 }
 
-// fuzzyMatch returns true if query fuzzy-matches target
-func fuzzyMatch(query, target string) bool {
-	query = strings.ToLower(query)
-	target = strings.ToLower(target)
-
-	qi := 0
-	for ti := 0; ti < len(target) && qi < len(query); ti++ {
-		if target[ti] == query[qi] {
-			qi++
-		}
-	}
-	return qi == len(query)
-}
-
 // filterIssues returns issues matching the query
 func filterIssues(issues []issue.IssueListItem, query string) []issue.IssueListItem {
 	if query == "" {
@@ -114,7 +100,7 @@ func filterIssues(issues []issue.IssueListItem, query string) []issue.IssueListI
 
 	var filtered []issue.IssueListItem
 	for _, iss := range issues {
-		if fuzzyMatch(query, iss.Title) || fuzzyMatch(query, iss.Path) || fuzzyMatch(query, iss.Number) {
+		if fuzzy.Match(query, iss.Title) || fuzzy.Match(query, iss.Path) || fuzzy.Match(query, iss.Number) {
 			filtered = append(filtered, iss)
 		}
 	}

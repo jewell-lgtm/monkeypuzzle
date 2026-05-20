@@ -41,8 +41,16 @@ echo '{"name":"my-feature","skip_switch":true}' | mp piece create
 # Create stacked piece (child of another piece)
 echo '{"name":"child-feat","parent":"parent-piece"}' | mp piece create
 
-# Switch to existing piece
+# Switch to existing piece (same-project picker)
 echo '{"name":"my-feature"}' | mp piece switch
+
+# Cross-project picker: pieces + open issues + unadopted branches.
+# Selecting an issue creates a piece from it. Selecting a branch adopts it.
+mp switch                                                        # interactive
+mp switch --project app --piece my-feature                       # attach existing
+mp switch --project app --issue issues/foo.md                    # create + attach
+mp switch --project app --branch spike-feature                   # adopt + attach
+echo '{"project":"app","issue":"issues/foo.md"}' | mp switch
 
 # Update piece with latest from main
 echo '{}' | mp piece update

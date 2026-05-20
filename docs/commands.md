@@ -124,6 +124,59 @@ Creates the monkeypuzzle directory (default `.monkeypuzzle/`):
 
 ---
 
+## mp switch
+
+Cross-project picker. Attach an existing piece (or main worktree), or create a piece on the fly by selecting an open todo issue or a stray local branch.
+
+### Usage
+
+```bash
+mp switch                                          # Interactive: fuzzy-filter all rows
+mp switch --project app                            # Attach app's main worktree
+mp switch --project app --piece fix-x              # Attach an existing piece
+mp switch --project app --issue issues/auth.md     # Create piece from issue, then attach
+mp switch --project app --branch spike-token-rotate  # Adopt branch as piece, then attach
+echo '{"project":"app","issue":"issues/auth.md"}' | mp switch
+mp switch --schema
+```
+
+### Flags
+
+| Flag        | Description                                                            |
+| ----------- | ---------------------------------------------------------------------- |
+| `--project` | Project name or path (required for non-interactive modes)              |
+| `--piece`   | Existing piece to attach                                               |
+| `--issue`   | Issue path (e.g. `issues/foo.md`) or title query; creates a piece     |
+| `--branch`  | Local git branch to adopt as a piece                                   |
+| `--schema`  | Print the JSON-stdin schema and exit                                   |
+
+`--piece`, `--issue` and `--branch` are mutually exclusive. Omit all three to attach the project's main worktree.
+
+### Interactive picker
+
+With a terminal, opens a fuzzy-filtered list of rows across every registered project:
+
+- **Pieces** — existing worktrees, with a `[tmux]` indicator if a session is live.
+- **Issues** — open `todo` issues that don't yet have a piece. Selecting one runs `mp piece create --issue`.
+- **Branches** — local git branches not currently checked out anywhere (excludes main/master and any branch already adopted as a piece). Selecting one runs `mp piece adopt`.
+
+Type to filter, ↑/↓ to move, `enter` to select, `esc` to cancel. The picker caps the visible rows at 20; narrow the query to surface anything below the cut.
+
+### What it does
+
+1. Resolves the project from the registry.
+2. Based on the chosen selector:
+   - **piece** — locates the worktree and attaches its tmux session
+   - **issue** — runs `CreatePieceFromIssue`, then attaches the new piece's session
+   - **branch** — runs `AdoptPiece` with `repo_root` set to the project path, then attaches
+3. When no multiplexer is configured, prints the worktree path so `cd $(mp switch ...)` works.
+
+### Non-interactive shape
+
+`mp dash --json` (and the JSON form of `mp switch` when stdout isn't a TTY) now includes per-project `issues` and `branches` arrays so callers can build their own pickers.
+
+---
+
 ## mp move
 
 Relocate the current repository's monkeypuzzle directory to a new path relative

@@ -128,6 +128,14 @@ echo '{"name":"piece-name","delete_branch":true}' | mp piece abandon
 # Convert existing branch to piece
 echo '{}' | mp piece adopt
 echo '{"name":"custom-name","parent":"main"}' | mp piece adopt
+
+# Cross-project picker: pieces + open todo issues + unadopted branches.
+# Selecting an issue creates a piece from it; selecting a branch adopts it.
+mp switch --project app --piece my-feature                           # attach existing piece
+mp switch --project app --issue issues/foo.md                        # create + attach
+mp switch --project app --branch spike-feature                       # adopt + attach
+echo '{"project":"app","issue":"issues/foo.md"}' | mp switch
+echo '{"project":"app","branch":"spike-feature"}' | mp switch
 ` + "```" + `
 
 ## Init & Config

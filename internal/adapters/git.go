@@ -95,6 +95,49 @@ func (g *Git) LocalBranchExists(ctx context.Context, workDir, branchName string)
 	return err == nil
 }
 
+// ListLocalBranches returns the short names of every local branch in workDir.
+// Empty slice (not nil) and no error on a brand-new repo with no branches yet.
+func (g *Git) ListLocalBranches(ctx context.Context, workDir string) ([]string, error) {
+	output, err := g.exec.RunWithDir(ctx, workDir, "git", "for-each-ref", "--format=%(refname:short)", "refs/heads")
+	if err != nil {
+		return nil, fmt.Errorf("failed to list local branches: %w", err)
+	}
+	raw := strings.Split(strings.TrimSpace(string(output)), "\n")
+	branches := make([]string, 0, len(raw))
+	for _, b := range raw {
+		b = strings.TrimSpace(b)
+		if b != "" {
+			branches = append(branches, b)
+		}
+	}
+	return branches, nil
+}
+
+// CheckedOutBranches returns the set of branch names currently checked out in
+// any worktree of workDir's repository (main repo or any added worktree).
+// Detached HEADs are skipped.
+func (g *Git) CheckedOutBranches(ctx context.Context, workDir string) (map[string]bool, error) {
+	output, err := g.exec.RunWithDir(ctx, workDir, "git", "worktree", "list", "--porcelain")
+	if err != nil {
+		return nil, fmt.Errorf("failed to list worktrees: %w", err)
+	}
+	checkedOut := map[string]bool{}
+	for _, line := range strings.Split(string(output), "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "branch ") {
+			continue
+		}
+		ref := strings.TrimSpace(strings.TrimPrefix(line, "branch "))
+		// Porcelain prints the fully-qualified refname; strip refs/heads/ to
+		// match what callers compare against.
+		ref = strings.TrimPrefix(ref, "refs/heads/")
+		if ref != "" {
+			checkedOut[ref] = true
+		}
+	}
+	return checkedOut, nil
+}
+
 // WorktreeRemove removes a git worktree
 func (g *Git) WorktreeRemove(ctx context.Context, repoRoot, worktreePath string) error {
 	_, err := g.exec.RunWithDir(ctx, repoRoot, "git", "worktree", "remove", worktreePath)

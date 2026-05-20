@@ -10,6 +10,7 @@ import (
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
 	initcmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/init"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core/piece"
+	"github.com/jewell-lgtm/monkeypuzzle/pkg/fuzzy"
 )
 
 const defaultFilePerm = 0644
@@ -135,7 +136,7 @@ func (p *MarkdownProvider) SearchIssues(input SearchInput) ([]Issue, error) {
 		}
 
 		// Apply query filter (fuzzy match on title)
-		if input.Query != "" && !fuzzyMatch(input.Query, issue.Title) {
+		if input.Query != "" && !fuzzy.Match(input.Query, issue.Title) {
 			continue
 		}
 
@@ -170,20 +171,6 @@ func (p *MarkdownProvider) SearchIssues(input SearchInput) ([]Issue, error) {
 	}
 
 	return result, nil
-}
-
-// fuzzyMatch returns true if query fuzzy-matches target (case-insensitive)
-func fuzzyMatch(query, target string) bool {
-	query = strings.ToLower(query)
-	target = strings.ToLower(target)
-
-	qi := 0
-	for ti := 0; ti < len(target) && qi < len(query); ti++ {
-		if target[ti] == query[qi] {
-			qi++
-		}
-	}
-	return qi == len(query)
 }
 
 // Get returns an issue by its file path

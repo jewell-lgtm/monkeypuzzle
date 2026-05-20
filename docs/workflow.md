@@ -93,9 +93,12 @@ mp piece create --name feature-a
 mp piece create --name feature-b
 # Work on feature B...
 
-# Switch between pieces
-mp piece switch                    # TUI selector
-mp piece switch --name feature-a   # By name
+# Switch between pieces (or jump straight to an open issue / unadopted branch)
+mp switch                          # Cross-project fuzzy picker over pieces, issues, and branches
+mp switch --project app --piece feature-a
+mp switch --project app --issue issues/auth.md   # creates the piece, then attaches
+mp switch --project app --branch spike-token     # adopts the branch, then attaches
+mp piece switch                    # Same-project TUI selector (legacy)
 
 # Merge feature A when ready
 mp piece switch --name feature-a

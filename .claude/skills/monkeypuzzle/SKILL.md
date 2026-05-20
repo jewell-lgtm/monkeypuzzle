@@ -29,6 +29,7 @@ CLI tool for git worktree-based development workflow. Binary: `mp`
 | `mp piece cleanup --force` | ✅ | Use `--force` to skip prompts |
 | `mp piece abandon` | ✅ | Use `--name` and `--force` |
 | `mp init` | ✅ | JSON stdin or flags |
+| `mp switch` | ✅ | `--project` + (`--piece`/`--issue`/`--branch`); JSON stdin equivalent |
 
 ## mp issue list
 

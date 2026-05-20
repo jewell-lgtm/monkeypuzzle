@@ -196,21 +196,33 @@ func (h *Handler) CreatePiece(ctx context.Context, pieceName string, opts Create
 // If input.Branch is provided, adopts that branch; otherwise uses current branch.
 // Creates a worktree for the branch and sets up piece metadata.
 func (h *Handler) AdoptPiece(ctx context.Context, input AdoptPieceInput) (PieceInfo, error) {
-	wd, err := os.Getwd()
-	if err != nil {
-		return PieceInfo{}, fmt.Errorf("failed to get working directory: %w", err)
-	}
-
-	// Detect main repo root (works from inside a piece worktree too)
-	repoRoot, err := h.git.GetMainRepoRoot(ctx, wd)
-	if err != nil {
-		repoRoot, err = h.git.RepoRoot(ctx, wd)
+	// Determine the directory we use to probe git state. If the caller passes
+	// an explicit RepoRoot, we trust it and skip the cwd-based discovery — this
+	// lets callers like `mp switch` adopt a branch in a project other than the
+	// one they're running from.
+	var wd string
+	var repoRoot string
+	if strings.TrimSpace(input.RepoRoot) != "" {
+		repoRoot = strings.TrimSpace(input.RepoRoot)
+		wd = repoRoot
+	} else {
+		var err error
+		wd, err = os.Getwd()
 		if err != nil {
-			return PieceInfo{}, fmt.Errorf("not in a git repository: %w", err)
+			return PieceInfo{}, fmt.Errorf("failed to get working directory: %w", err)
+		}
+		repoRoot, err = h.git.GetMainRepoRoot(ctx, wd)
+		if err != nil {
+			repoRoot, err = h.git.RepoRoot(ctx, wd)
+			if err != nil {
+				return PieceInfo{}, fmt.Errorf("not in a git repository: %w", err)
+			}
 		}
 	}
 
-	// Detect if we're inside a worktree — affects defaulting and clean check
+	// Detect if we're inside a worktree — affects defaulting and clean check.
+	// When the caller provides RepoRoot we treat it as a main repo (not a
+	// worktree); the new entrypoint never points us at a worktree.
 	gitDir, err := h.git.RevParseGitDir(ctx, wd)
 	if err != nil {
 		return PieceInfo{}, fmt.Errorf("failed to get git dir: %w", err)

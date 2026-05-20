@@ -2,62 +2,52 @@
 
 **Every feature is a piece of the puzzle. Work on them separately, assemble when ready.**
 
-Monkeypuzzle (`mp`) gives each piece of work its own isolated workspace—git worktree, tmux session, linked issue. Pick up a piece, put it down, pick up another. They all fit when you're ready to merge.
+Monkeypuzzle (`mp`) gives each piece of work its own isolated workspace — git worktree, tmux session, linked issue. Pick up a piece, put it down, pick up another. They all fit when you're ready to merge.
 
 ## Why?
 
 - **No context-switching** — Each piece is a separate worktree. No stashing, no branch juggling.
 - **Pick up where you left off** — Dedicated tmux session per piece. Your terminal state survives.
-- **Built for humans and agents** — Interactive TUI for humans, JSON stdin/stdout for AI agents. Same commands, different constraints, one workflow.
+- **One picker for everything** — `mp switch` over pieces, open issues, and stray branches. Start or resume work in one keystroke.
 
-## Quick Start
+## Quick Start (tmux)
+
+This is the recommended flow. One project, one tmux multiplexer, one picker.
 
 ```bash
+# 1. Install and point mp at tmux (once)
 go install github.com/jewell-lgtm/monkeypuzzle@latest
+mp config set multiplexer tmux
 
-mp init                    # Interactive setup
-mp piece create               # Start a new piece
-# ... do the thing ...
-mp piece merge             # Assemble it into main
+# 2. In your repo, set it up (once per project)
+mp init
+
+# 3. File something to work on
+mp issue create --title "Add dark mode"
+
+# 4. Open the picker. Fuzzy-find the issue and hit enter — mp creates a
+#    piece worktree, sets the issue to in-progress, and attaches a tmux
+#    session for it. From here on, you never leave the picker.
+mp switch
+
+# ... do the work in the attached tmux session ...
+
+# 5. Open a PR for the piece (run from inside the worktree)
+mp piece pr create
+
+# 6. After it's merged, sweep up the worktree and tmux session
+mp piece done
 ```
 
-## Works With AI Agents
+To jump between pieces, or to pick up a stray branch you left behind, just run `mp switch` again — pieces, open todo issues, and unadopted local branches all show in one fuzzy-filtered list.
 
-Every command accepts JSON and outputs structured data. Agents can request schemas, pipe data, and stay in flow:
+## More ways of working
 
-```bash
-mp piece create --schema                     # Get expected input format
-echo '{"name":"my-feature"}' | mp piece create   # Create piece via JSON
-mp piece list                             # JSON output for parsing
-```
-
-No special "agent mode"—the same CLI that works interactively works programmatically.
-
-## Commands
-
-| Command            | What it does                              |
-| ------------------ | ----------------------------------------- |
-| `mp init`          | Initialize project (also registers it)    |
-| `mp` / `mp dash`   | Cross-project dashboard (projects/pieces) |
-| `mp project list`  | List registered projects                  |
-| `mp project add`   | Register a project repo                    |
-| `mp switch`        | Jump to any piece in any project           |
-| `mp piece create`  | Create worktree + tmux session            |
-| `mp piece list`    | Show all pieces (`--all` across projects)  |
-| `mp piece switch`  | Jump to a piece                            |
-| `mp piece update`  | Sync with main                             |
-| `mp piece merge`   | Assemble piece into main                   |
-| `mp issue list`    | List issues (`--all` across projects)      |
-
-See [docs/commands.md](docs/commands.md) for full reference.
-
-## Docs
-
-- [Getting Started](docs/getting-started.md) — Installation, first piece
-- [Workflow Guide](docs/workflow.md) — Stacked pieces, lifecycle
-- [Commands Reference](docs/commands.md) — All flags, JSON schemas
-- [Architecture](docs/architecture.md) — How it's built
-- [Contributing](docs/contributing.md) — Dev setup, testing philosophy
+- **[Workflow guide](docs/workflow.md)** — stacked pieces, multiple projects, the full lifecycle, and integrating with GitHub PRs.
+- **[Commands reference](docs/commands.md)** — every command, every flag, every JSON schema.
+- **[Getting started](docs/getting-started.md)** — slower walkthrough of installation and your first piece.
+- **[Architecture](docs/architecture.md)** — how the worktree/session/issue layers fit together.
+- **AI agents** — every command accepts JSON stdin and emits JSON to stdout; pass `--schema` for the input shape. No "agent mode" — the same CLI works programmatically. See the commands reference for schemas.
 
 ## License
 

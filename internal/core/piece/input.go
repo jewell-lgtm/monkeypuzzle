@@ -420,17 +420,19 @@ func WithDoneDefaults(input DoneInput) DoneInput {
 // AdoptPieceInput holds input for the piece adopt command.
 // Converts an existing git branch to a piece.
 type AdoptPieceInput struct {
-	Branch string `json:"branch,omitempty"` // Branch to adopt (defaults to current branch)
-	Name   string `json:"name,omitempty"`   // Override piece name (defaults to branch name)
-	Parent string `json:"parent,omitempty"` // Parent piece name (defaults to "main")
+	Branch   string `json:"branch,omitempty"`    // Branch to adopt (defaults to current branch)
+	Name     string `json:"name,omitempty"`      // Override piece name (defaults to branch name)
+	Parent   string `json:"parent,omitempty"`    // Parent piece name (defaults to "main")
+	RepoRoot string `json:"repo_root,omitempty"` // Explicit repo root (defaults to resolving from cwd)
 }
 
 // AdoptPieceSchema returns the JSON schema for piece adopt input.
 func AdoptPieceSchema() ([]byte, error) {
 	schema := map[string]any{
-		"branch": "",
-		"name":   "",
-		"parent": "main",
+		"branch":    "",
+		"name":      "",
+		"parent":    "main",
+		"repo_root": "",
 	}
 	return json.MarshalIndent(schema, "", "  ")
 }
@@ -451,8 +453,9 @@ func WithAdoptPieceDefaults(input AdoptPieceInput) AdoptPieceInput {
 		parent = "main"
 	}
 	return AdoptPieceInput{
-		Branch: strings.TrimSpace(input.Branch),
-		Name:   strings.TrimSpace(input.Name),
-		Parent: parent,
+		Branch:   strings.TrimSpace(input.Branch),
+		Name:     strings.TrimSpace(input.Name),
+		Parent:   parent,
+		RepoRoot: strings.TrimSpace(input.RepoRoot),
 	}
 }
