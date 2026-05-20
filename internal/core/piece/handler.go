@@ -953,7 +953,9 @@ type MergeStatus struct {
 }
 
 // IsBranchMerged checks if a piece branch has been merged to main.
-// Detection priority: 1) PR metadata, 2) gh pr list by branch, 3) git branch --merged, 4) commit history
+// Detection priority: 0) is-piece-done.sh user hook (opt-in escape hatch),
+// 1) PR metadata, 2) provider PR list by branch, 3) git branch --merged,
+// 4) commit history.
 func (h *Handler) IsBranchMerged(ctx context.Context, repoRoot, branchName, mainBranch string) (MergeStatus, error) {
 	status := MergeStatus{}
 
@@ -967,6 +969,14 @@ func (h *Handler) IsBranchMerged(ctx context.Context, repoRoot, branchName, main
 		})
 	}
 	status.ExistsOnRemote = existsOnRemote
+
+	// Method 0: Defer to is-piece-done.sh if the user provided one. Exit 0 means
+	// merged. Anything else means "no opinion" and we fall through to built-ins.
+	if h.runIsPieceDoneHook(ctx, repoRoot, branchName, mainBranch) {
+		status.IsMerged = true
+		status.Method = "hook"
+		return status, nil
+	}
 
 	// Method 1: Check via PR metadata file (fastest, no API call)
 	merged, prNumber, err := h.checkPRMergeStatus(ctx, repoRoot)
@@ -1016,6 +1026,30 @@ func (h *Handler) IsBranchMerged(ctx context.Context, repoRoot, branchName, main
 
 	status.Method = "none"
 	return status, nil
+}
+
+// runIsPieceDoneHook invokes the optional is-piece-done.sh hook.
+// Returns true if the hook exited 0; false otherwise (including hook missing).
+func (h *Handler) runIsPieceDoneHook(ctx context.Context, repoRoot, branchName, mainBranch string) bool {
+	hookCtx := HookContext{
+		PieceName:    branchName,
+		WorktreePath: repoRoot,
+		RepoRoot:     repoRoot,
+		MainBranch:   mainBranch,
+	}
+	err := h.hooks.RunHook(ctx, repoRoot, HookIsPieceDone, hookCtx)
+	return err == nil && h.hookExists(repoRoot, HookIsPieceDone)
+}
+
+// hookExists returns true if the named hook file exists and is executable.
+// Distinct from "hook ran successfully" — a missing hook also returns nil from RunHook.
+func (h *Handler) hookExists(repoRoot, hookName string) bool {
+	hookPath := filepath.Join(projectdir.HooksDir(repoRoot), hookName)
+	info, err := h.deps.FS.Stat(hookPath)
+	if err != nil {
+		return false
+	}
+	return info.Mode()&0111 != 0
 }
 
 // checkPRMergeStatus checks if a PR associated with the piece has been merged.

@@ -21,6 +21,11 @@ const (
 	HookAfterPRCreate     = "after-pr-create.sh"
 	HookBeforePRReady     = "before-pr-ready.sh"
 	HookAfterPRReady      = "after-pr-ready.sh"
+	// HookIsPieceDone, if present + executable, is consulted by `mp piece cleanup`
+	// and merge-detection paths. Exit 0 means "this piece is merged". Lets users
+	// override mp's built-in git-based detection (e.g. to recognise squash-merges
+	// via a forge API) without baking forge-specific logic into core.
+	HookIsPieceDone = "is-piece-done.sh"
 )
 
 // HookContext contains environment variables to pass to hooks

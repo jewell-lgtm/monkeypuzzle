@@ -3,11 +3,13 @@ package pr
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"time"
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/adapters"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core/piece"
+	"github.com/jewell-lgtm/monkeypuzzle/internal/projectdir"
 )
 
 // PRCreateResult contains the result of creating a PR
@@ -128,6 +130,13 @@ func (h *Handler) CreatePR(ctx context.Context, workDir string, input Input) (*P
 	// before-pr-create hook (e.g. to write a description file)
 	if err := h.hooks.RunHook(ctx, status.RepoRoot, piece.HookBeforePRCreate, hookCtx); err != nil {
 		return nil, fmt.Errorf("before-pr-create hook failed: %w", err)
+	}
+
+	// If the hook (or the user) wrote a body file, prefer it over input.Body.
+	// Convention: <worktree>/.monkeypuzzle/pr-body.txt. Hook responsibility to clean up.
+	bodyPath := filepath.Join(status.WorktreePath, projectdir.DefaultDirName, "pr-body.txt")
+	if data, err := h.deps.FS.ReadFile(bodyPath); err == nil {
+		input.Body = string(data)
 	}
 
 	// Push branch to remote
