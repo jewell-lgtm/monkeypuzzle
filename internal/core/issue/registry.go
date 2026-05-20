@@ -3,6 +3,7 @@ package issue
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
 )
@@ -81,5 +82,38 @@ func init() {
 		}
 
 		return NewLinearProvider(cfg.Deps.HTTP, apiKey, teamKey), nil
+	})
+
+	// Register plane provider
+	RegisterProvider("plane", func(cfg ProviderConfig) (Provider, error) {
+		apiKey := os.Getenv("PLANE_API_KEY")
+		if apiKey == "" {
+			apiKey = cfg.Config["api_key"]
+		}
+		if apiKey == "" {
+			return nil, fmt.Errorf("PLANE_API_KEY env var or api_key config required")
+		}
+
+		workspace := cfg.Config["workspace"]
+		if workspace == "" {
+			return nil, fmt.Errorf("plane provider requires 'workspace' config")
+		}
+
+		project := cfg.Config["project"]
+		if project == "" {
+			return nil, fmt.Errorf("plane provider requires 'project' config")
+		}
+
+		baseURL := cfg.Config["base_url"]
+		if baseURL == "" {
+			baseURL = DefaultPlaneBaseURL
+		}
+		baseURL = strings.TrimRight(baseURL, "/")
+
+		if cfg.Deps.HTTP == nil {
+			return nil, fmt.Errorf("plane provider requires HTTP client")
+		}
+
+		return NewPlaneProvider(cfg.Deps.HTTP, baseURL, apiKey, workspace, project), nil
 	})
 }
