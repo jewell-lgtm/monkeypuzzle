@@ -3,13 +3,20 @@
 package paths
 
 import (
-	"fmt"
-	"path/filepath"
+	"os"
 
 	gap "github.com/muesli/go-app-paths"
 )
 
 const appName = "monkeypuzzle"
+
+// EnvDataDir, when set, overrides the user data directory. Useful for tests and
+// for isolating the global project registry.
+const EnvDataDir = "MP_DATA_DIR"
+
+// EnvConfigDir, when set, overrides the user config directory. Useful for tests
+// and for isolating the project-dir mapping.
+const EnvConfigDir = "MP_CONFIG_DIR"
 
 var scope = gap.NewScope(gap.User, appName)
 
@@ -32,6 +39,9 @@ func DataDir() (string, error) {
 	if overrideDataDir != "" {
 		return overrideDataDir, nil
 	}
+	if env := os.Getenv(EnvDataDir); env != "" {
+		return env, nil
+	}
 	dirs, err := scope.DataDirs()
 	if err != nil {
 		return "", err
@@ -42,18 +52,12 @@ func DataDir() (string, error) {
 	return dirs[0], nil
 }
 
-// PiecesDir returns the directory for storing piece worktrees.
-// Returns {repoRoot}/.monkeypuzzle/pieces/
-func PiecesDir(repoRoot string) (string, error) {
-	if repoRoot == "" {
-		return "", fmt.Errorf("repoRoot is required")
-	}
-	return filepath.Join(repoRoot, ".monkeypuzzle", "pieces"), nil
-}
-
 // ConfigDir returns the user config directory for monkeypuzzle.
 // e.g., ~/.config/monkeypuzzle on Linux, ~/Library/Application Support/monkeypuzzle on macOS
 func ConfigDir() (string, error) {
+	if env := os.Getenv(EnvConfigDir); env != "" {
+		return env, nil
+	}
 	dirs, err := scope.ConfigDirs()
 	if err != nil {
 		return "", err

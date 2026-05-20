@@ -18,6 +18,8 @@ import (
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core/issue"
 	piececmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/piece"
+	"github.com/jewell-lgtm/monkeypuzzle/internal/registry"
+	"github.com/jewell-lgtm/monkeypuzzle/internal/tui/chooser"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/tui/issuepicker"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/tui/modepicker"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/tui/pieceswitch"
@@ -119,6 +121,8 @@ var flagOverwriteSession bool
 var flagPieceCreateSchema bool
 var flagPieceUpdateSchema bool
 var flagPieceMergeSchema bool
+var flagPieceMergeReparent bool
+var flagPieceMergeReparentStrategy string
 var flagPieceCleanupSchema bool
 var flagPieceSwitchSchema bool
 var flagPieceAbandonSchema bool
@@ -129,6 +133,7 @@ var flagPieceAdoptParent string
 var flagPieceAdoptSchema bool
 var flagPiecePrompt string
 var flagPieceListFlat bool
+var flagPieceListAll bool
 
 func init() {
 	pieceCreateCmd.Flags().StringVar(&flagPieceName, "name", "", "Optional piece name (default: auto-generated)")
@@ -142,7 +147,9 @@ func init() {
 	pieceUpdateCmd.Flags().BoolVar(&flagPieceUpdateSchema, "schema", false, "Output JSON schema and exit")
 	pieceMergeCmd.Flags().StringVar(&flagMainBranch, "main-branch", "main", "Main branch name to merge into (default: main)")
 	pieceMergeCmd.Flags().BoolVar(&flagPieceMergeSchema, "schema", false, "Output JSON schema and exit")
-	pieceMergeCmd.Flags().BoolVar(&flagForce, "force", false, "Force merge even if piece has unmerged children")
+	pieceMergeCmd.Flags().BoolVar(&flagForce, "force", false, "Force merge even if piece has child pieces (children are NOT re-homed)")
+	pieceMergeCmd.Flags().BoolVar(&flagPieceMergeReparent, "reparent-children", false, "Merge a piece that has child pieces: re-home them onto the merge target")
+	pieceMergeCmd.Flags().StringVar(&flagPieceMergeReparentStrategy, "reparent-strategy", "", "How to re-home children: 'rebase' (default, rewrites history) or 'merge' (no force-push)")
 	pieceCleanupCmd.Flags().StringVar(&flagMainBranch, "main-branch", "main", "Main branch name to check for merged status (default: main)")
 	pieceCleanupCmd.Flags().BoolVar(&flagDryRun, "dry-run", false, "Show what would be cleaned without making changes")
 	pieceCleanupCmd.Flags().BoolVar(&flagForce, "force", false, "Skip confirmation prompts")
@@ -161,6 +168,7 @@ func init() {
 	pieceAdoptCmd.Flags().BoolVar(&flagPieceAdoptSchema, "schema", false, "Output JSON schema and exit")
 	pieceCmd.Flags().StringVar(&flagMainBranch, "main-branch", "main", "Main branch name (default: main)")
 	pieceListCmd.Flags().BoolVar(&flagPieceListFlat, "flat", false, "Display pieces in a flat list instead of tree view")
+	pieceListCmd.Flags().BoolVar(&flagPieceListAll, "all", false, "List pieces across all registered projects")
 	pieceCmd.AddCommand(pieceCreateCmd)
 	pieceCmd.AddCommand(pieceUpdateCmd)
 	pieceCmd.AddCommand(pieceMergeCmd)
@@ -569,7 +577,6 @@ func runPromptInputTUI() (piececmd.NewPieceInput, error) {
 	}, nil
 }
 
-
 func runPieceUpdate(cmd *cobra.Command, args []string) error {
 	// --schema mode
 	if flagPieceUpdateSchema {
@@ -668,6 +675,34 @@ func runPieceMerge(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// If this piece has child pieces and the caller hasn't already chosen how to
+	// handle them, ask (interactively) how to re-home them.
+	if !input.Force && !input.ReparentChildren {
+		if hs, hsErr := handler.GetPieceHierarchyStatus(ctx, wd, input.MainBranch); hsErr == nil && len(hs.Children) > 0 {
+			if cli.IsTerminal() {
+				choice, ok, cerr := chooser.Run(
+					fmt.Sprintf("Piece %q has child pieces", hs.PieceName),
+					[]string{"Children: " + strings.Join(hs.Children, ", "), "Merging it re-homes them onto the merge target."},
+					[]chooser.Option{
+						{Label: "Rebase children onto the target", Desc: "cleanest for stacks; rewrites their branch history (force-push if PRs are open)", Value: piececmd.ReparentRebase},
+						{Label: "Merge the target into children", Desc: "no history rewrite; their branches keep the parent's commits alongside", Value: piececmd.ReparentMerge},
+						{Label: "Cancel", Desc: "don't merge", Value: ""},
+					},
+				)
+				if cerr != nil {
+					return cerr
+				}
+				if !ok || choice == "" {
+					fmt.Fprintln(os.Stderr, "Cancelled.")
+					return nil
+				}
+				input.ReparentChildren = true
+				input.ReparentStrategy = choice
+			}
+			// Non-interactive: leave it; MergePiece returns an error explaining --reparent-children.
+		}
+	}
+
 	result, err := handler.MergePiece(ctx, wd, input)
 	if err != nil {
 		return err
@@ -704,8 +739,19 @@ func getMergeInput() (piececmd.MergeInput, error) {
 	if flagForce {
 		input.Force = true
 	}
+	if flagPieceMergeReparent {
+		input.ReparentChildren = true
+	}
+	if flagPieceMergeReparentStrategy != "" {
+		input.ReparentChildren = true
+		input.ReparentStrategy = flagPieceMergeReparentStrategy
+	}
 
-	return piececmd.WithMergeDefaults(input), nil
+	input = piececmd.WithMergeDefaults(input)
+	if err := piececmd.ValidateMergeInput(input); err != nil {
+		return piececmd.MergeInput{}, err
+	}
+	return input, nil
 }
 
 func runPieceCleanup(cmd *cobra.Command, args []string) error {
@@ -1107,6 +1153,10 @@ func runPieceList(cmd *cobra.Command, args []string) error {
 	)
 	handler := newPieceHandler(deps)
 
+	if flagPieceListAll {
+		return runPieceListAll(ctx, handler)
+	}
+
 	pieces, err := handler.ListPieces(ctx, "")
 	if err != nil {
 		return err
@@ -1129,6 +1179,59 @@ func runPieceList(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// projectPieces is the per-project entry in `mp piece list --all` JSON output.
+type projectPieces struct {
+	Name   string                   `json:"name"`
+	Path   string                   `json:"path"`
+	Pieces []piececmd.PieceListItem `json:"pieces"`
+	Error  string                   `json:"error,omitempty"`
+}
+
+func runPieceListAll(ctx context.Context, handler *piececmd.Handler) error {
+	reg, err := registry.Load()
+	if err != nil {
+		return err
+	}
+
+	results := make([]projectPieces, 0, len(reg.Projects))
+	for _, p := range reg.Projects {
+		entry := projectPieces{Name: p.Name, Path: p.Path}
+		pieces, err := handler.ListPieces(ctx, p.Path)
+		if err != nil {
+			entry.Error = err.Error()
+		} else {
+			entry.Pieces = pieces
+		}
+		results = append(results, entry)
+	}
+
+	if flagPieceListFlat || !cli.IsStdoutTerminal() {
+		jsonData, err := json.MarshalIndent(map[string]any{"projects": results}, "", "  ")
+		if err != nil {
+			return fmt.Errorf("failed to marshal result: %w", err)
+		}
+		fmt.Println(string(jsonData))
+		return nil
+	}
+
+	if len(results) == 0 {
+		fmt.Println("No registered projects. Run `mp init` in a repo, or `mp project add <path>`.")
+		return nil
+	}
+	for i, entry := range results {
+		if i > 0 {
+			fmt.Println()
+		}
+		fmt.Printf("# %s (%s)\n", entry.Name, entry.Path)
+		if entry.Error != "" {
+			fmt.Printf("  error: %s\n", entry.Error)
+			continue
+		}
+		renderTree(piececmd.BuildPieceTree(entry.Pieces))
+	}
+	return nil
+}
+
 // renderTree renders a piece tree to stdout in human-readable format
 func renderTree(root *piececmd.TreeNode) {
 	if root == nil {
@@ -1146,7 +1249,7 @@ func renderTree(root *piececmd.TreeNode) {
 func renderTreeNodes(nodes []*piececmd.TreeNode, prefix string) {
 	for i, node := range nodes {
 		isLastChild := i == len(nodes)-1
-		
+
 		// Determine the connector symbols
 		var connector, childPrefix string
 		if isLastChild {
@@ -1178,9 +1281,9 @@ func formatTimeAgo(t time.Time) string {
 	if t.IsZero() {
 		return "unknown"
 	}
-	
+
 	duration := time.Since(t)
-	
+
 	if duration < time.Minute {
 		return fmt.Sprintf("%ds ago", int(duration.Seconds()))
 	} else if duration < time.Hour {
@@ -1337,4 +1440,3 @@ func runSwitchTUI(ctx context.Context, handler *piececmd.Handler) (piececmd.Swit
 
 	return piececmd.SwitchInput{Name: pieces[finalModel.Selected].Name}, nil
 }
-

@@ -13,6 +13,7 @@ import (
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/adapters"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
+	"github.com/jewell-lgtm/monkeypuzzle/internal/core/issue"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core/piece"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/paths"
 )
@@ -61,7 +62,7 @@ echo "Session: $MP_SESSION_NAME" >> "` + outputFile + `"
 		WorktreePath: "/tmp/test-worktree",
 		RepoRoot:     "/tmp/test-repo",
 		MainBranch:   "main",
-		SessionName:  "mp-piece-test",
+		SessionName:  "mp/proj/test",
 	}
 
 	err = runner.RunHook(context.Background(), tmpDir, piece.HookOnPieceCreate, ctx)
@@ -88,7 +89,7 @@ echo "Session: $MP_SESSION_NAME" >> "` + outputFile + `"
 	if !strings.Contains(output, "MainBranch: main") {
 		t.Errorf("expected MP_MAIN_BRANCH in output, got: %s", output)
 	}
-	if !strings.Contains(output, "Session: mp-piece-test") {
+	if !strings.Contains(output, "Session: mp/proj/test") {
 		t.Errorf("expected MP_SESSION_NAME in output, got: %s", output)
 	}
 }
@@ -487,7 +488,7 @@ This is a great feature.
 	handler := piece.NewHandler(deps)
 
 	relIssuePath := ".monkeypuzzle/issues/my-feature.md"
-	info, err := handler.CreatePieceFromIssue(context.Background(), relIssuePath, piece.CreatePieceOptions{})
+	info, err := handler.CreatePieceFromIssue(context.Background(), issueRefFromFile(t, deps.FS, relIssuePath), piece.CreatePieceOptions{})
 	if err != nil {
 		t.Fatalf("CreatePieceFromIssue failed: %v", err)
 	}
@@ -510,8 +511,8 @@ This is a great feature.
 		t.Fatalf("failed to unmarshal marker: %v", err)
 	}
 
-	if marker.IssueName != "My Awesome Feature" {
-		t.Errorf("expected issue name 'My Awesome Feature', got %q", marker.IssueName)
+	if marker.Issue.Title != "My Awesome Feature" {
+		t.Errorf("expected issue name 'My Awesome Feature', got %q", marker.Issue.Title)
 	}
 
 	if marker.PieceName != expectedName {
@@ -584,7 +585,7 @@ This is a great feature.
 	handler := piece.NewHandler(deps)
 
 	relIssuePath := ".monkeypuzzle/issues/my-feature.md"
-	info, err := handler.CreatePieceFromIssue(context.Background(), relIssuePath, piece.CreatePieceOptions{})
+	info, err := handler.CreatePieceFromIssue(context.Background(), issueRefFromFile(t, deps.FS, relIssuePath), piece.CreatePieceOptions{})
 	if err != nil {
 		t.Fatalf("CreatePieceFromIssue failed: %v", err)
 	}
@@ -661,7 +662,7 @@ No H1 heading.
 	handler := piece.NewHandler(deps)
 
 	relIssuePath := ".monkeypuzzle/issues/my-feature.md"
-	info, err := handler.CreatePieceFromIssue(context.Background(), relIssuePath, piece.CreatePieceOptions{})
+	info, err := handler.CreatePieceFromIssue(context.Background(), issueRefFromFile(t, deps.FS, relIssuePath), piece.CreatePieceOptions{})
 	if err != nil {
 		t.Fatalf("CreatePieceFromIssue failed: %v", err)
 	}
@@ -740,7 +741,7 @@ Content here.
 	handler := piece.NewHandler(deps)
 
 	relIssuePath := ".monkeypuzzle/issues/my-feature.md"
-	info, err := handler.CreatePieceFromIssue(context.Background(), relIssuePath, piece.CreatePieceOptions{})
+	info, err := handler.CreatePieceFromIssue(context.Background(), issueRefFromFile(t, deps.FS, relIssuePath), piece.CreatePieceOptions{})
 	if err != nil {
 		t.Fatalf("CreatePieceFromIssue failed: %v", err)
 	}
@@ -884,16 +885,12 @@ Description here.
 		t.Fatalf("failed to change directory: %v", err)
 	}
 
-	// Create piece from issue
-	deps := core.Deps{
-		FS:     adapters.NewOSFS(""),
-		Output: adapters.NewBufferOutput(),
-		Exec:   adapters.NewOSExec(),
-	}
+	// Create piece from issue (status sync goes through the issue-sync subscriber)
+	deps := depsWithMarkdownSync(t)
 	handler := piece.NewHandler(deps)
 
 	relIssuePath := ".monkeypuzzle/issues/my-feature.md"
-	_, err = handler.CreatePieceFromIssue(context.Background(), relIssuePath, piece.CreatePieceOptions{})
+	_, err = handler.CreatePieceFromIssue(context.Background(), issueRefFromFile(t, deps.FS, relIssuePath), piece.CreatePieceOptions{})
 	if err != nil {
 		t.Fatalf("CreatePieceFromIssue failed: %v", err)
 	}
@@ -977,7 +974,7 @@ status: done
 	handler := piece.NewHandler(deps)
 
 	relIssuePath := ".monkeypuzzle/issues/completed-feature.md"
-	_, err = handler.CreatePieceFromIssue(context.Background(), relIssuePath, piece.CreatePieceOptions{})
+	_, err = handler.CreatePieceFromIssue(context.Background(), issueRefFromFile(t, deps.FS, relIssuePath), piece.CreatePieceOptions{})
 	if err != nil {
 		t.Fatalf("CreatePieceFromIssue failed: %v", err)
 	}
@@ -1254,17 +1251,13 @@ Description here.
 		t.Fatalf("failed to change directory: %v", err)
 	}
 
-	// Create handler
-	deps := core.Deps{
-		FS:     adapters.NewOSFS(""),
-		Output: adapters.NewBufferOutput(),
-		Exec:   adapters.NewOSExec(),
-	}
+	// Create handler (status sync goes through the issue-sync subscriber)
+	deps := depsWithMarkdownSync(t)
 	handler := piece.NewHandler(deps)
 
-	// Create piece using NewPieceInput with IssuePath
+	// Create piece from an issue ref
 	input := piece.NewPieceInput{
-		IssuePath: ".monkeypuzzle/issues/test-feature.md",
+		Issue: issueRefFromFile(t, deps.FS, ".monkeypuzzle/issues/test-feature.md"),
 	}
 
 	info, err := handler.CreatePieceWithInput(context.Background(), input, piece.CreatePieceOptions{})
@@ -1399,36 +1392,38 @@ func TestIntegration_CreatePiece_AutoStartsTmuxIfNoSessionsRunning(t *testing.T)
 		t.Fatalf("failed to change directory: %v", err)
 	}
 
-	// Create handler
+	// Create handler backed by a real tmux multiplexer (session creation happens
+	// when the piece is switched to).
 	deps := core.Deps{
 		FS:     adapters.NewOSFS(""),
 		Output: adapters.NewBufferOutput(),
 		Exec:   adapters.NewOSExec(),
 	}
-	handler := piece.NewHandler(deps)
-
-	// Check if tmux adapter can detect it's installed
-	tmux := adapters.NewTmux(adapters.NewOSExec())
+	tmux := adapters.NewTmuxMultiplexer(adapters.NewOSExec())
 	if !tmux.IsInstalled(context.Background()) {
 		t.Fatal("tmux.IsInstalled() returned false, but we already verified tmux exists")
 	}
+	handler := piece.NewHandlerWithMultiplexer(deps, adapters.NewTmuxMultiplexer(deps.Exec))
 
-	// Create piece - the session should be created
 	info, err := handler.CreatePiece(context.Background(), "auto-tmux-test", piece.CreatePieceOptions{})
 	if err != nil {
 		t.Fatalf("CreatePiece failed: %v", err)
 	}
+	// Switching to the piece creates (and attaches) its session.
+	if _, err := handler.SwitchPiece(context.Background(), info.Name); err != nil {
+		t.Fatalf("SwitchPiece failed: %v", err)
+	}
 
 	// Verify session was created
-	if !tmux.HasSession(context.Background(), info.SessionName) {
+	if !tmux.Exists(context.Background(), info.SessionName) {
 		t.Errorf("expected tmux session %q to exist", info.SessionName)
 	}
 
 	// Clean up: kill the session
-	_ = tmux.KillSession(context.Background(), info.SessionName)
+	_ = tmux.Kill(context.Background(), info.SessionName)
 	// Also clean up main session if created
-	mainSession := "mp-" + filepath.Base(tmpDir)
-	_ = tmux.KillSession(context.Background(), mainSession)
+	mainSession := "mp/" + filepath.Base(tmpDir)
+	_ = tmux.Kill(context.Background(), mainSession)
 }
 
 func TestIntegration_RepoSpecificPieces_Isolation(t *testing.T) {
@@ -1796,6 +1791,7 @@ func TestIntegration_AdoptPiece_CreatesTmuxSessions(t *testing.T) {
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux not available")
 	}
+	t.Skip("AdoptPiece no longer creates tmux sessions itself; session orchestration moved to the `mp piece adopt` CLI command")
 
 	tmpDataHome, err := os.MkdirTemp("", "mp-data-*")
 	if err != nil {
@@ -1854,7 +1850,7 @@ func TestIntegration_AdoptPiece_CreatesTmuxSessions(t *testing.T) {
 		Exec:   adapters.NewOSExec(),
 	}
 	handler := piece.NewHandler(deps)
-	tmux := adapters.NewTmux(adapters.NewOSExec())
+	tmux := adapters.NewTmuxMultiplexer(adapters.NewOSExec())
 
 	info, err := handler.AdoptPiece(context.Background(), piece.AdoptPieceInput{})
 	if err != nil {
@@ -1862,19 +1858,19 @@ func TestIntegration_AdoptPiece_CreatesTmuxSessions(t *testing.T) {
 	}
 
 	// Verify piece session created
-	if !tmux.HasSession(context.Background(), info.SessionName) {
+	if !tmux.Exists(context.Background(), info.SessionName) {
 		t.Errorf("expected piece tmux session %q to exist", info.SessionName)
 	}
 
 	// Verify main repo session created
-	mainSession := "mp-" + filepath.Base(tmpDir)
-	if !tmux.HasSession(context.Background(), mainSession) {
+	mainSession := "mp/" + filepath.Base(tmpDir)
+	if !tmux.Exists(context.Background(), mainSession) {
 		t.Errorf("expected main repo tmux session %q to exist", mainSession)
 	}
 
 	// Cleanup
-	_ = tmux.KillSession(context.Background(), info.SessionName)
-	_ = tmux.KillSession(context.Background(), mainSession)
+	_ = tmux.Kill(context.Background(), info.SessionName)
+	_ = tmux.Kill(context.Background(), mainSession)
 }
 
 func TestIntegration_SwitchPiece_Main(t *testing.T) {
@@ -1951,4 +1947,27 @@ func TestIntegration_SwitchPiece_Main(t *testing.T) {
 	if result.Piece.Name != "master" {
 		t.Errorf("expected piece name 'master', got %q", result.Piece.Name)
 	}
+}
+
+// issueRefFromFile builds a markdown IssueRef from a path, resolving the title
+// the same way the markdown provider does (frontmatter -> H1 -> filename).
+func issueRefFromFile(t *testing.T, fs core.FS, relPath string) piece.IssueRef {
+	t.Helper()
+	title, err := piece.ExtractIssueName(relPath, fs)
+	if err != nil {
+		t.Fatalf("ExtractIssueName(%q): %v", relPath, err)
+	}
+	return piece.IssueRef{Provider: "markdown", ID: relPath, Title: title}
+}
+
+// depsWithMarkdownSync returns Deps wired so that issue-sync events emitted by
+// piece operations are applied to the markdown provider (mirrors what the CLI does).
+// The current working directory must be the repo root.
+func depsWithMarkdownSync(_ *testing.T) core.Deps {
+	sig := core.NewIssueSyncSignal()
+	deps := core.NewDepsWithSync(adapters.NewOSFS(""), adapters.NewBufferOutput(), adapters.NewOSExec(), nil, nil, sig)
+	sig.Sub(func(ev core.IssueSyncEvent) {
+		_ = issue.NewHandler(deps, "").SyncStatus(ev.IssueID, ev.NewStatus)
+	})
+	return deps
 }

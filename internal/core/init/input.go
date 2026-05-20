@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"unicode"
+
+	"github.com/jewell-lgtm/monkeypuzzle/internal/projectdir"
 )
 
 // Field defines a single input field with validation rules
@@ -30,7 +32,7 @@ var fields = []Field{
 		Description: "How issues/features are managed",
 		Required:    true,
 		Default:     "markdown",
-		ValidValues: []string{"markdown", "linear"},
+		ValidValues: []string{"markdown", "linear", "plane"},
 	},
 	{
 		Name:        "pr_provider",
@@ -38,6 +40,12 @@ var fields = []Field{
 		Required:    true,
 		Default:     "github",
 		ValidValues: []string{"github"},
+	},
+	{
+		Name:        "dir",
+		Description: "Directory (relative to the repo root) for monkeypuzzle state",
+		Required:    false,
+		Default:     projectdir.DefaultDirName,
 	},
 }
 
@@ -47,6 +55,7 @@ type Input struct {
 	IssueProvider string            `json:"issue_provider"`
 	IssueConfig   map[string]string `json:"issue_config,omitempty"` // provider-specific config (e.g., api_key, team for linear)
 	PRProvider    string            `json:"pr_provider"`
+	Dir           string            `json:"dir,omitempty"`          // monkeypuzzle state dir, relative to repo root; defaults to ".monkeypuzzle"
 	CreateSkill   *bool             `json:"create_skill,omitempty"` // nil means default (true)
 }
 
@@ -122,6 +131,11 @@ func Validate(input Input) error {
 		}
 	}
 
+	// monkeypuzzle dir must be a safe relative path within the repo
+	if input.Dir != "" && !projectdir.ValidRel(filepath.Clean(input.Dir)) {
+		errs = append(errs, fmt.Sprintf("dir %q must be a relative path within the repo (no \"..\", no absolute paths)", input.Dir))
+	}
+
 	// Linear provider requires team config
 	if input.IssueProvider == "linear" {
 		team := ""
@@ -130,6 +144,21 @@ func Validate(input Input) error {
 		}
 		if team == "" {
 			errs = append(errs, "linear provider requires 'team' config")
+		}
+	}
+
+	// Plane provider requires workspace and project config
+	if input.IssueProvider == "plane" {
+		var workspace, project string
+		if input.IssueConfig != nil {
+			workspace = input.IssueConfig["workspace"]
+			project = input.IssueConfig["project"]
+		}
+		if workspace == "" {
+			errs = append(errs, "plane provider requires 'workspace' config")
+		}
+		if project == "" {
+			errs = append(errs, "plane provider requires 'project' config")
 		}
 	}
 
@@ -144,7 +173,7 @@ func Validate(input Input) error {
 func SanitizeProjectName(name string) string {
 	// Characters that are invalid in filenames on most filesystems
 	invalidChars := []rune{'/', '\\', ':', '*', '?', '"', '<', '>', '|', '\x00'}
-	
+
 	var result strings.Builder
 	for _, r := range name {
 		isInvalid := false
@@ -167,6 +196,7 @@ func WithDefaults(input Input, workDir string) Input {
 	input.Name = strings.TrimSpace(input.Name)
 	input.IssueProvider = strings.TrimSpace(input.IssueProvider)
 	input.PRProvider = strings.TrimSpace(input.PRProvider)
+	input.Dir = strings.TrimSpace(input.Dir)
 
 	if input.Name == "" {
 		input.Name = filepath.Base(workDir)
@@ -176,6 +206,11 @@ func WithDefaults(input Input, workDir string) Input {
 	}
 	if input.PRProvider == "" {
 		input.PRProvider = "github"
+	}
+	if input.Dir == "" {
+		input.Dir = projectdir.DefaultDirName
+	} else {
+		input.Dir = filepath.Clean(input.Dir)
 	}
 	if input.CreateSkill == nil {
 		t := true
@@ -201,6 +236,8 @@ func getFieldValue(input Input, name string) string {
 		return input.IssueProvider
 	case "pr_provider":
 		return input.PRProvider
+	case "dir":
+		return input.Dir
 	default:
 		return ""
 	}

@@ -11,6 +11,7 @@ import (
 	"github.com/jewell-lgtm/monkeypuzzle/internal/adapters"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core/piece"
+	"github.com/jewell-lgtm/monkeypuzzle/internal/projectdir"
 )
 
 func TestHookRunner_RunHook_HookNotExists(t *testing.T) {
@@ -134,7 +135,7 @@ func TestHookRunner_RunHook_Success(t *testing.T) {
 		PieceName:    "test-piece",
 		WorktreePath: "/pieces/test-piece",
 		RepoRoot:     "/repo",
-		SessionName:  "mp-piece-test-piece",
+		SessionName:  "mp/proj/test-piece",
 	})
 
 	if err != nil {
@@ -170,7 +171,7 @@ func TestHookRunner_RunHook_PassesEnvironmentVariables(t *testing.T) {
 		WorktreePath: "/pieces/my-piece",
 		RepoRoot:     "/repo",
 		MainBranch:   "main",
-		SessionName:  "mp-piece-my-piece",
+		SessionName:  "mp/proj/my-piece",
 	}
 
 	err := runner.RunHook(context.Background(), "/repo", piece.HookBeforePieceMerge, ctx)
@@ -210,8 +211,8 @@ func TestHookRunner_RunHook_PassesEnvironmentVariables(t *testing.T) {
 	if envMap["MP_MAIN_BRANCH"] != "main" {
 		t.Errorf("expected MP_MAIN_BRANCH=main, got: %s", envMap["MP_MAIN_BRANCH"])
 	}
-	if envMap["MP_SESSION_NAME"] != "mp-piece-my-piece" {
-		t.Errorf("expected MP_SESSION_NAME=mp-piece-my-piece, got: %s", envMap["MP_SESSION_NAME"])
+	if envMap["MP_SESSION_NAME"] != "mp/proj/my-piece" {
+		t.Errorf("expected MP_SESSION_NAME=mp/proj/my-piece, got: %s", envMap["MP_SESSION_NAME"])
 	}
 }
 
@@ -232,10 +233,12 @@ func TestHookRunner_AllHookTypes(t *testing.T) {
 	}
 }
 
-func TestHooksDir_Constant(t *testing.T) {
-	// Verify hooks directory constant
-	if piece.HooksDir != ".monkeypuzzle/hooks" {
-		t.Errorf("expected HooksDir to be .monkeypuzzle/hooks, got: %s", piece.HooksDir)
+func TestHooksDir_Default(t *testing.T) {
+	// By default (no relocation) hooks live under <repoRoot>/.monkeypuzzle/hooks.
+	got := projectdir.HooksDir("/tmp/repo")
+	want := filepath.Join("/tmp/repo", ".monkeypuzzle", "hooks")
+	if got != want {
+		t.Errorf("HooksDir = %q, want %q", got, want)
 	}
 }
 

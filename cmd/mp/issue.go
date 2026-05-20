@@ -12,6 +12,7 @@ import (
 	"github.com/jewell-lgtm/monkeypuzzle/internal/adapters"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core/issue"
+	"github.com/jewell-lgtm/monkeypuzzle/internal/registry"
 	issueTUI "github.com/jewell-lgtm/monkeypuzzle/internal/tui/issue"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/tui/issuepicker"
 	"github.com/jewell-lgtm/monkeypuzzle/pkg/cli"
@@ -23,6 +24,7 @@ var (
 	flagIssueSchema       bool
 	flagIssueListStatus   []string
 	flagIssueListSchema   bool
+	flagIssueListAll      bool
 	flagIssueSearchQuery  string
 	flagIssueSearchStatus []string
 	flagIssueSearchSchema bool
@@ -94,6 +96,7 @@ func init() {
 
 	issueListCmd.Flags().StringSliceVar(&flagIssueListStatus, "status", nil, "Filter by status (todo, in-progress, done)")
 	issueListCmd.Flags().BoolVar(&flagIssueListSchema, "schema", false, "Output JSON schema and exit")
+	issueListCmd.Flags().BoolVar(&flagIssueListAll, "all", false, "List issues across all registered projects")
 
 	issueSearchCmd.Flags().StringVar(&flagIssueSearchQuery, "query", "", "Search query (fuzzy match)")
 	issueSearchCmd.Flags().StringSliceVar(&flagIssueSearchStatus, "status", nil, "Filter by status (todo, in-progress, done)")
@@ -217,9 +220,9 @@ func runIssueList(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	wd, err := os.Getwd()
+	input, err := getIssueListInput()
 	if err != nil {
-		return fmt.Errorf("failed to get working directory: %w", err)
+		return err
 	}
 
 	deps := core.NewDeps(
@@ -229,12 +232,16 @@ func runIssueList(cmd *cobra.Command, args []string) error {
 		http.DefaultClient,
 		adapters.SetupCLILoading(os.Stderr),
 	)
-	handler := issue.NewHandler(deps, wd)
 
-	input, err := getIssueListInput()
-	if err != nil {
-		return err
+	if flagIssueListAll {
+		return runIssueListAll(deps, input.Status)
 	}
+
+	wd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("failed to get working directory: %w", err)
+	}
+	handler := issue.NewHandler(deps, wd)
 
 	issues, err := handler.ListIssues(input.Status)
 	if err != nil {
@@ -243,6 +250,64 @@ func runIssueList(cmd *cobra.Command, args []string) error {
 
 	// Output JSON to stdout
 	return cli.PrintJSON(issues)
+}
+
+// projectIssues is the per-project entry in `mp issue list --all` JSON output.
+type projectIssues struct {
+	Name   string                `json:"name"`
+	Path   string                `json:"path"`
+	Issues []issue.IssueListItem `json:"issues"`
+	Error  string                `json:"error,omitempty"`
+}
+
+func runIssueListAll(deps core.Deps, statusFilter []string) error {
+	reg, err := registry.Load()
+	if err != nil {
+		return err
+	}
+
+	results := make([]projectIssues, 0, len(reg.Projects))
+	for _, p := range reg.Projects {
+		entry := projectIssues{Name: p.Name, Path: p.Path}
+		issues, err := issue.NewHandler(deps, p.Path).ListIssues(statusFilter)
+		if err != nil {
+			entry.Error = err.Error()
+		} else {
+			entry.Issues = issues
+		}
+		results = append(results, entry)
+	}
+
+	if !cli.IsStdoutTerminal() {
+		return cli.PrintJSON(map[string]any{"projects": results})
+	}
+
+	if len(results) == 0 {
+		fmt.Println("No registered projects. Run `mp init` in a repo, or `mp project add <path>`.")
+		return nil
+	}
+	for i, entry := range results {
+		if i > 0 {
+			fmt.Println()
+		}
+		fmt.Printf("# %s (%s)\n", entry.Name, entry.Path)
+		if entry.Error != "" {
+			fmt.Printf("  error: %s\n", entry.Error)
+			continue
+		}
+		if len(entry.Issues) == 0 {
+			fmt.Println("  (no issues)")
+			continue
+		}
+		for _, it := range entry.Issues {
+			num := it.Number
+			if num != "" {
+				num += " "
+			}
+			fmt.Printf("  [%s] %s%s\n", it.Status, num, it.Title)
+		}
+	}
+	return nil
 }
 
 func getIssueListInput() (issue.ListInput, error) {

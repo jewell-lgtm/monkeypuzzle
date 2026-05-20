@@ -130,7 +130,7 @@ func TestIntegration_Init_EnsureGitignore_Standalone(t *testing.T) {
 	handler := initcmd.NewHandler(deps)
 
 	// Call standalone method
-	if err := handler.EnsureGitignore(); err != nil {
+	if err := handler.EnsureGitignore(""); err != nil {
 		t.Fatalf("EnsureGitignore failed: %v", err)
 	}
 

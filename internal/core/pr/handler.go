@@ -2,14 +2,11 @@ package pr
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"path/filepath"
 	"time"
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/adapters"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
-	initcmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/init"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core/piece"
 )
 
@@ -151,16 +148,9 @@ func (h *Handler) CreatePR(ctx context.Context, workDir string, input Input) (*P
 // readIssueMarker reads the current issue marker from the piece worktree.
 // Returns nil if no marker exists.
 func (h *Handler) readIssueMarker(worktreePath string) *piece.CurrentIssueMarker {
-	markerPath := filepath.Join(worktreePath, initcmd.DirName, "current-issue.json")
-	data, err := h.deps.FS.ReadFile(markerPath)
+	marker, err := piece.ReadCurrentIssueMarkerFS(worktreePath, h.deps.FS)
 	if err != nil {
 		return nil
 	}
-
-	var marker piece.CurrentIssueMarker
-	if err := json.Unmarshal(data, &marker); err != nil {
-		return nil
-	}
-
-	return &marker
+	return marker
 }

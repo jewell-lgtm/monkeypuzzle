@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
+	"github.com/jewell-lgtm/monkeypuzzle/internal/projectdir"
 )
 
 // Hook types for piece operations
@@ -17,9 +18,6 @@ const (
 	HookBeforePieceUpdate = "before-piece-update.sh"
 	HookAfterPieceUpdate  = "after-piece-update.sh"
 )
-
-// HooksDir is the directory name for hooks within the project
-const HooksDir = ".monkeypuzzle/hooks"
 
 // HookContext contains environment variables to pass to hooks
 type HookContext struct {
@@ -50,7 +48,7 @@ func NewHookRunner(deps core.Deps) *HookRunner {
 // Returns nil if the hook doesn't exist or the hooks directory doesn't exist.
 // Returns an error if the hook exists but fails to execute (non-zero exit code).
 func (h *HookRunner) RunHook(ctx context.Context, repoRoot, hookName string, hookCtx HookContext) error {
-	hookPath := filepath.Join(repoRoot, HooksDir, hookName)
+	hookPath := filepath.Join(projectdir.HooksDir(repoRoot), hookName)
 
 	// Check if the hook file exists
 	info, err := h.fs.Stat(hookPath)

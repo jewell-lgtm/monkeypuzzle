@@ -8,6 +8,7 @@ import (
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
 	initcmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/init"
+	"github.com/jewell-lgtm/monkeypuzzle/internal/projectdir"
 )
 
 const pieceMetadataFilename = "piece-metadata.json"
@@ -31,7 +32,11 @@ func DefaultPieceMetadata() PieceMetadata {
 // ReadPieceMetadata reads piece metadata from a worktree.
 // Returns default metadata (parent=main) if file doesn't exist.
 func ReadPieceMetadata(worktreePath string, fs core.FS) (*PieceMetadata, error) {
-	metadataPath := filepath.Join(worktreePath, initcmd.DirName, pieceMetadataFilename)
+	mpDir, err := projectdir.WorktreeDir(worktreePath)
+	if err != nil {
+		return nil, err
+	}
+	metadataPath := filepath.Join(mpDir, pieceMetadataFilename)
 	data, err := fs.ReadFile(metadataPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -52,10 +57,13 @@ func ReadPieceMetadata(worktreePath string, fs core.FS) (*PieceMetadata, error) 
 
 // WritePieceMetadata writes piece metadata to a worktree
 func WritePieceMetadata(worktreePath string, metadata PieceMetadata, fs core.FS) error {
-	// Ensure .monkeypuzzle directory exists
-	mpDir := filepath.Join(worktreePath, initcmd.DirName)
+	// Ensure the monkeypuzzle state directory exists
+	mpDir, err := projectdir.WorktreeDir(worktreePath)
+	if err != nil {
+		return err
+	}
 	if err := fs.MkdirAll(mpDir, DefaultDirPerm); err != nil {
-		return fmt.Errorf("failed to create .monkeypuzzle directory: %w", err)
+		return fmt.Errorf("failed to create monkeypuzzle directory: %w", err)
 	}
 
 	data, err := json.MarshalIndent(metadata, "", "  ")

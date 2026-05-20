@@ -10,6 +10,7 @@ import (
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
 	initcmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/init"
+	"github.com/jewell-lgtm/monkeypuzzle/internal/projectdir"
 )
 
 // Status values for issue tracking
@@ -203,7 +204,7 @@ func SanitizePieceName(name string) string {
 
 // ReadConfig reads the monkeypuzzle config from the repository root.
 func ReadConfig(repoRoot string, fs core.FS) (*initcmd.Config, error) {
-	configPath := filepath.Join(repoRoot, initcmd.DirName, initcmd.ConfigFile)
+	configPath := projectdir.ConfigFilePath(repoRoot)
 
 	data, err := fs.ReadFile(configPath)
 	if err != nil {

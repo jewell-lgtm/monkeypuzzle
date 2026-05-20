@@ -186,8 +186,11 @@ func TestIntegration_CreatePR_WithIssueMarker(t *testing.T) {
 
 	// Create issue marker file
 	marker := piece.CurrentIssueMarker{
-		IssuePath: "issues/my-feature.md",
-		IssueName: "My Awesome Feature",
+		Issue: piece.IssueRef{
+			Provider: "markdown",
+			ID:       "issues/my-feature.md",
+			Title:    "My Awesome Feature",
+		},
 		PieceName: "test-piece",
 	}
 	markerData, _ := json.Marshal(marker)
@@ -236,8 +239,11 @@ func TestIntegration_CreatePR_WithIssueMarker(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to read PR metadata: %v", err)
 	}
-	if metadata.IssuePath != "issues/my-feature.md" {
-		t.Errorf("metadata IssuePath = %q, want 'issues/my-feature.md'", metadata.IssuePath)
+	if metadata.Issue.ID != "issues/my-feature.md" {
+		t.Errorf("metadata Issue.ID = %q, want 'issues/my-feature.md'", metadata.Issue.ID)
+	}
+	if metadata.Issue.Title != "My Awesome Feature" {
+		t.Errorf("metadata Issue.Title = %q, want 'My Awesome Feature'", metadata.Issue.Title)
 	}
 }
 

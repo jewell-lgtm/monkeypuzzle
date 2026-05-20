@@ -28,11 +28,13 @@ func (g *Git) WorktreeAdd(ctx context.Context, repoRoot, worktreePath string) er
 	return nil
 }
 
-// WorktreeAddFrom creates a new git worktree branching from the specified start point
-func (g *Git) WorktreeAddFrom(ctx context.Context, repoRoot, worktreePath, startPoint string) error {
-	_, err := g.exec.RunWithDir(ctx, repoRoot, "git", "worktree", "add", worktreePath, startPoint)
+// WorktreeAddFrom creates a new git worktree at worktreePath checked out on a
+// new branch named newBranch, starting at startPoint (a branch name or commit).
+// Equivalent to `git worktree add -b <newBranch> <worktreePath> <startPoint>`.
+func (g *Git) WorktreeAddFrom(ctx context.Context, repoRoot, worktreePath, newBranch, startPoint string) error {
+	_, err := g.exec.RunWithDir(ctx, repoRoot, "git", "worktree", "add", "-b", newBranch, worktreePath, startPoint)
 	if err != nil {
-		return fmt.Errorf("failed to create worktree at %s from %s: %w", worktreePath, startPoint, err)
+		return fmt.Errorf("failed to create worktree at %s on branch %s from %s: %w", worktreePath, newBranch, startPoint, err)
 	}
 	return nil
 }
@@ -197,6 +199,29 @@ func (g *Git) MergeSquash(ctx context.Context, workDir, branch string) error {
 		return fmt.Errorf("failed to squash merge branch %s in %s: %w", branch, workDir, err)
 	}
 	return nil
+}
+
+// RebaseOnto replays the commits in upstream..branch onto newbase, in the given
+// worktree (where branch must be checked out). Equivalent to
+// `git rebase --onto <newbase> <upstream> <branch>`.
+func (g *Git) RebaseOnto(ctx context.Context, workDir, newbase, upstream, branch string) error {
+	_, err := g.exec.RunWithDir(ctx, workDir, "git", "rebase", "--onto", newbase, upstream, branch)
+	if err != nil {
+		return fmt.Errorf("failed to rebase %s onto %s in %s: %w", branch, newbase, workDir, err)
+	}
+	return nil
+}
+
+// RebaseAbort aborts an in-progress rebase in the given worktree.
+func (g *Git) RebaseAbort(ctx context.Context, workDir string) error {
+	_, err := g.exec.RunWithDir(ctx, workDir, "git", "rebase", "--abort")
+	return err
+}
+
+// MergeAbort aborts an in-progress merge in the given worktree.
+func (g *Git) MergeAbort(ctx context.Context, workDir string) error {
+	_, err := g.exec.RunWithDir(ctx, workDir, "git", "merge", "--abort")
+	return err
 }
 
 // Commit creates a commit with the specified message

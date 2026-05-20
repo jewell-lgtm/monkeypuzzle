@@ -50,9 +50,13 @@ func NewHandler(deps core.Deps) *Handler {
 	return &Handler{deps: deps}
 }
 
-// ConfigExists checks if a config already exists
-func (h *Handler) ConfigExists() bool {
-	_, err := h.deps.FS.Stat(filepath.Join(DirName, ConfigFile))
+// ConfigExists checks if a config already exists in the given monkeypuzzle dir
+// (relative to the working directory). An empty dir means the default.
+func (h *Handler) ConfigExists(dir string) bool {
+	if dir == "" {
+		dir = DirName
+	}
+	_, err := h.deps.FS.Stat(filepath.Join(dir, ConfigFile))
 	return err == nil
 }
 
@@ -60,8 +64,13 @@ func (h *Handler) ConfigExists() bool {
 // Expects input to be pre-validated via WithDefaults() and Validate().
 // Returns the created Config for JSON output.
 func (h *Handler) Run(input Input, workDir string) (Config, error) {
+	mpDir := input.Dir
+	if mpDir == "" {
+		mpDir = DirName
+	}
+
 	// Create directories
-	if err := h.deps.FS.MkdirAll(DirName, DefaultDirPerm); err != nil {
+	if err := h.deps.FS.MkdirAll(mpDir, DefaultDirPerm); err != nil {
 		return Config{}, err
 	}
 
@@ -103,13 +112,13 @@ func (h *Handler) Run(input Input, workDir string) (Config, error) {
 		return Config{}, err
 	}
 
-	configPath := filepath.Join(DirName, ConfigFile)
+	configPath := filepath.Join(mpDir, ConfigFile)
 	if err := h.deps.FS.WriteFile(configPath, data, DefaultFilePerm); err != nil {
 		return Config{}, err
 	}
 
 	// Ensure .gitignore has correct entries
-	if err := h.EnsureGitignore(); err != nil {
+	if err := h.EnsureGitignore(mpDir); err != nil {
 		return Config{}, err
 	}
 
@@ -134,9 +143,13 @@ func (h *Handler) Run(input Input, workDir string) (Config, error) {
 	return cfg, nil
 }
 
-// EnsureGitignore creates .monkeypuzzle/.gitignore for piece-specific state.
-func (h *Handler) EnsureGitignore() error {
-	gitignorePath := filepath.Join(DirName, ".gitignore")
+// EnsureGitignore creates <mpDir>/.gitignore for piece-specific state.
+// An empty mpDir means the default ".monkeypuzzle".
+func (h *Handler) EnsureGitignore(mpDir string) error {
+	if mpDir == "" {
+		mpDir = DirName
+	}
+	gitignorePath := filepath.Join(mpDir, ".gitignore")
 	content := `# Piece worktree state (not tracked)
 current-issue.json
 piece-metadata.json

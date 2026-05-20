@@ -151,7 +151,7 @@ func TestHandler_ConfigExists(t *testing.T) {
 	handler := initcmd.NewHandler(deps)
 
 	// Initially no config
-	if handler.ConfigExists() {
+	if handler.ConfigExists("") {
 		t.Error("expected config to not exist initially")
 	}
 
@@ -166,7 +166,7 @@ func TestHandler_ConfigExists(t *testing.T) {
 	}
 
 	// Now config exists
-	if !handler.ConfigExists() {
+	if !handler.ConfigExists("") {
 		t.Error("expected config to exist after creation")
 	}
 }

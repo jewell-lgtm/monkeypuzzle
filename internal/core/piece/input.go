@@ -263,27 +263,53 @@ func WithUpdateDefaults(input UpdateInput) UpdateInput {
 	return UpdateInput{MainBranch: mainBranch}
 }
 
+// Reparent strategies for merging a piece that has child pieces.
+const (
+	ReparentRebase = "rebase" // rebase descendants onto the merge target (rewrites history)
+	ReparentMerge  = "merge"  // merge the target into direct children (no history rewrite)
+)
+
 // MergeInput holds input for the piece merge command.
 type MergeInput struct {
 	MainBranch string `json:"main_branch,omitempty"`
-	Force      bool   `json:"force,omitempty"` // Force merge even if piece has children
+	Force      bool   `json:"force,omitempty"` // Force merge even if piece has children (children are NOT re-homed)
+	// ReparentChildren, when true, allows merging a piece that has child pieces:
+	// each descendant is re-homed onto the merge target and its parent metadata
+	// re-pointed accordingly.
+	ReparentChildren bool `json:"reparent_children,omitempty"`
+	// ReparentStrategy is "rebase" (default) or "merge"; only used when
+	// ReparentChildren is true.
+	ReparentStrategy string `json:"reparent_strategy,omitempty"`
 }
 
 // MergeResult contains the result of a merge operation.
 type MergeResult struct {
-	PieceName    string `json:"piece_name"`
-	PieceBranch  string `json:"piece_branch"`
-	TargetBranch string `json:"target_branch"` // The branch merged into (parent or main)
-	Status       string `json:"status"`        // "merged"
+	PieceName          string   `json:"piece_name"`
+	PieceBranch        string   `json:"piece_branch"`
+	TargetBranch       string   `json:"target_branch"` // The branch merged into (parent or main)
+	Status             string   `json:"status"`        // "merged"
+	ReparentedChildren []string `json:"reparented_children,omitempty"`
 }
 
 // MergeSchema returns the JSON schema for piece merge input.
 func MergeSchema() ([]byte, error) {
 	schema := map[string]any{
-		"main_branch": "main",
-		"force":       false,
+		"main_branch":       "main",
+		"force":             false,
+		"reparent_children": false,
+		"reparent_strategy": ReparentRebase,
 	}
 	return json.MarshalIndent(schema, "", "  ")
+}
+
+// ValidateMergeInput checks the reparent strategy is recognised.
+func ValidateMergeInput(input MergeInput) error {
+	switch input.ReparentStrategy {
+	case "", ReparentRebase, ReparentMerge:
+		return nil
+	default:
+		return fmt.Errorf("invalid reparent strategy %q (valid: %s, %s)", input.ReparentStrategy, ReparentRebase, ReparentMerge)
+	}
 }
 
 // ParseMergeJSON parses JSON input into MergeInput.
@@ -301,7 +327,16 @@ func WithMergeDefaults(input MergeInput) MergeInput {
 	if mainBranch == "" {
 		mainBranch = "main"
 	}
-	return MergeInput{MainBranch: mainBranch, Force: input.Force}
+	strategy := strings.TrimSpace(input.ReparentStrategy)
+	if input.ReparentChildren && strategy == "" {
+		strategy = ReparentRebase
+	}
+	return MergeInput{
+		MainBranch:       mainBranch,
+		Force:            input.Force,
+		ReparentChildren: input.ReparentChildren,
+		ReparentStrategy: strategy,
+	}
 }
 
 // CleanupInput holds input for the piece cleanup command.

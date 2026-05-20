@@ -13,7 +13,8 @@ import (
 	"github.com/jewell-lgtm/monkeypuzzle/internal/adapters"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
 	initcmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/init"
-	"github.com/jewell-lgtm/monkeypuzzle/internal/paths"
+	"github.com/jewell-lgtm/monkeypuzzle/internal/core/session"
+	"github.com/jewell-lgtm/monkeypuzzle/internal/projectdir"
 )
 
 const (
@@ -137,8 +138,9 @@ func (h *Handler) CreatePiece(ctx context.Context, pieceName string, opts Create
 		if _, err := h.deps.FS.Stat(parentPath); err != nil {
 			return PieceInfo{}, fmt.Errorf("parent piece %q not found", parent)
 		}
-		// The parent's branch name is the same as the piece name
-		if err := h.git.WorktreeAddFrom(ctx, repoRoot, worktreePath, parent); err != nil {
+		// The parent's branch name is the same as the parent piece name; the new
+		// piece gets its own branch named after the piece.
+		if err := h.git.WorktreeAddFrom(ctx, repoRoot, worktreePath, pieceName, parent); err != nil {
 			return PieceInfo{}, fmt.Errorf("failed to create worktree from parent %s: %w", parent, err)
 		}
 	} else {
@@ -160,7 +162,7 @@ func (h *Handler) CreatePiece(ctx context.Context, pieceName string, opts Create
 		})
 	}
 
-	sessionName := fmt.Sprintf("mp-piece-%s", pieceName)
+	sessionName := h.pieceSessionName(repoRoot, pieceName)
 	info := PieceInfo{
 		Name:         pieceName,
 		WorktreePath: worktreePath,
@@ -293,7 +295,7 @@ func (h *Handler) AdoptPiece(ctx context.Context, input AdoptPieceInput) (PieceI
 		})
 	}
 
-	sessionName := fmt.Sprintf("mp-piece-%s", pieceName)
+	sessionName := h.pieceSessionName(repoRoot, pieceName)
 	info := PieceInfo{
 		Name:         pieceName,
 		WorktreePath: worktreePath,
@@ -461,10 +463,13 @@ func ReadPieceMd(dir string, fs core.FS) (*PieceMd, error) {
 
 // writeCurrentIssueMarker writes the current issue marker file to the worktree.
 func (h *Handler) writeCurrentIssueMarker(worktreePath string, marker CurrentIssueMarker) error {
-	// Create .monkeypuzzle directory in worktree if it doesn't exist
-	mpDir := filepath.Join(worktreePath, initcmd.DirName)
+	// Create the monkeypuzzle state directory in the worktree if it doesn't exist
+	mpDir, err := projectdir.WorktreeDir(worktreePath)
+	if err != nil {
+		return err
+	}
 	if err := h.deps.FS.MkdirAll(mpDir, DefaultDirPerm); err != nil {
-		return fmt.Errorf("failed to create .monkeypuzzle directory: %w", err)
+		return fmt.Errorf("failed to create monkeypuzzle directory: %w", err)
 	}
 
 	// Write marker file
@@ -814,18 +819,23 @@ func (h *Handler) MergePiece(ctx context.Context, workDir string, input MergeInp
 		})
 	}
 
-	// Check for children unless Force is set
-	if !input.Force {
-		piecesDir, err := getPiecesDir(mainRepoRoot)
-		if err != nil {
-			return MergeResult{}, fmt.Errorf("failed to get pieces directory: %w", err)
-		}
-		children, err := GetPieceChildren(status.PieceName, piecesDir, h.deps.FS)
-		if err != nil {
-			return MergeResult{}, fmt.Errorf("failed to check for children: %w", err)
-		}
-		if len(children) > 0 {
-			return MergeResult{}, fmt.Errorf("cannot merge: piece has unmerged children: %v. Merge children first, or use --force", children)
+	// Determine direct children of this piece.
+	piecesDir, err := getPiecesDir(mainRepoRoot)
+	if err != nil {
+		return MergeResult{}, fmt.Errorf("failed to get pieces directory: %w", err)
+	}
+	children, err := GetPieceChildren(status.PieceName, piecesDir, h.deps.FS)
+	if err != nil {
+		return MergeResult{}, fmt.Errorf("failed to check for children: %w", err)
+	}
+	if len(children) > 0 && !input.Force && !input.ReparentChildren {
+		return MergeResult{}, fmt.Errorf("cannot merge: piece has child pieces: %v. Merge them first, or pass --reparent-children to rebase them onto %s and merge anyway", children, targetBranch)
+	}
+	// When re-homing children, every descendant worktree must be clean (rebase
+	// would refuse otherwise, possibly leaving the stack half-migrated).
+	if len(children) > 0 && input.ReparentChildren {
+		if err := h.ensureSubtreeClean(ctx, piecesDir, children); err != nil {
+			return MergeResult{}, err
 		}
 	}
 
@@ -881,11 +891,58 @@ func (h *Handler) MergePiece(ctx context.Context, workDir string, input MergeInp
 		return MergeResult{}, fmt.Errorf("after-piece-merge hook failed: %w", err)
 	}
 
+	// Re-home child pieces onto the merge target, if requested. The merged piece's
+	// branch (pieceBranch) still points at its pre-merge tip — the cut point for a
+	// rebase of its direct children.
+	strategy := input.ReparentStrategy
+	if strategy == "" {
+		strategy = ReparentRebase
+	}
+	var reparented []string
+	if input.ReparentChildren && len(children) > 0 {
+		newParent := pieceMetadata.Parent
+		if newParent == "" {
+			newParent = "main"
+		}
+		for _, child := range children {
+			var migrated []string
+			switch strategy {
+			case ReparentMerge:
+				if err := h.mergeIntoChild(ctx, piecesDir, child, targetBranch); err != nil {
+					return MergeResult{}, fmt.Errorf("piece merged into %s, but re-homing child %q failed: %w", targetBranch, child, err)
+				}
+				migrated = []string{child}
+			default: // ReparentRebase
+				m, err := h.rebaseSubtree(ctx, mainRepoRoot, piecesDir, child, targetBranch, pieceBranch)
+				if err != nil {
+					return MergeResult{}, fmt.Errorf("piece merged into %s, but re-homing children failed: %w", targetBranch, err)
+				}
+				migrated = m
+			}
+			childPath := filepath.Join(piecesDir, child)
+			meta, err := ReadPieceMetadata(childPath, h.deps.FS)
+			if err != nil {
+				return MergeResult{}, fmt.Errorf("piece merged, but failed to read metadata for child %q: %w", child, err)
+			}
+			meta.Parent = newParent
+			if err := WritePieceMetadata(childPath, *meta, h.deps.FS); err != nil {
+				return MergeResult{}, fmt.Errorf("piece merged, but failed to update metadata for child %q: %w", child, err)
+			}
+			reparented = append(reparented, migrated...)
+			note := fmt.Sprintf("Re-homed %s onto %s", child, targetBranch)
+			if strategy == ReparentRebase {
+				note += " (force-push it if it has an open PR)"
+			}
+			h.deps.Output.Write(core.Message{Type: core.MsgInfo, Content: note})
+		}
+	}
+
 	result := MergeResult{
-		PieceName:    status.PieceName,
-		PieceBranch:  pieceBranch,
-		TargetBranch: targetBranch,
-		Status:       "merged",
+		PieceName:          status.PieceName,
+		PieceBranch:        pieceBranch,
+		TargetBranch:       targetBranch,
+		Status:             "merged",
+		ReparentedChildren: reparented,
 	}
 
 	h.deps.Output.Write(core.Message{
@@ -913,9 +970,19 @@ func (h *Handler) buildSquashCommitMessage(pieceName string, commitMsgs []string
 }
 
 // getPiecesDir returns the directory for storing pieces scoped to the given repo.
-// Uses GAP (go-app-paths) for platform-appropriate paths.
+// Honors any relocation of the monkeypuzzle directory.
 func getPiecesDir(repoRoot string) (string, error) {
-	return paths.PiecesDir(repoRoot)
+	return projectdir.PiecesDir(repoRoot)
+}
+
+// currentIssueMarkerPath returns the path to a worktree's current-issue.json,
+// honoring any relocation of the monkeypuzzle directory.
+func currentIssueMarkerPath(worktreePath string) (string, error) {
+	mpDir, err := projectdir.WorktreeDir(worktreePath)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(mpDir, "current-issue.json"), nil
 }
 
 // MergeStatus represents the merge status of a branch
@@ -1153,7 +1220,10 @@ func (h *Handler) ReadCurrentIssueMarker(worktreePath string) (*CurrentIssueMark
 // ReadCurrentIssueMarkerFS reads the current issue marker from a worktree using a FS interface.
 // This standalone function is useful when you don't have a Handler instance.
 func ReadCurrentIssueMarkerFS(worktreePath string, fs core.FS) (*CurrentIssueMarker, error) {
-	markerPath := filepath.Join(worktreePath, initcmd.DirName, "current-issue.json")
+	markerPath, err := currentIssueMarkerPath(worktreePath)
+	if err != nil {
+		return nil, err
+	}
 	data, err := fs.ReadFile(markerPath)
 	if err != nil {
 		return nil, err
@@ -1182,7 +1252,10 @@ func ClearIssueDirtyFlag(worktreePath string, fs core.FS) error {
 	marker.Dirty = false
 
 	// Write updated marker
-	markerPath := filepath.Join(worktreePath, initcmd.DirName, "current-issue.json")
+	markerPath, err := currentIssueMarkerPath(worktreePath)
+	if err != nil {
+		return err
+	}
 	data, err := json.MarshalIndent(marker, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal marker: %w", err)
@@ -1197,7 +1270,7 @@ func ClearIssueDirtyFlag(worktreePath string, fs core.FS) error {
 
 // removePiece removes a piece worktree and associated session.
 func (h *Handler) removePiece(ctx context.Context, repoRoot, pieceName, worktreePath string) error {
-	sessionName := fmt.Sprintf("mp-piece-%s", pieceName)
+	sessionName := h.pieceSessionName(repoRoot, pieceName)
 
 	// Kill session (ignore errors - session may not exist)
 	_ = h.mux.Kill(ctx, sessionName)
@@ -1212,7 +1285,7 @@ func (h *Handler) removePiece(ctx context.Context, repoRoot, pieceName, worktree
 
 // removePieceForce removes a piece worktree forcefully (for removing from inside the worktree).
 func (h *Handler) removePieceForce(ctx context.Context, repoRoot, pieceName, worktreePath string) error {
-	sessionName := fmt.Sprintf("mp-piece-%s", pieceName)
+	sessionName := h.pieceSessionName(repoRoot, pieceName)
 
 	// Kill session (ignore errors - session may not exist)
 	_ = h.mux.Kill(ctx, sessionName)
@@ -1422,11 +1495,94 @@ func (h *Handler) DonePiece(ctx context.Context, workDir string, input DoneInput
 	return result, nil
 }
 
-// getMainSessionName returns the tmux session name for a repo's main worktree.
-// Format: mp-<repo-directory-name>
-func getMainSessionName(repoRoot string) string {
-	repoName := filepath.Base(repoRoot)
-	return fmt.Sprintf("mp-%s", repoName)
+// ensureSubtreeClean errors if any worktree in the subtree rooted at the given
+// piece names has uncommitted changes (a rebase would refuse).
+func (h *Handler) ensureSubtreeClean(ctx context.Context, piecesDir string, names []string) error {
+	for _, name := range names {
+		wt := filepath.Join(piecesDir, name)
+		clean, err := h.git.IsClean(ctx, wt)
+		if err != nil {
+			return fmt.Errorf("failed to check worktree status for piece %q: %w", name, err)
+		}
+		if !clean {
+			return fmt.Errorf("piece %q has uncommitted changes; commit or stash before merging the stack base", name)
+		}
+		grandchildren, err := GetPieceChildren(name, piecesDir, h.deps.FS)
+		if err != nil {
+			return err
+		}
+		if err := h.ensureSubtreeClean(ctx, piecesDir, grandchildren); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// mergeIntoChild merges targetBranch into the given child piece's branch
+// (in its worktree), without rewriting history. Aborts the merge on conflict.
+func (h *Handler) mergeIntoChild(ctx context.Context, piecesDir, childName, targetBranch string) error {
+	childWorktree := filepath.Join(piecesDir, childName)
+	if err := h.git.Merge(ctx, childWorktree, targetBranch); err != nil {
+		_ = h.git.MergeAbort(ctx, childWorktree)
+		return fmt.Errorf("failed to merge %s into piece %q (resolve manually with `mp piece update` from that worktree): %w", targetBranch, childName, err)
+	}
+	return nil
+}
+
+// rebaseSubtree rebases childName's branch onto ontoRef (cutting at fromRef),
+// then recursively rebases its descendants so the whole stack stays connected.
+// A piece's branch name is the same as the piece name. Returns the names of all
+// pieces whose branches were rewritten.
+func (h *Handler) rebaseSubtree(ctx context.Context, repoRoot, piecesDir, childName, ontoRef, fromRef string) ([]string, error) {
+	childWorktree := filepath.Join(piecesDir, childName)
+
+	grandchildren, err := GetPieceChildren(childName, piecesDir, h.deps.FS)
+	if err != nil {
+		return nil, err
+	}
+	oldChildTip, err := h.git.GetBranchCommit(ctx, repoRoot, childName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve piece branch %q: %w", childName, err)
+	}
+
+	if err := h.git.RebaseOnto(ctx, childWorktree, ontoRef, fromRef, childName); err != nil {
+		_ = h.git.RebaseAbort(ctx, childWorktree)
+		return nil, fmt.Errorf("failed to rebase piece %q onto %s: %w", childName, ontoRef, err)
+	}
+
+	newChildTip, err := h.git.GetBranchCommit(ctx, repoRoot, childName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve rebased branch %q: %w", childName, err)
+	}
+
+	migrated := []string{childName}
+	for _, gc := range grandchildren {
+		sub, err := h.rebaseSubtree(ctx, repoRoot, piecesDir, gc, newChildTip, oldChildTip)
+		if err != nil {
+			return nil, err
+		}
+		migrated = append(migrated, sub...)
+	}
+	return migrated, nil
+}
+
+// projectName returns the project name for repoRoot from its monkeypuzzle
+// config, falling back to the directory base name.
+func (h *Handler) projectName(repoRoot string) string {
+	if cfg, err := ReadConfig(repoRoot, h.deps.FS); err == nil && strings.TrimSpace(cfg.Project.Name) != "" {
+		return cfg.Project.Name
+	}
+	return filepath.Base(repoRoot)
+}
+
+// pieceSessionName returns the tmux session name for a piece in a repo.
+func (h *Handler) pieceSessionName(repoRoot, pieceName string) string {
+	return session.Name(h.projectName(repoRoot), pieceName)
+}
+
+// mainSessionName returns the tmux session name for a repo's main worktree.
+func (h *Handler) mainSessionName(repoRoot string) string {
+	return session.MainName(h.projectName(repoRoot))
 }
 
 // updateIssueStatusToDone updates the issue status to done if currently in-progress.
@@ -1497,7 +1653,7 @@ func (h *Handler) ListPieces(ctx context.Context, repoRoot string) ([]PieceListI
 
 		name := entry.Name()
 		worktreePath := filepath.Join(piecesDir, name)
-		sessionName := fmt.Sprintf("mp-piece-%s", name)
+		sessionName := h.pieceSessionName(repoRoot, name)
 
 		// Get modification time
 		info, err := entry.Info()
@@ -1711,7 +1867,7 @@ func (h *Handler) SwitchPiece(ctx context.Context, name string) (SwitchResult, e
 
 // switchToMain switches to the main repo session.
 func (h *Handler) switchToMain(ctx context.Context, mainRepoRoot, name string) (SwitchResult, error) {
-	sessionName := getMainSessionName(mainRepoRoot)
+	sessionName := h.mainSessionName(mainRepoRoot)
 
 	// Build result with main repo info
 	result := SwitchResult{

@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -15,6 +16,9 @@ import (
 	"github.com/jewell-lgtm/monkeypuzzle/internal/adapters"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
 	initcmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/init"
+	projectcmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/project"
+	"github.com/jewell-lgtm/monkeypuzzle/internal/projectdir"
+	"github.com/jewell-lgtm/monkeypuzzle/internal/registry"
 	initTUI "github.com/jewell-lgtm/monkeypuzzle/internal/tui/init"
 	"github.com/jewell-lgtm/monkeypuzzle/pkg/cli"
 )
@@ -25,6 +29,11 @@ var (
 	flagPRProvider     string
 	flagLinearAPIKey   string
 	flagLinearTeam     string
+	flagPlaneAPIKey    string
+	flagPlaneWorkspace string
+	flagPlaneProject   string
+	flagPlaneBaseURL   string
+	flagInitDir        string
 	flagYes            bool
 	flagSchema         bool
 	flagInitGitignore  bool
@@ -51,17 +60,22 @@ Examples:
 func init() {
 	rootCmd.AddCommand(initCmd)
 	initCmd.Flags().StringVar(&flagName, "name", "", "Project name")
-	initCmd.Flags().StringVar(&flagIssueProvider, "issue-provider", "", "Issue provider (markdown, linear)")
+	initCmd.Flags().StringVar(&flagIssueProvider, "issue-provider", "", "Issue provider (markdown, linear, plane)")
 	initCmd.Flags().StringVar(&flagPRProvider, "pr-provider", "", "PR provider (github)")
 	initCmd.Flags().StringVar(&flagLinearAPIKey, "linear-api-key", "", "Linear API key (or use LINEAR_API_KEY env var)")
 	initCmd.Flags().StringVar(&flagLinearTeam, "linear-team", "", "Linear team key (required for linear provider)")
+	initCmd.Flags().StringVar(&flagPlaneAPIKey, "plane-api-key", "", "Plane API key (or use PLANE_API_KEY env var)")
+	initCmd.Flags().StringVar(&flagPlaneWorkspace, "plane-workspace", "", "Plane workspace slug (required for plane provider)")
+	initCmd.Flags().StringVar(&flagPlaneProject, "plane-project", "", "Plane project ID (required for plane provider)")
+	initCmd.Flags().StringVar(&flagPlaneBaseURL, "plane-base-url", "", "Plane API base URL (defaults to https://api.plane.so; set for self-hosted)")
+	initCmd.Flags().StringVar(&flagInitDir, "dir", "", "Directory (relative to the repo root) for monkeypuzzle state (default .monkeypuzzle); the mapping is recorded in ~/.config/monkeypuzzle/project-dirs.json")
 	initCmd.Flags().BoolVarP(&flagYes, "yes", "y", false, "Overwrite existing config without prompting")
 	initCmd.Flags().BoolVar(&flagSchema, "schema", false, "Output JSON schema with defaults and exit")
 	initCmd.Flags().BoolVar(&flagInitGitignore, "gitignore", false, "Regenerate .monkeypuzzle/.gitignore only")
 
 	// Register completion functions (errors ignored - completion is optional)
 	_ = initCmd.RegisterFlagCompletionFunc("issue-provider", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-		return []string{"markdown", "linear"}, cobra.ShellCompDirectiveNoFileComp
+		return []string{"markdown", "linear", "plane"}, cobra.ShellCompDirectiveNoFileComp
 	})
 	_ = initCmd.RegisterFlagCompletionFunc("pr-provider", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		return []string{"github"}, cobra.ShellCompDirectiveNoFileComp
@@ -94,17 +108,28 @@ func runInit(cmd *cobra.Command, args []string) error {
 	)
 	handler := initcmd.NewHandler(deps)
 
+	// Resolve the monkeypuzzle dir for this repo: explicit --dir wins, else any
+	// recorded relocation, else the default.
+	mpDir := flagInitDir
+	if mpDir == "" {
+		if root, rerr := registry.ResolveRepoRoot(wd); rerr == nil {
+			mpDir = projectdir.RelDir(root)
+		} else {
+			mpDir = projectdir.DefaultDirName
+		}
+	}
+
 	// --gitignore: regenerate gitignore only
 	if flagInitGitignore {
-		if err := handler.EnsureGitignore(); err != nil {
+		if err := handler.EnsureGitignore(mpDir); err != nil {
 			return err
 		}
-		fmt.Fprintln(os.Stderr, "Regenerated .monkeypuzzle/.gitignore")
+		fmt.Fprintf(os.Stderr, "Regenerated %s\n", filepath.Join(mpDir, ".gitignore"))
 		return nil
 	}
 
 	// Check for existing config
-	if handler.ConfigExists() && !flagYes {
+	if handler.ConfigExists(mpDir) && !flagYes {
 		if !cli.IsTerminal() {
 			return fmt.Errorf("config already exists, use --yes to overwrite")
 		}
@@ -122,7 +147,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	}
 
 	// Get input based on mode
-	input, err := getInput(wd)
+	input, err := getInput(wd, mpDir)
 	if err != nil {
 		return err
 	}
@@ -130,6 +155,23 @@ func runInit(cmd *cobra.Command, args []string) error {
 	cfg, err := handler.Run(input, wd)
 	if err != nil {
 		return err
+	}
+
+	// Record the repo -> monkeypuzzle-dir mapping when relocated (non-default).
+	if input.Dir != projectdir.DefaultDirName {
+		if root, rerr := registry.ResolveRepoRoot(wd); rerr != nil {
+			fmt.Fprintf(os.Stderr, "warning: not in a git repository; monkeypuzzle dir mapping not saved: %v\n", rerr)
+		} else if serr := projectdir.Set(root, input.Dir); serr != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not save monkeypuzzle dir mapping: %v\n", serr)
+		}
+	}
+
+	// Register this repo in the global project registry (non-fatal on failure,
+	// e.g. when not inside a git repository).
+	if p, _, regErr := projectcmd.Add(wd); regErr != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not register project: %v\n", regErr)
+	} else {
+		fmt.Fprintf(os.Stderr, "Registered project %s\n", p.Name)
 	}
 
 	// Output JSON to stdout
@@ -142,7 +184,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func getInput(workDir string) (initcmd.Input, error) {
+func getInput(workDir, mpDir string) (initcmd.Input, error) {
 	allFlagsProvided := flagName != "" && flagIssueProvider != "" && flagPRProvider != ""
 
 	var input initcmd.Input
@@ -165,6 +207,21 @@ func getInput(workDir string) (initcmd.Input, error) {
 				input.IssueConfig["api_key"] = flagLinearAPIKey
 			}
 		}
+		if flagIssueProvider == "plane" {
+			input.IssueConfig = make(map[string]string)
+			if flagPlaneWorkspace != "" {
+				input.IssueConfig["workspace"] = flagPlaneWorkspace
+			}
+			if flagPlaneProject != "" {
+				input.IssueConfig["project"] = flagPlaneProject
+			}
+			if flagPlaneAPIKey != "" {
+				input.IssueConfig["api_key"] = flagPlaneAPIKey
+			}
+			if flagPlaneBaseURL != "" {
+				input.IssueConfig["base_url"] = flagPlaneBaseURL
+			}
+		}
 
 	case cli.HasStdinData():
 		data, err := io.ReadAll(os.Stdin)
@@ -184,6 +241,15 @@ func getInput(workDir string) (initcmd.Input, error) {
 
 	default:
 		return initcmd.Input{}, fmt.Errorf("no input provided; use --schema to see expected format, or provide flags")
+	}
+
+	// Resolve the monkeypuzzle dir: explicit --dir flag wins, then any value
+	// supplied via stdin JSON, then the resolved default (recorded relocation
+	// or ".monkeypuzzle").
+	if flagInitDir != "" {
+		input.Dir = flagInitDir
+	} else if input.Dir == "" {
+		input.Dir = mpDir
 	}
 
 	// Apply defaults and validate inside input layer
@@ -245,4 +311,3 @@ func runInteractiveMode(workDir string) (initcmd.Input, error) {
 
 	return input, nil
 }
-

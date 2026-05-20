@@ -13,9 +13,21 @@ import (
 
 // testEnv holds test environment state
 type testEnv struct {
-	t       *testing.T
-	tmpDir  string
-	binPath string
+	t         *testing.T
+	tmpDir    string
+	binPath   string
+	dataDir   string // MP_DATA_DIR for the binary, isolates the global registry
+	configDir string // MP_CONFIG_DIR for the binary, isolates user config
+}
+
+// env returns the environment for invoking the test binary, isolating both the
+// monkeypuzzle data directory and the user config directory so tests never
+// touch the real user state.
+func (e *testEnv) env() []string {
+	return append(os.Environ(),
+		"MP_DATA_DIR="+e.dataDir,
+		"MP_CONFIG_DIR="+e.configDir,
+	)
 }
 
 // setupTestEnv creates a temp directory and builds the binary
@@ -37,7 +49,23 @@ func setupTestEnv(t *testing.T) *testEnv {
 		t.Fatalf("failed to build binary: %v\n%s", err, output)
 	}
 
-	return &testEnv{t: t, tmpDir: tmpDir, binPath: binPath}
+	configDir := filepath.Join(tmpDir, "mp-config")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		os.RemoveAll(tmpDir)
+		t.Fatalf("failed to create config dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "config.json"), []byte(`{"multiplexer":"none"}`), 0o644); err != nil {
+		os.RemoveAll(tmpDir)
+		t.Fatalf("failed to seed config: %v", err)
+	}
+
+	return &testEnv{
+		t:         t,
+		tmpDir:    tmpDir,
+		binPath:   binPath,
+		dataDir:   filepath.Join(tmpDir, "mp-data"),
+		configDir: configDir,
+	}
 }
 
 // cleanup removes temp directory
@@ -49,6 +77,7 @@ func (e *testEnv) cleanup() {
 func (e *testEnv) run(args ...string) (string, string, error) {
 	cmd := exec.Command(e.binPath, args...)
 	cmd.Dir = e.tmpDir
+	cmd.Env = e.env()
 
 	var stdout, stderr strings.Builder
 	cmd.Stdout = &stdout
@@ -62,6 +91,7 @@ func (e *testEnv) run(args ...string) (string, string, error) {
 func (e *testEnv) runWithStdin(stdin string, args ...string) (string, string, error) {
 	cmd := exec.Command(e.binPath, args...)
 	cmd.Dir = e.tmpDir
+	cmd.Env = e.env()
 	cmd.Stdin = strings.NewReader(stdin)
 
 	var stdout, stderr strings.Builder
@@ -76,6 +106,7 @@ func (e *testEnv) runWithStdin(stdin string, args ...string) (string, string, er
 func (e *testEnv) runInDir(dir string, args ...string) (string, string, error) {
 	cmd := exec.Command(e.binPath, args...)
 	cmd.Dir = dir
+	cmd.Env = e.env()
 
 	var stdout, stderr strings.Builder
 	cmd.Stdout = &stdout
@@ -89,6 +120,7 @@ func (e *testEnv) runInDir(dir string, args ...string) (string, string, error) {
 func (e *testEnv) runInDirWithStdin(dir, stdin string, args ...string) (string, string, error) {
 	cmd := exec.Command(e.binPath, args...)
 	cmd.Dir = dir
+	cmd.Env = e.env()
 	cmd.Stdin = strings.NewReader(stdin)
 
 	var stdout, stderr strings.Builder
@@ -360,6 +392,13 @@ func (e *testEnv) initGitRepo() {
 	if output, err := cmd.CombinedOutput(); err != nil {
 		e.t.Fatalf("git commit failed: %v\n%s", err, output)
 	}
+
+	// Normalize the default branch name so commands defaulting to --main-branch=main work.
+	cmd = exec.Command("git", "branch", "-M", "main")
+	cmd.Dir = e.tmpDir
+	if output, err := cmd.CombinedOutput(); err != nil {
+		e.t.Fatalf("git branch -M main failed: %v\n%s", err, output)
+	}
 }
 
 // TestCLI_PieceCreate tests mp piece create outputs valid JSON
@@ -371,8 +410,7 @@ func TestCLI_PieceCreate(t *testing.T) {
 	env.initProject("test")
 	env.createIssue("add-feature.md", "Add Feature", "todo")
 
-	input := `{"issue_path":"issues/add-feature.md","skip_switch":true}`
-	stdout, stderr, err := env.runWithStdin(input, "piece", "create")
+	stdout, stderr, err := env.run("piece", "create", "--issue", "Add Feature", "--skip-switch")
 	if err != nil {
 		t.Fatalf("piece create failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
 	}
@@ -380,6 +418,9 @@ func TestCLI_PieceCreate(t *testing.T) {
 	var result map[string]any
 	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
 		t.Fatalf("invalid JSON output: %v\noutput: %s", err, stdout)
+	}
+	if name, _ := result["name"].(string); name != "add-feature" {
+		t.Errorf("expected piece name 'add-feature', got %v", result["name"])
 	}
 }
 
@@ -738,6 +779,7 @@ func TestCLI_IssueSearch_Schema(t *testing.T) {
 func (e *testEnv) runWithEnv(env map[string]string, args ...string) (string, string, error) {
 	cmd := exec.Command(e.binPath, args...)
 	cmd.Dir = e.tmpDir
+	cmd.Env = e.env()
 	cmd.Env = os.Environ()
 	for k, v := range env {
 		cmd.Env = append(cmd.Env, k+"="+v)
