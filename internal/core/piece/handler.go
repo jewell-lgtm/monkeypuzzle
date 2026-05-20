@@ -22,11 +22,10 @@ const (
 
 // Handler executes piece-related commands
 type Handler struct {
-	deps   core.Deps
-	git    *adapters.Git
-	github *adapters.GitHub
-	mux    core.Multiplexer
-	hooks  *HookRunner
+	deps  core.Deps
+	git   *adapters.Git
+	mux   core.Multiplexer
+	hooks *HookRunner
 }
 
 // NewHandler creates a new piece handler with dependencies.
@@ -38,11 +37,10 @@ func NewHandler(deps core.Deps) *Handler {
 // NewHandlerWithMultiplexer creates a new piece handler with a specific multiplexer.
 func NewHandlerWithMultiplexer(deps core.Deps, mux core.Multiplexer) *Handler {
 	return &Handler{
-		deps:   deps,
-		git:    adapters.NewGit(deps.Exec),
-		github: adapters.NewGitHub(deps.Exec),
-		mux:    mux,
-		hooks:  NewHookRunner(deps),
+		deps:  deps,
+		git:   adapters.NewGit(deps.Exec),
+		mux:   mux,
+		hooks: NewHookRunner(deps),
 	}
 }
 
@@ -55,6 +53,7 @@ type CreatePieceOptions struct {
 	// from inside a worktree (e.g. `mp stack append`) without scoping the pieces
 	// dir to the worktree.
 	RepoRoot string
+	Issue    IssueRef // Optional linked issue, surfaced as MP_ISSUE_ID in hooks
 }
 
 // CreatePieceWithInput creates a piece from validated input.
@@ -185,6 +184,8 @@ func (h *Handler) CreatePiece(ctx context.Context, pieceName string, opts Create
 		WorktreePath: worktreePath,
 		RepoRoot:     repoRoot,
 		SessionName:  sessionName,
+		IssueID:      opts.Issue.ID,
+		IssueNumber:  opts.Issue.Number,
 	}
 	if err := h.hooks.RunHook(ctx, repoRoot, HookOnPieceCreate, hookCtx); err != nil {
 		// A failing on-piece-create hook is non-fatal: keep the worktree and
@@ -421,6 +422,9 @@ func (h *Handler) CreatePieceFromIssue(ctx context.Context, issueRef IssueRef, o
 
 	// Sanitize issue title for piece name
 	pieceName := SanitizePieceName(issueRef.Title)
+
+	// Make issue ref available to on-piece-create hook via MP_ISSUE_ID
+	opts.Issue = issueRef
 
 	// Create the piece using the sanitized name
 	info, err := h.CreatePiece(ctx, pieceName, opts)
@@ -973,13 +977,15 @@ func (h *Handler) IsBranchMerged(ctx context.Context, repoRoot, branchName, main
 		return status, nil
 	}
 
-	// Method 2: Check via gh pr list by branch name (catches squash-merged PRs without metadata)
-	merged, prNumber, err = h.github.FindMergedPRByBranch(ctx, repoRoot, branchName)
-	if err == nil && merged {
-		status.IsMerged = true
-		status.Method = "pr-branch"
-		status.PRNumber = prNumber
-		return status, nil
+	// Method 2: Check via provider PR/MR list by branch name (catches squash-merged PRs without metadata)
+	if mc := h.getMergeChecker(repoRoot); mc != nil {
+		merged, prNumber, err = mc.FindMergedByBranch(ctx, repoRoot, branchName)
+		if err == nil && merged {
+			status.IsMerged = true
+			status.Method = "pr-branch"
+			status.PRNumber = prNumber
+			return status, nil
+		}
 	}
 
 	// Method 3: Check via git branch --merged
@@ -1026,8 +1032,12 @@ func (h *Handler) checkPRMergeStatus(ctx context.Context, worktreePath string) (
 		return false, 0, fmt.Errorf("PR number not set in metadata")
 	}
 
-	// Check if PR is merged using gh CLI
-	merged, err := h.github.IsPRMerged(ctx, worktreePath, metadata.PRNumber)
+	// Check via the configured provider (gh / glab / etc.)
+	mc := h.getMergeChecker(worktreePath)
+	if mc == nil {
+		return false, metadata.PRNumber, fmt.Errorf("no PR provider configured")
+	}
+	merged, err := mc.IsMerged(ctx, worktreePath, metadata.PRNumber)
 	if err != nil {
 		return false, metadata.PRNumber, fmt.Errorf("failed to check PR status: %w", err)
 	}

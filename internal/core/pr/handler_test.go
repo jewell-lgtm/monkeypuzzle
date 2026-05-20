@@ -20,6 +20,15 @@ func setupTestPieceWorktree(t *testing.T, mockExec *adapters.MockExec, fs *adapt
 	_ = fs.MkdirAll(filepath.Join(worktreePath, ".monkeypuzzle"), 0755)
 	_ = fs.MkdirAll(filepath.Join(mainRepoPath, ".monkeypuzzle"), 0755)
 
+	// Write minimal monkeypuzzle.json so pr.Handler.providerForRepo can resolve a provider.
+	configData := `{
+  "version": "1",
+  "project": {"name": "test"},
+  "issues": {"provider": "markdown", "config": {"directory": "issues"}},
+  "pr": {"provider": "github", "config": {}}
+}`
+	_ = fs.WriteFile(filepath.Join(mainRepoPath, ".monkeypuzzle/monkeypuzzle.json"), []byte(configData), 0644)
+
 	// Mock git rev-parse --git-dir to indicate we're in a worktree
 	// The gitdir for a worktree is under .git/worktrees/
 	gitDir := filepath.Join(mainRepoPath, ".git", "worktrees", "test-piece")
@@ -166,6 +175,14 @@ func TestCreatePR_UsesPieceNameAsFallback(t *testing.T) {
 	// Create .monkeypuzzle directories
 	_ = fs.MkdirAll(filepath.Join(worktreePath, ".monkeypuzzle"), 0755)
 	_ = fs.MkdirAll(filepath.Join(mainRepoPath, ".monkeypuzzle"), 0755)
+
+	// Minimal monkeypuzzle.json so pr.Handler resolves a github provider
+	_ = fs.WriteFile(filepath.Join(mainRepoPath, ".monkeypuzzle/monkeypuzzle.json"), []byte(`{
+  "version": "1",
+  "project": {"name": "test"},
+  "issues": {"provider": "markdown", "config": {"directory": "issues"}},
+  "pr": {"provider": "github", "config": {}}
+}`), 0644)
 
 	// Mock git commands for a worktree named "my-feature-piece"
 	gitDir := filepath.Join(mainRepoPath, ".git", "worktrees", "my-feature-piece")
@@ -318,6 +335,14 @@ func TestCreatePR_UsesParentBranchAsBase(t *testing.T) {
 	_ = fs.MkdirAll(filepath.Join(worktreePath, ".monkeypuzzle"), 0755)
 	_ = fs.MkdirAll(filepath.Join(mainRepoPath, ".monkeypuzzle"), 0755)
 
+	// Minimal monkeypuzzle.json so pr.Handler resolves a github provider
+	_ = fs.WriteFile(filepath.Join(mainRepoPath, ".monkeypuzzle/monkeypuzzle.json"), []byte(`{
+  "version": "1",
+  "project": {"name": "test"},
+  "issues": {"provider": "markdown", "config": {"directory": "issues"}},
+  "pr": {"provider": "github", "config": {}}
+}`), 0644)
+
 	// Create piece metadata with parent piece
 	pieceMetadata := piece.PieceMetadata{
 		Parent:            "parent-piece",
@@ -376,6 +401,14 @@ func TestCreatePR_ExplicitBaseOverridesParent(t *testing.T) {
 	_ = fs.MkdirAll(filepath.Join(worktreePath, ".monkeypuzzle"), 0755)
 	_ = fs.MkdirAll(filepath.Join(mainRepoPath, ".monkeypuzzle"), 0755)
 
+	// Minimal monkeypuzzle.json so pr.Handler resolves a github provider
+	_ = fs.WriteFile(filepath.Join(mainRepoPath, ".monkeypuzzle/monkeypuzzle.json"), []byte(`{
+  "version": "1",
+  "project": {"name": "test"},
+  "issues": {"provider": "markdown", "config": {"directory": "issues"}},
+  "pr": {"provider": "github", "config": {}}
+}`), 0644)
+
 	// Create piece metadata with parent piece
 	pieceMetadata := piece.PieceMetadata{
 		Parent:            "parent-piece",
@@ -433,6 +466,14 @@ func TestCreatePR_MainParentUsesMain(t *testing.T) {
 	// Create .monkeypuzzle directories
 	_ = fs.MkdirAll(filepath.Join(worktreePath, ".monkeypuzzle"), 0755)
 	_ = fs.MkdirAll(filepath.Join(mainRepoPath, ".monkeypuzzle"), 0755)
+
+	// Minimal monkeypuzzle.json so pr.Handler resolves a github provider
+	_ = fs.WriteFile(filepath.Join(mainRepoPath, ".monkeypuzzle/monkeypuzzle.json"), []byte(`{
+  "version": "1",
+  "project": {"name": "test"},
+  "issues": {"provider": "markdown", "config": {"directory": "issues"}},
+  "pr": {"provider": "github", "config": {}}
+}`), 0644)
 
 	// Create piece metadata with main as parent (root piece)
 	pieceMetadata := piece.PieceMetadata{

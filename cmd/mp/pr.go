@@ -30,10 +30,20 @@ If the piece was created from an issue, the issue title is used as the default P
 	RunE: runPRCreate,
 }
 
+var prReadyCmd = &cobra.Command{
+	Use:   "ready",
+	Short: "Flip the current piece's draft PR/MR to ready-for-review",
+	Long: `Flip the draft PR/MR for the current piece worktree to ready-for-review.
+Reads the PR number from .monkeypuzzle/pr-metadata.json. Fires the
+before-pr-ready and after-pr-ready hooks around the provider call.`,
+	RunE: runPRReady,
+}
+
 var (
 	flagPRTitle  string
 	flagPRBody   string
 	flagPRBase   string
+	flagPRDraft  bool
 	flagPRSchema bool
 )
 
@@ -41,8 +51,10 @@ func init() {
 	prCreateCmd.Flags().StringVar(&flagPRTitle, "title", "", "PR title (default: issue title or piece name)")
 	prCreateCmd.Flags().StringVar(&flagPRBody, "body", "", "PR description")
 	prCreateCmd.Flags().StringVar(&flagPRBase, "base", "", "Base branch to merge into (default: auto-detect from parent)")
+	prCreateCmd.Flags().BoolVar(&flagPRDraft, "draft", false, "Open the PR/MR as a draft")
 	prCreateCmd.Flags().BoolVar(&flagPRSchema, "schema", false, "Output JSON schema and exit")
 	prCmd.AddCommand(prCreateCmd)
+	prCmd.AddCommand(prReadyCmd)
 	rootCmd.AddCommand(prCmd)
 }
 
@@ -87,15 +99,34 @@ func runPRCreate(cmd *cobra.Command, args []string) error {
 	return cli.PrintJSON(result)
 }
 
+func runPRReady(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
+	wd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("failed to get working directory: %w", err)
+	}
+
+	deps := core.NewDeps(
+		adapters.NewOSFS(""),
+		adapters.NewTextOutput(os.Stderr),
+		adapters.NewOSExec(),
+		http.DefaultClient,
+		adapters.SetupCLILoading(os.Stderr),
+	)
+	handler := prcmd.NewHandler(deps)
+	return handler.MarkReady(ctx, wd)
+}
+
 func getPRInput() (prcmd.Input, error) {
 	var input prcmd.Input
 
 	// Flags always take priority (base not included since it auto-detects)
-	if flagPRTitle != "" || flagPRBody != "" {
+	if flagPRTitle != "" || flagPRBody != "" || flagPRDraft {
 		input = prcmd.Input{
 			Title: flagPRTitle,
 			Body:  flagPRBody,
 			Base:  flagPRBase,
+			Draft: flagPRDraft,
 		}
 	} else if cli.HasStdinData() {
 		data, err := io.ReadAll(os.Stdin)

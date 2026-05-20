@@ -130,7 +130,7 @@ func TestValidate_InvalidInputs(t *testing.T) {
 		},
 		{
 			name:  "invalid pr provider",
-			input: initcmd.Input{Name: "test", IssueProvider: "markdown", PRProvider: "gitlab"},
+			input: initcmd.Input{Name: "test", IssueProvider: "markdown", PRProvider: "bitbucket"},
 		},
 	}
 

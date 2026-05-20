@@ -32,14 +32,14 @@ var fields = []Field{
 		Description: "Issue import source (markdown = none; local store is always markdown). Consumed only by `mp issue import`.",
 		Required:    true,
 		Default:     "markdown",
-		ValidValues: []string{"markdown", "linear", "plane"},
+		ValidValues: []string{"markdown", "linear", "plane", "gitlab"},
 	},
 	{
 		Name:        "pr_provider",
-		Description: "How PRs are managed",
+		Description: "How PRs/MRs are managed",
 		Required:    true,
 		Default:     "github",
-		ValidValues: []string{"github"},
+		ValidValues: []string{"github", "gitlab"},
 	},
 	{
 		Name:        "dir",

@@ -19,21 +19,42 @@ type PRCreateResult struct {
 
 // Handler executes PR-related commands
 type Handler struct {
-	deps   core.Deps
-	git    *adapters.Git
-	github *adapters.GitHub
+	deps  core.Deps
+	git   *adapters.Git
+	hooks *piece.HookRunner
 }
 
 // NewHandler creates a new PR handler with dependencies
 func NewHandler(deps core.Deps) *Handler {
 	return &Handler{
-		deps:   deps,
-		git:    adapters.NewGit(deps.Exec),
-		github: adapters.NewGitHub(deps.Exec),
+		deps:  deps,
+		git:   adapters.NewGit(deps.Exec),
+		hooks: piece.NewHookRunner(deps),
 	}
 }
 
-// CreatePR creates a GitHub PR for the current piece.
+// providerForRepo loads the configured PR provider for the given repo root.
+func (h *Handler) providerForRepo(repoRoot string) (Provider, string, error) {
+	cfg, err := piece.ReadConfig(repoRoot, h.deps.FS)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to read config (run mp init first): %w", err)
+	}
+	providerType := cfg.PR.Provider
+	if providerType == "" {
+		providerType = "github"
+	}
+	p, err := NewProvider(ProviderConfig{
+		ProviderType: providerType,
+		Config:       cfg.PR.Config,
+		Deps:         ProviderDeps{Exec: h.deps.Exec},
+	})
+	if err != nil {
+		return nil, "", err
+	}
+	return p, providerType, nil
+}
+
+// CreatePR creates a PR/MR for the current piece via the configured provider.
 // Must be run from within a piece worktree.
 // Expects input to be pre-validated via WithDefaults() and Validate().
 func (h *Handler) CreatePR(ctx context.Context, workDir string, input Input) (*PRCreateResult, error) {
@@ -46,6 +67,11 @@ func (h *Handler) CreatePR(ctx context.Context, workDir string, input Input) (*P
 
 	if !status.InPiece {
 		return nil, fmt.Errorf("not in a piece worktree - run this command from within a piece")
+	}
+
+	provider, _, err := h.providerForRepo(status.RepoRoot)
+	if err != nil {
+		return nil, err
 	}
 
 	// Auto-detect base branch from piece metadata if not explicitly provided
@@ -87,13 +113,30 @@ func (h *Handler) CreatePR(ctx context.Context, workDir string, input Input) (*P
 		input.Title = status.PieceName
 	}
 
+	// Build base hook context (PR fields filled in once we have the result)
+	hookCtx := piece.HookContext{
+		PieceName:    status.PieceName,
+		WorktreePath: status.WorktreePath,
+		RepoRoot:     status.RepoRoot,
+		PRBaseBranch: input.Base,
+	}
+	if !issueRef.IsEmpty() {
+		hookCtx.IssueID = issueRef.ID
+		hookCtx.IssueNumber = issueRef.Number
+	}
+
+	// before-pr-create hook (e.g. to write a description file)
+	if err := h.hooks.RunHook(ctx, status.RepoRoot, piece.HookBeforePRCreate, hookCtx); err != nil {
+		return nil, fmt.Errorf("before-pr-create hook failed: %w", err)
+	}
+
 	// Push branch to remote
 	h.deps.Output.Write(core.Message{
 		Type:    core.MsgInfo,
 		Content: fmt.Sprintf("Pushing branch %s to origin...", branch),
 	})
 
-	if err := h.github.Push(ctx, workDir); err != nil {
+	if err := provider.Push(ctx, workDir); err != nil {
 		return nil, fmt.Errorf("failed to push branch: %w", err)
 	}
 
@@ -103,10 +146,11 @@ func (h *Handler) CreatePR(ctx context.Context, workDir string, input Input) (*P
 		Content: "Creating PR...",
 	})
 
-	prResult, err := h.github.CreatePR(ctx, workDir, adapters.PRCreateInput{
+	prResult, err := provider.Create(ctx, workDir, CreateInput{
 		Title: input.Title,
 		Body:  input.Body,
 		Base:  input.Base,
+		Draft: input.Draft,
 	})
 	if err != nil {
 		return nil, err
@@ -138,7 +182,82 @@ func (h *Handler) CreatePR(ctx context.Context, workDir string, input Input) (*P
 		Data:    result,
 	})
 
+	// after-pr-create hook
+	hookCtx.PRNumber = prResult.Number
+	hookCtx.PRURL = prResult.URL
+	if err := h.hooks.RunHook(ctx, status.RepoRoot, piece.HookAfterPRCreate, hookCtx); err != nil {
+		// Non-fatal: PR is already created. Report and continue.
+		h.deps.Output.Write(core.Message{
+			Type:    core.MsgWarning,
+			Content: fmt.Sprintf("after-pr-create hook failed: %v", err),
+		})
+	}
+
 	return result, nil
+}
+
+// MarkReady flips a draft PR/MR for the current piece to ready-for-review.
+// Fires before-pr-ready / after-pr-ready hooks around the provider call.
+func (h *Handler) MarkReady(ctx context.Context, workDir string) error {
+	pieceHandler := piece.NewHandler(h.deps)
+	status, err := pieceHandler.Status(ctx, workDir)
+	if err != nil {
+		return fmt.Errorf("failed to get piece status: %w", err)
+	}
+	if !status.InPiece {
+		return fmt.Errorf("not in a piece worktree - run this command from within a piece")
+	}
+
+	metadata, err := piece.ReadPRMetadata(status.WorktreePath, h.deps.FS)
+	if err != nil {
+		return fmt.Errorf("no PR metadata found; run `mp piece pr create` first: %w", err)
+	}
+	if metadata.PRNumber == 0 {
+		return fmt.Errorf("PR metadata has no number")
+	}
+
+	provider, _, err := h.providerForRepo(status.RepoRoot)
+	if err != nil {
+		return err
+	}
+
+	hookCtx := piece.HookContext{
+		PieceName:    status.PieceName,
+		WorktreePath: status.WorktreePath,
+		RepoRoot:     status.RepoRoot,
+		PRNumber:     metadata.PRNumber,
+		PRURL:        metadata.PRURL,
+		PRBaseBranch: metadata.BaseBranch,
+		IssueID:      metadata.Issue.ID,
+		IssueNumber:  metadata.Issue.Number,
+	}
+
+	if err := h.hooks.RunHook(ctx, status.RepoRoot, piece.HookBeforePRReady, hookCtx); err != nil {
+		return fmt.Errorf("before-pr-ready hook failed: %w", err)
+	}
+
+	h.deps.Output.Write(core.Message{
+		Type:    core.MsgInfo,
+		Content: fmt.Sprintf("Marking PR #%d as ready...", metadata.PRNumber),
+	})
+
+	if err := provider.MarkReady(ctx, workDir, metadata.PRNumber); err != nil {
+		return fmt.Errorf("failed to mark PR ready: %w", err)
+	}
+
+	h.deps.Output.Write(core.Message{
+		Type:    core.MsgSuccess,
+		Content: fmt.Sprintf("PR #%d marked ready: %s", metadata.PRNumber, metadata.PRURL),
+	})
+
+	if err := h.hooks.RunHook(ctx, status.RepoRoot, piece.HookAfterPRReady, hookCtx); err != nil {
+		h.deps.Output.Write(core.Message{
+			Type:    core.MsgWarning,
+			Content: fmt.Sprintf("after-pr-ready hook failed: %v", err),
+		})
+	}
+
+	return nil
 }
 
 // readIssueRef reads the issue ref recorded in the piece's metadata.

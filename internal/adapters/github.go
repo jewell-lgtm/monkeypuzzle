@@ -35,6 +35,7 @@ type PRCreateInput struct {
 	Title string
 	Body  string
 	Base  string // Base branch (e.g., "main")
+	Draft bool   // If true, create as draft PR
 }
 
 // CreatePR creates a GitHub PR using gh CLI and returns the PR number and URL.
@@ -51,6 +52,10 @@ func (g *GitHub) CreatePR(ctx context.Context, workDir string, input PRCreateInp
 
 	if input.Base != "" {
 		args = append(args, "--base", input.Base)
+	}
+
+	if input.Draft {
+		args = append(args, "--draft")
 	}
 
 	output, err := g.exec.RunWithDir(ctx, workDir, "gh", args...)
@@ -87,6 +92,15 @@ func (g *GitHub) Push(ctx context.Context, workDir string) error {
 	_, err := g.exec.RunWithDir(ctx, workDir, "git", "push", "-u", "origin", "HEAD")
 	if err != nil {
 		return fmt.Errorf("failed to push to remote: %w", err)
+	}
+	return nil
+}
+
+// MarkPRReady flips a draft PR to ready-for-review.
+func (g *GitHub) MarkPRReady(ctx context.Context, workDir string, prNumber int) error {
+	_, err := g.exec.RunWithDir(ctx, workDir, "gh", "pr", "ready", fmt.Sprintf("%d", prNumber))
+	if err != nil {
+		return fmt.Errorf("failed to mark PR ready: %w", err)
 	}
 	return nil
 }

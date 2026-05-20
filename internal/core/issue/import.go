@@ -56,7 +56,7 @@ func (h *Handler) ConfiguredImportSources() ([]ImportSource, error) {
 
 	var sources []ImportSource
 	switch cfg.Issues.Provider {
-	case "linear", "plane":
+	case "linear", "plane", "gitlab":
 		sources = append(sources, ImportSource{
 			Name:   cfg.Issues.Provider,
 			Config: cfg.Issues.Config,
@@ -83,7 +83,7 @@ func (h *Handler) ResolveImportSource(from string) (ImportSource, error) {
 // optional explicit name, failing loudly on genuine ambiguity.
 func resolveImportSource(sources []ImportSource, from string) (ImportSource, error) {
 	if len(sources) == 0 {
-		return ImportSource{}, fmt.Errorf("no import source configured; run `mp init` and configure linear or plane")
+		return ImportSource{}, fmt.Errorf("no import source configured; run `mp init` and configure linear, plane, or gitlab")
 	}
 
 	if from != "" {
@@ -114,7 +114,7 @@ func (h *Handler) newImporter(src ImportSource) (Importer, error) {
 	return NewImporter(ImporterConfig{
 		Source: src.Name,
 		Config: src.Config,
-		Deps:   ImporterDeps{HTTP: h.deps.HTTP},
+		Deps:   ImporterDeps{HTTP: h.deps.HTTP, Exec: h.deps.Exec},
 	})
 }
 

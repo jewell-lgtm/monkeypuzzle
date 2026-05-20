@@ -12,6 +12,7 @@ import (
 	"github.com/jewell-lgtm/monkeypuzzle/internal/adapters"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core/piece"
+	_ "github.com/jewell-lgtm/monkeypuzzle/internal/core/pr" // registers MergeChecker factory
 	"github.com/jewell-lgtm/monkeypuzzle/internal/paths"
 )
 
@@ -1218,10 +1219,17 @@ func TestHandler_IsBranchMerged_ViaPR(t *testing.T) {
 	repoRoot := "/repo"
 	branchName := "feature-branch"
 
-	// Create PR metadata
+	// Create PR metadata + monkeypuzzle config (so MergeChecker factory finds a github provider)
 	prMetadata := `{"pr_number": 123, "pr_url": "https://github.com/owner/repo/pull/123", "branch": "feature-branch", "base_branch": "main"}`
 	_ = fs.MkdirAll(filepath.Join(repoRoot, ".monkeypuzzle"), 0755)
 	_ = fs.WriteFile(filepath.Join(repoRoot, ".monkeypuzzle/pr-metadata.json"), []byte(prMetadata), 0644)
+	configData := `{
+  "version": "1",
+  "project": {"name": "test"},
+  "issues": {"provider": "markdown", "config": {"directory": "issues"}},
+  "pr": {"provider": "github", "config": {}}
+}`
+	_ = fs.WriteFile(filepath.Join(repoRoot, ".monkeypuzzle/monkeypuzzle.json"), []byte(configData), 0644)
 
 	// Mock remote branch check
 	mockExec.AddResponse("git", []string{"ls-remote", "--heads", "origin", branchName}, []byte("abc123\trefs/heads/feature-branch\n"), nil)
@@ -1258,7 +1266,16 @@ func TestHandler_IsBranchMerged_ViaPRBranch(t *testing.T) {
 	repoRoot := "/repo"
 	branchName := "feature-branch"
 
-	// No PR metadata - tests squash-merged PR without metadata file
+	// No PR metadata - tests squash-merged PR without metadata file.
+	// Still need monkeypuzzle config so the MergeChecker factory resolves to github.
+	_ = fs.MkdirAll(filepath.Join(repoRoot, ".monkeypuzzle"), 0755)
+	configData := `{
+  "version": "1",
+  "project": {"name": "test"},
+  "issues": {"provider": "markdown", "config": {"directory": "issues"}},
+  "pr": {"provider": "github", "config": {}}
+}`
+	_ = fs.WriteFile(filepath.Join(repoRoot, ".monkeypuzzle/monkeypuzzle.json"), []byte(configData), 0644)
 
 	// Mock remote branch check
 	mockExec.AddResponse("git", []string{"ls-remote", "--heads", "origin", branchName}, []byte("abc123\trefs/heads/feature-branch\n"), nil)

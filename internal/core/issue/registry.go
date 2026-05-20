@@ -10,6 +10,7 @@ import (
 type ProviderDeps struct {
 	FS   core.FS
 	HTTP core.HTTPClient
+	Exec core.Exec
 }
 
 // ProviderConfig holds configuration for creating a provider

@@ -17,6 +17,10 @@ const (
 	HookAfterPieceMerge   = "after-piece-merge.sh"
 	HookBeforePieceUpdate = "before-piece-update.sh"
 	HookAfterPieceUpdate  = "after-piece-update.sh"
+	HookBeforePRCreate    = "before-pr-create.sh"
+	HookAfterPRCreate     = "after-pr-create.sh"
+	HookBeforePRReady     = "before-pr-ready.sh"
+	HookAfterPRReady      = "after-pr-ready.sh"
 )
 
 // HookContext contains environment variables to pass to hooks
@@ -26,6 +30,11 @@ type HookContext struct {
 	RepoRoot     string // MP_REPO_ROOT
 	MainBranch   string // MP_MAIN_BRANCH (for merge/update hooks)
 	SessionName  string // MP_SESSION_NAME (for create hooks)
+	IssueID      string // MP_ISSUE_ID (for create + PR hooks, when the piece is linked to an issue)
+	IssueNumber  string // MP_ISSUE_NUMBER (human-readable issue number, e.g. "#1234")
+	PRNumber     int    // MP_PR_NUMBER (for PR hooks)
+	PRURL        string // MP_PR_URL (for PR hooks)
+	PRBaseBranch string // MP_PR_BASE_BRANCH (for PR hooks)
 }
 
 // HookRunner executes hook scripts from the .monkeypuzzle/hooks directory
@@ -123,6 +132,21 @@ func (h *HookRunner) buildEnv(ctx HookContext) []string {
 	}
 	if ctx.SessionName != "" {
 		env = append(env, fmt.Sprintf("MP_SESSION_NAME=%s", ctx.SessionName))
+	}
+	if ctx.IssueID != "" {
+		env = append(env, fmt.Sprintf("MP_ISSUE_ID=%s", ctx.IssueID))
+	}
+	if ctx.IssueNumber != "" {
+		env = append(env, fmt.Sprintf("MP_ISSUE_NUMBER=%s", ctx.IssueNumber))
+	}
+	if ctx.PRNumber != 0 {
+		env = append(env, fmt.Sprintf("MP_PR_NUMBER=%d", ctx.PRNumber))
+	}
+	if ctx.PRURL != "" {
+		env = append(env, fmt.Sprintf("MP_PR_URL=%s", ctx.PRURL))
+	}
+	if ctx.PRBaseBranch != "" {
+		env = append(env, fmt.Sprintf("MP_PR_BASE_BRANCH=%s", ctx.PRBaseBranch))
 	}
 
 	return env

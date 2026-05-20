@@ -35,6 +35,7 @@ type Importer interface {
 // ImporterDeps holds dependencies available to importers.
 type ImporterDeps struct {
 	HTTP core.HTTPClient
+	Exec core.Exec
 }
 
 // ImporterConfig holds configuration for creating an importer.
@@ -118,5 +119,14 @@ func init() {
 			return nil, fmt.Errorf("plane import source requires HTTP client")
 		}
 		return NewPlaneImporter(cfg.Deps.HTTP, baseURL, apiKey, workspace, project), nil
+	})
+
+	// GitLab shells out to the glab CLI, reusing existing glab auth.
+	RegisterImporter("gitlab", func(cfg ImporterConfig) (Importer, error) {
+		if cfg.Deps.Exec == nil {
+			return nil, fmt.Errorf("gitlab import source requires Exec dependency")
+		}
+		project := cfg.Config["project"] // optional: glab uses cwd repo by default
+		return NewGitLabImporter(cfg.Deps.Exec, project), nil
 	})
 }

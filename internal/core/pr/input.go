@@ -27,6 +27,12 @@ var fields = []input.Field{
 		Required:    false,
 		Default:     "", // Empty means auto-detect from piece metadata
 	},
+	{
+		Name:        "draft",
+		Description: "Open the PR/MR as a draft",
+		Required:    false,
+		Default:     "false",
+	},
 }
 
 // Input holds input for PR creation
@@ -34,6 +40,7 @@ type Input struct {
 	Title string `json:"title"`
 	Body  string `json:"body"`
 	Base  string `json:"base"`
+	Draft bool   `json:"draft"`
 }
 
 // Schema returns the JSON schema with defaults for PR create
@@ -58,6 +65,7 @@ func WithDefaults(in Input) Input {
 	in.Body = strings.TrimSpace(in.Body)
 	in.Base = strings.TrimSpace(in.Base)
 	// Base left empty intentionally - handler will auto-detect from piece parent
+	// Draft is a bool; nothing to trim
 	return in
 }
 
