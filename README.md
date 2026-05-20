@@ -35,14 +35,19 @@ No special "agent mode"—the same CLI that works interactively works programmat
 
 ## Commands
 
-| Command           | What it does                   |
-| ----------------- | ------------------------------ |
-| `mp init`         | Initialize project             |
-| `mp piece create`    | Create worktree + tmux session |
-| `mp piece list`   | Show all pieces                |
-| `mp piece switch` | Jump to a piece                |
-| `mp piece update` | Sync with main                 |
-| `mp piece merge`  | Assemble piece into main       |
+| Command            | What it does                              |
+| ------------------ | ----------------------------------------- |
+| `mp init`          | Initialize project (also registers it)    |
+| `mp` / `mp dash`   | Cross-project dashboard (projects/pieces) |
+| `mp project list`  | List registered projects                  |
+| `mp project add`   | Register a project repo                    |
+| `mp switch`        | Jump to any piece in any project           |
+| `mp piece create`  | Create worktree + tmux session            |
+| `mp piece list`    | Show all pieces (`--all` across projects)  |
+| `mp piece switch`  | Jump to a piece                            |
+| `mp piece update`  | Sync with main                             |
+| `mp piece merge`   | Assemble piece into main                   |
+| `mp issue list`    | List issues (`--all` across projects)      |
 
 See [docs/commands.md](docs/commands.md) for full reference.
 

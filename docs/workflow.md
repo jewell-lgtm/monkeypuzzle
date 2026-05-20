@@ -128,12 +128,20 @@ git push origin main
 
 ## Tmux Integration
 
-`mp piece create` creates tmux sessions automatically:
+`mp piece create` creates tmux sessions automatically. Sessions are namespaced by
+project so worktrees from different repositories never collide:
 
-- **Main repo session**: `mp-<repo-name>` (created once, reused)
-- **Piece session**: `mp-piece-<piece-name>` (one per piece)
+- **Main repo session**: `mp/<project>` (created once, reused)
+- **Piece session**: `mp/<project>/<piece-name>` (one per piece)
 
-This lets you always switch back to the main repo via `Ctrl+b s` session picker.
+The `<project>` component comes from `project.name` in `.monkeypuzzle/monkeypuzzle.json`
+(falling back to the repo directory name). This lets you always switch back to the
+main repo via the `Ctrl+b s` session picker.
+
+> **Migration note:** earlier versions used `mp-<repo>` / `mp-piece-<piece>`. The new
+> scheme is a rename, not an automatic migration — existing detached sessions keep their
+> old names until killed. Rename them with `tmux rename-session -t mp-piece-foo mp/<project>/foo`
+> if you want them to match.
 
 Switch between pieces:
 
@@ -142,8 +150,8 @@ mp piece switch              # TUI selector (works with/without tmux)
 mp piece switch --name foo   # By name
 
 # Or use tmux directly:
-tmux list-sessions           # See all piece sessions
-tmux attach -t mp-piece-...  # Attach to specific piece
+tmux list-sessions           # See all sessions
+tmux attach -t mp/<project>/<piece>  # Attach to a specific piece
 ```
 
 `mp piece switch` automatically detects if you're in tmux and uses `switch-client` for seamless session switching.
@@ -193,7 +201,7 @@ sudo dnf install tmux
 # Create piece (auto-creates tmux session)
 mp piece create --name my-feature
 
-# You're now in session "mp-piece-my-feature"
+# You're now in session "mp/<project>/my-feature"
 # Work on code, then detach:
 # Press Ctrl+b, then d
 
@@ -201,7 +209,7 @@ mp piece create --name my-feature
 mp piece switch --name my-feature
 
 # Or list all piece sessions:
-tmux ls | grep mp-piece
+tmux ls | grep "^mp/"
 ```
 
 **Tips:**
@@ -212,7 +220,7 @@ tmux ls | grep mp-piece
 
 ## Hooks
 
-Monkeypuzzle supports hooks to run custom scripts during piece operations. Create executable scripts in `.monkeypuzzle/hooks/`:
+Monkeypuzzle supports hooks to run custom scripts during piece operations. Create executable scripts in `.monkeypuzzle/hooks/` (or `<dir>/hooks/` if the monkeypuzzle directory has been relocated via `mp init --dir` / `mp move`):
 
 ### Pre-merge validation
 

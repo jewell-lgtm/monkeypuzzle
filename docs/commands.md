@@ -75,13 +75,20 @@ mp init --schema               # Output schema
 
 ### Flags
 
-| Flag               | Description                 | Default        |
-| ------------------ | --------------------------- | -------------- |
-| `--name`           | Project name                | Directory name |
-| `--issue-provider` | Issue provider              | `markdown`     |
-| `--pr-provider`    | PR provider                 | `github`       |
-| `--schema`         | Output JSON schema and exit | -              |
-| `-y, --yes`        | Overwrite existing config   | `false`        |
+| Flag               | Description                                                       | Default        |
+| ------------------ | ----------------------------------------------------------------- | -------------- |
+| `--name`           | Project name                                                      | Directory name |
+| `--issue-provider` | Issue provider                                                    | `markdown`     |
+| `--pr-provider`    | PR provider                                                       | `github`       |
+| `--dir`            | Directory (relative to repo root) for monkeypuzzle state          | `.monkeypuzzle`|
+| `--schema`         | Output JSON schema and exit                                       | -              |
+| `-y, --yes`        | Overwrite existing config                                         | `false`        |
+
+`--dir` lets you keep all monkeypuzzle state somewhere already ignored by git,
+e.g. `mp init --dir .DONOTCOMMIT/monkeypuzzle`. The repo→directory mapping is
+recorded in `~/.config/monkeypuzzle/project-dirs.json` (it can't live in
+`monkeypuzzle.json`, which is inside the directory being relocated). To relocate
+an existing project later, use [`mp move`](#mp-move).
 
 ### JSON Schema
 
@@ -89,17 +96,19 @@ mp init --schema               # Output schema
 {
   "name": "project-name",
   "issue_provider": "markdown",
-  "pr_provider": "github"
+  "pr_provider": "github",
+  "dir": ".monkeypuzzle"
 }
 ```
 
 ### Output
 
-Creates `.monkeypuzzle/` directory:
+Creates the monkeypuzzle directory (default `.monkeypuzzle/`):
 
 ```
 .monkeypuzzle/
 ├── monkeypuzzle.json    # Configuration
+├── .gitignore           # Ignores pieces/ and per-piece metadata
 └── issues/              # Markdown issues (if markdown provider)
 ```
 
@@ -112,6 +121,40 @@ Creates `.monkeypuzzle/` directory:
 **PR Providers:**
 
 - `github` - PR management via `gh` CLI
+
+---
+
+## mp move
+
+Relocate the current repository's monkeypuzzle directory to a new path relative
+to the repo root, updating the mapping in `~/.config/monkeypuzzle/project-dirs.json`.
+
+### Usage
+
+```bash
+mp move .DONOTCOMMIT/monkeypuzzle          # relocate
+mp move --path .DONOTCOMMIT/monkeypuzzle   # same, via flag
+echo '{"path":".DONOTCOMMIT/monkeypuzzle"}' | mp move
+mp move .monkeypuzzle                      # move back to the default (clears the mapping entry)
+mp move --schema
+```
+
+### What it does
+
+1. Resolves the repo root (works from a subdirectory or inside a piece worktree).
+2. `os.Rename`s the monkeypuzzle directory to the new location.
+3. Runs `git worktree repair` on the relocated piece worktrees so git keeps tracking them.
+4. Moves each piece's per-piece state directory to mirror the new layout.
+5. Records the repo→directory mapping (or removes it when moved back to `.monkeypuzzle`).
+
+Git tracking is left untouched — if `monkeypuzzle.json` was committed, run `git add -A`
+for the move yourself. The repo's root `.gitignore` is not modified; relocating into
+`.DONOTCOMMIT/` assumes that path is already ignored.
+
+### Output
+
+JSON to stdout with `repo_root`, `old_dir`, `new_dir`, `old_path`, `new_path`, and the
+list of `pieces` that were moved/repaired. Human-readable summary to stderr.
 
 ---
 
