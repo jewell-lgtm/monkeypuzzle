@@ -9,7 +9,11 @@ import (
 	"github.com/jewell-lgtm/monkeypuzzle/internal/config"
 )
 
-var validMultiplexerValues = []string{"tmux", "zellij", "none"}
+// validMultiplexerValues lists the multiplexer options mp recognises.
+// tmux is the only real multiplexer; "none" is the no-op (print-the-path) fallback.
+// Maybe one day we'll support zellij / wezterm / kitty / others — drop the adapter
+// in internal/adapters, wire it in NewMultiplexer, and add the name here.
+var validMultiplexerValues = []string{"tmux", "none"}
 
 var configCmd = &cobra.Command{
 	Use:   "config",
@@ -30,7 +34,7 @@ var configSetCmd = &cobra.Command{
 	Long: `Set a configuration value.
 
 Available keys:
-  multiplexer  Terminal multiplexer to use (tmux, zellij, none)`,
+  multiplexer  Terminal multiplexer to use (tmux, none)`,
 	Args: cobra.ExactArgs(2),
 	RunE: runConfigSet,
 }
@@ -89,7 +93,7 @@ func runConfigSet(cmd *cobra.Command, args []string) error {
 	switch key {
 	case "multiplexer":
 		if !isValidMultiplexer(value) {
-			return fmt.Errorf("invalid multiplexer value: %s (valid: tmux, zellij, none)", value)
+			return fmt.Errorf("invalid multiplexer value: %s (valid: tmux, none)", value)
 		}
 		cfg.Multiplexer = value
 	default:

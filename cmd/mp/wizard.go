@@ -56,7 +56,7 @@ func ensureUserConfig(cmd *cobra.Command) error {
 }
 
 func notConfiguredError() error {
-	return fmt.Errorf("monkeypuzzle is not configured yet. Run `mp config set multiplexer <tmux|zellij|none>` to set it up, " +
+	return fmt.Errorf("monkeypuzzle is not configured yet. Run `mp config set multiplexer <tmux|none>` to set it up, " +
 		"or run any `mp` command in an interactive terminal to use the setup wizard")
 }
 

@@ -7,13 +7,14 @@ import (
 )
 
 // NewMultiplexer creates a Multiplexer based on the provider name.
-// Valid providers: "tmux", "zellij", "none"
+// Valid providers: "tmux", "none".
+//
+// Maybe one day we'll support zellij / wezterm / kitty / others — add a new
+// case here pointing at a fresh adapter implementing core.Multiplexer.
 func NewMultiplexer(provider string, exec core.Exec) (core.Multiplexer, error) {
 	switch provider {
 	case "tmux":
 		return NewTmuxMultiplexer(exec), nil
-	case "zellij":
-		return NewZellijMultiplexer(exec), nil
 	case "none", "":
 		return NewNoopMultiplexer(), nil
 	default:

@@ -196,7 +196,7 @@ echo '{"name":"project","issue_provider":"markdown","pr_provider":"github"}' | m
 
 # Config (uses args, not JSON stdin)
 mp config get multiplexer
-mp config set multiplexer tmux  # tmux, zellij, or none
+mp config set multiplexer tmux  # tmux or none
 
 # Relocate the .monkeypuzzle state dir (e.g. into a gitignored path)
 mp move .DONOTCOMMIT/monkeypuzzle

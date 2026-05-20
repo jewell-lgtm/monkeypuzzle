@@ -53,7 +53,8 @@ type HTTPClient interface {
 	Do(req *http.Request) (*http.Response, error)
 }
 
-// Multiplexer abstracts terminal multiplexer operations (tmux, zellij, etc.)
+// Multiplexer abstracts terminal multiplexer operations (currently tmux + a no-op).
+// Maybe one day this grows zellij / wezterm / kitty implementations.
 type Multiplexer interface {
 	// SwitchTo switches to (or creates) a session for the given piece
 	SwitchTo(ctx context.Context, sessionName, workDir string) error
