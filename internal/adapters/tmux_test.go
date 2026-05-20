@@ -11,8 +11,9 @@ func TestTmuxMultiplexer_SwitchTo_CreatesAndAttaches(t *testing.T) {
 	exec.AddResponse("tmux", []string{"has-session", "-t", "test-session"}, nil, MockError("no session"))
 	// Create session
 	exec.AddResponse("tmux", []string{"new-session", "-d", "-s", "test-session", "-c", "/work/dir"}, nil, nil)
-	// Attach (not in tmux)
+	// Either attach (outside tmux) or switch-client (inside tmux) depending on $TMUX
 	exec.AddResponse("tmux", []string{"attach-session", "-t", "test-session"}, nil, nil)
+	exec.AddResponse("tmux", []string{"switch-client", "-t", "test-session"}, nil, nil)
 
 	mux := NewTmuxMultiplexer(exec)
 	err := mux.SwitchTo(context.Background(), "test-session", "/work/dir")
@@ -26,8 +27,9 @@ func TestTmuxMultiplexer_SwitchTo_ExistingSession(t *testing.T) {
 	exec := NewMockExec()
 	// Session exists
 	exec.AddResponse("tmux", []string{"has-session", "-t", "test-session"}, nil, nil)
-	// Attach (not in tmux)
+	// Either attach (outside tmux) or switch-client (inside tmux) depending on $TMUX
 	exec.AddResponse("tmux", []string{"attach-session", "-t", "test-session"}, nil, nil)
+	exec.AddResponse("tmux", []string{"switch-client", "-t", "test-session"}, nil, nil)
 
 	mux := NewTmuxMultiplexer(exec)
 	err := mux.SwitchTo(context.Background(), "test-session", "/work/dir")

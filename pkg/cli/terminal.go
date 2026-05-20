@@ -11,6 +11,15 @@ func IsTerminal() bool {
 	return (fi.Mode() & os.ModeCharDevice) != 0
 }
 
+// IsStdoutTerminal returns true if stdout is connected to a terminal.
+func IsStdoutTerminal() bool {
+	fi, err := os.Stdout.Stat()
+	if err != nil {
+		return false
+	}
+	return (fi.Mode() & os.ModeCharDevice) != 0
+}
+
 // HasStdinData returns true if there is data available on stdin.
 func HasStdinData() bool {
 	fi, err := os.Stdin.Stat()
