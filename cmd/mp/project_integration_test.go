@@ -77,21 +77,18 @@ func mpRun(t *testing.T, e *testEnv, dir, dataDir string, args ...string) string
 	return string(out)
 }
 
-func TestPieceAndIssueListAll(t *testing.T) {
+func TestPieceListAll(t *testing.T) {
 	e := setupTestEnv(t)
 	defer e.cleanup()
 
 	dataDir := filepath.Join(e.tmpDir, "data")
 	reposDir := filepath.Join(e.tmpDir, "repos")
 	repoA := projectTestRepo(t, e, dataDir, reposDir, "alpha")
-	repoB := projectTestRepo(t, e, dataDir, reposDir, "bravo")
+	_ = projectTestRepo(t, e, dataDir, reposDir, "bravo")
 
-	// A piece in alpha, an issue in bravo.
-	mpRun(t, e, repoA, dataDir, "create", "--name", "feature-x", "--skip-switch")
-	mpRun(t, e, repoB, dataDir, "issue", "create", "--title", "Fix the thing")
+	mpRun(t, e, repoA, dataDir, "piece", "create", "--name", "feature-x", "--skip-switch")
 
-	// piece list --all
-	out, _ := mpJSON(t, e, e.tmpDir, dataDir, "list", "--all")
+	out, _ := mpJSON(t, e, e.tmpDir, dataDir, "piece", "list", "--all")
 	var pieceResult struct {
 		Projects []struct {
 			Name   string `json:"name"`
@@ -115,33 +112,6 @@ func TestPieceAndIssueListAll(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("expected alpha/feature-x in piece list --all, got: %s", out)
-	}
-
-	// issue list --all
-	out, _ = mpJSON(t, e, e.tmpDir, dataDir, "issue", "list", "--all")
-	var issueResult struct {
-		Projects []struct {
-			Name   string `json:"name"`
-			Issues []struct {
-				Title string `json:"title"`
-			} `json:"issues"`
-		} `json:"projects"`
-	}
-	if err := json.Unmarshal(out, &issueResult); err != nil {
-		t.Fatalf("unmarshal issue list --all: %v\n%s", err, out)
-	}
-	found = false
-	for _, p := range issueResult.Projects {
-		if p.Name == "bravo" {
-			for _, is := range p.Issues {
-				if is.Title == "Fix the thing" {
-					found = true
-				}
-			}
-		}
-	}
-	if !found {
-		t.Errorf("expected bravo issue 'Fix the thing' in issue list --all, got: %s", out)
 	}
 }
 

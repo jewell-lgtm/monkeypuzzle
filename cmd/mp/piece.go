@@ -20,8 +20,6 @@ import (
 	piececmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/piece"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/registry"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/tui/chooser"
-	"github.com/jewell-lgtm/monkeypuzzle/internal/tui/issuepicker"
-	"github.com/jewell-lgtm/monkeypuzzle/internal/tui/modepicker"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/tui/pieceswitch"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/tui/promptinput"
 	"github.com/jewell-lgtm/monkeypuzzle/pkg/cli"
@@ -418,19 +416,11 @@ func getPieceCreateInput(deps core.Deps, workDir string) (piececmd.NewPieceInput
 		}
 		// Look up issue via provider if --issue flag specified
 		if flagIssuePath != "" {
-			tuiDeps := core.NewDeps(deps.FS, deps.Output, deps.Exec, deps.HTTP, nil)
-			issueHandler := issue.NewHandler(tuiDeps, workDir)
-			issues, err := issueHandler.SearchIssues(issue.SearchInput{
-				Query: flagIssuePath,
-				Limit: 1,
-			})
+			ref, err := resolveIssueRef(deps, workDir, flagIssuePath)
 			if err != nil {
-				return piececmd.NewPieceInput{}, fmt.Errorf("failed to find issue %q: %w", flagIssuePath, err)
+				return piececmd.NewPieceInput{}, err
 			}
-			if len(issues) == 0 {
-				return piececmd.NewPieceInput{}, fmt.Errorf("no issue found matching %q", flagIssuePath)
-			}
-			input.Issue = issues[0].ToIssueRef()
+			input.Issue = ref
 		}
 	} else if cli.HasStdinData() {
 		// Mode 2: Stdin JSON
@@ -472,67 +462,28 @@ func getPieceCreateInput(deps core.Deps, workDir string) (piececmd.NewPieceInput
 	return input, nil
 }
 
+// runPieceCreateTUI prompts for a free-form description.
+// Issue selection from a picker was removed; pass --issue <id> for issue-driven flows.
 func runPieceCreateTUI(deps core.Deps, workDir string) (piececmd.NewPieceInput, error) {
-	tuiDeps := core.NewDeps(deps.FS, deps.Output, deps.Exec, deps.HTTP, nil)
-	issueHandler := issue.NewHandler(tuiDeps, workDir)
-	issues := availableIssues(tuiDeps, issueHandler, workDir)
+	return runPromptInputTUI()
+}
 
-	// If no issues, skip straight to prompt input
-	if len(issues) == 0 {
-		return runPromptInputTUI()
-	}
-
-	// Show mode picker: "From issue" or "From prompt"
-	p := tea.NewProgram(modepicker.New())
-	m, err := p.Run()
+// resolveIssueRef looks up an opaque issue identifier via the configured provider.
+func resolveIssueRef(deps core.Deps, workDir, id string) (piececmd.IssueRef, error) {
+	cfg, err := piececmd.ReadConfig(workDir, deps.FS)
 	if err != nil {
-		return piececmd.NewPieceInput{}, fmt.Errorf("TUI error: %w", err)
+		return piececmd.IssueRef{}, fmt.Errorf("failed to read config: %w", err)
 	}
-
-	picker := m.(modepicker.Model)
-	if picker.Cancelled {
-		return piececmd.NewPieceInput{}, fmt.Errorf("cancelled")
-	}
-
-	if picker.Chosen == modepicker.ModePrompt {
-		return runPromptInputTUI()
-	}
-
-	// Issue picker flow. Exclude issues that already have a piece (the dedup
-	// that keeps the list useful now that issues have no status).
-	worked := workedIssueIDsForRepo(tuiDeps, workDir)
-	searchFn := func(query string) tea.Cmd {
-		return func() tea.Msg {
-			results, err := issueHandler.SearchIssues(issue.SearchInput{
-				Query: query,
-				Limit: 100,
-			})
-			return issuepicker.IssuesLoadedMsg{
-				Query:  query,
-				Issues: filterWorkedIssues(results, worked),
-				Err:    err,
-			}
-		}
-	}
-
-	ip := tea.NewProgram(issuepicker.NewWithSearch(issues, searchFn))
-	im, err := ip.Run()
+	h := issue.NewHandler(deps, workDir)
+	i, err := h.Get(id)
 	if err != nil {
-		return piececmd.NewPieceInput{}, fmt.Errorf("TUI error: %w", err)
+		return piececmd.IssueRef{}, fmt.Errorf("failed to resolve issue %q: %w", id, err)
 	}
-
-	finalModel := im.(issuepicker.Model)
-	if finalModel.Cancelled {
-		return piececmd.NewPieceInput{}, fmt.Errorf("cancelled")
-	}
-
-	selectedIssue, ok := finalModel.SelectedIssue()
-	if !ok {
-		return piececmd.NewPieceInput{}, fmt.Errorf("no issue selected")
-	}
-
-	return piececmd.NewPieceInput{
-		Issue: selectedIssue.ToIssueRef(),
+	return piececmd.IssueRef{
+		Provider: cfg.Issues.Provider,
+		ID:       i.ID,
+		Number:   i.Number,
+		Title:    i.Title,
 	}, nil
 }
 
@@ -1260,47 +1211,3 @@ func formatTimeAgo(t time.Time) string {
 	}
 }
 
-// availableIssues lists issues for the repo, excluding any that already have a
-// piece. This is the dedup that keeps the picker useful now that issues have no
-// status — an issue with a piece is "in progress" by virtue of the piece.
-func availableIssues(deps core.Deps, issueHandler *issue.Handler, workDir string) []issue.IssueListItem {
-	items, err := issueHandler.ListIssues()
-	if err != nil {
-		return nil
-	}
-	return filterWorkedIssues(items, workedIssueIDsForRepo(deps, workDir))
-}
-
-// filterWorkedIssues drops issues whose ID is in the worked set.
-func filterWorkedIssues(items []issue.IssueListItem, worked map[string]bool) []issue.IssueListItem {
-	if len(worked) == 0 {
-		return items
-	}
-	out := make([]issue.IssueListItem, 0, len(items))
-	for _, it := range items {
-		if worked[it.ID] {
-			continue
-		}
-		out = append(out, it)
-	}
-	return out
-}
-
-// workedIssueIDsForRepo returns the set of issue IDs that already have a piece
-// in the given repo, derived from each piece's recorded issue ref in metadata.
-func workedIssueIDsForRepo(deps core.Deps, workDir string) map[string]bool {
-	worked := make(map[string]bool)
-	handler := newPieceHandler(deps)
-	pieces, err := handler.ListPieces(context.Background(), workDir)
-	if err != nil {
-		return worked
-	}
-	for _, pc := range pieces {
-		meta, err := piececmd.ReadPieceMetadata(pc.WorktreePath, deps.FS)
-		if err != nil || meta == nil || meta.Issue.IsEmpty() {
-			continue
-		}
-		worked[meta.Issue.ID] = true
-	}
-	return worked
-}

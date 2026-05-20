@@ -8,13 +8,11 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/adapters"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
-	"github.com/jewell-lgtm/monkeypuzzle/internal/core/issue"
 	piececmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/piece"
 	projectcmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/project"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core/session"
@@ -56,7 +54,7 @@ the project's main worktree.`,
 func init() {
 	switchCmd.Flags().StringVar(&flagSwitchProject, "project", "", "Project name or path")
 	switchCmd.Flags().StringVar(&flagSwitchPiece, "piece", "", "Existing piece name to attach")
-	switchCmd.Flags().StringVar(&flagSwitchIssue, "issue", "", "Issue path or title; creates a piece, then attaches")
+	switchCmd.Flags().StringVar(&flagSwitchIssue, "issue", "", "Issue id or path; creates a piece, then attaches")
 	switchCmd.Flags().StringVar(&flagSwitchBranch, "branch", "", "Local git branch; adopts as a piece, then attaches")
 	switchCmd.Flags().BoolVar(&flagSwitchAllSchema, "schema", false, "Output JSON schema and exit")
 	rootCmd.AddCommand(switchCmd)
@@ -260,43 +258,6 @@ func pieceHandlerForSwitch() (core.Deps, *piececmd.Handler) {
 	return deps, newPieceHandler(deps)
 }
 
-// resolveIssueRef accepts either a path-like query (e.g. "issues/foo.md") or
-// a free-form search query, and returns the IssueRef the piece-create flow
-// expects. Path-style queries are resolved by suffix match against the
-// provider's issue list; everything else falls back to fuzzy search on title.
-func resolveIssueRef(deps core.Deps, projectPath, query string) (piececmd.IssueRef, error) {
-	if strings.TrimSpace(query) == "" {
-		return piececmd.IssueRef{}, fmt.Errorf("empty issue query")
-	}
-	handler := issue.NewHandler(deps, projectPath)
-
-	if looksLikePath(query) {
-		items, err := handler.ListIssues()
-		if err != nil {
-			return piececmd.IssueRef{}, fmt.Errorf("failed to list issues: %w", err)
-		}
-		needle := strings.TrimSpace(query)
-		for _, it := range items {
-			if it.Path == needle || strings.HasSuffix(it.Path, "/"+needle) || strings.HasSuffix(it.ID, needle) {
-				return it.ToIssueRef(), nil
-			}
-		}
-		return piececmd.IssueRef{}, fmt.Errorf("no issue found at %q", query)
-	}
-
-	items, err := handler.SearchIssues(issue.SearchInput{Query: query, Limit: 1})
-	if err != nil {
-		return piececmd.IssueRef{}, fmt.Errorf("failed to search issues: %w", err)
-	}
-	if len(items) == 0 {
-		return piececmd.IssueRef{}, fmt.Errorf("no issue matching %q", query)
-	}
-	return items[0].ToIssueRef(), nil
-}
-
-func looksLikePath(s string) bool {
-	return strings.Contains(s, "/") || strings.HasSuffix(s, ".md")
-}
 
 // tempChdir changes the working directory to dir and returns a function that
 // restores the previous cwd. Callers should defer the returned restore.

@@ -91,10 +91,20 @@ func setupTestRepo(t *testing.T) (repoDir, worktreeDir string, cleanup func()) {
 		t.Fatalf("git branch failed: %v\n%s", err, out)
 	}
 
-	// Create .monkeypuzzle directory in repo
+	// Create .monkeypuzzle directory in repo + minimal config so pr.Handler
+	// can resolve a provider via the registry.
 	if err := os.MkdirAll(filepath.Join(repoDir, ".monkeypuzzle"), 0755); err != nil {
 		cleanup()
 		t.Fatalf("failed to create .monkeypuzzle: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, ".monkeypuzzle/monkeypuzzle.json"), []byte(`{
+  "version": "1",
+  "project": {"name": "test"},
+  "issues": {"provider": "markdown", "config": {"directory": "issues"}},
+  "pr": {"provider": "github", "config": {}}
+}`), 0644); err != nil {
+		cleanup()
+		t.Fatalf("failed to write monkeypuzzle.json: %v", err)
 	}
 
 	// Create worktree

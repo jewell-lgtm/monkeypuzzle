@@ -161,7 +161,7 @@ func TestIntegration_Init_ConfigExists(t *testing.T) {
 	handler := initcmd.NewHandler(deps)
 
 	// Initially no config
-	if handler.ConfigExists() {
+	if handler.ConfigExists("") {
 		t.Error("config should not exist initially")
 	}
 
@@ -176,7 +176,7 @@ func TestIntegration_Init_ConfigExists(t *testing.T) {
 	}
 
 	// Now config exists
-	if !handler.ConfigExists() {
+	if !handler.ConfigExists("") {
 		t.Error("config should exist after init")
 	}
 }

@@ -1,12 +1,11 @@
 package issue
 
 import (
-	"context"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
@@ -15,10 +14,15 @@ import (
 // DefaultPlaneBaseURL is the API base URL for Plane Cloud.
 const DefaultPlaneBaseURL = "https://api.plane.so"
 
-// PlaneImporter is a read-only import source backed by the Plane REST API. It
-// fetches remote issues so they can be materialised as local markdown; it never
-// creates or mutates Plane state.
-type PlaneImporter struct {
+// closedPlaneGroups are Plane state groups that map to Open=false.
+var closedPlaneGroups = map[string]bool{
+	"completed": true,
+	"cancelled": true,
+	"canceled":  true,
+}
+
+// PlaneProvider resolves issues via the Plane REST API.
+type PlaneProvider struct {
 	http          core.HTTPClient
 	baseURL       string // no trailing slash
 	apiKey        string
@@ -26,16 +30,16 @@ type PlaneImporter struct {
 	projectID     string
 
 	// lazily-loaded caches
-	identifierLoaded bool
-	identifier       string // project identifier prefix (e.g. "PROJ")
+	stateGroups map[string]string // state uuid -> group
+	identifier  string            // project identifier prefix (e.g. "PROJ")
 }
 
-// NewPlaneImporter creates a read-only Plane import source.
-func NewPlaneImporter(httpClient core.HTTPClient, baseURL, apiKey, workspaceSlug, projectID string) *PlaneImporter {
+// NewPlaneProvider creates a provider backed by a Plane project.
+func NewPlaneProvider(httpClient core.HTTPClient, baseURL, apiKey, workspaceSlug, projectID string) *PlaneProvider {
 	if baseURL == "" {
 		baseURL = DefaultPlaneBaseURL
 	}
-	return &PlaneImporter{
+	return &PlaneProvider{
 		http:          httpClient,
 		baseURL:       strings.TrimRight(baseURL, "/"),
 		apiKey:        apiKey,
@@ -46,142 +50,94 @@ func NewPlaneImporter(httpClient core.HTTPClient, baseURL, apiKey, workspaceSlug
 
 // planeIssue is the subset of Plane's issue payload we use.
 type planeIssue struct {
-	ID                  string `json:"id"`
-	SequenceID          int    `json:"sequence_id"`
-	Name                string `json:"name"`
-	DescriptionStripped string `json:"description_stripped"`
+	ID         string `json:"id"`
+	SequenceID int    `json:"sequence_id"`
+	Name       string `json:"name"`
+	State      string `json:"state"`
 }
 
-// planeListResponse is Plane's cursor-paginated list envelope.
-type planeListResponse struct {
-	Results         json.RawMessage `json:"results"`
-	NextCursor      string          `json:"next_cursor"`
-	NextPageResults bool            `json:"next_page_results"`
-}
-
-// Search returns remote issues matching query (empty = all issues), capped at
-// limit (0 = DefaultSearchLimit). Plane has no documented title-search query
-// parameter, so the list is fetched and filtered client-side.
-func (p *PlaneImporter) Search(_ context.Context, query string, limit int) ([]RemoteIssue, error) {
-	if limit <= 0 {
-		limit = DefaultSearchLimit
-	}
-	raw, err := p.fetchAllIssues(limit)
-	if err != nil {
-		return nil, err
-	}
-	queryLower := strings.ToLower(query)
-	issues := make([]RemoteIssue, 0, len(raw))
-	for _, pi := range raw {
-		if query != "" && !strings.Contains(strings.ToLower(pi.Name), queryLower) {
-			continue
-		}
-		issues = append(issues, p.remoteFrom(pi))
-		if len(issues) >= limit {
-			break
-		}
-	}
-	return issues, nil
-}
-
-// Fetch returns a single remote issue by its Plane UUID.
-func (p *PlaneImporter) Fetch(_ context.Context, id string) (RemoteIssue, error) {
+// Get returns an issue by its Plane UUID.
+func (p *PlaneProvider) Get(id string) (Issue, error) {
 	respBody, err := p.do("GET", p.issuesPath(id), nil)
 	if err != nil {
-		return RemoteIssue{}, fmt.Errorf("failed to fetch issue: %w", err)
+		return Issue{}, fmt.Errorf("failed to get issue: %w", err)
 	}
 	var pi planeIssue
 	if err := json.Unmarshal(respBody, &pi); err != nil {
-		return RemoteIssue{}, fmt.Errorf("failed to parse issue response: %w", err)
+		return Issue{}, fmt.Errorf("failed to parse issue response: %w", err)
 	}
-	if pi.ID == "" && pi.Name == "" {
-		return RemoteIssue{}, fmt.Errorf("plane issue not found: %s", id)
+	if err := p.ensureStates(); err != nil {
+		return Issue{}, err
 	}
-	return p.remoteFrom(pi), nil
+	number := ""
+	if pi.SequenceID > 0 {
+		if p.identifier != "" {
+			number = fmt.Sprintf("%s-%d", p.identifier, pi.SequenceID)
+		} else {
+			number = fmt.Sprintf("%d", pi.SequenceID)
+		}
+	}
+	group := strings.ToLower(p.stateGroups[pi.State])
+	return Issue{
+		ID:     pi.ID,
+		Number: number,
+		Title:  pi.Name,
+		URL:    p.issueWebURL(pi.ID),
+		Open:   !closedPlaneGroups[group],
+	}, nil
 }
 
-// fetchAllIssues walks the cursor-paginated issues endpoint, stopping early
-// once limit issues have been collected (limit <= 0 means no limit).
-func (p *PlaneImporter) fetchAllIssues(limit int) ([]planeIssue, error) {
-	var all []planeIssue
-	cursor := ""
-	for {
-		q := url.Values{}
-		q.Set("per_page", "100")
-		if cursor != "" {
-			q.Set("cursor", cursor)
-		}
-		respBody, err := p.do("GET", p.issuesPath("")+"?"+q.Encode(), nil)
-		if err != nil {
-			return nil, fmt.Errorf("failed to list issues: %w", err)
-		}
-		var env planeListResponse
-		if err := json.Unmarshal(respBody, &env); err != nil {
-			return nil, fmt.Errorf("failed to parse issues response: %w", err)
-		}
-		var page []planeIssue
-		if len(env.Results) > 0 {
-			if err := json.Unmarshal(env.Results, &page); err != nil {
-				return nil, fmt.Errorf("failed to parse issues page: %w", err)
-			}
-		}
-		all = append(all, page...)
-		if limit > 0 && len(all) >= limit {
-			return all[:limit], nil
-		}
-		if !env.NextPageResults || env.NextCursor == "" {
-			return all, nil
-		}
-		cursor = env.NextCursor
-	}
-}
-
-// remoteFrom converts a Plane issue into a RemoteIssue, loading the project
-// identifier prefix lazily for a human-readable ID.
-func (p *PlaneImporter) remoteFrom(pi planeIssue) RemoteIssue {
-	_ = p.ensureIdentifier()
-	id := pi.ID
-	if pi.SequenceID > 0 && p.identifier != "" {
-		id = fmt.Sprintf("%s-%d", p.identifier, pi.SequenceID)
-	}
-	return RemoteIssue{
-		ID:    id,
-		Title: pi.Name,
-		Body:  pi.DescriptionStripped,
-		URL:   p.issueURL(pi.ID),
-	}
-}
-
-func (p *PlaneImporter) issueURL(uuid string) string {
-	if uuid == "" {
-		return ""
-	}
-	return fmt.Sprintf("%s/%s/projects/%s/issues/%s", p.baseURL, p.workspaceSlug, p.projectID, uuid)
-}
-
-// ensureIdentifier loads the project's identifier prefix once (best-effort).
-func (p *PlaneImporter) ensureIdentifier() error {
-	if p.identifierLoaded {
+// ensureStates loads the project's workflow states and identifier once.
+func (p *PlaneProvider) ensureStates() error {
+	if p.stateGroups != nil {
 		return nil
 	}
-	p.identifierLoaded = true
 	if projBody, err := p.do("GET", p.projectPath(), nil); err == nil {
 		var proj struct {
 			Identifier string `json:"identifier"`
 		}
-		if json.Unmarshal(projBody, &proj) == nil {
+		if err := json.Unmarshal(projBody, &proj); err == nil {
 			p.identifier = proj.Identifier
 		}
+	}
+	statesBody, err := p.do("GET", p.statesPath(), nil)
+	if err != nil {
+		return fmt.Errorf("failed to load Plane states: %w", err)
+	}
+	var states []struct {
+		ID    string `json:"id"`
+		Group string `json:"group"`
+	}
+	// Plane returns either a bare array or a {results: [...]} envelope depending on endpoint.
+	if err := json.Unmarshal(statesBody, &states); err != nil {
+		var env struct {
+			Results json.RawMessage `json:"results"`
+		}
+		if err2 := json.Unmarshal(statesBody, &env); err2 == nil && len(env.Results) > 0 {
+			if err := json.Unmarshal(env.Results, &states); err != nil {
+				return fmt.Errorf("failed to parse Plane states: %w", err)
+			}
+		} else {
+			return fmt.Errorf("failed to parse Plane states: %w", err)
+		}
+	}
+	p.stateGroups = make(map[string]string, len(states))
+	for _, s := range states {
+		p.stateGroups[s.ID] = s.Group
 	}
 	return nil
 }
 
-func (p *PlaneImporter) projectPath() string {
+func (p *PlaneProvider) projectPath() string {
 	return fmt.Sprintf("/api/v1/workspaces/%s/projects/%s/", p.workspaceSlug, p.projectID)
 }
 
+func (p *PlaneProvider) statesPath() string {
+	return fmt.Sprintf("/api/v1/workspaces/%s/projects/%s/states/", p.workspaceSlug, p.projectID)
+}
+
 // issuesPath builds the issues collection path, or a single-issue path when id is non-empty.
-func (p *PlaneImporter) issuesPath(id string) string {
+func (p *PlaneProvider) issuesPath(id string) string {
 	base := fmt.Sprintf("/api/v1/workspaces/%s/projects/%s/issues/", p.workspaceSlug, p.projectID)
 	if id == "" {
 		return base
@@ -189,28 +145,47 @@ func (p *PlaneImporter) issuesPath(id string) string {
 	return base + id + "/"
 }
 
-// do performs an HTTP GET against the Plane API and returns the response body.
-// Only read methods are used; the importer never mutates remote state.
-func (p *PlaneImporter) do(method, path string, body io.Reader) ([]byte, error) {
-	req, err := http.NewRequest(method, p.baseURL+path, body)
+// issueWebURL returns a best-effort browser URL for a Plane issue.
+func (p *PlaneProvider) issueWebURL(id string) string {
+	// Plane web URL convention: <baseHost>/<workspace>/projects/<projectID>/issues/<issueID>
+	// baseURL is the API host; not always the same as the web host. Best effort: replace api. prefix.
+	host := strings.Replace(p.baseURL, "://api.", "://", 1)
+	return fmt.Sprintf("%s/%s/projects/%s/issues/%s", host, p.workspaceSlug, p.projectID, id)
+}
+
+// do performs an HTTP request against the Plane API and returns the response body.
+func (p *PlaneProvider) do(method, path string, body interface{}) ([]byte, error) {
+	var reader io.Reader
+	if body != nil {
+		b, err := json.Marshal(body)
+		if err != nil {
+			return nil, err
+		}
+		reader = bytes.NewReader(b)
+	}
+
+	req, err := http.NewRequest(method, p.baseURL+path, reader)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("X-API-Key", p.apiKey)
 	req.Header.Set("Accept", "application/json")
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 
 	resp, err := p.http.Do(req)
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("plane API %s %s returned status %d: %s", method, path, resp.StatusCode, string(respBody))
+		return nil, fmt.Errorf("Plane API %s %s returned status %d: %s", method, path, resp.StatusCode, string(respBody))
 	}
 	return respBody, nil
 }

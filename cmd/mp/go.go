@@ -167,29 +167,45 @@ func collectDashboard(ctx context.Context, infos []projectcmd.Info) ([]dashProje
 	return out, nil
 }
 
-// collectProjectIssues returns up to maxIssuesPerProject issues for a project,
-// excluding any issue that already has a piece. The exclusion set is built from
-// each existing piece's recorded issue ref (in piece-metadata.json): there is no
-// longer an issue status to filter on, so "has a piece?" is the dedup rule that
-// keeps the list useful.
+// collectProjectIssues returns up to maxIssuesPerProject local markdown issues
+// for a project, excluding any that already have a piece. Core issue handling
+// is resolution-only, so this is a cmd-layer directory scan; tracker-backed
+// projects list issues with the tracker's own CLI, not in the dashboard.
 func collectProjectIssues(deps core.Deps, projectPath string, pieces []dashPiece) []dashIssue {
-	handler := issue.NewHandler(deps, projectPath)
-	items, err := handler.ListIssues()
+	cfg, err := piececmd.ReadConfig(projectPath, deps.FS)
+	if err != nil || cfg.Issues.Provider != "markdown" {
+		return nil
+	}
+	issuesDir := cfg.Issues.Config["directory"]
+	if issuesDir == "" {
+		issuesDir = "issues"
+	}
+
+	entries, err := deps.FS.ReadDir(filepath.Join(projectPath, issuesDir))
 	if err != nil {
 		return nil
 	}
 
 	worked := workedIssueIDs(deps, pieces)
+	handler := issue.NewHandler(deps, projectPath)
 
-	out := make([]dashIssue, 0, len(items))
-	for _, it := range items {
-		if worked[it.ID] {
+	out := make([]dashIssue, 0, maxIssuesPerProject)
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+			continue
+		}
+		rel := filepath.Join(issuesDir, e.Name())
+		abs := filepath.Join(projectPath, rel)
+		if worked[rel] || worked[abs] {
+			continue
+		}
+		it, err := handler.Get(abs)
+		if err != nil {
 			continue
 		}
 		out = append(out, dashIssue{
-			Path:   it.Path,
-			Title:  it.Title,
-			Number: it.Number,
+			Path:  rel,
+			Title: it.Title,
 		})
 		if len(out) >= maxIssuesPerProject {
 			break
