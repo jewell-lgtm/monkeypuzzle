@@ -28,6 +28,7 @@ const (
 	RowPiece
 	RowIssue
 	RowBranch
+	RowNewPiece
 )
 
 // Row is one selectable line in the dashboard.
@@ -100,7 +101,14 @@ func matchesQuery(r Row, q string) bool {
 }
 
 // rowHaystack flattens the searchable text of a row into one lowercased string.
+// RowNewPiece rows match only on the project name — the literal "+ new piece"
+// label is intentionally excluded from the haystack so a stray subsequence match
+// (e.g. fuzzy "new" inside "feature-name") doesn't surface every project's
+// create row.
 func rowHaystack(r Row) string {
+	if r.Kind == RowNewPiece {
+		return strings.ToLower(r.Project)
+	}
 	parts := []string{r.Project, r.Piece, r.Branch, r.IssueTitle, r.IssuePath, r.IssueNumber}
 	return strings.ToLower(strings.Join(parts, " "))
 }
@@ -237,6 +245,12 @@ func renderRow(r Row, selected bool) string {
 			name = styles.Selected.Render(name)
 		}
 		return fmt.Sprintf("  %s %s", styles.Subtle.Render("[branch]"), name)
+	case RowNewPiece:
+		label := "+ new piece"
+		if selected {
+			label = styles.Selected.Render(label)
+		}
+		return "  " + label
 	}
 	return ""
 }

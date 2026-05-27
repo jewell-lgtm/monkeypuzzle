@@ -195,6 +195,15 @@ func dashboardRows(projects []dashProject) []dashboard.Row {
 			OpenIssues:   p.OpenIssues,
 			Missing:      !p.Exists,
 		})
+		// Only existing project repos can host a new piece. Missing projects
+		// would just fail downstream.
+		if p.Exists && p.IsProject {
+			rows = append(rows, dashboard.Row{
+				Kind:        dashboard.RowNewPiece,
+				Project:     p.Name,
+				ProjectPath: p.Path,
+			})
+		}
 		for _, pc := range p.Pieces {
 			rows = append(rows, dashboard.Row{
 				Kind:         dashboard.RowPiece,
@@ -250,7 +259,7 @@ func runDash(cmd *cobra.Command, args []string) error {
 	if !ok {
 		return nil // cancelled
 	}
-	return attachSession(ctx, row.SessionName, row.WorktreePath)
+	return dispatchPickedRow(ctx, row)
 }
 
 // attachSession switches to (creating if needed) the given tmux session, using

@@ -153,7 +153,7 @@ func runSwitchInteractive(ctx context.Context) error {
 
 // dispatchPickedRow takes a dashboard.Row chosen by the user and runs the
 // matching workflow: attach an existing piece/project, create a piece from an
-// open issue, or adopt an unadopted branch.
+// open issue, adopt an unadopted branch, or kick off the create-piece TUI.
 func dispatchPickedRow(ctx context.Context, row dashboard.Row) error {
 	switch row.Kind {
 	case dashboard.RowProject, dashboard.RowPiece:
@@ -162,6 +162,8 @@ func dispatchPickedRow(ctx context.Context, row dashboard.Row) error {
 		return runSwitchFromIssue(ctx, projectFromRow(row), row.IssuePath)
 	case dashboard.RowBranch:
 		return runSwitchFromBranch(ctx, projectFromRow(row), row.Branch)
+	case dashboard.RowNewPiece:
+		return runSwitchNewPiece(ctx, projectFromRow(row))
 	}
 	return fmt.Errorf("unknown dashboard row kind: %v", row.Kind)
 }
@@ -215,6 +217,39 @@ func runSwitchFromBranch(ctx context.Context, proj registry.Project, branch stri
 		RepoRoot: proj.Path,
 		Branch:   branch,
 	})
+	if err != nil {
+		return err
+	}
+	return attachSession(ctx, info.SessionName, info.WorktreePath)
+}
+
+// runSwitchNewPiece launches the existing piece-create TUI (modepicker →
+// issuepicker or promptinput) targeted at the given project, then attaches.
+// We chdir into proj.Path for the duration because the underlying create flow
+// resolves its repo root from cwd.
+func runSwitchNewPiece(ctx context.Context, proj registry.Project) error {
+	deps, handler := pieceHandlerForSwitch()
+
+	restore, err := tempChdir(proj.Path)
+	if err != nil {
+		return err
+	}
+	defer restore()
+
+	input, err := runPieceCreateTUI(deps, proj.Path)
+	if err != nil {
+		if err.Error() == "cancelled" {
+			return nil
+		}
+		return err
+	}
+
+	input = piececmd.WithNewPieceDefaults(input)
+	if err := piececmd.ValidateNewPieceInput(input); err != nil {
+		return err
+	}
+
+	info, err := handler.CreatePieceWithInput(ctx, input, piececmd.CreatePieceOptions{})
 	if err != nil {
 		return err
 	}

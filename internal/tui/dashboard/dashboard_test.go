@@ -9,10 +9,12 @@ import (
 func sampleRows() []Row {
 	return []Row{
 		{Kind: RowProject, Project: "alpha"},
+		{Kind: RowNewPiece, Project: "alpha", ProjectPath: "/repos/alpha"},
 		{Kind: RowPiece, Project: "alpha", Piece: "feature-x"},
 		{Kind: RowIssue, Project: "alpha", IssuePath: "issues/wire-the-picker.md", IssueTitle: "Wire the picker"},
 		{Kind: RowBranch, Project: "alpha", Branch: "stray-spike"},
 		{Kind: RowProject, Project: "bravo"},
+		{Kind: RowNewPiece, Project: "bravo", ProjectPath: "/repos/bravo"},
 	}
 }
 
@@ -23,8 +25,32 @@ func sendKey(m Model, s string) Model {
 
 func TestNew_EmptyQuery_ShowsAllRows(t *testing.T) {
 	m := New(sampleRows())
-	if got := len(m.Filtered); got != 5 {
-		t.Fatalf("len(Filtered) = %d, want 5", got)
+	if got := len(m.Filtered); got != 7 {
+		t.Fatalf("len(Filtered) = %d, want 7", got)
+	}
+}
+
+// TestFuzzy_NewPieceFiltersByProject covers the deliberate choice that
+// RowNewPiece's haystack is just the project name — so filtering by project
+// surfaces its create row alongside its other rows, without the literal label
+// triggering stray subsequence matches.
+func TestFuzzy_NewPieceFiltersByProject(t *testing.T) {
+	m := New(sampleRows())
+	m = sendKey(m, "bravo")
+	for _, idx := range m.Filtered {
+		r := m.Rows[idx]
+		if r.Project != "bravo" {
+			t.Errorf("filter 'bravo' returned row from project %q", r.Project)
+		}
+	}
+	foundNewPiece := false
+	for _, idx := range m.Filtered {
+		if m.Rows[idx].Kind == RowNewPiece {
+			foundNewPiece = true
+		}
+	}
+	if !foundNewPiece {
+		t.Error("expected bravo's new-piece row in filtered set")
 	}
 }
 
