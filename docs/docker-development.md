@@ -206,7 +206,7 @@ Include in your issue:
 - Image: `monkeypuzzle-dev` (built from Dockerfile)
 - OS: Ubuntu 24.04
 - Go: 1.24.11
-- mp version: `mp --version` (or commit hash)
+- mp version: commit hash (`git rev-parse HEAD`)
 ```
 
 ### Step 3: Provide Reproduction Steps

@@ -109,6 +109,46 @@ mp piece switch --name feature-b
 mp piece update
 ```
 
+## Stacked Pieces
+
+When a piece depends on another (not yet merged) piece, stack them so each builds
+on its parent's branch. Create a stacked piece with `--parent`, or use the
+`mp stack` subcommands which operate over a whole stack git-town-style.
+
+```bash
+# Create a child of the current piece
+mp stack append --name api-layer
+# ... commit work in api-layer ...
+
+# Create a grandchild stacked on api-layer
+mp stack append --name api-ui
+
+# Equivalent low-level form
+mp piece create --name api-ui --parent api-layer
+
+# Insert a piece between the current piece and its parent
+mp stack prepend --name shared-types
+```
+
+Keep the stack in sync as main and parent branches move:
+
+```bash
+# Show the stack tree, PR state, and drift vs the GitHub PR list
+mp stack status
+
+# Propagate main and each parent down through the stack
+mp stack sync                     # merge strategy (default)
+mp stack sync --strategy rebase   # rebase strategy
+mp stack sync --push              # push each branch after syncing
+
+# If a rebase sync hits conflicts, resolve them, then:
+mp stack continue
+```
+
+`mp stack` operations are non-interactive — anything risky aborts cleanly and
+prints the next steps (e.g. which PR base to change on GitHub). Open a PR per
+piece with `mp piece pr create`; the base auto-detects to the parent's branch.
+
 ## Integration with GitHub PRs
 
 Recommended workflow:
@@ -120,14 +160,18 @@ mp piece create
 # Work on feature, commit changes
 git add . && git commit -m "feat: new feature"
 
-# Push branch and create PR
-git push -u origin HEAD
-gh pr create
+# Push the branch and open a PR (run from inside the worktree).
+# For a stacked piece the PR base auto-detects to the parent piece's branch.
+mp piece pr create
+mp piece pr create --title "Add feature" --body "Description"
 
-# After PR review and approval
-mp piece merge
-git push origin main
+# After the PR is merged, sweep up the worktree and tmux session
+mp piece done
 ```
+
+`mp piece pr create` pushes to origin and creates the PR via the `gh` CLI, so you
+don't need to run `git push` / `gh pr create` by hand. `mp piece done` verifies
+the branch is merged before cleaning up (use `mp piece abandon` for unmerged work).
 
 ## Tmux Integration
 

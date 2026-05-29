@@ -194,7 +194,7 @@ var fields = []Field{
     },
     {
         Name:        "issue_provider",
-        ValidValues: []string{"markdown"},
+        ValidValues: []string{"markdown", "linear", "plane"},
         Default:     "markdown",
     },
 }

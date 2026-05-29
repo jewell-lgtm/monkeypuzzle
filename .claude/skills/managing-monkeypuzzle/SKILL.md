@@ -38,19 +38,14 @@ mp piece create --issue issues/feat.md --skip-switch
 # Create new piece by name
 echo '{"name":"my-feature","skip_switch":true}' | mp piece create
 
+# Create piece from a prompt (name auto-generated from the prompt)
+mp piece create --prompt "add dark mode"
+
 # Create stacked piece (child of another piece)
 echo '{"name":"child-feat","parent":"parent-piece"}' | mp piece create
 
-# Switch to existing piece (same-project picker)
+# Switch to existing piece
 echo '{"name":"my-feature"}' | mp piece switch
-
-# Cross-project picker: pieces + open issues + unadopted branches.
-# Selecting an issue creates a piece from it. Selecting a branch adopts it.
-mp switch                                                        # interactive
-mp switch --project app --piece my-feature                       # attach existing
-mp switch --project app --issue issues/foo.md                    # create + attach
-mp switch --project app --branch spike-feature                   # adopt + attach
-echo '{"project":"app","issue":"issues/foo.md"}' | mp switch
 
 # Update piece with latest from main
 echo '{}' | mp piece update
@@ -78,6 +73,54 @@ echo '{"name":"piece-name","delete_branch":true}' | mp piece abandon
 # Convert existing branch to piece
 echo '{}' | mp piece adopt
 echo '{"name":"custom-name","parent":"main"}' | mp piece adopt
+
+# Cross-project picker: pieces + open todo issues + unadopted branches.
+# Selecting an issue creates a piece from it; selecting a branch adopts it.
+mp switch --project app --piece my-feature                           # attach existing piece
+mp switch --project app --issue issues/foo.md                        # create + attach
+mp switch --project app --branch spike-feature                       # adopt + attach
+echo '{"project":"app","issue":"issues/foo.md"}' | mp switch
+echo '{"project":"app","branch":"spike-feature"}' | mp switch
+```
+
+## Stacks (git-town-style whole-stack ops)
+
+Pieces stacked via `--parent` form a stack. `mp stack` operates over the whole
+stack. All operations are non-interactive: anything risky aborts cleanly and
+prints plain-English next steps (e.g. which PR base to change on GitHub).
+
+```bash
+# Show the stack tree, PR state, and drift vs the GitHub PR list
+mp stack status
+
+# Propagate main and each parent down through the stack
+mp stack sync
+mp stack sync --strategy rebase   # rebase instead of merge
+
+# Resume a conflicted rebase started by 'mp stack sync --strategy rebase'
+mp stack continue
+
+# Create a new piece as a child of the current piece
+mp stack append --name child-feat
+
+# Insert a new piece between the current piece and its parent
+mp stack prepend --name base-feat
+```
+
+## Projects & Dashboard
+
+A "project" is any git repo initialised with `mp init`. Registering projects lets
+mp list pieces and issues across all of them and jump between their sessions.
+
+```bash
+# Register / list / unregister projects (current dir by default)
+mp project add
+mp project list
+mp project remove <name>
+
+# Cross-project dashboard of projects + piece worktrees (bare 'mp' is the same)
+mp dash
+mp dash --json
 ```
 
 ## Init & Config
@@ -89,6 +132,10 @@ echo '{"name":"project","issue_provider":"markdown","pr_provider":"github"}' | m
 # Config (uses args, not JSON stdin)
 mp config get multiplexer
 mp config set multiplexer tmux  # tmux, zellij, or none
+
+# Relocate the .monkeypuzzle state dir (e.g. into a gitignored path)
+mp move .DONOTCOMMIT/monkeypuzzle
+mp move .monkeypuzzle                # move back to the default
 ```
 
 ## Workflow
@@ -96,5 +143,6 @@ mp config set multiplexer tmux  # tmux, zellij, or none
 1. `mp issue create` or find existing issue
 2. `mp piece create --issue issues/foo.md` creates worktree
 3. Work in worktree, commit changes
-4. `mp piece pr create` pushes and creates PR
-5. After PR merged: `mp piece done` or `mp piece cleanup`
+4. For dependent work, stack with `mp stack append` and keep it in sync via `mp stack sync`
+5. `mp piece pr create` pushes and creates PR
+6. After PR merged: `mp piece done` or `mp piece cleanup`

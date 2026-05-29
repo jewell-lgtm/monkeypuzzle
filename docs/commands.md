@@ -53,7 +53,7 @@ mp completion powershell | Out-String | Invoke-Expression
 | `mp piece switch --name`        | Available piece names   |
 | `mp piece abandon --name`       | Available piece names   |
 | `mp piece create --issue`          | Files (for issue paths) |
-| `mp init --issue-provider`      | `markdown`              |
+| `mp init --issue-provider`      | `markdown`, `linear`, `plane` |
 | `mp init --pr-provider`         | `github`                |
 | `mp piece update --main-branch` | Git branch names        |
 | `mp piece merge --main-branch`  | Git branch names        |
@@ -75,14 +75,21 @@ mp init --schema               # Output schema
 
 ### Flags
 
-| Flag               | Description                                                       | Default        |
-| ------------------ | ----------------------------------------------------------------- | -------------- |
-| `--name`           | Project name                                                      | Directory name |
-| `--issue-provider` | Issue provider                                                    | `markdown`     |
-| `--pr-provider`    | PR provider                                                       | `github`       |
-| `--dir`            | Directory (relative to repo root) for monkeypuzzle state          | `.monkeypuzzle`|
-| `--schema`         | Output JSON schema and exit                                       | -              |
-| `-y, --yes`        | Overwrite existing config                                         | `false`        |
+| Flag                 | Description                                                       | Default        |
+| -------------------- | ----------------------------------------------------------------- | -------------- |
+| `--name`             | Project name                                                      | Directory name |
+| `--issue-provider`   | Issue provider (`markdown`, `linear`, `plane`)                    | `markdown`     |
+| `--pr-provider`      | PR provider (`github`)                                            | `github`       |
+| `--dir`              | Directory (relative to repo root) for monkeypuzzle state          | `.monkeypuzzle`|
+| `--gitignore`        | Regenerate `<dir>/.gitignore` only (no other changes)             | `false`        |
+| `--schema`           | Output JSON schema and exit                                       | -              |
+| `-y, --yes`          | Overwrite existing config                                         | `false`        |
+| `--linear-api-key`   | Linear API key (or `LINEAR_API_KEY` env var)                      | -              |
+| `--linear-team`      | Linear team key (required for `linear` provider)                  | -              |
+| `--plane-api-key`    | Plane API key (or `PLANE_API_KEY` env var)                        | -              |
+| `--plane-workspace`  | Plane workspace slug (required for `plane` provider)              | -              |
+| `--plane-project`    | Plane project ID (required for `plane` provider)                  | -              |
+| `--plane-base-url`   | Plane API base URL (set for self-hosted)                          | `https://api.plane.so` |
 
 `--dir` lets you keep all monkeypuzzle state somewhere already ignored by git,
 e.g. `mp init --dir .DONOTCOMMIT/monkeypuzzle`. The repo→directory mapping is
@@ -117,10 +124,73 @@ Creates the monkeypuzzle directory (default `.monkeypuzzle/`):
 **Issue Providers:**
 
 - `markdown` - Issues as markdown files in `issues/`
+- `linear` - Issues from a Linear team (needs `--linear-team` and `--linear-api-key` / `LINEAR_API_KEY`)
+- `plane` - Issues from a Plane project (needs `--plane-workspace`, `--plane-project`, and `--plane-api-key` / `PLANE_API_KEY`; `--plane-base-url` for self-hosted)
 
 **PR Providers:**
 
 - `github` - PR management via `gh` CLI
+
+---
+
+## mp issue
+
+Create, list, and search issues. With the `markdown` provider, issues are markdown files in `issues/`; with `linear`/`plane` they are backed by the remote tracker.
+
+### mp issue list
+
+```bash
+mp issue list                          # all issues (current project)
+mp issue list --status todo
+mp issue list --status todo,in-progress
+mp issue list --all                    # across all registered projects
+echo '{"status":["todo"]}' | mp issue list
+mp issue list --schema
+```
+
+| Flag       | Description                                  | Default |
+| ---------- | -------------------------------------------- | ------- |
+| `--status` | Filter by status (`todo`, `in-progress`, `done`) | -   |
+| `--all`    | List issues across all registered projects   | `false` |
+
+Returns a JSON array to stdout:
+
+```json
+[
+  { "path": "issues/add-login.md", "title": "Add login", "status": "todo" },
+  { "path": "issues/fix-bug.md", "title": "Fix bug", "status": "in-progress" }
+]
+```
+
+### mp issue create
+
+```bash
+mp issue create --title "Add feature" --description "Details"
+echo '{"title":"Add feature","description":"Details"}' | mp issue create
+mp issue create --schema
+```
+
+| Flag            | Description       |
+| --------------- | ----------------- |
+| `--title`       | Issue title       |
+| `--description` | Issue description |
+
+Returns the created issue as JSON (e.g. `{"path":"issues/add-feature.md","title":"Add feature","filename":"add-feature.md"}`).
+
+### mp issue search
+
+Fuzzy-match issues by query. Interactive picker with a TTY; JSON-friendly otherwise.
+
+```bash
+echo '{"query":"auth","status":["todo"]}' | mp issue search
+mp issue search --query auth --status todo
+mp issue search --schema
+```
+
+| Flag       | Description                                  |
+| ---------- | -------------------------------------------- |
+| `--query`  | Search query (fuzzy match)                   |
+| `--status` | Filter by status (`todo`, `in-progress`, `done`) |
 
 ---
 
@@ -248,17 +318,21 @@ Create a new piece (git worktree + tmux session).
 mp piece create
 mp piece create --name my-feature
 mp piece create --issue issues/my-feature.md
+mp piece create --prompt "add dark mode"        # name auto-generated from the prompt
+mp piece create --parent parent-piece           # stack on another piece
 mp piece create --skip-switch  # Don't auto-switch to new piece
 ```
 
 ### Flags
 
-| Flag                  | Description                                   | Default        |
-| --------------------- | --------------------------------------------- | -------------- |
-| `--name`              | Custom piece name                             | Auto-generated |
-| `--issue`             | Create from issue file (sets name from title) | -              |
-| `--skip-switch`       | Don't switch to the new piece after creation  | `false`        |
-| `--overwrite-session` | Replace existing main repo tmux session       | `false`        |
+| Flag                  | Description                                       | Default        |
+| --------------------- | ------------------------------------------------- | -------------- |
+| `--name`              | Custom piece name                                 | Auto-generated |
+| `--issue`             | Create from issue file (sets name from title)     | -              |
+| `--prompt`            | Create from a prompt (name auto-generated)        | -              |
+| `-p, --parent`        | Parent piece name to branch from (stacks the piece) | `main`       |
+| `--skip-switch`       | Don't switch to the new piece after creation      | `false`        |
+| `--overwrite-session` | Replace existing main repo tmux session           | `false`        |
 
 ### What it does
 
@@ -298,6 +372,36 @@ The `{repo-hash}` is a unique identifier derived from the repository's absolute 
 - Each repository has its own isolated pieces directory
 - No naming conflicts between different repositories
 - Easier management of pieces per project
+
+---
+
+## mp piece list
+
+List pieces for the current repo as a tree (parent → child) or a flat list.
+
+### Usage
+
+```bash
+mp piece list           # tree view (human readable)
+mp piece list --flat    # flat list (JSON-friendly)
+mp piece list --all     # across all registered projects
+```
+
+### Flags
+
+| Flag     | Description                                      | Default |
+| -------- | ------------------------------------------------ | ------- |
+| `--flat` | Flat list instead of the tree view               | `false` |
+| `--all`  | List pieces across all registered projects       | `false` |
+
+### Output (`--flat`)
+
+```json
+[
+  { "name": "feature-auth", "worktree_path": "/path", "parent": "main", "mod_time": "2025-01-04T10:00:00Z" },
+  { "name": "auth-oauth", "worktree_path": "/path", "parent": "feature-auth", "mod_time": "2025-01-04T11:00:00Z" }
+]
+```
 
 ---
 
@@ -347,14 +451,18 @@ mp piece merge --main-branch develop  # Merge to 'develop'
 
 ### Flags
 
-| Flag            | Description          | Default |
-| --------------- | -------------------- | ------- |
-| `--main-branch` | Branch to merge into | `main`  |
+| Flag                   | Description                                                              | Default |
+| ---------------------- | ------------------------------------------------------------------------ | ------- |
+| `--main-branch`        | Branch to merge into                                                     | `main`  |
+| `--force`              | Merge even if the piece has child pieces (children are **not** re-homed) | `false` |
+| `--reparent-children`  | Merge a piece with children, re-homing them onto the merge target        | `false` |
+| `--reparent-strategy`  | How to re-home children: `rebase` (rewrites history) or `merge` (no force-push) | `rebase` |
 
 ### Requirements
 
 - Must be run from within a piece worktree
 - **Main branch must not be ahead** - Fails if main has commits not in piece
+- **No unmerged child pieces** - Fails if the piece has children, unless you pass `--reparent-children` (re-homes them) or `--force` (leaves them orphaned)
 
 ### What it does
 
@@ -497,6 +605,201 @@ mp piece abandon --name foo --delete-branch   # Also delete git branch
   "branch_deleted": true
 }
 ```
+
+---
+
+## mp piece pr create
+
+Create a GitHub pull request for the current piece. Pushes the branch to origin and creates the PR via the `gh` CLI. Run from within a piece worktree.
+
+### Usage
+
+```bash
+mp piece pr create                                  # title/body from issue or piece name
+mp piece pr create --title "Add login" --body "..."
+mp piece pr create --base develop                   # override the base branch
+echo '{"title":"Add login","body":"..."}' | mp piece pr create
+mp piece pr create --schema
+```
+
+### Flags
+
+| Flag      | Description                                              | Default                         |
+| --------- | ------------------------------------------------------- | ------------------------------- |
+| `--title` | PR title                                                | Issue title or piece name       |
+| `--body`  | PR description                                           | -                               |
+| `--base`  | Base branch to merge into                               | Auto-detect from parent piece   |
+
+For a stacked piece, the base auto-detects to the parent piece's branch so the PR targets the right branch in the stack.
+
+### Output
+
+```json
+{ "url": "https://github.com/owner/repo/pull/123", "number": 123 }
+```
+
+---
+
+## mp piece done
+
+Clean up the current piece (worktree + tmux session) after its branch has been merged. Run from within a piece worktree. Verifies the piece is merged first — use [`mp piece abandon`](#mp-piece-abandon) for unmerged pieces.
+
+### Usage
+
+```bash
+mp piece done
+mp piece done --main-branch develop
+```
+
+### Flags
+
+| Flag            | Description                               | Default |
+| --------------- | ----------------------------------------- | ------- |
+| `--main-branch` | Main branch to check merge status against | `main`  |
+
+---
+
+## mp piece adopt
+
+Convert an existing git branch into a piece worktree. Accepts a local branch name or a remote ref like `origin/foo` (remote refs are fetched and a tracking branch is created). Run from the main repo with no branch to adopt the current branch; from inside a piece worktree `--branch` is required.
+
+### Usage
+
+```bash
+mp piece adopt                       # adopt the current branch (from main repo)
+mp piece adopt my-spike              # adopt a local branch
+mp piece adopt --branch origin/foo   # fetch + adopt a remote branch
+mp piece adopt my-spike --parent feature-a   # adopt as a child of another piece
+echo '{}' | mp piece adopt
+```
+
+### Flags
+
+| Flag           | Description                                              | Default               |
+| -------------- | ------------------------------------------------------- | --------------------- |
+| `-b, --branch` | Branch to adopt; local name or remote ref `origin/foo`  | Current branch on main |
+| `--name`       | Override piece name                                     | Branch name           |
+| `-p, --parent` | Parent piece name                                       | `main`                |
+
+---
+
+## mp stack
+
+Whole-stack operations over pieces stacked via `--parent` (git-town-style). All operations are non-interactive: anything risky aborts cleanly and prints plain-English next steps (e.g. which PR base to change on GitHub).
+
+### mp stack status
+
+Show the stack tree, PR state, and drift vs the GitHub PR list.
+
+```bash
+mp stack status
+mp stack status --from-github   # rebuild local lineage from open PR bases
+mp stack status --apply-bases   # edit PR bases on GitHub to match local lineage
+```
+
+| Flag            | Description                                          | Default |
+| --------------- | ---------------------------------------------------- | ------- |
+| `--from-github` | Rebuild local lineage from open PR bases             | `false` |
+| `--apply-bases` | Edit PR bases on GitHub to match local lineage       | `false` |
+| `--main`        | Main branch name                                     | `main`  |
+
+### mp stack sync
+
+Propagate main and each parent down through the stack.
+
+```bash
+mp stack sync
+mp stack sync --strategy rebase   # rebase instead of the default merge
+mp stack sync --push              # push each branch after syncing
+mp stack sync --stack             # limit to the current piece's stack
+```
+
+| Flag         | Description                                          | Default |
+| ------------ | ---------------------------------------------------- | ------- |
+| `--strategy` | Sync strategy: `merge` or `rebase`                   | `merge` |
+| `--push`     | Push each branch after syncing                       | `false` |
+| `--stack`    | Limit to the current piece's stack (run from a piece) | `false` |
+| `--main`     | Main branch name                                     | `main`  |
+
+### mp stack continue
+
+Resume a conflicted rebase started by `mp stack sync --strategy rebase` (after resolving conflicts).
+
+```bash
+mp stack continue
+```
+
+### mp stack append / prepend
+
+`append` creates a new piece as a child of the current piece; `prepend` inserts a new piece between the current piece and its parent.
+
+```bash
+mp stack append --name child-feat
+mp stack append --prompt "add caching layer"
+mp stack prepend --name base-feat
+```
+
+| Flag       | Description                          | Default        |
+| ---------- | ------------------------------------ | -------------- |
+| `--name`   | Piece name                           | Auto-generated |
+| `--prompt` | Piece prompt (written to `piece.md`) | -              |
+
+---
+
+## mp project
+
+Manage the global registry of monkeypuzzle projects. A "project" is any git repo initialised with `mp init` (which registers it automatically). Registering projects lets `mp` list pieces and issues across all of them and jump between their tmux sessions. Aliases: `projects`, `proj`.
+
+### Usage
+
+```bash
+mp project add                       # register the current directory
+mp project add /path/to/repo
+echo '{"path":"/repo"}' | mp project add
+
+mp project list                      # human-readable table (alias: ls, status)
+mp project list --json               # machine output
+
+mp project remove my-project         # unregister (alias: rm); repo on disk untouched
+mp project remove --target /path/to/repo
+```
+
+`mp project list` shows best-effort live state per project (current branch, number of pieces, number of open issues).
+
+---
+
+## mp dash
+
+Cross-project dashboard of every registered project and its piece worktrees. With a terminal it opens an interactive dashboard; otherwise (or with `--json`) it prints the same data as JSON. Running bare `mp` is equivalent to `mp dash`.
+
+### Usage
+
+```bash
+mp dash          # interactive dashboard (or JSON when not a TTY)
+mp dash --json   # force JSON output
+mp               # same as mp dash
+```
+
+The JSON form includes per-project `pieces`, `issues`, and `branches` arrays so callers can build their own pickers (see [`mp switch`](#mp-switch)).
+
+---
+
+## mp config
+
+Get and set user-level configuration (stored under `~/.config/monkeypuzzle/`). Uses positional args, not JSON stdin.
+
+### Usage
+
+```bash
+mp config get multiplexer
+mp config set multiplexer tmux   # tmux, zellij, or none
+```
+
+### Keys
+
+| Key           | Description                                | Values                |
+| ------------- | ------------------------------------------ | --------------------- |
+| `multiplexer` | Terminal multiplexer for piece sessions    | `tmux`, `zellij`, `none` |
 
 ---
 

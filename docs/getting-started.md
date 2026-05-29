@@ -39,8 +39,8 @@ mp init
 
 This launches an interactive wizard:
 1. Enter project name (defaults to directory name)
-2. Choose issue provider (markdown)
-3. Choose PR provider (github)
+2. Choose issue provider (`markdown`, `linear`, or `plane`)
+3. Choose PR provider (`github`)
 4. Confirm configuration
 
 Creates `.monkeypuzzle/` directory with configuration.
