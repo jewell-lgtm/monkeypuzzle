@@ -317,10 +317,14 @@ func (h *Handler) AdoptPiece(ctx context.Context, input AdoptPieceInput) (PieceI
 		// metadata + the success message.
 		branchToAdopt = remoteBranch
 	} else {
-		// Local branch path. If the branch is currently checked out in the main
-		// repo (the historical default), the old code would checkout main on wd
-		// first; now we just surface git's own error so the user can sort it
-		// out. From a worktree we don't touch wd.
+		// Local branch path. Git refuses to create a worktree for a branch that is
+		// already checked out in another worktree, failing with a bare "exit status
+		// 128". The common case is adopting a branch you've been working on directly
+		// in the main repo. Rather than silently moving that checkout, detect the
+		// situation up front and explain how to resolve it.
+		if err := h.ensureBranchAdoptable(ctx, repoRoot, branchToAdopt); err != nil {
+			return PieceInfo{}, err
+		}
 		if err := h.git.WorktreeAddExisting(ctx, repoRoot, worktreePath, branchToAdopt); err != nil {
 			return PieceInfo{}, fmt.Errorf("failed to create worktree for branch %s: %w", branchToAdopt, err)
 		}
@@ -1683,6 +1687,32 @@ func (h *Handler) rebaseSubtree(ctx context.Context, repoRoot, piecesDir, childN
 
 // projectName returns the project name for repoRoot from its monkeypuzzle
 // config, falling back to the directory base name.
+// ensureBranchAdoptable returns an actionable error when branchToAdopt cannot be
+// placed in a new worktree because it is already checked out elsewhere in the
+// repo. Git would otherwise fail with a bare "exit status 128". A nil return
+// means the branch is free to adopt.
+func (h *Handler) ensureBranchAdoptable(ctx context.Context, repoRoot, branchToAdopt string) error {
+	checkedOut, err := h.git.CheckedOutBranches(ctx, repoRoot)
+	if err != nil {
+		// If we can't inspect worktrees, let the worktree-add attempt surface the
+		// underlying error rather than blocking on a probe failure.
+		return nil
+	}
+	if !checkedOut[branchToAdopt] {
+		return nil
+	}
+	// Distinguish the common "checked out in the main repo" case so we can give a
+	// concrete next step.
+	if mainBranch, err := h.git.CurrentBranch(ctx, repoRoot); err == nil && mainBranch == branchToAdopt {
+		return fmt.Errorf(
+			"branch %q is currently checked out in the main repo at %s; switch that checkout to another branch first (e.g. `git -C %s checkout main`), then re-run adopt",
+			branchToAdopt, repoRoot, repoRoot)
+	}
+	return fmt.Errorf(
+		"branch %q is already checked out in another worktree of this repo; a branch can only be checked out in one worktree at a time, so check it out elsewhere first or adopt a different branch",
+		branchToAdopt)
+}
+
 func (h *Handler) projectName(repoRoot string) string {
 	if cfg, err := ReadConfig(repoRoot, h.deps.FS); err == nil && strings.TrimSpace(cfg.Project.Name) != "" {
 		return cfg.Project.Name
