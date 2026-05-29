@@ -40,7 +40,7 @@ func (m Model) View() string {
 			sessionIndicator = styles.Subtle.Render(" [tmux]")
 		}
 
-		b.WriteString(fmt.Sprintf("%s%s%s\n", cursor, name, sessionIndicator))
+		fmt.Fprintf(&b, "%s%s%s\n", cursor, name, sessionIndicator)
 	}
 
 	b.WriteString("\n")

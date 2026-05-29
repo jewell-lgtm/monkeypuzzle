@@ -36,7 +36,7 @@ func (o *TextOutput) Write(msg core.Message) {
 	case core.MsgError:
 		prefix = "✗ "
 	}
-	fmt.Fprintf(o.w, "%s%s\n", prefix, msg.Content)
+	_, _ = fmt.Fprintf(o.w, "%s%s\n", prefix, msg.Content)
 }
 
 // JSONOutput writes JSON-formatted messages
@@ -62,7 +62,7 @@ func (o *JSONOutput) Write(msg core.Message) {
 	}
 	if err := o.enc.Encode(out); err != nil {
 		// Fallback to simple error message if encoding fails
-		fmt.Fprintf(o.w, "{\"error\":\"failed to encode message\",\"message\":%q}\n", msg.Content)
+		_, _ = fmt.Fprintf(o.w, "{\"error\":\"failed to encode message\",\"message\":%q}\n", msg.Content)
 	}
 }
 

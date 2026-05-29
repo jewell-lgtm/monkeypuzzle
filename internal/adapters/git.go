@@ -367,6 +367,15 @@ func (g *Git) BranchExistsOnRemote(ctx context.Context, workDir, branchName stri
 	return strings.TrimSpace(string(output)) != "", nil
 }
 
+// MergeBase returns the best common ancestor commit of two refs.
+func (g *Git) MergeBase(ctx context.Context, workDir, ref1, ref2 string) (string, error) {
+	output, err := g.exec.RunWithDir(ctx, workDir, "git", "merge-base", ref1, ref2)
+	if err != nil {
+		return "", fmt.Errorf("failed to find merge-base of %s and %s: %w", ref1, ref2, err)
+	}
+	return strings.TrimSpace(string(output)), nil
+}
+
 // GetBranchCommit returns the commit hash of a branch.
 func (g *Git) GetBranchCommit(ctx context.Context, workDir, branchName string) (string, error) {
 	output, err := g.exec.RunWithDir(ctx, workDir, "git", "rev-parse", branchName)
@@ -397,4 +406,55 @@ func (g *Git) IsClean(ctx context.Context, workDir string) (bool, error) {
 		return false, fmt.Errorf("failed to check git status: %w", err)
 	}
 	return strings.TrimSpace(string(output)) == "", nil
+}
+
+// MergeFFOnly fast-forwards the current branch to ref, refusing to create a merge
+// commit. Returns an error if a fast-forward isn't possible (history diverged).
+func (g *Git) MergeFFOnly(ctx context.Context, workDir, ref string) error {
+	_, err := g.exec.RunWithDir(ctx, workDir, "git", "merge", "--ff-only", ref)
+	if err != nil {
+		return fmt.Errorf("failed to fast-forward %s in %s: %w", ref, workDir, err)
+	}
+	return nil
+}
+
+// StashPush stashes uncommitted changes (including untracked files) in workDir.
+// Returns true if something was stashed, false if the worktree was already clean.
+func (g *Git) StashPush(ctx context.Context, workDir string) (bool, error) {
+	output, err := g.exec.RunWithDir(ctx, workDir, "git", "stash", "push", "--include-untracked", "-m", "mp-stack-sync")
+	if err != nil {
+		return false, fmt.Errorf("failed to stash changes in %s: %w", workDir, err)
+	}
+	// `git stash push` exits 0 even when there's nothing to stash, printing a
+	// stable "No local changes to save" message.
+	if strings.Contains(string(output), "No local changes to save") {
+		return false, nil
+	}
+	return true, nil
+}
+
+// StashPop restores the most recently stashed changes in workDir.
+func (g *Git) StashPop(ctx context.Context, workDir string) error {
+	_, err := g.exec.RunWithDir(ctx, workDir, "git", "stash", "pop")
+	if err != nil {
+		return fmt.Errorf("failed to pop stash in %s: %w", workDir, err)
+	}
+	return nil
+}
+
+// RebaseInProgress reports whether workDir has a rebase in progress (e.g. stopped
+// at a conflict). Uses `git rebase --show-current-patch`, which exits non-zero
+// when no rebase is underway.
+func (g *Git) RebaseInProgress(ctx context.Context, workDir string) (bool, error) {
+	_, err := g.exec.RunWithDir(ctx, workDir, "git", "rebase", "--show-current-patch")
+	return err == nil, nil
+}
+
+// RebaseContinue resumes an in-progress rebase in workDir after conflicts are resolved.
+func (g *Git) RebaseContinue(ctx context.Context, workDir string) error {
+	_, err := g.exec.RunWithDir(ctx, workDir, "git", "rebase", "--continue")
+	if err != nil {
+		return fmt.Errorf("failed to continue rebase in %s: %w", workDir, err)
+	}
+	return nil
 }

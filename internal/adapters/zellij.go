@@ -121,12 +121,14 @@ func (z *ZellijMultiplexer) attachAndSwitchTab(ctx context.Context, tabName, wor
 	if err != nil {
 		return fmt.Errorf("failed to create temp layout: %w", err)
 	}
-	defer os.Remove(tmpFile.Name())
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
 
 	if _, err := tmpFile.WriteString(layout); err != nil {
 		return fmt.Errorf("failed to write layout: %w", err)
 	}
-	tmpFile.Close()
+	if err := tmpFile.Close(); err != nil {
+		return fmt.Errorf("failed to close temp layout: %w", err)
+	}
 
 	// Attach with layout - creates session if needed
 	_, err = z.exec.Run(ctx, "zellij", "attach", zellijSessionName, "--create", "-l", tmpFile.Name())

@@ -72,7 +72,7 @@ func (m Model) View() string {
 				title = styles.Selected.Render(title)
 			}
 
-			b.WriteString(fmt.Sprintf("%s%s\n", cursor, title))
+			fmt.Fprintf(&b, "%s%s\n", cursor, title)
 		}
 
 		// Scroll indicator

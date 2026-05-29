@@ -21,7 +21,7 @@ func TestNewProvider_Markdown(t *testing.T) {
 
 func TestNewProvider_Linear_MissingAPIKey(t *testing.T) {
 	// Ensure env var is not set
-	os.Unsetenv("LINEAR_API_KEY")
+	_ = os.Unsetenv("LINEAR_API_KEY")
 
 	_, err := NewProvider(ProviderConfig{
 		ProviderType: "linear",
@@ -34,8 +34,7 @@ func TestNewProvider_Linear_MissingAPIKey(t *testing.T) {
 }
 
 func TestNewProvider_Linear_MissingTeam(t *testing.T) {
-	os.Setenv("LINEAR_API_KEY", "test-key")
-	defer os.Unsetenv("LINEAR_API_KEY")
+	t.Setenv("LINEAR_API_KEY", "test-key")
 
 	_, err := NewProvider(ProviderConfig{
 		ProviderType: "linear",
@@ -48,8 +47,7 @@ func TestNewProvider_Linear_MissingTeam(t *testing.T) {
 }
 
 func TestNewProvider_Linear_MissingHTTP(t *testing.T) {
-	os.Setenv("LINEAR_API_KEY", "test-key")
-	defer os.Unsetenv("LINEAR_API_KEY")
+	t.Setenv("LINEAR_API_KEY", "test-key")
 
 	_, err := NewProvider(ProviderConfig{
 		ProviderType: "linear",
@@ -62,8 +60,7 @@ func TestNewProvider_Linear_MissingHTTP(t *testing.T) {
 }
 
 func TestNewProvider_Linear_Success(t *testing.T) {
-	os.Setenv("LINEAR_API_KEY", "test-key")
-	defer os.Unsetenv("LINEAR_API_KEY")
+	t.Setenv("LINEAR_API_KEY", "test-key")
 
 	provider, err := NewProvider(ProviderConfig{
 		ProviderType: "linear",
@@ -80,7 +77,7 @@ func TestNewProvider_Linear_Success(t *testing.T) {
 
 func TestNewProvider_Linear_APIKeyFromConfig(t *testing.T) {
 	// Ensure env var is not set
-	os.Unsetenv("LINEAR_API_KEY")
+	_ = os.Unsetenv("LINEAR_API_KEY")
 
 	provider, err := NewProvider(ProviderConfig{
 		ProviderType: "linear",

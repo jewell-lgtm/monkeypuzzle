@@ -226,15 +226,15 @@ func buildMarkdownContent(input CreateInput) []byte {
 
 	// YAML frontmatter
 	b.WriteString("---\n")
-	b.WriteString(fmt.Sprintf("title: %s\n", escapeYAMLString(input.Title)))
-	b.WriteString(fmt.Sprintf("status: %s\n", piece.StatusTodo))
+	fmt.Fprintf(&b, "title: %s\n", escapeYAMLString(input.Title))
+	fmt.Fprintf(&b, "status: %s\n", piece.StatusTodo)
 	if input.Description != "" {
-		b.WriteString(fmt.Sprintf("description: %s\n", escapeYAMLString(input.Description)))
+		fmt.Fprintf(&b, "description: %s\n", escapeYAMLString(input.Description))
 	}
 	b.WriteString("---\n\n")
 
 	// Markdown body
-	b.WriteString(fmt.Sprintf("# %s\n", input.Title))
+	fmt.Fprintf(&b, "# %s\n", input.Title)
 	if input.Description != "" {
 		b.WriteString("\n")
 		b.WriteString(input.Description)

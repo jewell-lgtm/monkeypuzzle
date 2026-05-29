@@ -210,7 +210,7 @@ func runProjectList(cmd *cobra.Command, args []string) error {
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-	fmt.Fprintln(w, "NAME\tBRANCH\tPIECES\tOPEN ISSUES\tPATH")
+	_, _ = fmt.Fprintln(w, "NAME\tBRANCH\tPIECES\tOPEN ISSUES\tPATH")
 	for _, p := range projects {
 		branch := p.Branch
 		path := p.Path
@@ -222,7 +222,7 @@ func runProjectList(cmd *cobra.Command, args []string) error {
 		case branch == "":
 			branch = "-"
 		}
-		fmt.Fprintf(w, "%s\t%s\t%d\t%d\t%s\n", p.Name, branch, p.PieceCount, p.OpenIssues, path)
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%d\t%d\t%s\n", p.Name, branch, p.PieceCount, p.OpenIssues, path)
 	}
 	return w.Flush()
 }

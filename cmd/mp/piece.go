@@ -1311,7 +1311,7 @@ func newIssueSyncSubscriber(workDir string, deps core.Deps, output io.Writer) fu
 		handler := issue.NewHandler(deps, workDir)
 		err := handler.SyncStatus(event.IssueID, event.NewStatus)
 		if err != nil {
-			fmt.Fprintf(output, "⚠ Failed to sync: %v\n", err)
+			_, _ = fmt.Fprintf(output, "⚠ Failed to sync: %v\n", err)
 			return
 		}
 
@@ -1320,7 +1320,7 @@ func newIssueSyncSubscriber(workDir string, deps core.Deps, output io.Writer) fu
 			_ = piececmd.ClearIssueDirtyFlag(event.WorktreePath, deps.FS)
 		}
 
-		fmt.Fprintf(output, "✓ Synced %s → %s\n", event.IssueID, event.NewStatus)
+		_, _ = fmt.Fprintf(output, "✓ Synced %s → %s\n", event.IssueID, event.NewStatus)
 	}
 }
 

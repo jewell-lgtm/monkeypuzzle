@@ -3,11 +3,16 @@ package adapters
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
 )
+
+// ErrGHUnavailable indicates the gh CLI is missing or unauthenticated, so GitHub
+// state can't be read. Callers should degrade to local-only behavior.
+var ErrGHUnavailable = errors.New("gh CLI unavailable or unauthenticated")
 
 // GitHub provides GitHub operations via gh CLI
 type GitHub struct {
@@ -137,6 +142,58 @@ func (g *GitHub) FindMergedPRByBranch(ctx context.Context, workDir, branchName s
 	}
 
 	return true, results[0].Number, nil
+}
+
+// PRInfo is one row of `gh pr list --json number,headRefName,baseRefName,state,url`.
+// It encodes a stack edge: HeadRefName is the piece branch, BaseRefName its parent.
+type PRInfo struct {
+	Number      int    `json:"number"`
+	HeadRefName string `json:"headRefName"`
+	BaseRefName string `json:"baseRefName"`
+	State       string `json:"state"` // OPEN, MERGED, CLOSED
+	URL         string `json:"url"`
+}
+
+// ListPRs returns all PRs (open, merged, closed) for the repo. This is the source
+// of truth for stack lineage across machines. Returns ErrGHUnavailable (with an
+// empty slice) when gh is missing or unauthenticated so callers can degrade to
+// local lineage rather than failing.
+func (g *GitHub) ListPRs(ctx context.Context, workDir string) ([]PRInfo, error) {
+	output, err := g.exec.RunWithDir(ctx, workDir, "gh", "pr", "list",
+		"--state", "all",
+		"--json", "number,headRefName,baseRefName,state,url",
+		"--limit", "200",
+	)
+	if err != nil {
+		return []PRInfo{}, ErrGHUnavailable
+	}
+
+	var prs []PRInfo
+	if err := json.Unmarshal(output, &prs); err != nil {
+		return []PRInfo{}, fmt.Errorf("failed to parse PR list: %w", err)
+	}
+	return prs, nil
+}
+
+// SetPRBase changes the base branch of an open PR via `gh pr edit`. Used only by
+// the opt-in `mp stack status --apply-bases` path.
+func (g *GitHub) SetPRBase(ctx context.Context, workDir string, prNumber int, base string) error {
+	_, err := g.exec.RunWithDir(ctx, workDir, "gh", "pr", "edit", fmt.Sprintf("%d", prNumber), "--base", base)
+	if err != nil {
+		return fmt.Errorf("failed to set base of PR #%d to %s: %w", prNumber, base, err)
+	}
+	return nil
+}
+
+// PushForceWithLease force-pushes the current branch (HEAD) with --force-with-lease,
+// which refuses to clobber remote commits the local repo hasn't seen. Used after a
+// rebase rewrites an already-pushed branch.
+func (g *GitHub) PushForceWithLease(ctx context.Context, workDir string) error {
+	_, err := g.exec.RunWithDir(ctx, workDir, "git", "push", "--force-with-lease", "origin", "HEAD")
+	if err != nil {
+		return fmt.Errorf("failed to force-push to remote: %w", err)
+	}
+	return nil
 }
 
 // extractPRNumberFromURL extracts the PR number from a GitHub PR URL

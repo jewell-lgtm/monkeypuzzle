@@ -12,7 +12,7 @@ import (
 func NewCLILoadingSubscriber(w io.Writer) func(active bool, label string) {
 	return func(active bool, label string) {
 		if active && label != "" {
-			fmt.Fprintf(w, "⏳ %s\n", label)
+			_, _ = fmt.Fprintf(w, "⏳ %s\n", label)
 		}
 	}
 }

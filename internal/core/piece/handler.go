@@ -52,6 +52,11 @@ func NewHandlerWithMultiplexer(deps core.Deps, mux core.Multiplexer) *Handler {
 type CreatePieceOptions struct {
 	OverwriteSession bool   // If true, replace existing main repo session
 	Parent           string // Parent piece name, defaults to "main"
+	// RepoRoot, when set, anchors creation at this main repo root instead of
+	// resolving from the current working directory. Lets callers create a piece
+	// from inside a worktree (e.g. `mp stack append`) without scoping the pieces
+	// dir to the worktree.
+	RepoRoot string
 }
 
 // CreatePieceWithInput creates a piece from validated input.
@@ -77,15 +82,22 @@ func (h *Handler) CreatePieceWithInput(ctx context.Context, input NewPieceInput,
 // If pieceName is empty, a name will be generated automatically.
 // Session management is handled separately by SwitchPiece.
 func (h *Handler) CreatePiece(ctx context.Context, pieceName string, opts CreatePieceOptions) (PieceInfo, error) {
-	wd, err := os.Getwd()
-	if err != nil {
-		return PieceInfo{}, fmt.Errorf("failed to get working directory: %w", err)
-	}
-
-	// Detect git repo root
-	repoRoot, err := h.git.RepoRoot(ctx, wd)
-	if err != nil {
-		return PieceInfo{}, fmt.Errorf("not in a git repository: %w", err)
+	// Resolve repo root: prefer an explicit one (lets callers create from inside a
+	// worktree), otherwise detect from the current working directory.
+	var wd string
+	repoRoot := strings.TrimSpace(opts.RepoRoot)
+	if repoRoot != "" {
+		wd = repoRoot
+	} else {
+		var err error
+		wd, err = os.Getwd()
+		if err != nil {
+			return PieceInfo{}, fmt.Errorf("failed to get working directory: %w", err)
+		}
+		repoRoot, err = h.git.RepoRoot(ctx, wd)
+		if err != nil {
+			return PieceInfo{}, fmt.Errorf("not in a git repository: %w", err)
+		}
 	}
 
 	// Get current branch before creating worktree (for piece metadata)
@@ -556,33 +568,6 @@ func (h *Handler) pubIssueSync(event core.IssueSyncEvent) {
 	}
 }
 
-// updateIssueStatusToInProgress updates the issue status to in-progress if it's currently todo.
-// Logs a warning on failure but doesn't fail the piece creation.
-func (h *Handler) updateIssueStatusToInProgress(issuePath string) {
-	// Check current status
-	currentStatus, err := ParseStatus(issuePath, h.deps.FS)
-	if err != nil {
-		h.deps.Output.Write(core.Message{
-			Type:    core.MsgWarning,
-			Content: fmt.Sprintf("Failed to read issue status: %v", err),
-		})
-		return
-	}
-
-	// Only update if status is todo
-	if currentStatus != StatusTodo {
-		return
-	}
-
-	// Update to in-progress
-	if err := UpdateStatus(issuePath, StatusInProgress, h.deps.FS); err != nil {
-		h.deps.Output.Write(core.Message{
-			Type:    core.MsgWarning,
-			Content: fmt.Sprintf("Failed to update issue status: %v", err),
-		})
-	}
-}
-
 // cleanupPiece removes a partially created piece (worktree and session).
 // Errors during cleanup are logged as warnings but not returned.
 func (h *Handler) cleanupPiece(ctx context.Context, repoRoot, worktreePath, sessionName string, _ bool) {
@@ -1020,12 +1005,12 @@ func (h *Handler) MergePiece(ctx context.Context, workDir string, input MergeInp
 // buildSquashCommitMessage creates a commit message for squash merge
 func (h *Handler) buildSquashCommitMessage(pieceName string, commitMsgs []string) string {
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("feat: %s\n", pieceName))
+	fmt.Fprintf(&b, "feat: %s\n", pieceName)
 
 	if len(commitMsgs) > 0 {
 		b.WriteString("\nSquashed commits:\n")
 		for _, msg := range commitMsgs {
-			b.WriteString(fmt.Sprintf("- %s\n", msg))
+			fmt.Fprintf(&b, "- %s\n", msg)
 		}
 	}
 
@@ -1681,6 +1666,26 @@ func (h *Handler) rebaseSubtree(ctx context.Context, repoRoot, piecesDir, childN
 	return migrated, nil
 }
 
+// EnsureSubtreeClean verifies every worktree in the subtree rooted at each of
+// names has no uncommitted changes. Exported wrapper over ensureSubtreeClean for
+// reuse by the stack package.
+func (h *Handler) EnsureSubtreeClean(ctx context.Context, piecesDir string, names []string) error {
+	return h.ensureSubtreeClean(ctx, piecesDir, names)
+}
+
+// MergeIntoChild merges targetBranch into the given child piece's branch (in its
+// worktree), aborting the merge on conflict. Exported wrapper for the stack package.
+func (h *Handler) MergeIntoChild(ctx context.Context, piecesDir, childName, targetBranch string) error {
+	return h.mergeIntoChild(ctx, piecesDir, childName, targetBranch)
+}
+
+// RebaseSubtree rebases childName onto ontoRef (cutting at fromRef) and recursively
+// re-points its descendants, aborting on conflict. Returns the names of all pieces
+// whose branches were rewritten. Exported wrapper for the stack package.
+func (h *Handler) RebaseSubtree(ctx context.Context, repoRoot, piecesDir, childName, ontoRef, fromRef string) ([]string, error) {
+	return h.rebaseSubtree(ctx, repoRoot, piecesDir, childName, ontoRef, fromRef)
+}
+
 // projectName returns the project name for repoRoot from its monkeypuzzle
 // config, falling back to the directory base name.
 func (h *Handler) projectName(repoRoot string) string {
@@ -1698,27 +1703,6 @@ func (h *Handler) pieceSessionName(repoRoot, pieceName string) string {
 // mainSessionName returns the tmux session name for a repo's main worktree.
 func (h *Handler) mainSessionName(repoRoot string) string {
 	return session.MainName(h.projectName(repoRoot))
-}
-
-// updateIssueStatusToDone updates the issue status to done if currently in-progress.
-func (h *Handler) updateIssueStatusToDone(issuePath string) error {
-	// Check current status
-	currentStatus, err := ParseStatus(issuePath, h.deps.FS)
-	if err != nil {
-		return fmt.Errorf("failed to read issue status: %w", err)
-	}
-
-	// Only update if status is in-progress
-	if currentStatus != StatusInProgress {
-		return nil
-	}
-
-	// Update to done
-	if err := UpdateStatus(issuePath, StatusDone, h.deps.FS); err != nil {
-		return fmt.Errorf("failed to update issue status: %w", err)
-	}
-
-	return nil
 }
 
 // ListPieces returns all available pieces in the pieces directory.

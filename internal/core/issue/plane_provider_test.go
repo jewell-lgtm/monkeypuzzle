@@ -65,7 +65,7 @@ const statesResponse = `{"results":[
 const projectResponse = `{"id":"proj-uuid","identifier":"PROJ","name":"My Project"}`
 
 func TestNewProvider_Plane_MissingAPIKey(t *testing.T) {
-	os.Unsetenv("PLANE_API_KEY")
+	_ = os.Unsetenv("PLANE_API_KEY")
 	_, err := NewProvider(ProviderConfig{
 		ProviderType: "plane",
 		Config:       map[string]string{"workspace": "acme", "project": "p"},
@@ -77,8 +77,7 @@ func TestNewProvider_Plane_MissingAPIKey(t *testing.T) {
 }
 
 func TestNewProvider_Plane_MissingWorkspace(t *testing.T) {
-	os.Setenv("PLANE_API_KEY", "k")
-	defer os.Unsetenv("PLANE_API_KEY")
+	t.Setenv("PLANE_API_KEY", "k")
 	_, err := NewProvider(ProviderConfig{
 		ProviderType: "plane",
 		Config:       map[string]string{"project": "p"},
@@ -90,8 +89,7 @@ func TestNewProvider_Plane_MissingWorkspace(t *testing.T) {
 }
 
 func TestNewProvider_Plane_MissingProject(t *testing.T) {
-	os.Setenv("PLANE_API_KEY", "k")
-	defer os.Unsetenv("PLANE_API_KEY")
+	t.Setenv("PLANE_API_KEY", "k")
 	_, err := NewProvider(ProviderConfig{
 		ProviderType: "plane",
 		Config:       map[string]string{"workspace": "acme"},
@@ -103,8 +101,7 @@ func TestNewProvider_Plane_MissingProject(t *testing.T) {
 }
 
 func TestNewProvider_Plane_Success(t *testing.T) {
-	os.Setenv("PLANE_API_KEY", "k")
-	defer os.Unsetenv("PLANE_API_KEY")
+	t.Setenv("PLANE_API_KEY", "k")
 	provider, err := NewProvider(ProviderConfig{
 		ProviderType: "plane",
 		Config:       map[string]string{"workspace": "acme", "project": "p"},
@@ -119,7 +116,7 @@ func TestNewProvider_Plane_Success(t *testing.T) {
 }
 
 func TestNewProvider_Plane_DefaultBaseURL(t *testing.T) {
-	os.Unsetenv("PLANE_API_KEY")
+	_ = os.Unsetenv("PLANE_API_KEY")
 	provider, err := NewProvider(ProviderConfig{
 		ProviderType: "plane",
 		Config:       map[string]string{"workspace": "acme", "project": "p", "api_key": "k"},
