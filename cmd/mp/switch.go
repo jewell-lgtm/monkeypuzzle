@@ -17,6 +17,7 @@ import (
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core/issue"
 	piececmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/piece"
+	projectcmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/project"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core/session"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/projectdir"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/registry"
@@ -135,7 +136,11 @@ func validateSwitchSelectors(in switchAllInput) error {
 }
 
 func runSwitchInteractive(ctx context.Context) error {
-	projects, err := collectDashboard(ctx)
+	infos, err := projectcmd.List()
+	if err != nil {
+		return err
+	}
+	projects, err := collectDashboard(ctx, infos)
 	if err != nil {
 		return err
 	}

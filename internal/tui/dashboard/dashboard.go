@@ -49,6 +49,10 @@ type Row struct {
 	// Branch-row field (used when Kind == RowBranch). Also reused for the
 	// project's current branch on RowProject rows for display.
 	Branch string
+	// Remote marks a RowBranch as a remote-only ref (e.g. "origin/foo") with no
+	// local branch yet. Adopting it fetches the remote and creates a tracking
+	// worktree.
+	Remote bool
 
 	// Display-only metadata for RowProject rows.
 	PieceCount int
@@ -244,7 +248,11 @@ func renderRow(r Row, selected bool) string {
 		if selected {
 			name = styles.Selected.Render(name)
 		}
-		return fmt.Sprintf("  %s %s", styles.Subtle.Render("[branch]"), name)
+		tag := "branch"
+		if r.Remote {
+			tag = "remote"
+		}
+		return fmt.Sprintf("  %s %s", styles.Subtle.Render("["+tag+"]"), name)
 	case RowNewPiece:
 		label := "+ new piece"
 		if selected {

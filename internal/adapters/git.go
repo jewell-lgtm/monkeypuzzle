@@ -113,6 +113,26 @@ func (g *Git) ListLocalBranches(ctx context.Context, workDir string) ([]string, 
 	return branches, nil
 }
 
+// ListRemoteBranches returns the short names of remote-tracking branches in
+// workDir (e.g. "origin/foo"), excluding symbolic refs like "origin/HEAD".
+// Empty slice (not nil) and no error when there are no remotes.
+func (g *Git) ListRemoteBranches(ctx context.Context, workDir string) ([]string, error) {
+	output, err := g.exec.RunWithDir(ctx, workDir, "git", "for-each-ref", "--format=%(refname:short)", "refs/remotes")
+	if err != nil {
+		return nil, fmt.Errorf("failed to list remote branches: %w", err)
+	}
+	raw := strings.Split(strings.TrimSpace(string(output)), "\n")
+	branches := make([]string, 0, len(raw))
+	for _, b := range raw {
+		b = strings.TrimSpace(b)
+		if b == "" || strings.HasSuffix(b, "/HEAD") {
+			continue
+		}
+		branches = append(branches, b)
+	}
+	return branches, nil
+}
+
 // CheckedOutBranches returns the set of branch names currently checked out in
 // any worktree of workDir's repository (main repo or any added worktree).
 // Detached HEADs are skipped.

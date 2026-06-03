@@ -49,7 +49,7 @@ Navigate to the piece and make changes:
 
 ```bash
 # Check where you are
-mp piece
+mp piece status
 
 # Make commits as usual
 git add .

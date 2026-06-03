@@ -26,7 +26,7 @@ echo '{"query":"auth","status":["todo"]}' | mp issue search
 
 ```bash
 # Show current piece status
-mp piece
+mp piece status
 
 # List all pieces (tree view or flat)
 mp piece list

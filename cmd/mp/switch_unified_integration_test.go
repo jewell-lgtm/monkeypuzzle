@@ -201,6 +201,168 @@ func TestSwitchUnified_DashJSON_IncludesIssuesAndBranches(t *testing.T) {
 	}
 }
 
+// TestDash_BareMpScopesToCurrentProject verifies the headline behaviour: bare
+// `mp` run inside one registered project shows only that project (repo-local),
+// while `mp dash` still shows every registered project.
+func TestDash_BareMpScopesToCurrentProject(t *testing.T) {
+	e := setupTestEnv(t)
+	defer e.cleanup()
+
+	dataDir := filepath.Join(e.tmpDir, "data")
+	repos := filepath.Join(e.tmpDir, "repos")
+	alpha := projectTestRepo(t, e, dataDir, repos, "alpha")
+	_ = projectTestRepo(t, e, dataDir, repos, "beta")
+
+	// Bare `mp` from inside alpha: only alpha should appear.
+	scoped := dashProjectNames(t, e, alpha, dataDir)
+	if len(scoped) != 1 || scoped[0] != "alpha" {
+		t.Errorf("bare mp in alpha should show only [alpha], got %v", scoped)
+	}
+
+	// `mp dash` from inside alpha: both projects should appear.
+	all := dashProjectNames(t, e, alpha, dataDir, "dash")
+	if !contains(all, "alpha") || !contains(all, "beta") {
+		t.Errorf("mp dash should show both alpha and beta, got %v", all)
+	}
+}
+
+// TestDash_BareMpFallsBackOutsideProject verifies bare `mp` from a directory
+// that isn't a registered project falls back to the cross-project view.
+func TestDash_BareMpFallsBackOutsideProject(t *testing.T) {
+	e := setupTestEnv(t)
+	defer e.cleanup()
+
+	dataDir := filepath.Join(e.tmpDir, "data")
+	repos := filepath.Join(e.tmpDir, "repos")
+	_ = projectTestRepo(t, e, dataDir, repos, "alpha")
+	_ = projectTestRepo(t, e, dataDir, repos, "beta")
+
+	// e.tmpDir is not a registered project: expect the full list.
+	names := dashProjectNames(t, e, e.tmpDir, dataDir)
+	if !contains(names, "alpha") || !contains(names, "beta") {
+		t.Errorf("bare mp outside a project should fall back to all projects, got %v", names)
+	}
+}
+
+// TestDash_RemoteOnlyBranchSurfaces verifies that a branch that exists only on
+// a remote (origin) appears in the dashboard branch list as a remote ref, so a
+// user can create a piece from it.
+func TestDash_RemoteOnlyBranchSurfaces(t *testing.T) {
+	e := setupTestEnv(t)
+	defer e.cleanup()
+
+	dataDir := filepath.Join(e.tmpDir, "data")
+	repos := filepath.Join(e.tmpDir, "repos")
+
+	// Build a bare "remote" with a feature branch, then clone it as the project.
+	remote := filepath.Join(repos, "origin.git")
+	if err := os.MkdirAll(remote, 0o755); err != nil {
+		t.Fatalf("mkdir remote: %v", err)
+	}
+	seed := filepath.Join(e.tmpDir, "seed")
+	gitCmd(t, e.tmpDir, "init", seed)
+	gitCmd(t, seed, "commit", "--allow-empty", "-m", "init")
+	gitCmd(t, seed, "branch", "-M", "main")
+	gitCmd(t, seed, "checkout", "-b", "remote-spike")
+	gitCmd(t, seed, "commit", "--allow-empty", "-m", "spike work")
+	gitCmd(t, seed, "checkout", "main")
+	gitCmd(t, e.tmpDir, "clone", "--bare", seed, remote)
+
+	// Clone the bare remote into the project location and `mp init` it.
+	gamma := filepath.Join(repos, "gamma")
+	gitCmd(t, e.tmpDir, "clone", remote, gamma)
+	gitCmd(t, gamma, "checkout", "main")
+	cmd := exec.Command(e.binPath, "init", "--name", "gamma", "--issue-provider", "markdown", "--pr-provider", "github")
+	cmd.Dir = gamma
+	cmd.Env = append(os.Environ(), "MP_DATA_DIR="+dataDir, "MP_CONFIG_DIR="+e.configDir)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("mp init in gamma: %v\n%s", err, out)
+	}
+
+	out, _ := mpJSON(t, e, gamma, dataDir, "dash", "--json")
+	var dash struct {
+		Projects []struct {
+			Name     string `json:"name"`
+			Branches []struct {
+				Name   string `json:"name"`
+				Remote bool   `json:"remote"`
+			} `json:"branches"`
+		} `json:"projects"`
+	}
+	if err := json.Unmarshal(out, &dash); err != nil {
+		t.Fatalf("unmarshal dash --json: %v\n%s", err, out)
+	}
+
+	foundRemote := false
+	for _, p := range dash.Projects {
+		if p.Name != "gamma" {
+			continue
+		}
+		for _, b := range p.Branches {
+			if b.Name == "origin/remote-spike" && b.Remote {
+				foundRemote = true
+			}
+		}
+	}
+	if !foundRemote {
+		t.Errorf("expected remote-only branch 'origin/remote-spike' (remote=true) in dash --json, got: %s", out)
+	}
+}
+
+// TestPiece_BareListsAndStatusSubcommand verifies bare `mp piece` prints a
+// human overview (not JSON) while `mp piece status` returns the status JSON.
+func TestPiece_BareListsAndStatusSubcommand(t *testing.T) {
+	e := setupTestEnv(t)
+	defer e.cleanup()
+
+	dataDir := filepath.Join(e.tmpDir, "data")
+	repos := filepath.Join(e.tmpDir, "repos")
+	alpha := projectTestRepo(t, e, dataDir, repos, "alpha")
+
+	// Bare `mp piece` should print the subcommand hint to stderr.
+	pieceCmd := exec.Command(e.binPath, "piece")
+	pieceCmd.Dir = alpha
+	pieceCmd.Env = append(os.Environ(), "MP_DATA_DIR="+dataDir, "MP_CONFIG_DIR="+e.configDir)
+	pieceOut, err := pieceCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("mp piece: %v\n%s", err, pieceOut)
+	}
+	if !strings.Contains(string(pieceOut), "Subcommands:") {
+		t.Errorf("expected bare `mp piece` to list subcommands, got: %q", pieceOut)
+	}
+
+	// `mp piece status` should emit JSON with in_piece on stdout.
+	statusOut := mpRun(t, e, alpha, dataDir, "piece", "status")
+	if !strings.Contains(statusOut, "in_piece") {
+		t.Errorf("expected `mp piece status` to emit status JSON, got: %q", statusOut)
+	}
+}
+
+// dashProjectNames runs the dashboard (bare `mp` by default, or the given args
+// like "dash") in dir with JSON output and returns the project names.
+func dashProjectNames(t *testing.T, e *testEnv, dir, dataDir string, args ...string) []string {
+	t.Helper()
+	if len(args) == 0 {
+		args = []string{"--json"}
+	} else {
+		args = append(args, "--json")
+	}
+	out, _ := mpJSON(t, e, dir, dataDir, args...)
+	var dash struct {
+		Projects []struct {
+			Name string `json:"name"`
+		} `json:"projects"`
+	}
+	if err := json.Unmarshal(out, &dash); err != nil {
+		t.Fatalf("unmarshal dash --json: %v\n%s", err, out)
+	}
+	names := make([]string, 0, len(dash.Projects))
+	for _, p := range dash.Projects {
+		names = append(names, p.Name)
+	}
+	return names
+}
+
 // TestSwitchUnified_MutuallyExclusiveSelectors verifies that --piece, --issue,
 // and --branch cannot be combined.
 func TestSwitchUnified_MutuallyExclusiveSelectors(t *testing.T) {

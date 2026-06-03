@@ -283,12 +283,24 @@ list of `pieces` that were moved/repaired. Human-readable summary to stderr.
 
 ## mp piece
 
+With no subcommand, lists the project's pieces as a tree and prints the
+available subcommands — a discoverable overview for getting your bearings.
+
+### Usage
+
+```bash
+mp piece          # list pieces + show subcommands
+mp piece status   # current-piece status as JSON (see below)
+```
+
+## mp piece status
+
 Show current piece status.
 
 ### Usage
 
 ```bash
-mp piece
+mp piece status
 ```
 
 ### Output
@@ -770,17 +782,20 @@ mp project remove --target /path/to/repo
 
 ## mp dash
 
-Cross-project dashboard of every registered project and its piece worktrees. With a terminal it opens an interactive dashboard; otherwise (or with `--json`) it prints the same data as JSON. Running bare `mp` is equivalent to `mp dash`.
+Cross-project dashboard of every registered project and its piece worktrees. With a terminal it opens an interactive dashboard; otherwise (or with `--json`) it prints the same data as JSON.
+
+Bare `mp` opens the **same dashboard scoped to the current project** (repo-local) — it shows only the pieces, issues, and branches of the project you're standing in. When run outside any registered project it falls back to the cross-project view, so `mp` still works as a launcher from anywhere. Use `mp dash` for the explicit all-projects view.
 
 ### Usage
 
 ```bash
-mp dash          # interactive dashboard (or JSON when not a TTY)
+mp               # dashboard scoped to the current project (all projects if outside one)
+mp dash          # every registered project (or JSON when not a TTY)
 mp dash --json   # force JSON output
-mp               # same as mp dash
+mp --json        # JSON for the current project
 ```
 
-The JSON form includes per-project `pieces`, `issues`, and `branches` arrays so callers can build their own pickers (see [`mp switch`](#mp-switch)).
+The JSON form includes per-project `pieces`, `issues`, and `branches` arrays so callers can build their own pickers (see [`mp switch`](#mp-switch)). The `branches` array includes both local branches and remote-only refs (e.g. `origin/foo`, marked `"remote": true`) that have no local branch yet — selecting one fetches the remote and adopts it as a piece.
 
 ---
 
@@ -858,7 +873,7 @@ Monkeypuzzle is designed for programmatic use:
 mp init --schema | jq '.name = "myproject"' | mp init
 
 # Check status programmatically
-STATUS=$(mp piece)
+STATUS=$(mp piece status)
 IN_PIECE=$(echo "$STATUS" | jq -r '.in_piece')
 
 # Parse piece creation output
