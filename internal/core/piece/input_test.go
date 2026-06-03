@@ -159,3 +159,69 @@ func TestNewPieceSchema_HasPrompt(t *testing.T) {
 		t.Error("expected 'prompt' in schema")
 	}
 }
+
+func TestFlattenSchema(t *testing.T) {
+	schema, err := piece.FlattenSchema()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var data map[string]any
+	if err := json.Unmarshal(schema, &data); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+
+	for _, key := range []string{"force", "delete_branches", "dry_run"} {
+		if _, ok := data[key]; !ok {
+			t.Errorf("expected %q in schema", key)
+		}
+	}
+}
+
+func TestParseFlattenJSON(t *testing.T) {
+	tests := []struct {
+		name    string
+		json    string
+		want    piece.FlattenInput
+		wantErr bool
+	}{
+		{
+			name: "all flags set",
+			json: `{"force":true,"delete_branches":true,"dry_run":true}`,
+			want: piece.FlattenInput{Force: true, DeleteBranches: true, DryRun: true},
+		},
+		{
+			name: "empty object defaults to false",
+			json: `{}`,
+			want: piece.FlattenInput{},
+		},
+		{
+			name: "partial input",
+			json: `{"force":true}`,
+			want: piece.FlattenInput{Force: true},
+		},
+		{
+			name:    "invalid JSON",
+			json:    `{not json}`,
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := piece.ParseFlattenJSON([]byte(tt.json))
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("got %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}

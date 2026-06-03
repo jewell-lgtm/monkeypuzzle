@@ -281,6 +281,62 @@ list of `pieces` that were moved/repaired. Human-readable summary to stderr.
 
 ---
 
+## mp flatten
+
+Remove **all** piece worktrees for the current repository, returning it to a flat
+main-only state. Each piece's tmux session is killed and its worktree removed.
+
+Unlike `mp piece cleanup` (which only removes _merged_ pieces), flatten removes every
+piece regardless of merge status. Branches are kept by default.
+
+### Usage
+
+```bash
+mp flatten                       # Interactive confirmation, then remove all pieces
+mp flatten --yes                 # Remove all (skip confirmation)
+mp flatten --force               # Discard uncommitted changes while removing
+mp flatten --delete-branches     # Also delete each piece's git branch
+mp flatten --dry-run             # Show what would be removed without changes
+echo '{"force":true}' | mp flatten
+mp flatten --schema
+```
+
+### Flags
+
+| Flag                | Description                                  | Default |
+| ------------------- | -------------------------------------------- | ------- |
+| `--force`           | Force removal even with uncommitted changes  | `false` |
+| `--delete-branches` | Also delete each piece's git branch          | `false` |
+| `--dry-run`         | Show what would be removed without changes   | `false` |
+| `--yes`             | Skip the interactive confirmation prompt     | `false` |
+
+### What it does
+
+1. Lists all pieces for the repo (works from the main repo or from inside a piece)
+2. In an interactive terminal, asks for confirmation (skip with `--yes`/`--force`)
+3. For each piece: switches you to the main session if you're inside it, kills the
+   tmux session, and removes the worktree (use `--force` to discard uncommitted changes)
+4. Optionally deletes each piece's branch (`--delete-branches`)
+5. Continues past individual failures, reporting them under `failed`
+
+### Output
+
+```json
+{
+  "removed": [
+    { "piece_name": "piece-a", "worktree_path": "/…/pieces/abc123/piece-a", "branch_name": "piece-a" },
+    { "piece_name": "piece-b", "worktree_path": "/…/pieces/abc123/piece-b", "branch_name": "piece-b" }
+  ],
+  "count": 2,
+  "main_path": "/home/user/repo"
+}
+```
+
+Pieces that could not be removed (e.g. uncommitted changes without `--force`) appear in a
+`failed` array with an `error` message instead.
+
+---
+
 ## mp piece
 
 With no subcommand, lists the project's pieces as a tree and prints the

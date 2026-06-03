@@ -666,6 +666,128 @@ func TestCLI_PieceAbandon_CurrentPiece(t *testing.T) {
 	}
 }
 
+// TestCLI_Flatten_RemovesAllPieces tests that mp flatten removes every piece
+// worktree, returning the repo to a flat main-only state.
+func TestCLI_Flatten_RemovesAllPieces(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	env.initGitRepo()
+	env.initProject("test")
+
+	// Create a couple of pieces.
+	var worktrees []string
+	for _, name := range []string{"piece-a", "piece-b"} {
+		stdout, stderr, err := env.run("piece", "create", "--name", name, "--skip-switch")
+		if err != nil {
+			t.Fatalf("piece create %s failed: %v\nstdout: %s\nstderr: %s", name, err, stdout, stderr)
+		}
+		var created map[string]any
+		if err := json.Unmarshal([]byte(stdout), &created); err != nil {
+			t.Fatalf("invalid JSON from piece create: %v", err)
+		}
+		worktrees = append(worktrees, created["worktree_path"].(string))
+	}
+
+	// Flatten via stdin JSON (non-interactive; skips the confirmation prompt).
+	stdout, stderr, err := env.runWithStdin(`{"force":true}`, "flatten")
+	if err != nil {
+		t.Fatalf("flatten failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+
+	var result struct {
+		Removed  []map[string]any `json:"removed"`
+		Count    int              `json:"count"`
+		MainPath string           `json:"main_path"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("invalid JSON output: %v\noutput: %s", err, stdout)
+	}
+
+	if result.Count != 2 {
+		t.Errorf("expected 2 pieces removed, got %d", result.Count)
+	}
+	if result.MainPath == "" {
+		t.Error("result missing main_path")
+	}
+
+	// Every worktree should be gone.
+	for _, wt := range worktrees {
+		if _, err := os.Stat(wt); !os.IsNotExist(err) {
+			t.Errorf("worktree %s should have been removed", wt)
+		}
+	}
+
+	// And listing pieces should now return an empty set.
+	stdout, _, err = env.run("piece", "list", "--flat")
+	if err != nil {
+		t.Fatalf("piece list failed: %v", err)
+	}
+	var remaining []map[string]any
+	if err := json.Unmarshal([]byte(stdout), &remaining); err != nil {
+		t.Fatalf("invalid JSON from piece list: %v\noutput: %s", err, stdout)
+	}
+	if len(remaining) != 0 {
+		t.Errorf("expected no pieces after flatten, got %d", len(remaining))
+	}
+}
+
+// TestCLI_Flatten_Schema tests mp flatten --schema outputs valid JSON
+func TestCLI_Flatten_Schema(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	stdout, _, err := env.run("flatten", "--schema")
+	if err != nil {
+		t.Fatalf("flatten --schema failed: %v", err)
+	}
+
+	var schema map[string]any
+	if err := json.Unmarshal([]byte(stdout), &schema); err != nil {
+		t.Fatalf("invalid JSON schema: %v\noutput: %s", err, stdout)
+	}
+}
+
+// TestCLI_Flatten_DryRun tests that mp flatten --dry-run reports pieces without
+// removing them.
+func TestCLI_Flatten_DryRun(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	env.initGitRepo()
+	env.initProject("test")
+
+	stdout, stderr, err := env.run("piece", "create", "--name", "keep-me", "--skip-switch")
+	if err != nil {
+		t.Fatalf("piece create failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+	var created map[string]any
+	if err := json.Unmarshal([]byte(stdout), &created); err != nil {
+		t.Fatalf("invalid JSON from piece create: %v", err)
+	}
+	worktree := created["worktree_path"].(string)
+
+	stdout, stderr, err = env.run("flatten", "--dry-run")
+	if err != nil {
+		t.Fatalf("flatten --dry-run failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+	var result struct {
+		Count  int  `json:"count"`
+		DryRun bool `json:"dry_run"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("invalid JSON output: %v\noutput: %s", err, stdout)
+	}
+	if result.Count != 1 || !result.DryRun {
+		t.Errorf("expected dry-run reporting 1 piece, got count=%d dry_run=%v", result.Count, result.DryRun)
+	}
+
+	// The worktree must still exist.
+	if _, err := os.Stat(worktree); err != nil {
+		t.Errorf("worktree should still exist after dry-run: %v", err)
+	}
+}
+
 // TestCLI_IssueSearch tests mp issue search command with query
 func TestCLI_IssueSearch(t *testing.T) {
 	env := setupTestEnv(t)

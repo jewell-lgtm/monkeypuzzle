@@ -357,3 +357,13 @@ mp piece abandon --name my-feature            # Remove piece
 mp piece abandon --name my-feature --force    # Discard uncommitted changes
 mp piece abandon --name foo --delete-branch   # Also delete git branch
 ```
+
+**All pieces** - use flatten to wipe every worktree at once (regardless of merge
+status), returning the repo to a flat main-only state:
+
+```bash
+mp flatten                    # Confirm, then remove all piece worktrees
+mp flatten --dry-run          # Preview what would be removed
+mp flatten --force            # Also discard uncommitted changes
+mp flatten --delete-branches  # Also delete each piece's branch
+```

@@ -378,6 +378,32 @@ func WithCleanupDefaults(input CleanupInput) CleanupInput {
 	}
 }
 
+// FlattenInput holds input for the flatten command.
+type FlattenInput struct {
+	Force          bool `json:"force,omitempty"`
+	DeleteBranches bool `json:"delete_branches,omitempty"`
+	DryRun         bool `json:"dry_run,omitempty"`
+}
+
+// FlattenSchema returns the JSON schema for flatten input.
+func FlattenSchema() ([]byte, error) {
+	schema := map[string]any{
+		"force":           false,
+		"delete_branches": false,
+		"dry_run":         false,
+	}
+	return json.MarshalIndent(schema, "", "  ")
+}
+
+// ParseFlattenJSON parses JSON input into FlattenInput.
+func ParseFlattenJSON(data []byte) (FlattenInput, error) {
+	var input FlattenInput
+	if err := json.Unmarshal(data, &input); err != nil {
+		return FlattenInput{}, fmt.Errorf("invalid JSON: %w", err)
+	}
+	return input, nil
+}
+
 // DoneInput holds input for the piece done command.
 type DoneInput struct {
 	MainBranch string `json:"main_branch,omitempty"`
