@@ -26,7 +26,7 @@ echo '{"query":"auth","status":["todo"]}' | mp issue search
 
 ```bash
 # Show current piece status
-mp piece
+mp piece status
 
 # List all pieces (tree view or flat)
 mp piece list
@@ -69,6 +69,11 @@ echo '{"dry_run":true}' | mp piece cleanup
 # Abandon unmerged piece
 echo '{"force":true}' | mp piece abandon
 echo '{"name":"piece-name","delete_branch":true}' | mp piece abandon
+
+# Flatten: remove ALL piece worktrees (regardless of merge status)
+echo '{"force":true}' | mp flatten
+echo '{"force":true,"delete_branches":true}' | mp flatten
+echo '{"dry_run":true}' | mp flatten   # preview only
 
 # Convert existing branch to piece
 echo '{}' | mp piece adopt

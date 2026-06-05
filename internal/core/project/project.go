@@ -78,6 +78,20 @@ func List() ([]Info, error) {
 	return out, nil
 }
 
+// Get returns the enriched Info for the registered project matching nameOrPath
+// (by symlink-resolved path or by name). The bool is false when nothing matches.
+func Get(nameOrPath string) (Info, bool, error) {
+	reg, err := registry.Load()
+	if err != nil {
+		return Info{}, false, err
+	}
+	p, ok := reg.Find(nameOrPath)
+	if !ok {
+		return Info{}, false, nil
+	}
+	return enrich(p), true, nil
+}
+
 func enrich(p registry.Project) Info {
 	info := Info{Name: p.Name, Path: p.Path}
 	fi, err := os.Stat(p.Path)

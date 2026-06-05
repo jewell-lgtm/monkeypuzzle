@@ -128,6 +128,11 @@ echo '{"dry_run":true}' | mp piece cleanup
 echo '{"force":true}' | mp piece abandon
 echo '{"name":"piece-name","delete_branch":true}' | mp piece abandon
 
+# Flatten: remove ALL piece worktrees (regardless of merge status)
+echo '{"force":true}' | mp flatten
+echo '{"force":true,"delete_branches":true}' | mp flatten
+echo '{"dry_run":true}' | mp flatten   # preview only
+
 # Convert existing branch to piece
 echo '{}' | mp piece adopt
 echo '{"name":"custom-name","parent":"main"}' | mp piece adopt

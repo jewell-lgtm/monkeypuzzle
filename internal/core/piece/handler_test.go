@@ -885,7 +885,7 @@ func TestHandler_UpdatePiece_NoHooks_Success(t *testing.T) {
 	}
 }
 
-func TestHandler_CreatePiece_OnPieceCreateHookFails_CleansUp(t *testing.T) {
+func TestHandler_CreatePiece_OnPieceCreateHookFails_KeepsPiece(t *testing.T) {
 	// Override data dir for tests
 	paths.SetDataDir("/test-data/monkeypuzzle")
 	t.Cleanup(paths.ResetDataDir)
@@ -913,24 +913,31 @@ func TestHandler_CreatePiece_OnPieceCreateHookFails_CleansUp(t *testing.T) {
 	fullHookPath := filepath.Join(repoRoot, ".monkeypuzzle/hooks", piece.HookOnPieceCreate)
 	mockExec.AddResponse("bash", []string{fullHookPath}, []byte("hook failed"), fmt.Errorf("exit status 1"))
 
-	// Mock cleanup commands - only worktree removal, no session (sessions not created at piece creation)
-	mockExec.AddResponse("git", []string{"worktree", "remove", worktreePath}, nil, nil)
-
 	// Execute
-	_, err := handler.CreatePiece(context.Background(), pieceName, piece.CreatePieceOptions{})
+	info, err := handler.CreatePiece(context.Background(), pieceName, piece.CreatePieceOptions{})
 
-	// Verify the operation failed
-	if err == nil {
-		t.Fatal("expected error when hook fails")
+	// A failing on-piece-create hook is non-fatal: the piece is kept.
+	if err != nil {
+		t.Fatalf("expected no error when on-piece-create hook fails, got: %v", err)
+	}
+	if info.Name != pieceName {
+		t.Errorf("expected piece %q to be returned, got %q", pieceName, info.Name)
 	}
 
-	if !strings.Contains(err.Error(), "on-piece-create hook failed") {
-		t.Errorf("expected error about hook failure, got: %v", err)
+	// Verify the worktree was NOT removed.
+	if mockExec.WasCalled("git", "worktree", "remove", worktreePath) {
+		t.Error("expected worktree to be kept, but cleanup removed it")
 	}
 
-	// Verify cleanup was called - git worktree remove
-	if !mockExec.WasCalled("git", "worktree", "remove", worktreePath) {
-		t.Error("expected git worktree remove to be called for cleanup")
+	// Verify the user was warned about the hook failure.
+	var warned bool
+	for _, m := range out.Messages {
+		if m.Type == core.MsgWarning && strings.Contains(m.Content, "on-piece-create hook failed") {
+			warned = true
+		}
+	}
+	if !warned {
+		t.Errorf("expected a warning about the hook failure, got messages: %+v", out.Messages)
 	}
 }
 

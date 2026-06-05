@@ -189,9 +189,14 @@ func (h *Handler) CreatePiece(ctx context.Context, pieceName string, opts Create
 		SessionName:  sessionName,
 	}
 	if err := h.hooks.RunHook(ctx, repoRoot, HookOnPieceCreate, hookCtx); err != nil {
-		// Cleanup: remove worktree on hook failure
-		h.cleanupPiece(ctx, repoRoot, worktreePath, sessionName, false)
-		return PieceInfo{}, fmt.Errorf("on-piece-create hook failed: %w", err)
+		// A failing on-piece-create hook is non-fatal: keep the worktree and
+		// continue. Setup steps (dependency installs, submodule init) can fail
+		// for transient reasons, and discarding the worktree is worse than a
+		// warning the user can act on.
+		h.deps.Output.Write(core.Message{
+			Type:    core.MsgWarning,
+			Content: fmt.Sprintf("on-piece-create hook failed (piece kept): %v", err),
+		})
 	}
 
 	h.deps.Output.Write(core.Message{
@@ -365,8 +370,11 @@ func (h *Handler) AdoptPiece(ctx context.Context, input AdoptPieceInput) (PieceI
 		SessionName:  sessionName,
 	}
 	if err := h.hooks.RunHook(ctx, repoRoot, HookOnPieceCreate, hookCtx); err != nil {
-		h.cleanupPiece(ctx, repoRoot, worktreePath, sessionName, false)
-		return PieceInfo{}, fmt.Errorf("on-piece-create hook failed: %w", err)
+		// Non-fatal: keep the adopted worktree and warn. See CreatePiece.
+		h.deps.Output.Write(core.Message{
+			Type:    core.MsgWarning,
+			Content: fmt.Sprintf("on-piece-create hook failed (piece kept): %v", err),
+		})
 	}
 
 	h.deps.Output.Write(core.Message{
@@ -1518,6 +1526,126 @@ func (h *Handler) AbandonPiece(ctx context.Context, pieceName string, opts Aband
 		Data:    result,
 	})
 
+	return result, nil
+}
+
+// FlattenOptions configures the flatten behavior.
+type FlattenOptions struct {
+	Force          bool // Force removal even with uncommitted changes
+	DeleteBranches bool // Also delete each piece's git branch
+	DryRun         bool // Only report what would be removed
+}
+
+// FlattenItem describes the outcome for a single piece during a flatten.
+type FlattenItem struct {
+	PieceName     string `json:"piece_name"`
+	WorktreePath  string `json:"worktree_path"`
+	BranchName    string `json:"branch_name,omitempty"`
+	BranchDeleted bool   `json:"branch_deleted,omitempty"`
+	Error         string `json:"error,omitempty"`
+}
+
+// FlattenResult contains the result of a flatten operation.
+type FlattenResult struct {
+	Removed  []FlattenItem `json:"removed"`          // pieces removed (or that would be removed, in dry-run)
+	Failed   []FlattenItem `json:"failed,omitempty"` // pieces that could not be removed
+	Count    int           `json:"count"`            // number removed
+	MainPath string        `json:"main_path"`        // main repo root to navigate back to
+	DryRun   bool          `json:"dry_run,omitempty"`
+}
+
+// FlattenPieces removes every piece worktree for the repo, returning it to a
+// flat main-only state. Unlike CleanupMergedPieces it does not check merge
+// status, and unlike AbandonPiece it operates on all pieces at once. A failure
+// removing one piece does not abort the rest; failures are collected in Failed.
+func (h *Handler) FlattenPieces(ctx context.Context, repoRoot string, opts FlattenOptions) (FlattenResult, error) {
+	result := FlattenResult{DryRun: opts.DryRun, Removed: []FlattenItem{}}
+
+	// Detect the main repo root, handling the case of running from within a
+	// piece worktree.
+	if repoRoot == "" {
+		wd, err := os.Getwd()
+		if err != nil {
+			return result, fmt.Errorf("failed to get working directory: %w", err)
+		}
+		detected, err := h.git.GetMainRepoRoot(ctx, wd)
+		if err != nil {
+			detected, err = h.git.RepoRoot(ctx, wd)
+			if err != nil {
+				return result, fmt.Errorf("not in a git repository")
+			}
+		}
+		repoRoot = detected
+	}
+	result.MainPath = repoRoot
+
+	pieces, err := h.ListPieces(ctx, repoRoot)
+	if err != nil {
+		return result, fmt.Errorf("failed to list pieces: %w", err)
+	}
+
+	for i := range pieces {
+		p := pieces[i]
+		item := FlattenItem{PieceName: p.Name, WorktreePath: p.WorktreePath}
+
+		// Capture the branch name before the worktree goes away.
+		if branch, err := h.git.CurrentBranch(ctx, p.WorktreePath); err == nil {
+			item.BranchName = branch
+		}
+
+		if opts.DryRun {
+			h.deps.Output.Write(core.Message{
+				Type:    core.MsgInfo,
+				Content: fmt.Sprintf("[dry-run] Would remove: %s", p.Name),
+			})
+			result.Removed = append(result.Removed, item)
+			continue
+		}
+
+		// If we're inside the worktree about to be removed, move the active
+		// client to the main repo session first.
+		h.switchClientToMainIfInside(ctx, repoRoot, p.WorktreePath)
+
+		// Kill the session if it exists (ignore errors — it may be gone).
+		if p.HasSession {
+			_ = h.mux.Kill(ctx, p.SessionName)
+		}
+
+		var removeErr error
+		if opts.Force {
+			removeErr = h.git.WorktreeRemoveForce(ctx, repoRoot, p.WorktreePath)
+		} else {
+			removeErr = h.git.WorktreeRemove(ctx, repoRoot, p.WorktreePath)
+		}
+		if removeErr != nil {
+			item.Error = removeErr.Error()
+			h.deps.Output.Write(core.Message{
+				Type:    core.MsgWarning,
+				Content: fmt.Sprintf("Failed to remove %s (use --force to discard changes): %v", p.Name, removeErr),
+			})
+			result.Failed = append(result.Failed, item)
+			continue
+		}
+
+		if opts.DeleteBranches && item.BranchName != "" {
+			if err := h.git.BranchDelete(ctx, repoRoot, item.BranchName, true); err != nil {
+				h.deps.Output.Write(core.Message{
+					Type:    core.MsgWarning,
+					Content: fmt.Sprintf("Removed %s but failed to delete branch %s: %v", p.Name, item.BranchName, err),
+				})
+			} else {
+				item.BranchDeleted = true
+			}
+		}
+
+		result.Removed = append(result.Removed, item)
+		h.deps.Output.Write(core.Message{
+			Type:    core.MsgSuccess,
+			Content: fmt.Sprintf("Removed piece: %s", p.Name),
+		})
+	}
+
+	result.Count = len(result.Removed)
 	return result, nil
 }
 

@@ -281,14 +281,82 @@ list of `pieces` that were moved/repaired. Human-readable summary to stderr.
 
 ---
 
+## mp flatten
+
+Remove **all** piece worktrees for the current repository, returning it to a flat
+main-only state. Each piece's tmux session is killed and its worktree removed.
+
+Unlike `mp piece cleanup` (which only removes _merged_ pieces), flatten removes every
+piece regardless of merge status. Branches are kept by default.
+
+### Usage
+
+```bash
+mp flatten                       # Interactive confirmation, then remove all pieces
+mp flatten --yes                 # Remove all (skip confirmation)
+mp flatten --force               # Discard uncommitted changes while removing
+mp flatten --delete-branches     # Also delete each piece's git branch
+mp flatten --dry-run             # Show what would be removed without changes
+echo '{"force":true}' | mp flatten
+mp flatten --schema
+```
+
+### Flags
+
+| Flag                | Description                                  | Default |
+| ------------------- | -------------------------------------------- | ------- |
+| `--force`           | Force removal even with uncommitted changes  | `false` |
+| `--delete-branches` | Also delete each piece's git branch          | `false` |
+| `--dry-run`         | Show what would be removed without changes   | `false` |
+| `--yes`             | Skip the interactive confirmation prompt     | `false` |
+
+### What it does
+
+1. Lists all pieces for the repo (works from the main repo or from inside a piece)
+2. In an interactive terminal, asks for confirmation (skip with `--yes`/`--force`)
+3. For each piece: switches you to the main session if you're inside it, kills the
+   tmux session, and removes the worktree (use `--force` to discard uncommitted changes)
+4. Optionally deletes each piece's branch (`--delete-branches`)
+5. Continues past individual failures, reporting them under `failed`
+
+### Output
+
+```json
+{
+  "removed": [
+    { "piece_name": "piece-a", "worktree_path": "/…/pieces/abc123/piece-a", "branch_name": "piece-a" },
+    { "piece_name": "piece-b", "worktree_path": "/…/pieces/abc123/piece-b", "branch_name": "piece-b" }
+  ],
+  "count": 2,
+  "main_path": "/home/user/repo"
+}
+```
+
+Pieces that could not be removed (e.g. uncommitted changes without `--force`) appear in a
+`failed` array with an `error` message instead.
+
+---
+
 ## mp piece
+
+With no subcommand, lists the project's pieces as a tree and prints the
+available subcommands — a discoverable overview for getting your bearings.
+
+### Usage
+
+```bash
+mp piece          # list pieces + show subcommands
+mp piece status   # current-piece status as JSON (see below)
+```
+
+## mp piece status
 
 Show current piece status.
 
 ### Usage
 
 ```bash
-mp piece
+mp piece status
 ```
 
 ### Output
@@ -344,7 +412,9 @@ mp piece create --skip-switch  # Don't auto-switch to new piece
 6. Runs `on-piece-create.sh` hook (if exists)
 7. **Switches to the new piece** (unless `--skip-switch` is set)
 
-If the hook fails, the worktree and tmux session are cleaned up automatically.
+If the `on-piece-create.sh` hook fails, the worktree is kept and a warning is
+printed — setup steps (dependency installs, submodule init) often fail for
+transient reasons, so re-run the failed step manually inside the worktree.
 The auto-switch uses tmux attach/switch-client if available, otherwise prints the path.
 
 ### Output
@@ -770,17 +840,20 @@ mp project remove --target /path/to/repo
 
 ## mp dash
 
-Cross-project dashboard of every registered project and its piece worktrees. With a terminal it opens an interactive dashboard; otherwise (or with `--json`) it prints the same data as JSON. Running bare `mp` is equivalent to `mp dash`.
+Cross-project dashboard of every registered project and its piece worktrees. With a terminal it opens an interactive dashboard; otherwise (or with `--json`) it prints the same data as JSON.
+
+Bare `mp` opens the **same dashboard scoped to the current project** (repo-local) — it shows only the pieces, issues, and branches of the project you're standing in. When run outside any registered project it falls back to the cross-project view, so `mp` still works as a launcher from anywhere. Use `mp dash` for the explicit all-projects view.
 
 ### Usage
 
 ```bash
-mp dash          # interactive dashboard (or JSON when not a TTY)
+mp               # dashboard scoped to the current project (all projects if outside one)
+mp dash          # every registered project (or JSON when not a TTY)
 mp dash --json   # force JSON output
-mp               # same as mp dash
+mp --json        # JSON for the current project
 ```
 
-The JSON form includes per-project `pieces`, `issues`, and `branches` arrays so callers can build their own pickers (see [`mp switch`](#mp-switch)).
+The JSON form includes per-project `pieces`, `issues`, and `branches` arrays so callers can build their own pickers (see [`mp switch`](#mp-switch)). The `branches` array includes both local branches and remote-only refs (e.g. `origin/foo`, marked `"remote": true`) that have no local branch yet — selecting one fetches the remote and adopts it as a piece.
 
 ---
 
@@ -858,7 +931,7 @@ Monkeypuzzle is designed for programmatic use:
 mp init --schema | jq '.name = "myproject"' | mp init
 
 # Check status programmatically
-STATUS=$(mp piece)
+STATUS=$(mp piece status)
 IN_PIECE=$(echo "$STATUS" | jq -r '.in_piece')
 
 # Parse piece creation output

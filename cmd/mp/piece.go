@@ -30,8 +30,18 @@ import (
 var pieceCmd = &cobra.Command{
 	Use:   "piece",
 	Short: "Manage puzzle pieces",
-	Long:  `Show piece status or create new pieces.`,
-	Args:  cobra.NoArgs,
+	Long: `Manage puzzle pieces (git worktrees).
+
+With no subcommand, lists the project's pieces and the available subcommands.
+Use 'mp piece status' for the current piece's status as JSON.`,
+	Args: cobra.NoArgs,
+	RunE: runPieceDefault,
+}
+
+var pieceStatusCmd = &cobra.Command{
+	Use:   "status",
+	Short: "Show current piece status",
+	Long:  `Print the current piece's status (parent, children, issue, branch) as JSON. Run from within a piece worktree, or the main repo.`,
 	RunE:  runPieceStatus,
 }
 
@@ -170,9 +180,10 @@ func init() {
 	pieceAdoptCmd.Flags().StringVar(&flagPieceAdoptName, "name", "", "Override piece name (defaults to branch name)")
 	pieceAdoptCmd.Flags().StringVarP(&flagPieceAdoptParent, "parent", "p", "main", "Parent piece name (default: main)")
 	pieceAdoptCmd.Flags().BoolVar(&flagPieceAdoptSchema, "schema", false, "Output JSON schema and exit")
-	pieceCmd.Flags().StringVar(&flagMainBranch, "main-branch", "main", "Main branch name (default: main)")
+	pieceStatusCmd.Flags().StringVar(&flagMainBranch, "main-branch", "main", "Main branch name (default: main)")
 	pieceListCmd.Flags().BoolVar(&flagPieceListFlat, "flat", false, "Display pieces in a flat list instead of tree view")
 	pieceListCmd.Flags().BoolVar(&flagPieceListAll, "all", false, "List pieces across all registered projects")
+	pieceCmd.AddCommand(pieceStatusCmd)
 	pieceCmd.AddCommand(pieceCreateCmd)
 	pieceCmd.AddCommand(pieceUpdateCmd)
 	pieceCmd.AddCommand(pieceMergeCmd)
@@ -264,6 +275,35 @@ func completeGitBranches(cmd *cobra.Command, args []string, toComplete string) (
 		}
 	}
 	return filtered, cobra.ShellCompDirectiveNoFileComp
+}
+
+// runPieceDefault handles bare `mp piece`: a quick, discoverable overview that
+// lists the project's pieces as a tree and points to the subcommands. The
+// machine-readable current-piece status lives at `mp piece status`.
+func runPieceDefault(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
+	deps := core.NewDeps(
+		adapters.NewOSFS(""),
+		adapters.NewTextOutput(os.Stderr),
+		adapters.NewOSExec(),
+		http.DefaultClient,
+		adapters.SetupCLILoading(os.Stderr),
+	)
+	handler := newPieceHandler(deps)
+
+	pieces, err := handler.ListPieces(ctx, "")
+	if err != nil {
+		return err
+	}
+	if len(pieces) == 0 {
+		fmt.Fprintln(os.Stderr, "No pieces yet. Create one with `mp piece create`.")
+	} else {
+		renderTree(piececmd.BuildPieceTree(pieces))
+	}
+
+	fmt.Fprintln(os.Stderr, "\nSubcommands: status, create, list, switch, adopt, update, merge, done, abandon, cleanup")
+	fmt.Fprintln(os.Stderr, "Run `mp piece <command> --help` for details, or `mp piece status` for current-piece JSON.")
+	return nil
 }
 
 func runPieceStatus(cmd *cobra.Command, args []string) error {

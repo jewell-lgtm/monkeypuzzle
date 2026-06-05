@@ -30,6 +30,7 @@ CLI tool for git worktree-based development workflow. Binary: `mp`
 | `mp piece adopt` | ✅ | Convert a branch into a piece |
 | `mp piece cleanup --force` | ✅ | Use `--force` to skip prompts |
 | `mp piece abandon` | ✅ | Use `--name` and `--force` |
+| `mp flatten --yes` | ✅ | Removes ALL piece worktrees; `--force` for dirty trees |
 | `mp stack status/sync/append/prepend/continue` | ✅ | Whole-stack ops; non-interactive |
 | `mp project add/list/remove` | ✅ | Global project registry |
 | `mp dash --json` | ✅ | Cross-project JSON dashboard |
@@ -214,6 +215,21 @@ mp piece adopt                       # adopt current branch (from main repo)
 mp piece adopt my-spike              # adopt a local branch
 mp piece adopt --branch origin/foo   # fetch + adopt a remote branch
 mp piece adopt my-spike --parent feature-a   # stack under another piece
+```
+
+## mp flatten
+
+Remove **all** piece worktrees for the repo, returning to a flat main-only state. Unlike `mp piece cleanup` (merged pieces only), flatten removes every piece regardless of merge status. Interactive runs confirm first; pass `--yes` (or `--force`) to skip the prompt. Branches are kept unless `--delete-branches`.
+
+```bash
+# For agents (non-interactive; --yes/--force skip the prompt)
+mp flatten --yes
+mp flatten --force                 # discard uncommitted changes too
+mp flatten --delete-branches       # also delete each piece's branch
+mp flatten --dry-run               # preview without removing
+
+# JSON stdin
+echo '{"force":true}' | mp flatten
 ```
 
 ## mp stack

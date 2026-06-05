@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
@@ -34,7 +36,8 @@ var dashCmd = &cobra.Command{
 into any worktree's tmux session.
 
 With a terminal, opens an interactive dashboard. Otherwise (or with --json) prints
-the same data as JSON. Running bare 'mp' is equivalent to 'mp dash'.`,
+the same data as JSON. Bare 'mp' shows the same dashboard scoped to the current
+project (repo-local); 'mp dash' always shows every registered project.`,
 	RunE: runDash,
 }
 
@@ -44,8 +47,11 @@ func init() {
 	dashCmd.Flags().BoolVar(&flagDashJSON, "json", false, "Output JSON instead of the interactive dashboard")
 	rootCmd.AddCommand(dashCmd)
 
-	// Bare `mp` opens the dashboard.
-	rootCmd.RunE = runDash
+	// Bare `mp` opens a dashboard scoped to the current project (repo-local),
+	// falling back to the cross-project view when run outside a registered repo.
+	// `mp dash` always shows every project.
+	rootCmd.Flags().BoolVar(&flagDashJSON, "json", false, "Output JSON instead of the interactive dashboard")
+	rootCmd.RunE = runRoot
 }
 
 // dashPiece is the JSON shape for a piece worktree in the dashboard.
@@ -66,10 +72,12 @@ type dashIssue struct {
 	Status string `json:"status"`
 }
 
-// dashBranch is the JSON shape for a local git branch that is not yet adopted
-// as a piece. The picker uses these rows to adopt a branch on the fly.
+// dashBranch is the JSON shape for a git branch that is not yet adopted as a
+// piece. The picker uses these rows to adopt a branch on the fly. Remote marks
+// a remote-only ref (e.g. "origin/foo") with no local branch yet.
 type dashBranch struct {
-	Name string `json:"name"`
+	Name   string `json:"name"`
+	Remote bool   `json:"remote,omitempty"`
 }
 
 // dashProject is the JSON shape for one project in the dashboard.
@@ -82,12 +90,47 @@ type dashProject struct {
 	Error       string       `json:"error,omitempty"`
 }
 
-func collectDashboard(ctx context.Context) ([]dashProject, error) {
-	infos, err := projectcmd.List()
+// currentProjectInfo returns the enriched Info for the registered project that
+// contains the current working directory, resolving the main repo root so it
+// also works from inside a piece worktree. The bool is false when cwd is not
+// inside a registered project (e.g. an unrelated repo, or no repo at all).
+func currentProjectInfo(ctx context.Context) (projectcmd.Info, bool) {
+	wd, err := os.Getwd()
 	if err != nil {
-		return nil, err
+		return projectcmd.Info{}, false
 	}
+	git := adapters.NewGit(adapters.NewOSExec())
+	root, err := git.GetMainRepoRoot(ctx, wd)
+	if err != nil {
+		if root, err = git.RepoRoot(ctx, wd); err != nil {
+			return projectcmd.Info{}, false
+		}
+	}
+	// The registry stores symlink-resolved paths; match that so lookups succeed
+	// on systems where the repo lives under a symlinked prefix.
+	if resolved, rerr := filepath.EvalSymlinks(root); rerr == nil {
+		root = resolved
+	}
+	info, ok, err := projectcmd.Get(root)
+	if err != nil || !ok {
+		return projectcmd.Info{}, false
+	}
+	return info, true
+}
 
+// dashboardInfos returns the projects to show. Bare `mp` scopes to the current
+// project (repo-local); when cwd isn't in a registered project it falls back to
+// every registered project so `mp` still works as a launcher from anywhere.
+func dashboardInfos(ctx context.Context, scopeToCurrent bool) ([]projectcmd.Info, error) {
+	if scopeToCurrent {
+		if info, ok := currentProjectInfo(ctx); ok {
+			return []projectcmd.Info{info}, nil
+		}
+	}
+	return projectcmd.List()
+}
+
+func collectDashboard(ctx context.Context, infos []projectcmd.Info) ([]dashProject, error) {
 	deps := core.NewDeps(
 		adapters.NewOSFS(""),
 		adapters.NewTextOutput(os.Stderr),
@@ -150,11 +193,13 @@ func collectProjectIssues(deps core.Deps, projectPath string, pieces []dashPiece
 	return out
 }
 
-// collectProjectBranches returns local git branches that are candidates for
-// adoption: not main/master, not currently checked out in any worktree (which
-// covers both the main repo and existing piece worktrees).
+// collectProjectBranches returns git branches that are candidates for adoption:
+// not main/master and not currently checked out in any worktree (which covers
+// both the main repo and existing piece worktrees). Local branches come first,
+// then remote-only refs (e.g. "origin/foo") that have no local branch yet —
+// adopting one fetches the remote and creates a tracking worktree.
 func collectProjectBranches(ctx context.Context, git *adapters.Git, projectPath string) []dashBranch {
-	branches, err := git.ListLocalBranches(ctx, projectPath)
+	locals, err := git.ListLocalBranches(ctx, projectPath)
 	if err != nil {
 		return nil
 	}
@@ -165,20 +210,57 @@ func collectProjectBranches(ctx context.Context, git *adapters.Git, projectPath 
 		checkedOut = map[string]bool{}
 	}
 
-	out := make([]dashBranch, 0, len(branches))
-	for _, b := range branches {
-		if b == "main" || b == "master" {
-			continue
-		}
-		if checkedOut[b] {
+	localSet := make(map[string]bool, len(locals))
+	for _, b := range locals {
+		localSet[b] = true
+	}
+
+	out := make([]dashBranch, 0, maxBranchesPerProject)
+	for _, b := range locals {
+		if b == "main" || b == "master" || checkedOut[b] {
 			continue
 		}
 		out = append(out, dashBranch{Name: b})
+		if len(out) >= maxBranchesPerProject {
+			return out
+		}
+	}
+
+	// Remote-only branches: the bug we're fixing is that you couldn't create a
+	// piece from a branch that exists on origin but not locally.
+	remotes, err := git.ListRemoteBranches(ctx, projectPath)
+	if err != nil {
+		return out
+	}
+	seen := map[string]bool{}
+	for _, r := range remotes {
+		short := remoteBranchShortName(r)
+		if short == "" || short == "main" || short == "master" {
+			continue
+		}
+		// Skip remotes that already have a local branch (the local row covers
+		// them) or whose branch is checked out, and dedupe across remotes.
+		if localSet[short] || checkedOut[short] || seen[short] {
+			continue
+		}
+		seen[short] = true
+		out = append(out, dashBranch{Name: r, Remote: true})
 		if len(out) >= maxBranchesPerProject {
 			break
 		}
 	}
 	return out
+}
+
+// remoteBranchShortName strips the leading "<remote>/" from a remote ref like
+// "origin/foo" → "foo" (preserving any further slashes, e.g.
+// "origin/feature/x" → "feature/x"). Returns "" if there's nothing after the
+// remote name.
+func remoteBranchShortName(ref string) string {
+	if i := strings.IndexByte(ref, '/'); i > 0 && i < len(ref)-1 {
+		return ref[i+1:]
+	}
+	return ""
 }
 
 func dashboardRows(projects []dashProject) []dashboard.Row {
@@ -231,15 +313,32 @@ func dashboardRows(projects []dashProject) []dashboard.Row {
 				Project:     p.Name,
 				ProjectPath: p.Path,
 				Branch:      br.Name,
+				Remote:      br.Remote,
 			})
 		}
 	}
 	return rows
 }
 
+// runRoot handles bare `mp`: a dashboard scoped to the current project. When
+// cwd isn't inside a registered project it falls back to the cross-project view
+// so `mp` still works as a launcher from anywhere.
+func runRoot(cmd *cobra.Command, args []string) error {
+	return runDashScoped(cmd.Context(), true)
+}
+
+// runDash handles `mp dash`: the explicit cross-project view over every
+// registered project, regardless of where it's run from.
 func runDash(cmd *cobra.Command, args []string) error {
-	ctx := cmd.Context()
-	projects, err := collectDashboard(ctx)
+	return runDashScoped(cmd.Context(), false)
+}
+
+func runDashScoped(ctx context.Context, scopeToCurrent bool) error {
+	infos, err := dashboardInfos(ctx, scopeToCurrent)
+	if err != nil {
+		return err
+	}
+	projects, err := collectDashboard(ctx, infos)
 	if err != nil {
 		return err
 	}
