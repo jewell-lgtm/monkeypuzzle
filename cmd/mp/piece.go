@@ -314,16 +314,9 @@ func runPieceStatus(cmd *cobra.Command, args []string) error {
 			fmt.Fprintf(os.Stderr, "\nPrompt: %s\n", meta.Prompt)
 		}
 
-		// Display issue information if available
-		marker, err := handler.ReadCurrentIssueMarker(status.WorktreePath)
-		if err == nil && marker != nil && !marker.Issue.IsEmpty() {
-			fmt.Fprintf(os.Stderr, "\nIssue: %s\n", marker.Issue.DisplayName())
-			if marker.Status != "" {
-				fmt.Fprintf(os.Stderr, "Status: %s\n", marker.Status)
-			}
-			if marker.Dirty {
-				fmt.Fprintf(os.Stderr, "⚠ Unsynced changes (run 'mp issue sync')\n")
-			}
+		// Display the issue this piece was created from, if any.
+		if metaErr == nil && meta != nil && !meta.Issue.IsEmpty() {
+			fmt.Fprintf(os.Stderr, "\nIssue: %s\n", meta.Issue.DisplayName())
 		}
 
 		// Display branch information
@@ -367,19 +360,13 @@ func runPieceCreate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to get working directory: %w", err)
 	}
 
-	// Setup deps with issue sync
-	issueSync := core.NewIssueSyncSignal()
-	deps := core.NewDepsWithSync(
+	deps := core.NewDeps(
 		adapters.NewOSFS(""),
 		adapters.NewTextOutput(os.Stderr),
 		adapters.NewOSExec(),
 		http.DefaultClient,
 		adapters.SetupCLILoading(os.Stderr),
-		issueSync,
 	)
-
-	// Register issue sync subscriber
-	issueSync.Sub(newIssueSyncSubscriber(wd, deps, os.Stderr))
 
 	handler := newPieceHandler(deps)
 
@@ -488,7 +475,7 @@ func getPieceCreateInput(deps core.Deps, workDir string) (piececmd.NewPieceInput
 func runPieceCreateTUI(deps core.Deps, workDir string) (piececmd.NewPieceInput, error) {
 	tuiDeps := core.NewDeps(deps.FS, deps.Output, deps.Exec, deps.HTTP, nil)
 	issueHandler := issue.NewHandler(tuiDeps, workDir)
-	issues, _ := issueHandler.ListIssues([]string{piececmd.StatusTodo})
+	issues := availableIssues(tuiDeps, issueHandler, workDir)
 
 	// If no issues, skip straight to prompt input
 	if len(issues) == 0 {
@@ -511,17 +498,18 @@ func runPieceCreateTUI(deps core.Deps, workDir string) (piececmd.NewPieceInput, 
 		return runPromptInputTUI()
 	}
 
-	// Issue picker flow
+	// Issue picker flow. Exclude issues that already have a piece (the dedup
+	// that keeps the list useful now that issues have no status).
+	worked := workedIssueIDsForRepo(tuiDeps, workDir)
 	searchFn := func(query string) tea.Cmd {
 		return func() tea.Msg {
 			results, err := issueHandler.SearchIssues(issue.SearchInput{
-				Query:  query,
-				Status: []string{piececmd.StatusTodo},
-				Limit:  100,
+				Query: query,
+				Limit: 100,
 			})
 			return issuepicker.IssuesLoadedMsg{
 				Query:  query,
-				Issues: results,
+				Issues: filterWorkedIssues(results, worked),
 				Err:    err,
 			}
 		}
@@ -759,19 +747,13 @@ func runPieceCleanup(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to get working directory: %w", err)
 	}
 
-	// Setup deps with issue sync
-	issueSync := core.NewIssueSyncSignal()
-	deps := core.NewDepsWithSync(
+	deps := core.NewDeps(
 		adapters.NewOSFS(""),
 		adapters.NewTextOutput(os.Stderr),
 		adapters.NewOSExec(),
 		http.DefaultClient,
 		adapters.SetupCLILoading(os.Stderr),
-		issueSync,
 	)
-
-	// Register issue sync subscriber
-	issueSync.Sub(newIssueSyncSubscriber(wd, deps, os.Stderr))
 
 	handler := newPieceHandler(deps)
 
@@ -904,19 +886,13 @@ func runPieceDone(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to get working directory: %w", err)
 	}
 
-	// Setup deps with issue sync
-	issueSync := core.NewIssueSyncSignal()
-	deps := core.NewDepsWithSync(
+	deps := core.NewDeps(
 		adapters.NewOSFS(""),
 		adapters.NewTextOutput(os.Stderr),
 		adapters.NewOSExec(),
 		http.DefaultClient,
 		adapters.SetupCLILoading(os.Stderr),
-		issueSync,
 	)
-
-	// Register issue sync subscriber
-	issueSync.Sub(newIssueSyncSubscriber(wd, deps, os.Stderr))
 
 	handler := newPieceHandler(deps)
 
@@ -1284,26 +1260,47 @@ func formatTimeAgo(t time.Time) string {
 	}
 }
 
-// newIssueSyncSubscriber creates a subscriber that syncs status changes to providers.
-func newIssueSyncSubscriber(workDir string, deps core.Deps, output io.Writer) func(event core.IssueSyncEvent) {
-	return func(event core.IssueSyncEvent) {
-		if event.IssueID == "" {
-			return
-		}
-
-		// Sync to provider
-		handler := issue.NewHandler(deps, workDir)
-		err := handler.SyncStatus(event.IssueID, event.NewStatus)
-		if err != nil {
-			_, _ = fmt.Fprintf(output, "⚠ Failed to sync: %v\n", err)
-			return
-		}
-
-		// Clear dirty flag
-		if event.WorktreePath != "" {
-			_ = piececmd.ClearIssueDirtyFlag(event.WorktreePath, deps.FS)
-		}
-
-		_, _ = fmt.Fprintf(output, "✓ Synced %s → %s\n", event.IssueID, event.NewStatus)
+// availableIssues lists issues for the repo, excluding any that already have a
+// piece. This is the dedup that keeps the picker useful now that issues have no
+// status — an issue with a piece is "in progress" by virtue of the piece.
+func availableIssues(deps core.Deps, issueHandler *issue.Handler, workDir string) []issue.IssueListItem {
+	items, err := issueHandler.ListIssues()
+	if err != nil {
+		return nil
 	}
+	return filterWorkedIssues(items, workedIssueIDsForRepo(deps, workDir))
+}
+
+// filterWorkedIssues drops issues whose ID is in the worked set.
+func filterWorkedIssues(items []issue.IssueListItem, worked map[string]bool) []issue.IssueListItem {
+	if len(worked) == 0 {
+		return items
+	}
+	out := make([]issue.IssueListItem, 0, len(items))
+	for _, it := range items {
+		if worked[it.ID] {
+			continue
+		}
+		out = append(out, it)
+	}
+	return out
+}
+
+// workedIssueIDsForRepo returns the set of issue IDs that already have a piece
+// in the given repo, derived from each piece's recorded issue ref in metadata.
+func workedIssueIDsForRepo(deps core.Deps, workDir string) map[string]bool {
+	worked := make(map[string]bool)
+	handler := newPieceHandler(deps)
+	pieces, err := handler.ListPieces(context.Background(), workDir)
+	if err != nil {
+		return worked
+	}
+	for _, pc := range pieces {
+		meta, err := piececmd.ReadPieceMetadata(pc.WorktreePath, deps.FS)
+		if err != nil || meta == nil || meta.Issue.IsEmpty() {
+			continue
+		}
+		worked[meta.Issue.ID] = true
+	}
+	return worked
 }

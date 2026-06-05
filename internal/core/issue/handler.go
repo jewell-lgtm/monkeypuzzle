@@ -20,7 +20,6 @@ type IssueListItem struct {
 	ID       string `json:"id"`       // Provider-specific ID (path for markdown)
 	Path     string `json:"path"`     // Relative path from repo root (for display)
 	Title    string `json:"title"`    // Display title
-	Status   string `json:"status"`   // Current status
 	Number   string `json:"number"`   // Human-readable issue number (e.g., "ABC-123")
 	Provider string `json:"provider"` // Provider type (markdown, linear)
 }
@@ -78,17 +77,16 @@ func (h *Handler) Run(input Input) (IssueFile, error) {
 	return result, nil
 }
 
-// ListIssues returns issues from the configured issues directory.
-// If statusFilter is non-empty, only issues with matching status are returned.
-// Issues are sorted alphabetically by title.
-func (h *Handler) ListIssues(statusFilter []string) ([]IssueListItem, error) {
+// ListIssues returns all issues from the configured issues directory,
+// sorted alphabetically by title.
+func (h *Handler) ListIssues() ([]IssueListItem, error) {
 	pinfo, err := h.getProvider()
 	if err != nil {
 		return nil, err
 	}
 
 	h.pubLoading(true, "Fetching issues...")
-	issues, err := pinfo.provider.List(statusFilter)
+	issues, err := pinfo.provider.List()
 	h.pubLoading(false, "")
 	if err != nil {
 		return nil, err
@@ -102,7 +100,6 @@ func (h *Handler) ListIssues(statusFilter []string) ([]IssueListItem, error) {
 			ID:       issue.ID,
 			Path:     filepath.Join(pinfo.issuesDir, filename),
 			Title:    issue.Title,
-			Status:   issue.Status,
 			Number:   issue.Number,
 			Provider: pinfo.providerType,
 		}
@@ -133,7 +130,6 @@ func (h *Handler) SearchIssues(input SearchInput) ([]IssueListItem, error) {
 			ID:       issue.ID,
 			Path:     filepath.Join(pinfo.issuesDir, filename),
 			Title:    issue.Title,
-			Status:   issue.Status,
 			Number:   issue.Number,
 			Provider: pinfo.providerType,
 		}
@@ -195,15 +191,4 @@ func (h *Handler) pubLoading(active bool, label string) {
 	if h.deps.Loading != nil {
 		h.deps.Loading.Pub(active, label)
 	}
-}
-
-// SyncStatus updates the status of an issue via the configured provider.
-// This is called by the issue sync subscriber to persist status changes.
-func (h *Handler) SyncStatus(issueID string, status string) error {
-	pinfo, err := h.getProvider()
-	if err != nil {
-		return err
-	}
-
-	return pinfo.provider.UpdateStatus(issueID, status)
 }

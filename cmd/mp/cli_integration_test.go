@@ -238,19 +238,19 @@ func TestCLI_IssueList(t *testing.T) {
 }
 
 // TestCLI_IssueList_StatusFilter tests mp issue list --status
-func TestCLI_IssueList_StatusFilter(t *testing.T) {
+func TestCLI_IssueList_ReturnsAllIgnoringLegacyStatus(t *testing.T) {
 	env := setupTestEnv(t)
 	defer env.cleanup()
 
 	env.initProject("test")
+	// Legacy files carrying a status field must still list without error.
 	env.createIssue("todo-feature.md", "Todo Feature", "todo")
 	env.createIssue("done-feature.md", "Done Feature", "done")
 	env.createIssue("wip-feature.md", "WIP Feature", "in-progress")
 
-	// Filter by todo status
-	stdout, _, err := env.run("issue", "list", "--status", "todo")
+	stdout, _, err := env.run("issue", "list")
 	if err != nil {
-		t.Fatalf("issue list --status failed: %v", err)
+		t.Fatalf("issue list failed: %v", err)
 	}
 
 	var issues []map[string]any
@@ -258,12 +258,8 @@ func TestCLI_IssueList_StatusFilter(t *testing.T) {
 		t.Fatalf("invalid JSON output: %v\noutput: %s", err, stdout)
 	}
 
-	if len(issues) != 1 {
-		t.Errorf("expected 1 todo issue, got %d", len(issues))
-	}
-
-	if len(issues) > 0 && issues[0]["status"] != "todo" {
-		t.Errorf("expected status 'todo', got %v", issues[0]["status"])
+	if len(issues) != 3 {
+		t.Errorf("expected 3 issues, got %d", len(issues))
 	}
 }
 
@@ -282,8 +278,8 @@ func TestCLI_IssueList_Schema(t *testing.T) {
 		t.Fatalf("invalid JSON schema: %v\noutput: %s", err, stdout)
 	}
 
-	if _, ok := schema["status"]; !ok {
-		t.Error("schema missing 'status' field")
+	if _, ok := schema["status"]; ok {
+		t.Error("schema should no longer contain a 'status' field")
 	}
 }
 
@@ -340,17 +336,6 @@ func TestCLI_IssueCreate_Flags(t *testing.T) {
 
 	if result["title"] != "Flag Feature" {
 		t.Errorf("expected title 'Flag Feature', got %v", result["title"])
-	}
-}
-
-// TestCLI_IssueList_InvalidStatus tests error handling for invalid status
-func TestCLI_IssueList_InvalidStatus(t *testing.T) {
-	env := setupTestEnv(t)
-	defer env.cleanup()
-
-	_, _, err := env.run("issue", "list", "--status", "invalid")
-	if err == nil {
-		t.Error("expected error for invalid status, got nil")
 	}
 }
 
@@ -800,7 +785,7 @@ func TestCLI_IssueSearch(t *testing.T) {
 }
 
 // TestCLI_IssueSearch_StatusFilter tests mp issue search with status filter
-func TestCLI_IssueSearch_StatusFilter(t *testing.T) {
+func TestCLI_IssueSearch_Query(t *testing.T) {
 	env := setupTestEnv(t)
 	defer env.cleanup()
 
@@ -809,10 +794,10 @@ func TestCLI_IssueSearch_StatusFilter(t *testing.T) {
 	env.createIssue("fix-auth-bug.md", "Fix authentication bug", "in-progress")
 	env.createIssue("add-logging.md", "Add logging", "todo")
 
-	// Search with status filter
-	stdout, _, err := env.run("issue", "search", "--status", "todo")
+	// Search by query (fuzzy match on title)
+	stdout, _, err := env.run("issue", "search", "--query", "auth")
 	if err != nil {
-		t.Fatalf("issue search --status failed: %v", err)
+		t.Fatalf("issue search --query failed: %v", err)
 	}
 
 	var issues []map[string]any
@@ -820,15 +805,9 @@ func TestCLI_IssueSearch_StatusFilter(t *testing.T) {
 		t.Fatalf("invalid JSON output: %v\noutput: %s", err, stdout)
 	}
 
-	// Should find 2 todo issues
+	// Should find 2 issues matching "auth"
 	if len(issues) != 2 {
-		t.Errorf("expected 2 todo issues, got %d", len(issues))
-	}
-
-	for _, iss := range issues {
-		if iss["status"] != "todo" {
-			t.Errorf("expected status 'todo', got %v", iss["status"])
-		}
+		t.Errorf("expected 2 issues matching 'auth', got %d", len(issues))
 	}
 }
 
@@ -842,7 +821,7 @@ func TestCLI_IssueSearch_Stdin(t *testing.T) {
 	env.createIssue("fix-bug.md", "Fix bug", "done")
 
 	// Search with stdin JSON
-	input := `{"query":"auth","status":["todo"]}`
+	input := `{"query":"auth"}`
 	stdout, _, err := env.runWithStdin(input, "issue", "search")
 	if err != nil {
 		t.Fatalf("issue search with stdin failed: %v", err)
@@ -876,8 +855,8 @@ func TestCLI_IssueSearch_Schema(t *testing.T) {
 	if _, ok := schema["query"]; !ok {
 		t.Error("schema missing 'query' field")
 	}
-	if _, ok := schema["status"]; !ok {
-		t.Error("schema missing 'status' field")
+	if _, ok := schema["status"]; ok {
+		t.Error("schema should no longer contain a 'status' field")
 	}
 }
 

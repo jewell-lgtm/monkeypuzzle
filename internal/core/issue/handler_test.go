@@ -60,8 +60,8 @@ func TestHandler_Run_CreatesIssueFile(t *testing.T) {
 	if !strings.Contains(content, "title: My Feature") {
 		t.Error("expected title in frontmatter")
 	}
-	if !strings.Contains(content, "status: todo") {
-		t.Error("expected status in frontmatter")
+	if strings.Contains(content, "status:") {
+		t.Error("did not expect a status field in frontmatter")
 	}
 	if !strings.Contains(content, "description: Description here") {
 		t.Error("expected description in frontmatter")
@@ -285,7 +285,7 @@ func TestHandler_ListIssues_EmptyDirectory(t *testing.T) {
 
 	handler := issue.NewHandler(deps, "")
 
-	issues, err := handler.ListIssues(nil)
+	issues, err := handler.ListIssues()
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -303,7 +303,7 @@ func TestHandler_ListIssues_NoIssuesDirectory(t *testing.T) {
 
 	handler := issue.NewHandler(deps, "")
 
-	issues, err := handler.ListIssues(nil)
+	issues, err := handler.ListIssues()
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -312,50 +312,26 @@ func TestHandler_ListIssues_NoIssuesDirectory(t *testing.T) {
 	}
 }
 
-func TestHandler_ListIssues_FiltersTodo(t *testing.T) {
+func TestHandler_ListIssues_ReturnsAll(t *testing.T) {
 	fs := adapters.NewMemoryFS()
 	out := adapters.NewBufferOutput()
 	deps := core.Deps{FS: fs, Output: out}
 	setupConfig(t, fs)
 
 	_ = fs.MkdirAll("issues", 0755)
+	// Legacy files with a status field must still list without error.
 	_ = fs.WriteFile("issues/todo.md", []byte("---\ntitle: Todo\nstatus: todo\n---\n"), 0644)
 	_ = fs.WriteFile("issues/done.md", []byte("---\ntitle: Done\nstatus: done\n---\n"), 0644)
+	_ = fs.WriteFile("issues/plain.md", []byte("---\ntitle: Plain\n---\n"), 0644)
 
 	handler := issue.NewHandler(deps, "")
 
-	issues, err := handler.ListIssues([]string{"todo"})
+	issues, err := handler.ListIssues()
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
-	if len(issues) != 1 {
-		t.Errorf("expected 1 issue, got %d", len(issues))
-	}
-	if len(issues) > 0 && issues[0].Title != "Todo" {
-		t.Errorf("expected title 'Todo', got %q", issues[0].Title)
-	}
-}
-
-func TestHandler_ListIssues_MissingStatusDefaultsTodo(t *testing.T) {
-	fs := adapters.NewMemoryFS()
-	out := adapters.NewBufferOutput()
-	deps := core.Deps{FS: fs, Output: out}
-	setupConfig(t, fs)
-
-	_ = fs.MkdirAll("issues", 0755)
-	_ = fs.WriteFile("issues/no-status.md", []byte("---\ntitle: No Status\n---\n"), 0644)
-
-	handler := issue.NewHandler(deps, "")
-
-	issues, err := handler.ListIssues([]string{"todo"})
-	if err != nil {
-		t.Fatalf("expected no error, got %v", err)
-	}
-	if len(issues) != 1 {
-		t.Errorf("expected 1 issue, got %d", len(issues))
-	}
-	if len(issues) > 0 && issues[0].Status != "todo" {
-		t.Errorf("expected status 'todo', got %q", issues[0].Status)
+	if len(issues) != 3 {
+		t.Errorf("expected 3 issues, got %d", len(issues))
 	}
 }
 
@@ -366,13 +342,13 @@ func TestHandler_ListIssues_SortsByTitle(t *testing.T) {
 	setupConfig(t, fs)
 
 	_ = fs.MkdirAll("issues", 0755)
-	_ = fs.WriteFile("issues/z.md", []byte("---\ntitle: Zebra\nstatus: todo\n---\n"), 0644)
-	_ = fs.WriteFile("issues/a.md", []byte("---\ntitle: Alpha\nstatus: todo\n---\n"), 0644)
-	_ = fs.WriteFile("issues/m.md", []byte("---\ntitle: Middle\nstatus: todo\n---\n"), 0644)
+	_ = fs.WriteFile("issues/z.md", []byte("---\ntitle: Zebra\n---\n"), 0644)
+	_ = fs.WriteFile("issues/a.md", []byte("---\ntitle: Alpha\n---\n"), 0644)
+	_ = fs.WriteFile("issues/m.md", []byte("---\ntitle: Middle\n---\n"), 0644)
 
 	handler := issue.NewHandler(deps, "")
 
-	issues, err := handler.ListIssues(nil)
+	issues, err := handler.ListIssues()
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -398,38 +374,10 @@ func TestListSchema(t *testing.T) {
 	if err := json.Unmarshal(schema, &data); err != nil {
 		t.Fatalf("invalid schema JSON: %v", err)
 	}
-
-	if _, ok := data["status"]; !ok {
-		t.Error("expected 'status' in schema")
-	}
 }
 
 func TestParseListJSON(t *testing.T) {
-	jsonData := `{"status":["todo","in-progress"]}`
-
-	input, err := issue.ParseListJSON([]byte(jsonData))
-	if err != nil {
+	if _, err := issue.ParseListJSON([]byte(`{}`)); err != nil {
 		t.Fatalf("expected no error, got %v", err)
-	}
-
-	if len(input.Status) != 2 {
-		t.Errorf("expected 2 statuses, got %d", len(input.Status))
-	}
-}
-
-func TestValidateListInput(t *testing.T) {
-	valid := issue.ListInput{Status: []string{"todo", "in-progress"}}
-	if err := issue.ValidateListInput(valid); err != nil {
-		t.Errorf("expected valid input, got error: %v", err)
-	}
-
-	empty := issue.ListInput{}
-	if err := issue.ValidateListInput(empty); err != nil {
-		t.Errorf("expected empty input to be valid, got error: %v", err)
-	}
-
-	invalid := issue.ListInput{Status: []string{"invalid"}}
-	if err := issue.ValidateListInput(invalid); err == nil {
-		t.Error("expected validation error for invalid status")
 	}
 }

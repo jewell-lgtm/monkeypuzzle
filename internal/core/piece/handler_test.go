@@ -1009,24 +1009,16 @@ Content here.
 		t.Errorf("expected piece name %q, got %q", pieceName, info.Name)
 	}
 
-	// Verify marker file was created
-	markerPath := filepath.Join(worktreePath, ".monkeypuzzle/current-issue.json")
-	markerData, err := fs.ReadFile(markerPath)
+	// Verify the issue ref was recorded in piece metadata.
+	meta, err := piece.ReadPieceMetadata(worktreePath, fs)
 	if err != nil {
-		t.Fatalf("marker file not created: %v", err)
+		t.Fatalf("failed to read piece metadata: %v", err)
 	}
-
-	var marker piece.CurrentIssueMarker
-	if err := json.Unmarshal(markerData, &marker); err != nil {
-		t.Fatalf("failed to unmarshal marker: %v", err)
+	if meta.Issue.Title != "My Awesome Feature" {
+		t.Errorf("expected issue title 'My Awesome Feature', got %q", meta.Issue.Title)
 	}
-
-	if marker.Issue.Title != "My Awesome Feature" {
-		t.Errorf("expected issue title 'My Awesome Feature', got %q", marker.Issue.Title)
-	}
-
-	if marker.PieceName != pieceName {
-		t.Errorf("expected piece name %q, got %q", pieceName, marker.PieceName)
+	if meta.Issue.Provider != "markdown" {
+		t.Errorf("expected provider 'markdown', got %q", meta.Issue.Provider)
 	}
 }
 
@@ -1584,10 +1576,10 @@ func TestHandler_CleanupMergedPieces_WithIssue(t *testing.T) {
 	worktreePath := filepath.Join(piecesDir, pieceName)
 	fullWorktreePath := worktreePath
 
-	// Create piece directory with issue marker (new format with IssueRef)
+	// Create piece directory with an issue ref recorded in piece metadata.
 	_ = fs.MkdirAll(fullWorktreePath+"/.monkeypuzzle", 0755)
-	issueMarker := `{"issue": {"provider": "markdown", "id": "issues/test.md", "title": "Test Issue"}, "piece_name": "issue-piece", "status": "in-progress", "dirty": false}`
-	_ = fs.WriteFile(fullWorktreePath+"/.monkeypuzzle/current-issue.json", []byte(issueMarker), 0644)
+	pieceMeta := `{"parent": "main", "created_from_branch": "", "issue": {"provider": "markdown", "id": "issues/test.md", "title": "Test Issue"}}`
+	_ = fs.WriteFile(fullWorktreePath+"/.monkeypuzzle/piece-metadata.json", []byte(pieceMeta), 0644)
 
 	// Mock git commands for the piece
 	mockExec.AddResponse("git", []string{"rev-parse", "--abbrev-ref", "HEAD"}, []byte(pieceName+"\n"), nil)

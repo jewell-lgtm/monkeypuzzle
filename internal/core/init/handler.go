@@ -151,7 +151,6 @@ func (h *Handler) EnsureGitignore(mpDir string) error {
 	}
 	gitignorePath := filepath.Join(mpDir, ".gitignore")
 	content := `# Piece worktree state (not tracked)
-current-issue.json
 piece-metadata.json
 pr-metadata.json
 

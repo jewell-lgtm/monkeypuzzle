@@ -71,20 +71,14 @@ func TestLinearProvider_HappyPath(t *testing.T) {
 	if issue.Title != "Test Issue" {
 		t.Errorf("Create() Title = %v, want Test Issue", issue.Title)
 	}
-	if issue.Status != "todo" {
-		t.Errorf("Create() Status = %v, want todo (mapped from Backlog)", issue.Status)
-	}
 
 	// Test List
-	issues, err := provider.List(nil)
+	issues, err := provider.List()
 	if err != nil {
 		t.Fatalf("List() error = %v", err)
 	}
 	if len(issues) != 1 {
 		t.Errorf("List() returned %d issues, want 1", len(issues))
-	}
-	if len(issues) > 0 && issues[0].Status != "todo" {
-		t.Errorf("List() issue status = %v, want todo", issues[0].Status)
 	}
 
 	// Test Get
@@ -96,86 +90,12 @@ func TestLinearProvider_HappyPath(t *testing.T) {
 		t.Errorf("Get() Title = %v, want Test Issue", issue.Title)
 	}
 
-	// Test UpdateStatus
-	err = provider.UpdateStatus("abc123", "in-progress")
-	if err != nil {
-		t.Fatalf("UpdateStatus() error = %v", err)
-	}
-
 	// Verify API key was sent in requests
 	for _, req := range mockHTTP.requests {
 		auth := req.Header.Get("Authorization")
 		if auth != "test-api-key" {
 			t.Errorf("Request missing/wrong Authorization header: %v", auth)
 		}
-	}
-}
-
-func TestLinearProvider_StatusMapping(t *testing.T) {
-	tests := []struct {
-		linearState string
-		wantStatus  string
-	}{
-		{"Backlog", "todo"},
-		{"Todo", "todo"},
-		{"In Progress", "in-progress"},
-		{"In Review", "in-progress"},
-		{"Done", "done"},
-		{"Canceled", "done"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.linearState, func(t *testing.T) {
-			mockHTTP := &mockHTTPClient{
-				responses: map[string]string{
-					"issue": `{"data":{"issue":{"id":"test","title":"Test","state":{"name":"` + tt.linearState + `"}}}}`,
-				},
-			}
-
-			provider := NewLinearProvider(mockHTTP, "key", "TEAM")
-			issue, err := provider.Get("test")
-			if err != nil {
-				t.Fatalf("Get() error = %v", err)
-			}
-			if issue.Status != tt.wantStatus {
-				t.Errorf("Status = %v, want %v (from Linear state %v)", issue.Status, tt.wantStatus, tt.linearState)
-			}
-		})
-	}
-}
-
-func TestLinearProvider_ListWithStatusFilter(t *testing.T) {
-	mockHTTP := &mockHTTPClient{
-		responses: map[string]string{
-			"issues": `{"data":{"issues":{"nodes":[
-				{"id":"1","title":"Todo","state":{"name":"Backlog"}},
-				{"id":"2","title":"InProgress","state":{"name":"In Progress"}},
-				{"id":"3","title":"Done","state":{"name":"Done"}}
-			]}}}`,
-		},
-	}
-
-	provider := NewLinearProvider(mockHTTP, "key", "TEAM")
-
-	// Filter for todo only
-	issues, err := provider.List([]string{"todo"})
-	if err != nil {
-		t.Fatalf("List() error = %v", err)
-	}
-	if len(issues) != 1 {
-		t.Errorf("List(todo) returned %d issues, want 1", len(issues))
-	}
-	if len(issues) > 0 && issues[0].ID != "1" {
-		t.Errorf("List(todo) returned wrong issue: %v", issues[0].ID)
-	}
-
-	// Filter for in-progress only
-	issues, err = provider.List([]string{"in-progress"})
-	if err != nil {
-		t.Fatalf("List() error = %v", err)
-	}
-	if len(issues) != 1 {
-		t.Errorf("List(in-progress) returned %d issues, want 1", len(issues))
 	}
 }
 

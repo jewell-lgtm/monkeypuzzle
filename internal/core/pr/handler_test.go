@@ -101,18 +101,18 @@ func TestCreatePR_UsesIssueTitleWhenAvailable(t *testing.T) {
 
 	setupTestPieceWorktree(t, mockExec, fs, worktreePath, mainRepoPath)
 
-	// Create issue marker file
-	markerPath := filepath.Join(worktreePath, ".monkeypuzzle", "current-issue.json")
-	marker := piece.CurrentIssueMarker{
+	// Record the issue ref in piece metadata (the PR handler reads it for the
+	// default PR title).
+	meta := piece.PieceMetadata{
+		Parent: "main",
 		Issue: piece.IssueRef{
 			Provider: "markdown",
 			ID:       "issues/my-feature.md",
 			Title:    "My Awesome Feature",
 		},
-		PieceName: "test-piece",
 	}
-	markerData, _ := json.Marshal(marker)
-	_ = fs.WriteFile(markerPath, markerData, 0644)
+	metaData, _ := json.Marshal(meta)
+	_ = fs.WriteFile(filepath.Join(worktreePath, ".monkeypuzzle", "piece-metadata.json"), metaData, 0644)
 
 	// Mock git push
 	mockExec.AddResponse("git", []string{"push", "-u", "origin", "HEAD"}, []byte(""), nil)

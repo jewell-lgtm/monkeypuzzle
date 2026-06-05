@@ -2,7 +2,6 @@ package piece
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,7 +11,6 @@ import (
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/adapters"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
-	initcmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/init"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core/session"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/projectdir"
 )
@@ -412,16 +410,10 @@ func (h *Handler) detectRemoteRef(ctx context.Context, repoRoot, branchRef strin
 	return "", ""
 }
 
-// CurrentIssueMarker represents the current issue marker file structure
-type CurrentIssueMarker struct {
-	Issue     IssueRef `json:"issue"`
-	PieceName string   `json:"piece_name"`
-	Status    string   `json:"status,omitempty"` // Local status, synced via `mp issue sync`
-	Dirty     bool     `json:"dirty,omitempty"`  // True if status has unsynced changes
-}
-
 // CreatePieceFromIssue creates a new piece linked to an issue.
 // The caller is responsible for looking up the issue via the provider.
+// The issue reference is recorded in the piece's metadata so it can be
+// surfaced later and excluded from pickers (it now has a piece).
 func (h *Handler) CreatePieceFromIssue(ctx context.Context, issueRef IssueRef, opts CreatePieceOptions) (PieceInfo, error) {
 	if issueRef.IsEmpty() {
 		return PieceInfo{}, fmt.Errorf("issue reference is empty")
@@ -436,28 +428,20 @@ func (h *Handler) CreatePieceFromIssue(ctx context.Context, issueRef IssueRef, o
 		return PieceInfo{}, err
 	}
 
-	// Write current issue marker file in worktree
-	marker := CurrentIssueMarker{
-		Issue:     issueRef,
-		PieceName: pieceName,
-		Status:    StatusInProgress,
-		Dirty:     true, // Will be cleared after sync
+	// Record the issue in piece metadata so `mp status` can surface it and
+	// pickers/dashboard can exclude it (it now has a piece).
+	metadata, err := ReadPieceMetadata(info.WorktreePath, h.deps.FS)
+	if err != nil {
+		def := DefaultPieceMetadata()
+		metadata = &def
 	}
-	if err := h.writeCurrentIssueMarker(info.WorktreePath, marker); err != nil {
+	metadata.Issue = issueRef
+	if err := WritePieceMetadata(info.WorktreePath, *metadata, h.deps.FS); err != nil {
 		h.deps.Output.Write(core.Message{
 			Type:    core.MsgWarning,
-			Content: fmt.Sprintf("Failed to write current issue marker: %v", err),
+			Content: fmt.Sprintf("Failed to record piece issue: %v", err),
 		})
 	}
-
-	// Publish sync event to update issue status in provider
-	h.pubIssueSync(core.IssueSyncEvent{
-		Provider:     issueRef.Provider,
-		IssueID:      issueRef.ID,
-		NewStatus:    StatusInProgress,
-		PieceName:    pieceName,
-		WorktreePath: info.WorktreePath,
-	})
 
 	return info, nil
 }
@@ -495,38 +479,6 @@ func (h *Handler) CreatePieceFromPrompt(ctx context.Context, name, prompt string
 	}
 
 	return info, nil
-}
-
-// writeCurrentIssueMarker writes the current issue marker file to the worktree.
-func (h *Handler) writeCurrentIssueMarker(worktreePath string, marker CurrentIssueMarker) error {
-	// Create the monkeypuzzle state directory in the worktree if it doesn't exist
-	mpDir, err := projectdir.WorktreeDir(worktreePath)
-	if err != nil {
-		return err
-	}
-	if err := h.deps.FS.MkdirAll(mpDir, DefaultDirPerm); err != nil {
-		return fmt.Errorf("failed to create monkeypuzzle directory: %w", err)
-	}
-
-	// Write marker file
-	markerPath := filepath.Join(mpDir, "current-issue.json")
-	data, err := json.MarshalIndent(marker, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to marshal marker: %w", err)
-	}
-
-	if err := h.deps.FS.WriteFile(markerPath, data, initcmd.DefaultFilePerm); err != nil {
-		return fmt.Errorf("failed to write marker file: %w", err)
-	}
-
-	return nil
-}
-
-// pubIssueSync publishes an issue sync event if IssueSync is configured.
-func (h *Handler) pubIssueSync(event core.IssueSyncEvent) {
-	if h.deps.IssueSync != nil {
-		h.deps.IssueSync.Pub(event)
-	}
 }
 
 // cleanupPiece removes a partially created piece (worktree and session).
@@ -984,16 +936,6 @@ func getPiecesDir(repoRoot string) (string, error) {
 	return projectdir.PiecesDir(repoRoot)
 }
 
-// currentIssueMarkerPath returns the path to a worktree's current-issue.json,
-// honoring any relocation of the monkeypuzzle directory.
-func currentIssueMarkerPath(worktreePath string) (string, error) {
-	mpDir, err := projectdir.WorktreeDir(worktreePath)
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(mpDir, "current-issue.json"), nil
-}
-
 // MergeStatus represents the merge status of a branch
 type MergeStatus struct {
 	// IsMerged is true if the branch has been merged to main
@@ -1177,19 +1119,9 @@ func (h *Handler) CleanupMergedPieces(ctx context.Context, repoRoot string, opts
 			WorktreePath: worktreePath,
 		}
 
-		// Read issue marker if exists
-		marker, err := h.ReadCurrentIssueMarker(worktreePath)
-		if err == nil && marker != nil && !marker.Issue.IsEmpty() {
-			result.Issue = marker.Issue
-
-			// Publish sync event to mark issue as done
-			h.pubIssueSync(core.IssueSyncEvent{
-				Provider:     marker.Issue.Provider,
-				IssueID:      marker.Issue.ID,
-				NewStatus:    StatusDone,
-				PieceName:    pieceName,
-				WorktreePath: worktreePath,
-			})
+		// Record the issue this piece came from, if any (from piece metadata).
+		if meta, err := ReadPieceMetadata(worktreePath, h.deps.FS); err == nil && meta != nil && !meta.Issue.IsEmpty() {
+			result.Issue = meta.Issue
 		}
 
 		if opts.DryRun {
@@ -1219,62 +1151,6 @@ func (h *Handler) CleanupMergedPieces(ctx context.Context, repoRoot string, opts
 	}
 
 	return results, nil
-}
-
-// ReadCurrentIssueMarker reads the current issue marker from a piece worktree.
-func (h *Handler) ReadCurrentIssueMarker(worktreePath string) (*CurrentIssueMarker, error) {
-	return ReadCurrentIssueMarkerFS(worktreePath, h.deps.FS)
-}
-
-// ReadCurrentIssueMarkerFS reads the current issue marker from a worktree using a FS interface.
-// This standalone function is useful when you don't have a Handler instance.
-func ReadCurrentIssueMarkerFS(worktreePath string, fs core.FS) (*CurrentIssueMarker, error) {
-	markerPath, err := currentIssueMarkerPath(worktreePath)
-	if err != nil {
-		return nil, err
-	}
-	data, err := fs.ReadFile(markerPath)
-	if err != nil {
-		return nil, err
-	}
-
-	var marker CurrentIssueMarker
-	if err := json.Unmarshal(data, &marker); err != nil {
-		return nil, err
-	}
-
-	return &marker, nil
-}
-
-// ClearIssueDirtyFlag clears the dirty flag on the issue marker in a worktree.
-// Called after successful sync to provider.
-func ClearIssueDirtyFlag(worktreePath string, fs core.FS) error {
-	marker, err := ReadCurrentIssueMarkerFS(worktreePath, fs)
-	if err != nil {
-		return err
-	}
-
-	if !marker.Dirty {
-		return nil // Already clean
-	}
-
-	marker.Dirty = false
-
-	// Write updated marker
-	markerPath, err := currentIssueMarkerPath(worktreePath)
-	if err != nil {
-		return err
-	}
-	data, err := json.MarshalIndent(marker, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to marshal marker: %w", err)
-	}
-
-	if err := fs.WriteFile(markerPath, data, initcmd.DefaultFilePerm); err != nil {
-		return fmt.Errorf("failed to write marker file: %w", err)
-	}
-
-	return nil
 }
 
 // removePiece removes a piece worktree and associated session.
@@ -1641,19 +1517,6 @@ func (h *Handler) DonePiece(ctx context.Context, workDir string, input DoneInput
 		PieceName:    status.PieceName,
 		WorktreePath: status.WorktreePath,
 		MainPath:     mainRepoRoot,
-	}
-
-	// Read issue marker if exists and sync "done" status
-	marker, _ := h.ReadCurrentIssueMarker(status.WorktreePath)
-	if marker != nil && !marker.Issue.IsEmpty() {
-		// Publish sync event to mark issue as done
-		h.pubIssueSync(core.IssueSyncEvent{
-			Provider:     marker.Issue.Provider,
-			IssueID:      marker.Issue.ID,
-			NewStatus:    StatusDone,
-			PieceName:    status.PieceName,
-			WorktreePath: status.WorktreePath,
-		})
 	}
 
 	// If we're running inside the worktree being removed, switch the active

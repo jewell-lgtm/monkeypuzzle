@@ -283,7 +283,7 @@ func resolveIssueRef(deps core.Deps, projectPath, query string) (piececmd.IssueR
 	handler := issue.NewHandler(deps, projectPath)
 
 	if looksLikePath(query) {
-		items, err := handler.ListIssues(nil)
+		items, err := handler.ListIssues()
 		if err != nil {
 			return piececmd.IssueRef{}, fmt.Errorf("failed to list issues: %w", err)
 		}

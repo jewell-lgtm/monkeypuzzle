@@ -98,7 +98,7 @@ func TestIntegration_Init_CreatesFullStructure(t *testing.T) {
 		t.Fatalf(".gitignore not created: %v", err)
 	}
 	gitignore := string(gitignoreData)
-	for _, entry := range []string{"current-issue.json", "piece-metadata.json", "pr-metadata.json"} {
+	for _, entry := range []string{"piece-metadata.json", "pr-metadata.json"} {
 		if !strings.Contains(gitignore, entry) {
 			t.Errorf(".monkeypuzzle/.gitignore should contain %s", entry)
 		}

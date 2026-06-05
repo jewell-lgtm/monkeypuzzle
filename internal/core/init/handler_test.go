@@ -252,7 +252,7 @@ func TestHandler_Run_CreatesNestedGitignore(t *testing.T) {
 	}
 
 	content := string(data)
-	if !strings.Contains(content, "current-issue.json") {
-		t.Errorf("expected .gitignore to contain current-issue.json, got: %s", content)
+	if !strings.Contains(content, "piece-metadata.json") {
+		t.Errorf("expected .gitignore to contain piece-metadata.json, got: %s", content)
 	}
 }

@@ -71,15 +71,11 @@ func ParseJSON(data []byte) (Input, error) {
 }
 
 // ListInput holds input for issue list command
-type ListInput struct {
-	Status []string `json:"status,omitempty"`
-}
+type ListInput struct{}
 
 // ListSchema returns the JSON schema for issue list input
 func ListSchema() ([]byte, error) {
-	return input.GenerateSchema([]input.Field{
-		{Name: "status", Description: "Filter by status", Default: ""},
-	})
+	return input.GenerateSchema([]input.Field{})
 }
 
 // ParseListJSON parses JSON input into ListInput
@@ -87,34 +83,10 @@ func ParseListJSON(data []byte) (ListInput, error) {
 	return input.ParseJSON[ListInput](data)
 }
 
-// ValidStatuses returns valid status values for filtering
-func ValidStatuses() []string {
-	return []string{"todo", "in-progress", "done"}
-}
-
-// ValidateListInput validates the list input
-func ValidateListInput(in ListInput) error {
-	valid := ValidStatuses()
-	for _, s := range in.Status {
-		found := false
-		for _, v := range valid {
-			if s == v {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return fmt.Errorf("invalid status %q (valid: %v)", s, valid)
-		}
-	}
-	return nil
-}
-
 // SearchSchema returns the JSON schema for issue search input
 func SearchSchema() ([]byte, error) {
 	return input.GenerateSchema([]input.Field{
 		{Name: "query", Description: "Search query (fuzzy match)", Default: ""},
-		{Name: "status", Description: "Filter by status", Default: ""},
 		{Name: "limit", Description: "Max results (default 100)", Default: "100"},
 	})
 }
@@ -124,20 +96,8 @@ func ParseSearchJSON(data []byte) (SearchInput, error) {
 	return input.ParseJSON[SearchInput](data)
 }
 
-// ValidateSearchInput validates the search input
+// ValidateSearchInput validates the search input.
 func ValidateSearchInput(in SearchInput) error {
-	valid := ValidStatuses()
-	for _, s := range in.Status {
-		found := false
-		for _, v := range valid {
-			if s == v {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return fmt.Errorf("invalid status %q (valid: %v)", s, valid)
-		}
-	}
+	_ = in
 	return nil
 }

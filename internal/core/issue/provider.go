@@ -5,7 +5,6 @@ type Issue struct {
 	ID          string `json:"id"`          // Provider-specific identifier (path for markdown, UUID for Linear)
 	Number      string `json:"number"`      // Human-readable issue number (e.g., "ABC-123" for Linear)
 	Title       string `json:"title"`       // Issue title
-	Status      string `json:"status"`      // Status (todo, in-progress, done)
 	Description string `json:"description"` // Issue description/body
 }
 
@@ -17,9 +16,8 @@ type CreateInput struct {
 
 // SearchInput holds input for searching issues
 type SearchInput struct {
-	Query  string   `json:"query"`  // Text search query (empty = all)
-	Status []string `json:"status"` // Filter by status (empty = all)
-	Limit  int      `json:"limit"`  // Max results (0 = default 100)
+	Query string `json:"query"` // Text search query (empty = all)
+	Limit int    `json:"limit"` // Max results (0 = default 100)
 }
 
 // DefaultSearchLimit is the default max results for SearchIssues
@@ -30,16 +28,13 @@ type Provider interface {
 	// Create creates a new issue and returns it
 	Create(input CreateInput) (Issue, error)
 
-	// List returns issues, optionally filtered by status
+	// List returns all issues.
 	// Deprecated: Use SearchIssues instead
-	List(statusFilter []string) ([]Issue, error)
+	List() ([]Issue, error)
 
 	// SearchIssues returns issues matching search criteria, sorted by recency
 	SearchIssues(input SearchInput) ([]Issue, error)
 
 	// Get returns an issue by ID
 	Get(id string) (Issue, error)
-
-	// UpdateStatus updates the status of an issue
-	UpdateStatus(id string, status string) error
 }

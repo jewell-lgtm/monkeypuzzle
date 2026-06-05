@@ -13,7 +13,6 @@ import (
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/adapters"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
-	"github.com/jewell-lgtm/monkeypuzzle/internal/core/issue"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core/piece"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/paths"
 )
@@ -499,24 +498,13 @@ This is a great feature.
 		t.Errorf("expected piece name %q, got %q", expectedName, info.Name)
 	}
 
-	// Verify marker file exists
-	markerPath := filepath.Join(info.WorktreePath, ".monkeypuzzle", "current-issue.json")
-	markerData, err := os.ReadFile(markerPath)
+	// Verify the issue ref was recorded in piece metadata.
+	meta, err := piece.ReadPieceMetadata(info.WorktreePath, deps.FS)
 	if err != nil {
-		t.Fatalf("marker file not found: %v", err)
+		t.Fatalf("failed to read piece metadata: %v", err)
 	}
-
-	var marker piece.CurrentIssueMarker
-	if err := json.Unmarshal(markerData, &marker); err != nil {
-		t.Fatalf("failed to unmarshal marker: %v", err)
-	}
-
-	if marker.Issue.Title != "My Awesome Feature" {
-		t.Errorf("expected issue name 'My Awesome Feature', got %q", marker.Issue.Title)
-	}
-
-	if marker.PieceName != expectedName {
-		t.Errorf("expected piece name %q, got %q", expectedName, marker.PieceName)
+	if meta.Issue.Title != "My Awesome Feature" {
+		t.Errorf("expected issue name 'My Awesome Feature', got %q", meta.Issue.Title)
 	}
 }
 
@@ -824,172 +812,6 @@ func setupMonkeypuzzleConfig(t *testing.T, tmpDir string) {
 	}
 }
 
-func TestIntegration_CreatePieceFromIssue_UpdatesStatusToInProgress(t *testing.T) {
-	// Skip if git is not available
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not available")
-	}
-
-	// Override data dir for tests
-	tmpDataHome, err := os.MkdirTemp("", "mp-data-*")
-	if err != nil {
-		t.Fatalf("failed to create temp data dir: %v", err)
-	}
-	t.Cleanup(func() {
-		os.RemoveAll(tmpDataHome)
-		paths.ResetDataDir()
-	})
-	paths.SetDataDir(tmpDataHome)
-
-	// Create temp directory for test repo
-	tmpDir, err := os.MkdirTemp("", "mp-integration-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	// Initialize git repo
-	setupGitRepo(t, tmpDir)
-
-	// Create monkeypuzzle config
-	setupMonkeypuzzleConfig(t, tmpDir)
-
-	// Create issue file with todo status
-	issuesDir := filepath.Join(tmpDir, ".monkeypuzzle", "issues")
-	if err := os.MkdirAll(issuesDir, 0755); err != nil {
-		t.Fatalf("failed to create issues dir: %v", err)
-	}
-
-	issueContent := `---
-title: My Feature
-status: todo
----
-
-# My Feature
-
-Description here.
-`
-	issuePath := filepath.Join(issuesDir, "my-feature.md")
-	if err := os.WriteFile(issuePath, []byte(issueContent), 0644); err != nil {
-		t.Fatalf("failed to write issue file: %v", err)
-	}
-
-	// Change to repo directory
-	oldWd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("failed to get working directory: %v", err)
-	}
-	defer func() { _ = os.Chdir(oldWd) }()
-
-	if err := os.Chdir(tmpDir); err != nil {
-		t.Fatalf("failed to change directory: %v", err)
-	}
-
-	// Create piece from issue (status sync goes through the issue-sync subscriber)
-	deps := depsWithMarkdownSync(t)
-	handler := piece.NewHandler(deps)
-
-	relIssuePath := ".monkeypuzzle/issues/my-feature.md"
-	_, err = handler.CreatePieceFromIssue(context.Background(), issueRefFromFile(t, deps.FS, relIssuePath), piece.CreatePieceOptions{})
-	if err != nil {
-		t.Fatalf("CreatePieceFromIssue failed: %v", err)
-	}
-
-	// Verify issue status was updated to in-progress
-	updatedContent, err := os.ReadFile(issuePath)
-	if err != nil {
-		t.Fatalf("failed to read updated issue: %v", err)
-	}
-
-	if !strings.Contains(string(updatedContent), "status: in-progress") {
-		t.Errorf("expected status to be updated to in-progress, got:\n%s", string(updatedContent))
-	}
-}
-
-func TestIntegration_CreatePieceFromIssue_SkipsUpdateIfNotTodo(t *testing.T) {
-	// Skip if git is not available
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not available")
-	}
-
-	// Override data dir for tests
-	tmpDataHome, err := os.MkdirTemp("", "mp-data-*")
-	if err != nil {
-		t.Fatalf("failed to create temp data dir: %v", err)
-	}
-	t.Cleanup(func() {
-		os.RemoveAll(tmpDataHome)
-		paths.ResetDataDir()
-	})
-	paths.SetDataDir(tmpDataHome)
-
-	// Create temp directory for test repo
-	tmpDir, err := os.MkdirTemp("", "mp-integration-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	// Initialize git repo
-	setupGitRepo(t, tmpDir)
-
-	// Create monkeypuzzle config
-	setupMonkeypuzzleConfig(t, tmpDir)
-
-	// Create issue file with done status (should not be changed)
-	issuesDir := filepath.Join(tmpDir, ".monkeypuzzle", "issues")
-	if err := os.MkdirAll(issuesDir, 0755); err != nil {
-		t.Fatalf("failed to create issues dir: %v", err)
-	}
-
-	issueContent := `---
-title: Completed Feature
-status: done
----
-
-# Completed Feature
-`
-	issuePath := filepath.Join(issuesDir, "completed-feature.md")
-	if err := os.WriteFile(issuePath, []byte(issueContent), 0644); err != nil {
-		t.Fatalf("failed to write issue file: %v", err)
-	}
-
-	// Change to repo directory
-	oldWd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("failed to get working directory: %v", err)
-	}
-	defer func() { _ = os.Chdir(oldWd) }()
-
-	if err := os.Chdir(tmpDir); err != nil {
-		t.Fatalf("failed to change directory: %v", err)
-	}
-
-	// Create piece from issue
-	deps := core.Deps{
-		FS:     adapters.NewOSFS(""),
-		Output: adapters.NewBufferOutput(),
-		Exec:   adapters.NewOSExec(),
-	}
-	handler := piece.NewHandler(deps)
-
-	relIssuePath := ".monkeypuzzle/issues/completed-feature.md"
-	_, err = handler.CreatePieceFromIssue(context.Background(), issueRefFromFile(t, deps.FS, relIssuePath), piece.CreatePieceOptions{})
-	if err != nil {
-		t.Fatalf("CreatePieceFromIssue failed: %v", err)
-	}
-
-	// Verify issue status was NOT changed (still done)
-	updatedContent, err := os.ReadFile(issuePath)
-	if err != nil {
-		t.Fatalf("failed to read issue: %v", err)
-	}
-
-	if !strings.Contains(string(updatedContent), "status: done") {
-		t.Errorf("expected status to remain 'done', got:\n%s", string(updatedContent))
-	}
-}
-
 func TestIntegration_ListPieces_And_SwitchPiece(t *testing.T) {
 	// Skip if git is not available
 	if _, err := exec.LookPath("git"); err != nil {
@@ -1251,8 +1073,11 @@ Description here.
 		t.Fatalf("failed to change directory: %v", err)
 	}
 
-	// Create handler (status sync goes through the issue-sync subscriber)
-	deps := depsWithMarkdownSync(t)
+	deps := core.Deps{
+		FS:     adapters.NewOSFS(""),
+		Output: adapters.NewBufferOutput(),
+		Exec:   adapters.NewOSExec(),
+	}
 	handler := piece.NewHandler(deps)
 
 	// Create piece from an issue ref
@@ -1270,14 +1095,22 @@ Description here.
 		t.Errorf("expected piece name 'test-feature', got %q", info.Name)
 	}
 
-	// Verify issue status was updated to in-progress
-	updatedContent, err := os.ReadFile(issuePath)
+	// Verify the issue ref was recorded in piece metadata, and the issue file
+	// itself was left untouched (no status mutation anymore).
+	meta, err := piece.ReadPieceMetadata(info.WorktreePath, deps.FS)
 	if err != nil {
-		t.Fatalf("failed to read updated issue: %v", err)
+		t.Fatalf("failed to read piece metadata: %v", err)
+	}
+	if meta.Issue.Title != "Test Feature" {
+		t.Errorf("expected recorded issue title 'Test Feature', got %q", meta.Issue.Title)
 	}
 
-	if !strings.Contains(string(updatedContent), "status: in-progress") {
-		t.Errorf("expected status to be updated to in-progress, got:\n%s", string(updatedContent))
+	updatedContent, err := os.ReadFile(issuePath)
+	if err != nil {
+		t.Fatalf("failed to read issue: %v", err)
+	}
+	if !strings.Contains(string(updatedContent), "status: todo") {
+		t.Errorf("issue file should be unchanged, got:\n%s", string(updatedContent))
 	}
 }
 
@@ -2075,18 +1908,6 @@ func issueRefFromFile(t *testing.T, fs core.FS, relPath string) piece.IssueRef {
 		t.Fatalf("ExtractIssueName(%q): %v", relPath, err)
 	}
 	return piece.IssueRef{Provider: "markdown", ID: relPath, Title: title}
-}
-
-// depsWithMarkdownSync returns Deps wired so that issue-sync events emitted by
-// piece operations are applied to the markdown provider (mirrors what the CLI does).
-// The current working directory must be the repo root.
-func depsWithMarkdownSync(_ *testing.T) core.Deps {
-	sig := core.NewIssueSyncSignal()
-	deps := core.NewDepsWithSync(adapters.NewOSFS(""), adapters.NewBufferOutput(), adapters.NewOSExec(), nil, nil, sig)
-	sig.Sub(func(ev core.IssueSyncEvent) {
-		_ = issue.NewHandler(deps, "").SyncStatus(ev.IssueID, ev.NewStatus)
-	})
-	return deps
 }
 
 // recordingMux is a test multiplexer that records calls. It reports as a

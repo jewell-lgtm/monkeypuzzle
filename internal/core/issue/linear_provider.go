@@ -6,24 +6,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
 )
 
 const linearAPIURL = "https://api.linear.app/graphql"
-
-// linearToMpStatus maps Linear workflow state names to mp statuses
-var linearToMpStatus = map[string]string{
-	"Backlog":     "todo",
-	"Todo":        "todo",
-	"Triage":      "todo",
-	"In Progress": "in-progress",
-	"In Review":   "in-progress",
-	"Done":        "done",
-	"Canceled":    "done",
-	"Cancelled":   "done",
-}
 
 // LinearProvider implements Provider using Linear API
 type LinearProvider struct {
@@ -94,12 +81,11 @@ func (p *LinearProvider) Create(input CreateInput) (Issue, error) {
 		Number:      issue.Identifier,
 		Title:       issue.Title,
 		Description: issue.Description,
-		Status:      mapLinearStatus(issue.State.Name),
 	}, nil
 }
 
-// List returns issues from Linear, optionally filtered by status
-func (p *LinearProvider) List(statusFilter []string) ([]Issue, error) {
+// List returns all issues from Linear.
+func (p *LinearProvider) List() ([]Issue, error) {
 	query := `query Issues($teamId: String!) {
 		issues(filter: {team: {key: {eq: $teamId}}}) {
 			nodes {
@@ -145,19 +131,11 @@ func (p *LinearProvider) List(statusFilter []string) ([]Issue, error) {
 
 	var issues []Issue
 	for _, node := range result.Data.Issues.Nodes {
-		status := mapLinearStatus(node.State.Name)
-
-		// Apply status filter
-		if len(statusFilter) > 0 && !containsStatus(statusFilter, status) {
-			continue
-		}
-
 		issues = append(issues, Issue{
 			ID:          node.ID,
 			Number:      node.Identifier,
 			Title:       node.Title,
 			Description: node.Description,
-			Status:      status,
 		})
 	}
 
@@ -173,15 +151,15 @@ func (p *LinearProvider) SearchIssues(input SearchInput) ([]Issue, error) {
 
 	// Use server-side search when query provided
 	if input.Query != "" {
-		return p.searchIssuesWithQuery(input.Query, input.Status, limit)
+		return p.searchIssuesWithQuery(input.Query, limit)
 	}
 
-	// No query - use regular list with optional status filter
-	return p.listIssuesWithLimit(input.Status, limit)
+	// No query - use regular list
+	return p.listIssuesWithLimit(limit)
 }
 
 // searchIssuesWithQuery uses Linear's issues query with title filter for text search
-func (p *LinearProvider) searchIssuesWithQuery(query string, statusFilter []string, limit int) ([]Issue, error) {
+func (p *LinearProvider) searchIssuesWithQuery(query string, limit int) ([]Issue, error) {
 	gql := `query issues($teamKey: String!, $first: Int!, $query: String!) {
 		issues(
 			filter: {
@@ -236,19 +214,11 @@ func (p *LinearProvider) searchIssuesWithQuery(query string, statusFilter []stri
 
 	var issues []Issue
 	for _, node := range result.Data.Issues.Nodes {
-		status := mapLinearStatus(node.State.Name)
-
-		// Apply status filter client-side
-		if len(statusFilter) > 0 && !containsStatus(statusFilter, status) {
-			continue
-		}
-
 		issues = append(issues, Issue{
 			ID:          node.ID,
 			Number:      node.Identifier,
 			Title:       node.Title,
 			Description: node.Description,
-			Status:      status,
 		})
 	}
 
@@ -256,7 +226,7 @@ func (p *LinearProvider) searchIssuesWithQuery(query string, statusFilter []stri
 }
 
 // listIssuesWithLimit fetches issues without text search
-func (p *LinearProvider) listIssuesWithLimit(statusFilter []string, limit int) ([]Issue, error) {
+func (p *LinearProvider) listIssuesWithLimit(limit int) ([]Issue, error) {
 	gql := `query issues($teamKey: String!, $first: Int!) {
 		issues(
 			filter: {team: {key: {eq: $teamKey}}}
@@ -307,19 +277,11 @@ func (p *LinearProvider) listIssuesWithLimit(statusFilter []string, limit int) (
 
 	var issues []Issue
 	for _, node := range result.Data.Issues.Nodes {
-		status := mapLinearStatus(node.State.Name)
-
-		// Apply status filter
-		if len(statusFilter) > 0 && !containsStatus(statusFilter, status) {
-			continue
-		}
-
 		issues = append(issues, Issue{
 			ID:          node.ID,
 			Number:      node.Identifier,
 			Title:       node.Title,
 			Description: node.Description,
-			Status:      status,
 		})
 	}
 
@@ -373,39 +335,7 @@ func (p *LinearProvider) Get(id string) (Issue, error) {
 		Number:      issue.Identifier,
 		Title:       issue.Title,
 		Description: issue.Description,
-		Status:      mapLinearStatus(issue.State.Name),
 	}, nil
-}
-
-// UpdateStatus updates the status of an issue
-func (p *LinearProvider) UpdateStatus(id string, status string) error {
-	// First, we need to find the appropriate state ID for the target status
-	// For now, we'll use a mutation that accepts state name
-	query := `mutation UpdateIssue($id: String!, $stateId: String!) {
-		issueUpdate(id: $id, input: {stateId: $stateId}) {
-			issue {
-				id
-				state {
-					name
-				}
-			}
-		}
-	}`
-
-	// Map mp status to Linear state ID (simplified - real impl would query states)
-	stateID := mapMpStatusToLinearState(status)
-
-	variables := map[string]interface{}{
-		"id":      id,
-		"stateId": stateID,
-	}
-
-	_, err := p.doGraphQL(query, variables)
-	if err != nil {
-		return fmt.Errorf("failed to update issue status: %w", err)
-	}
-
-	return nil
 }
 
 // doGraphQL executes a GraphQL request
@@ -444,35 +374,4 @@ func (p *LinearProvider) doGraphQL(query string, variables map[string]interface{
 	}
 
 	return respBody, nil
-}
-
-// mapLinearStatus converts Linear state name to mp status
-func mapLinearStatus(linearState string) string {
-	if status, ok := linearToMpStatus[linearState]; ok {
-		return status
-	}
-	// Default: unknown states map to todo
-	if strings.Contains(strings.ToLower(linearState), "progress") ||
-		strings.Contains(strings.ToLower(linearState), "review") {
-		return "in-progress"
-	}
-	if strings.Contains(strings.ToLower(linearState), "done") ||
-		strings.Contains(strings.ToLower(linearState), "complete") ||
-		strings.Contains(strings.ToLower(linearState), "cancel") {
-		return "done"
-	}
-	return "todo"
-}
-
-// mapMpStatusToLinearState converts mp status to Linear state ID placeholder
-// In real usage, this would need to query the team's workflow states
-func mapMpStatusToLinearState(status string) string {
-	switch status {
-	case "in-progress":
-		return "started"
-	case "done":
-		return "completed"
-	default:
-		return "backlog"
-	}
 }

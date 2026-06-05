@@ -74,12 +74,12 @@ func (h *Handler) CreatePR(ctx context.Context, workDir string, input Input) (*P
 		return nil, fmt.Errorf("failed to get current branch: %w", err)
 	}
 
-	// Try to read issue marker to get title/body defaults
-	issueMarker := h.readIssueMarker(status.WorktreePath)
+	// Try to read the issue ref recorded in piece metadata for title defaults.
+	issueRef := h.readIssueRef(status.WorktreePath)
 
 	// Use issue title if PR title not provided
-	if input.Title == "" && issueMarker != nil {
-		input.Title = issueMarker.Issue.Title
+	if input.Title == "" && !issueRef.IsEmpty() {
+		input.Title = issueRef.Title
 	}
 
 	// Fallback to piece name if still no title
@@ -113,10 +113,6 @@ func (h *Handler) CreatePR(ctx context.Context, workDir string, input Input) (*P
 	}
 
 	// Store PR metadata
-	var issueRef piece.IssueRef
-	if issueMarker != nil {
-		issueRef = issueMarker.Issue
-	}
 	metadata := piece.PRMetadata{
 		PRNumber:   prResult.Number,
 		PRURL:      prResult.URL,
@@ -145,12 +141,12 @@ func (h *Handler) CreatePR(ctx context.Context, workDir string, input Input) (*P
 	return result, nil
 }
 
-// readIssueMarker reads the current issue marker from the piece worktree.
-// Returns nil if no marker exists.
-func (h *Handler) readIssueMarker(worktreePath string) *piece.CurrentIssueMarker {
-	marker, err := piece.ReadCurrentIssueMarkerFS(worktreePath, h.deps.FS)
-	if err != nil {
-		return nil
+// readIssueRef reads the issue ref recorded in the piece's metadata.
+// Returns an empty ref if none is recorded or metadata can't be read.
+func (h *Handler) readIssueRef(worktreePath string) piece.IssueRef {
+	meta, err := piece.ReadPieceMetadata(worktreePath, h.deps.FS)
+	if err != nil || meta == nil {
+		return piece.IssueRef{}
 	}
-	return marker
+	return meta.Issue
 }

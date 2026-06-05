@@ -10,10 +10,9 @@ import (
 	"github.com/jewell-lgtm/monkeypuzzle/internal/adapters"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core/issue"
-	"github.com/jewell-lgtm/monkeypuzzle/internal/core/piece"
 )
 
-func TestIntegration_ListIssues_FiltersTodoStatus(t *testing.T) {
+func TestIntegration_ListIssues_ReturnsAllIgnoringLegacyStatus(t *testing.T) {
 	// Create temp directory for test
 	tmpDir, err := os.MkdirTemp("", "mp-issue-test-*")
 	if err != nil {
@@ -85,35 +84,17 @@ title: No Status Feature
 	}
 	handler := issue.NewHandler(deps, tmpDir)
 
-	// List only todo issues
-	issues, err := handler.ListIssues([]string{piece.StatusTodo})
+	// List all issues; legacy status fields must be ignored, not error.
+	issues, err := handler.ListIssues()
 	if err != nil {
 		t.Fatalf("ListIssues failed: %v", err)
 	}
 
-	// Should return 2 issues: "Todo Feature" and "No Status Feature" (defaults to todo)
-	if len(issues) != 2 {
-		t.Errorf("expected 2 issues, got %d", len(issues))
+	// All 4 issues should be returned regardless of any legacy status field.
+	if len(issues) != 4 {
+		t.Errorf("expected 4 issues, got %d", len(issues))
 		for _, i := range issues {
-			t.Logf("  - %s (%s)", i.Title, i.Status)
-		}
-	}
-
-	// Verify titles (sorted alphabetically)
-	expectedTitles := []string{"No Status Feature", "Todo Feature"}
-	for i, expected := range expectedTitles {
-		if i >= len(issues) {
-			break
-		}
-		if issues[i].Title != expected {
-			t.Errorf("issue %d: expected title %q, got %q", i, expected, issues[i].Title)
-		}
-	}
-
-	// Verify all returned issues have todo status
-	for _, iss := range issues {
-		if iss.Status != piece.StatusTodo {
-			t.Errorf("expected status 'todo', got %q for issue %q", iss.Status, iss.Title)
+			t.Logf("  - %s", i.Title)
 		}
 	}
 }
@@ -166,8 +147,8 @@ status: done
 	}
 	handler := issue.NewHandler(deps, tmpDir)
 
-	// List all issues (empty filter)
-	issues, err := handler.ListIssues(nil)
+	// List all issues
+	issues, err := handler.ListIssues()
 	if err != nil {
 		t.Fatalf("ListIssues failed: %v", err)
 	}
@@ -233,15 +214,6 @@ func TestIntegration_SearchIssues_FuzzyMatchAndLimit(t *testing.T) {
 	}
 	if len(result) != 2 {
 		t.Errorf("expected 2 issues matching 'auth', got %d", len(result))
-	}
-
-	// Test 2: Search with status filter
-	result, err = handler.SearchIssues(issue.SearchInput{Status: []string{"todo"}})
-	if err != nil {
-		t.Fatalf("SearchIssues with status filter failed: %v", err)
-	}
-	if len(result) != 2 {
-		t.Errorf("expected 2 todo issues, got %d", len(result))
 	}
 
 	// Test 3: Search with limit

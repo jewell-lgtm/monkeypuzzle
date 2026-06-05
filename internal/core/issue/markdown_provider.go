@@ -55,13 +55,12 @@ func (p *MarkdownProvider) Create(input CreateInput) (Issue, error) {
 	return Issue{
 		ID:          filePath,
 		Title:       input.Title,
-		Status:      piece.StatusTodo,
 		Description: input.Description,
 	}, nil
 }
 
 // List returns issues from the issues directory
-func (p *MarkdownProvider) List(statusFilter []string) ([]Issue, error) {
+func (p *MarkdownProvider) List() ([]Issue, error) {
 	entries, err := p.fs.ReadDir(p.issuesDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -82,11 +81,6 @@ func (p *MarkdownProvider) List(statusFilter []string) ([]Issue, error) {
 		if err != nil {
 			// Log warning for unexpected errors (file read or parse issues)
 			fmt.Fprintf(os.Stderr, "warning: skipping %s: %v\n", entry.Name(), err)
-			continue
-		}
-
-		// Apply status filter
-		if len(statusFilter) > 0 && !containsStatus(statusFilter, issue.Status) {
 			continue
 		}
 
@@ -130,11 +124,6 @@ func (p *MarkdownProvider) SearchIssues(input SearchInput) ([]Issue, error) {
 			continue
 		}
 
-		// Apply status filter
-		if len(input.Status) > 0 && !containsStatus(input.Status, issue.Status) {
-			continue
-		}
-
 		// Apply query filter (fuzzy match on title)
 		if input.Query != "" && !fuzzy.Match(input.Query, issue.Title) {
 			continue
@@ -175,26 +164,15 @@ func (p *MarkdownProvider) SearchIssues(input SearchInput) ([]Issue, error) {
 
 // Get returns an issue by its file path
 func (p *MarkdownProvider) Get(id string) (Issue, error) {
-	status, err := piece.ParseStatus(id, p.fs)
-	if err != nil {
-		return Issue{}, fmt.Errorf("failed to parse status: %w", err)
-	}
-
 	title, err := piece.ExtractIssueName(id, p.fs)
 	if err != nil {
 		return Issue{}, fmt.Errorf("failed to extract title: %w", err)
 	}
 
 	return Issue{
-		ID:     id,
-		Title:  title,
-		Status: status,
+		ID:    id,
+		Title: title,
 	}, nil
-}
-
-// UpdateStatus updates the status in the issue's frontmatter
-func (p *MarkdownProvider) UpdateStatus(id string, status string) error {
-	return piece.UpdateStatus(id, status, p.fs)
 }
 
 // resolveUniqueFilename generates a unique filename, adding numeric suffix if needed
@@ -227,7 +205,6 @@ func buildMarkdownContent(input CreateInput) []byte {
 	// YAML frontmatter
 	b.WriteString("---\n")
 	fmt.Fprintf(&b, "title: %s\n", escapeYAMLString(input.Title))
-	fmt.Fprintf(&b, "status: %s\n", piece.StatusTodo)
 	if input.Description != "" {
 		fmt.Fprintf(&b, "description: %s\n", escapeYAMLString(input.Description))
 	}
@@ -252,13 +229,4 @@ func escapeYAMLString(s string) string {
 		return `"` + escaped + `"`
 	}
 	return s
-}
-
-func containsStatus(slice []string, item string) bool {
-	for _, s := range slice {
-		if s == item {
-			return true
-		}
-	}
-	return false
 }

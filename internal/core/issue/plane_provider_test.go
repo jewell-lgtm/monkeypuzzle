@@ -150,12 +150,9 @@ func TestPlaneProvider_HappyPath(t *testing.T) {
 	if created.ID != "i1" || created.Number != "PROJ-7" || created.Title != "New issue" {
 		t.Errorf("Create() = %+v", created)
 	}
-	if created.Status != "todo" {
-		t.Errorf("Create() Status = %q, want todo", created.Status)
-	}
 
 	// List
-	issues, err := provider.List(nil)
+	issues, err := provider.List()
 	if err != nil {
 		t.Fatalf("List() error = %v", err)
 	}
@@ -172,46 +169,11 @@ func TestPlaneProvider_HappyPath(t *testing.T) {
 		t.Errorf("Get() = %+v", got)
 	}
 
-	// UpdateStatus -> PATCH with started state uuid
-	if err := provider.UpdateStatus("i1", "in-progress"); err != nil {
-		t.Fatalf("UpdateStatus() error = %v", err)
-	}
-	var patchReq *http.Request
-	for _, r := range mt.requests {
-		if r.Method == "PATCH" {
-			patchReq = r
-		}
-	}
-	if patchReq == nil {
-		t.Fatal("no PATCH request issued")
-	}
-	body, _ := io.ReadAll(patchReq.Body)
-	if !strings.Contains(string(body), "s-started") {
-		t.Errorf("PATCH body = %s, want state s-started", string(body))
-	}
-
 	// All requests carry the API key header
 	for _, r := range mt.requests {
 		if r.Header.Get("X-API-Key") != "test-key" {
 			t.Errorf("request %s %s missing X-API-Key header", r.Method, r.URL.Path)
 		}
-	}
-}
-
-func TestPlaneProvider_ListStatusFilter(t *testing.T) {
-	routes := map[string]string{
-		"GET " + planeBasePath(""):        projectResponse,
-		"GET " + planeBasePath("states/"): statesResponse,
-		"GET " + planeBasePath("issues/"): `{"results":[{"id":"i1","sequence_id":1,"name":"a","state":"s-backlog"},{"id":"i2","sequence_id":2,"name":"b","state":"s-started"},{"id":"i3","sequence_id":3,"name":"c","state":"s-completed"}],"next_page_results":false,"next_cursor":""}`,
-	}
-	provider, _ := newPlaneTestProvider(routes)
-
-	issues, err := provider.List([]string{"in-progress"})
-	if err != nil {
-		t.Fatalf("List() error = %v", err)
-	}
-	if len(issues) != 1 || issues[0].ID != "i2" {
-		t.Errorf("List(in-progress) = %+v", issues)
 	}
 }
 
@@ -240,7 +202,7 @@ func TestPlaneProvider_Pagination(t *testing.T) {
 	}}
 	// Custom Do: branch on cursor query param.
 	provider := NewPlaneProvider(&paginatingTransport{inner: mt}, "https://api.plane.so", "k", planeWS, planeProj)
-	issues, err := provider.List(nil)
+	issues, err := provider.List()
 	if err != nil {
 		t.Fatalf("List() error = %v", err)
 	}
@@ -263,18 +225,4 @@ func (p *paginatingTransport) Do(req *http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
 	}
 	return p.inner.Do(req)
-}
-
-func TestMpStatusToPlaneGroup(t *testing.T) {
-	cases := map[string]string{
-		"todo":        "backlog",
-		"in-progress": "started",
-		"done":        "completed",
-		"weird":       "backlog",
-	}
-	for in, want := range cases {
-		if got := mpStatusToPlaneGroup(in); got != want {
-			t.Errorf("mpStatusToPlaneGroup(%q) = %q, want %q", in, got, want)
-		}
-	}
 }

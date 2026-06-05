@@ -22,11 +22,9 @@ var (
 	flagIssueTitle        string
 	flagIssueDescription  string
 	flagIssueSchema       bool
-	flagIssueListStatus   []string
 	flagIssueListSchema   bool
 	flagIssueListAll      bool
 	flagIssueSearchQuery  string
-	flagIssueSearchStatus []string
 	flagIssueSearchSchema bool
 )
 
@@ -60,14 +58,12 @@ var issueListCmd = &cobra.Command{
 	Long: `List issues from the configured issues directory.
 
 Modes:
-  Flags/stdin:  Filter by status
+  --all:        List issues across all registered projects
   --schema:     Output expected JSON format
 
 Examples:
   mp issue list                        # List all issues
-  mp issue list --status todo          # Filter by status
-  mp issue list --status todo,in-progress  # Multiple statuses
-  echo '{"status":["todo"]}' | mp issue list  # Stdin JSON`,
+  mp issue list --all                  # List across all projects`,
 	RunE: runIssueList,
 }
 
@@ -84,7 +80,6 @@ Modes:
 Examples:
   mp issue search                      # Interactive search
   mp issue search --query "auth"       # Direct search
-  mp issue search --status in-progress # Filter by status
   echo '{"query":"auth"}' | mp issue search  # Stdin JSON`,
 	RunE: runIssueSearch,
 }
@@ -94,12 +89,10 @@ func init() {
 	issueCreateCmd.Flags().StringVar(&flagIssueDescription, "description", "", "Issue description")
 	issueCreateCmd.Flags().BoolVar(&flagIssueSchema, "schema", false, "Output JSON schema with defaults and exit")
 
-	issueListCmd.Flags().StringSliceVar(&flagIssueListStatus, "status", nil, "Filter by status (todo, in-progress, done)")
 	issueListCmd.Flags().BoolVar(&flagIssueListSchema, "schema", false, "Output JSON schema and exit")
 	issueListCmd.Flags().BoolVar(&flagIssueListAll, "all", false, "List issues across all registered projects")
 
 	issueSearchCmd.Flags().StringVar(&flagIssueSearchQuery, "query", "", "Search query (fuzzy match)")
-	issueSearchCmd.Flags().StringSliceVar(&flagIssueSearchStatus, "status", nil, "Filter by status (todo, in-progress, done)")
 	issueSearchCmd.Flags().BoolVar(&flagIssueSearchSchema, "schema", false, "Output JSON schema and exit")
 
 	issueCmd.AddCommand(issueCreateCmd)
@@ -220,11 +213,6 @@ func runIssueList(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	input, err := getIssueListInput()
-	if err != nil {
-		return err
-	}
-
 	deps := core.NewDeps(
 		adapters.NewOSFS(""),
 		adapters.NewTextOutput(os.Stderr),
@@ -234,7 +222,7 @@ func runIssueList(cmd *cobra.Command, args []string) error {
 	)
 
 	if flagIssueListAll {
-		return runIssueListAll(deps, input.Status)
+		return runIssueListAll(deps)
 	}
 
 	wd, err := os.Getwd()
@@ -243,7 +231,7 @@ func runIssueList(cmd *cobra.Command, args []string) error {
 	}
 	handler := issue.NewHandler(deps, wd)
 
-	issues, err := handler.ListIssues(input.Status)
+	issues, err := handler.ListIssues()
 	if err != nil {
 		return err
 	}
@@ -260,7 +248,7 @@ type projectIssues struct {
 	Error  string                `json:"error,omitempty"`
 }
 
-func runIssueListAll(deps core.Deps, statusFilter []string) error {
+func runIssueListAll(deps core.Deps) error {
 	reg, err := registry.Load()
 	if err != nil {
 		return err
@@ -269,7 +257,7 @@ func runIssueListAll(deps core.Deps, statusFilter []string) error {
 	results := make([]projectIssues, 0, len(reg.Projects))
 	for _, p := range reg.Projects {
 		entry := projectIssues{Name: p.Name, Path: p.Path}
-		issues, err := issue.NewHandler(deps, p.Path).ListIssues(statusFilter)
+		issues, err := issue.NewHandler(deps, p.Path).ListIssues()
 		if err != nil {
 			entry.Error = err.Error()
 		} else {
@@ -304,39 +292,10 @@ func runIssueListAll(deps core.Deps, statusFilter []string) error {
 			if num != "" {
 				num += " "
 			}
-			fmt.Printf("  [%s] %s%s\n", it.Status, num, it.Title)
+			fmt.Printf("  %s%s\n", num, it.Title)
 		}
 	}
 	return nil
-}
-
-func getIssueListInput() (issue.ListInput, error) {
-	var input issue.ListInput
-
-	switch {
-	case len(flagIssueListStatus) > 0:
-		input = issue.ListInput{Status: flagIssueListStatus}
-
-	case cli.HasStdinData():
-		data, err := io.ReadAll(os.Stdin)
-		if err != nil {
-			return issue.ListInput{}, fmt.Errorf("failed to read stdin: %w", err)
-		}
-		input, err = issue.ParseListJSON(data)
-		if err != nil {
-			return issue.ListInput{}, err
-		}
-
-	default:
-		// No filter - list all
-		input = issue.ListInput{}
-	}
-
-	if err := issue.ValidateListInput(input); err != nil {
-		return issue.ListInput{}, err
-	}
-
-	return input, nil
 }
 
 func runIssueSearch(cmd *cobra.Command, args []string) error {
@@ -426,7 +385,7 @@ func runIssueSearch(cmd *cobra.Command, args []string) error {
 }
 
 func getIssueSearchInput() (issue.SearchInput, bool, error) {
-	hasFlagsOrStdin := flagIssueSearchQuery != "" || len(flagIssueSearchStatus) > 0 || cli.HasStdinData()
+	hasFlagsOrStdin := flagIssueSearchQuery != "" || cli.HasStdinData()
 
 	// Interactive mode if TTY and no flags/stdin
 	if cli.IsTerminal() && !hasFlagsOrStdin {
@@ -436,10 +395,9 @@ func getIssueSearchInput() (issue.SearchInput, bool, error) {
 	var input issue.SearchInput
 
 	switch {
-	case flagIssueSearchQuery != "" || len(flagIssueSearchStatus) > 0:
+	case flagIssueSearchQuery != "":
 		input = issue.SearchInput{
-			Query:  flagIssueSearchQuery,
-			Status: flagIssueSearchStatus,
+			Query: flagIssueSearchQuery,
 		}
 
 	case cli.HasStdinData():

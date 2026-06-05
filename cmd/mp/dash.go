@@ -69,7 +69,6 @@ type dashIssue struct {
 	Path   string `json:"path"`
 	Title  string `json:"title"`
 	Number string `json:"number,omitempty"`
-	Status string `json:"status"`
 }
 
 // dashBranch is the JSON shape for a git branch that is not yet adopted as a
@@ -166,31 +165,49 @@ func collectDashboard(ctx context.Context, infos []projectcmd.Info) ([]dashProje
 	return out, nil
 }
 
-// collectProjectIssues returns up to maxIssuesPerProject open todo issues for a
-// project. Issues claimed by an existing piece are already filtered out by the
-// "todo"-only status filter — creating a piece from an issue transitions its
-// status to in-progress.
+// collectProjectIssues returns up to maxIssuesPerProject issues for a project,
+// excluding any issue that already has a piece. The exclusion set is built from
+// each existing piece's recorded issue ref (in piece-metadata.json): there is no
+// longer an issue status to filter on, so "has a piece?" is the dedup rule that
+// keeps the list useful.
 func collectProjectIssues(deps core.Deps, projectPath string, pieces []dashPiece) []dashIssue {
 	handler := issue.NewHandler(deps, projectPath)
-	items, err := handler.ListIssues([]string{piececmd.StatusTodo})
+	items, err := handler.ListIssues()
 	if err != nil {
 		return nil
 	}
 
+	worked := workedIssueIDs(deps, pieces)
+
 	out := make([]dashIssue, 0, len(items))
 	for _, it := range items {
+		if worked[it.ID] {
+			continue
+		}
 		out = append(out, dashIssue{
 			Path:   it.Path,
 			Title:  it.Title,
 			Number: it.Number,
-			Status: it.Status,
 		})
 		if len(out) >= maxIssuesPerProject {
 			break
 		}
 	}
-	_ = pieces
 	return out
+}
+
+// workedIssueIDs returns the set of issue IDs that already have a piece, derived
+// from each piece's recorded issue ref in its metadata.
+func workedIssueIDs(deps core.Deps, pieces []dashPiece) map[string]bool {
+	worked := make(map[string]bool)
+	for _, pc := range pieces {
+		meta, err := piececmd.ReadPieceMetadata(pc.WorktreePath, deps.FS)
+		if err != nil || meta == nil || meta.Issue.IsEmpty() {
+			continue
+		}
+		worked[meta.Issue.ID] = true
+	}
+	return worked
 }
 
 // collectProjectBranches returns git branches that are candidates for adoption:

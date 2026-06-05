@@ -99,60 +99,17 @@ func (l *LoadingSignal) Pub(active bool, label string) {
 	}
 }
 
-// IssueSyncEvent represents a status change that should be synced to a provider.
-type IssueSyncEvent struct {
-	Provider     string // Issue provider type (markdown, linear, etc.)
-	IssueID      string // Provider-specific issue ID
-	NewStatus    string // New status to sync (in-progress, done, etc.)
-	PieceName    string // Name of the piece that triggered the sync
-	WorktreePath string // Path to the piece worktree (for updating marker dirty flag)
-}
-
-// IssueSyncSignal provides pub/sub for issue status sync events.
-// Piece operations publish events, sync subscribers persist changes to providers.
-type IssueSyncSignal struct {
-	mu   sync.RWMutex
-	subs []func(event IssueSyncEvent)
-}
-
-// NewIssueSyncSignal creates a new issue sync signal pub/sub.
-func NewIssueSyncSignal() *IssueSyncSignal {
-	return &IssueSyncSignal{subs: make([]func(event IssueSyncEvent), 0)}
-}
-
-// Sub registers a subscriber to receive issue sync events.
-func (s *IssueSyncSignal) Sub(fn func(event IssueSyncEvent)) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.subs = append(s.subs, fn)
-}
-
-// Pub publishes an issue sync event to all subscribers.
-func (s *IssueSyncSignal) Pub(event IssueSyncEvent) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	for _, fn := range s.subs {
-		fn(event)
-	}
-}
-
 // Deps holds all injectable dependencies for handlers
 type Deps struct {
-	FS        FS
-	Output    Output
-	Exec      Exec
-	HTTP      HTTPClient
-	Loading   *LoadingSignal
-	IssueSync *IssueSyncSignal
+	FS      FS
+	Output  Output
+	Exec    Exec
+	HTTP    HTTPClient
+	Loading *LoadingSignal
 }
 
 // NewDeps creates Deps with all required dependencies.
 // Using this constructor ensures the compiler catches missing dependencies.
 func NewDeps(fs FS, output Output, exec Exec, http HTTPClient, loading *LoadingSignal) Deps {
 	return Deps{FS: fs, Output: output, Exec: exec, HTTP: http, Loading: loading}
-}
-
-// NewDepsWithSync creates Deps with all dependencies including issue sync.
-func NewDepsWithSync(fs FS, output Output, exec Exec, http HTTPClient, loading *LoadingSignal, issueSync *IssueSyncSignal) Deps {
-	return Deps{FS: fs, Output: output, Exec: exec, HTTP: http, Loading: loading, IssueSync: issueSync}
 }

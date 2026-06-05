@@ -184,24 +184,25 @@ func TestIntegration_CreatePR_WithIssueMarker(t *testing.T) {
 	_, worktreeDir, cleanup := setupTestRepo(t)
 	defer cleanup()
 
-	// Create issue marker file
-	marker := piece.CurrentIssueMarker{
+	// Record the issue ref in piece metadata (the PR handler reads it for the
+	// default PR title).
+	meta := piece.PieceMetadata{
+		Parent: "main",
 		Issue: piece.IssueRef{
 			Provider: "markdown",
 			ID:       "issues/my-feature.md",
 			Title:    "My Awesome Feature",
 		},
-		PieceName: "test-piece",
 	}
-	markerData, _ := json.Marshal(marker)
-	markerPath := filepath.Join(worktreeDir, ".monkeypuzzle", "current-issue.json")
-	if err := os.WriteFile(markerPath, markerData, 0644); err != nil {
-		t.Fatalf("failed to write marker: %v", err)
+	metaData, _ := json.Marshal(meta)
+	metaPath := filepath.Join(worktreeDir, ".monkeypuzzle", "piece-metadata.json")
+	if err := os.WriteFile(metaPath, metaData, 0644); err != nil {
+		t.Fatalf("failed to write piece metadata: %v", err)
 	}
 
 	mockExec := adapters.NewMockExec()
 	mockExec.AddResponse("git", []string{"push", "-u", "origin", "HEAD"}, []byte(""), nil)
-	// Note: title should come from issue marker since input.Title is empty
+	// Note: title should come from the recorded issue ref since input.Title is empty
 	mockExec.AddResponse("gh", []string{"pr", "create", "--title", "My Awesome Feature", "--body", "", "--base", "main"},
 		[]byte("https://github.com/test/repo/pull/99\n"), nil)
 

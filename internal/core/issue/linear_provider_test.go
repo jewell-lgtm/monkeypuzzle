@@ -124,25 +124,6 @@ func TestRegisteredProviders(t *testing.T) {
 	}
 }
 
-func TestMapLinearStatus_UnknownState(t *testing.T) {
-	tests := []struct {
-		state  string
-		expect string
-	}{
-		{"Unknown", "todo"},
-		{"Custom Progress State", "in-progress"},
-		{"Complete", "done"},
-		{"Cancelled", "done"},
-	}
-
-	for _, tt := range tests {
-		got := mapLinearStatus(tt.state)
-		if got != tt.expect {
-			t.Errorf("mapLinearStatus(%q) = %q, want %q", tt.state, got, tt.expect)
-		}
-	}
-}
-
 // mockFS implements core.FS for testing
 type mockFS struct{}
 

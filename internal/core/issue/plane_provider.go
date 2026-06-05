@@ -15,17 +15,6 @@ import (
 // DefaultPlaneBaseURL is the API base URL for Plane Cloud.
 const DefaultPlaneBaseURL = "https://api.plane.so"
 
-// planeGroupToMpStatus maps Plane state groups to mp statuses.
-var planeGroupToMpStatus = map[string]string{
-	"backlog":   "todo",
-	"unstarted": "todo",
-	"triage":    "todo",
-	"started":   "in-progress",
-	"completed": "done",
-	"cancelled": "done",
-	"canceled":  "done",
-}
-
 // PlaneProvider implements Provider using the Plane REST API.
 type PlaneProvider struct {
 	http          core.HTTPClient
@@ -35,9 +24,8 @@ type PlaneProvider struct {
 	projectID     string
 
 	// lazily-loaded caches
-	stateGroups map[string]string // state uuid -> group
-	groupState  map[string]string // group -> a representative state uuid
-	identifier  string            // project identifier prefix (e.g. "PROJ")
+	identifierLoaded bool
+	identifier       string // project identifier prefix (e.g. "PROJ")
 }
 
 // NewPlaneProvider creates a provider backed by a Plane project.
@@ -87,13 +75,13 @@ func (p *PlaneProvider) Create(input CreateInput) (Issue, error) {
 	return p.toIssue(pi)
 }
 
-// List returns issues from the Plane project, optionally filtered by status.
-func (p *PlaneProvider) List(statusFilter []string) ([]Issue, error) {
+// List returns all issues from the Plane project.
+func (p *PlaneProvider) List() ([]Issue, error) {
 	raw, err := p.fetchAllIssues(0)
 	if err != nil {
 		return nil, err
 	}
-	return p.toIssues(raw, statusFilter, "", 0)
+	return p.toIssues(raw, "", 0)
 }
 
 // SearchIssues returns issues matching the search criteria.
@@ -108,7 +96,7 @@ func (p *PlaneProvider) SearchIssues(input SearchInput) ([]Issue, error) {
 	if err != nil {
 		return nil, err
 	}
-	return p.toIssues(raw, input.Status, input.Query, limit)
+	return p.toIssues(raw, input.Query, limit)
 }
 
 // Get returns a single issue by its Plane UUID.
@@ -122,23 +110,6 @@ func (p *PlaneProvider) Get(id string) (Issue, error) {
 		return Issue{}, fmt.Errorf("failed to parse issue response: %w", err)
 	}
 	return p.toIssue(pi)
-}
-
-// UpdateStatus moves an issue to a state matching the target mp status.
-func (p *PlaneProvider) UpdateStatus(id string, status string) error {
-	if err := p.ensureStates(); err != nil {
-		return err
-	}
-	group := mpStatusToPlaneGroup(status)
-	stateID, ok := p.groupState[group]
-	if !ok {
-		return fmt.Errorf("no Plane state found for group %q (status %q)", group, status)
-	}
-	_, err := p.do("PATCH", p.issuesPath(id), map[string]string{"state": stateID})
-	if err != nil {
-		return fmt.Errorf("failed to update issue status: %w", err)
-	}
-	return nil
 }
 
 // fetchAllIssues walks the cursor-paginated issues endpoint, stopping early
@@ -177,10 +148,10 @@ func (p *PlaneProvider) fetchAllIssues(limit int) ([]planeIssue, error) {
 	}
 }
 
-// toIssues converts Plane issues, resolving state groups, applying an optional
-// case-insensitive title query and status filter, and capping at limit.
-func (p *PlaneProvider) toIssues(raw []planeIssue, statusFilter []string, query string, limit int) ([]Issue, error) {
-	if err := p.ensureStates(); err != nil {
+// toIssues converts Plane issues, applying an optional case-insensitive title
+// query and capping at limit.
+func (p *PlaneProvider) toIssues(raw []planeIssue, query string, limit int) ([]Issue, error) {
+	if err := p.ensureIdentifier(); err != nil {
 		return nil, err
 	}
 	queryLower := strings.ToLower(query)
@@ -189,11 +160,7 @@ func (p *PlaneProvider) toIssues(raw []planeIssue, statusFilter []string, query 
 		if query != "" && !strings.Contains(strings.ToLower(pi.Name), queryLower) {
 			continue
 		}
-		status := p.statusForState(pi.State)
-		if len(statusFilter) > 0 && !containsStatus(statusFilter, status) {
-			continue
-		}
-		issues = append(issues, p.issueFrom(pi, status))
+		issues = append(issues, p.issueFrom(pi))
 		if limit > 0 && len(issues) >= limit {
 			break
 		}
@@ -202,13 +169,13 @@ func (p *PlaneProvider) toIssues(raw []planeIssue, statusFilter []string, query 
 }
 
 func (p *PlaneProvider) toIssue(pi planeIssue) (Issue, error) {
-	if err := p.ensureStates(); err != nil {
+	if err := p.ensureIdentifier(); err != nil {
 		return Issue{}, err
 	}
-	return p.issueFrom(pi, p.statusForState(pi.State)), nil
+	return p.issueFrom(pi), nil
 }
 
-func (p *PlaneProvider) issueFrom(pi planeIssue, status string) Issue {
+func (p *PlaneProvider) issueFrom(pi planeIssue) Issue {
 	number := ""
 	if pi.SequenceID > 0 {
 		if p.identifier != "" {
@@ -221,26 +188,16 @@ func (p *PlaneProvider) issueFrom(pi planeIssue, status string) Issue {
 		ID:          pi.ID,
 		Number:      number,
 		Title:       pi.Name,
-		Status:      status,
 		Description: pi.DescriptionStripped,
 	}
 }
 
-func (p *PlaneProvider) statusForState(stateID string) string {
-	if group, ok := p.stateGroups[stateID]; ok {
-		if status, ok := planeGroupToMpStatus[strings.ToLower(group)]; ok {
-			return status
-		}
-	}
-	return "todo"
-}
-
-// ensureStates loads the project's workflow states and identifier once.
-func (p *PlaneProvider) ensureStates() error {
-	if p.stateGroups != nil {
+// ensureIdentifier loads the project's identifier prefix once (best-effort).
+func (p *PlaneProvider) ensureIdentifier() error {
+	if p.identifierLoaded {
 		return nil
 	}
-	// Project identifier (best-effort: a failure here is non-fatal).
+	p.identifierLoaded = true
 	if projBody, err := p.do("GET", p.projectPath(), nil); err == nil {
 		var proj struct {
 			Identifier string `json:"identifier"`
@@ -249,54 +206,11 @@ func (p *PlaneProvider) ensureStates() error {
 			p.identifier = proj.Identifier
 		}
 	}
-
-	groups := map[string]string{}
-	groupState := map[string]string{}
-	cursor := ""
-	for {
-		path := p.statesPath()
-		if cursor != "" {
-			path += "?cursor=" + url.QueryEscape(cursor)
-		}
-		respBody, err := p.do("GET", path, nil)
-		if err != nil {
-			return fmt.Errorf("failed to list states: %w", err)
-		}
-		var env planeListResponse
-		if err := json.Unmarshal(respBody, &env); err != nil {
-			return fmt.Errorf("failed to parse states response: %w", err)
-		}
-		var page []struct {
-			ID    string `json:"id"`
-			Group string `json:"group"`
-		}
-		if len(env.Results) > 0 {
-			if err := json.Unmarshal(env.Results, &page); err != nil {
-				return fmt.Errorf("failed to parse states page: %w", err)
-			}
-		}
-		for _, s := range page {
-			groups[s.ID] = s.Group
-			if _, ok := groupState[s.Group]; !ok {
-				groupState[s.Group] = s.ID
-			}
-		}
-		if !env.NextPageResults || env.NextCursor == "" {
-			break
-		}
-		cursor = env.NextCursor
-	}
-	p.stateGroups = groups
-	p.groupState = groupState
 	return nil
 }
 
 func (p *PlaneProvider) projectPath() string {
 	return fmt.Sprintf("/api/v1/workspaces/%s/projects/%s/", p.workspaceSlug, p.projectID)
-}
-
-func (p *PlaneProvider) statesPath() string {
-	return fmt.Sprintf("/api/v1/workspaces/%s/projects/%s/states/", p.workspaceSlug, p.projectID)
 }
 
 // issuesPath builds the issues collection path, or a single-issue path when id is non-empty.
@@ -343,16 +257,4 @@ func (p *PlaneProvider) do(method, path string, body interface{}) ([]byte, error
 		return nil, fmt.Errorf("plane API %s %s returned status %d: %s", method, path, resp.StatusCode, string(respBody))
 	}
 	return respBody, nil
-}
-
-// mpStatusToPlaneGroup maps an mp status to a Plane state group.
-func mpStatusToPlaneGroup(status string) string {
-	switch status {
-	case "in-progress":
-		return "started"
-	case "done":
-		return "completed"
-	default:
-		return "backlog"
-	}
 }
