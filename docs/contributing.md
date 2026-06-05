@@ -356,6 +356,17 @@ func runNewCmd(cmd *cobra.Command, args []string) error {
 
 ---
 
+## Claude / Agent Skills
+
+The repo ships skills under `.claude/skills/`. Only one of them is generated:
+
+- **`.claude/skills/managing-monkeypuzzle/SKILL.md` is generated** by `mp claude skill`. Re-run that command to regenerate it; do not hand-edit it, as your changes will be overwritten.
+- **`.claude/skills/monkeypuzzle/SKILL.md` and `.claude/skills/work-on-issue/SKILL.md` are hand-maintained.** There is no generator for them — edit them directly and review changes in PRs like any other source file.
+
+When `mp`'s CLI surface changes, run `mp claude skill` to refresh `managing-monkeypuzzle`, and update the two hand-maintained skills manually if affected.
+
+---
+
 ## Project Structure Reference
 
 See [architecture.md](architecture.md) for detailed architecture documentation.

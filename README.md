@@ -41,6 +41,17 @@ mp done
 
 To jump between pieces, or to pick up a stray branch you left behind, just run `mp switch` again — pieces, open todo issues, and unadopted local branches all show in one fuzzy-filtered list.
 
+## How you talk to mp
+
+Every `mp` command exposes the same four-mode interaction contract, in priority order:
+
+1. **Interactive (TTY, default)** — a Bubble Tea **wizard/TUI** walks you through the decisions, pre-filling smart defaults from detected state. Commands with several decisions (e.g. `mp done`, `mp abandon`) are multi-step wizards.
+2. **Flags** — passing flags **skips the matching wizard steps**; pass enough and there's no wizard at all (`mp create --name foo`).
+3. **Stdin JSON** — `echo '{...}' | mp <cmd>` is fully programmatic: JSON in, JSON out on stdout. There is no separate "agent mode" — the same CLI is the API.
+4. **`--schema`** — `mp <cmd> --schema` prints the expected JSON-stdin shape.
+
+The key rule: **non-interactive invocations (flags or JSON) fail loudly on genuine ambiguity** rather than prompting or guessing — there's no human to ask. The wizard is the only place ambiguity gets resolved. (A pure no-op isn't ambiguous.)
+
 ## More ways of working
 
 - **[Workflow guide](docs/workflow.md)** — stacked pieces, multiple projects, the full lifecycle, and integrating with GitHub PRs.

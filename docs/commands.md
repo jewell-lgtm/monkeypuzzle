@@ -2,14 +2,26 @@
 
 ## Input Modes
 
-All commands support multiple input modes:
+Every command follows the same interaction contract, in priority order:
 
 | Mode        | When                        | Usage                    |
 | ----------- | --------------------------- | ------------------------ |
-| Interactive | TTY detected                | Run command with no args |
-| Flags       | All required flags provided | `mp <cmd> --flag value`  |
+| Interactive | TTY detected (default)      | Run command with no args |
+| Flags       | One or more flags provided  | `mp <cmd> --flag value`  |
 | Stdin JSON  | Piped input                 | `echo '{}' \| mp <cmd>`  |
 | Schema      | `--schema` flag             | `mp <cmd> --schema`      |
+
+In interactive mode a Bubble Tea wizard walks you through the decisions, using
+defaults inferred from detected state; commands with several decisions are
+multi-step wizards. **Flags skip the corresponding wizard steps** — pass enough
+flags and the command runs straight through with no wizard. Stdin JSON is the
+fully programmatic path (JSON in, JSON out): there is no separate "agent mode",
+the same CLI is the API.
+
+**Ambiguity rule:** non-interactive invocations (flags or JSON) **fail loudly on
+genuine ambiguity** rather than prompting or guessing — there is no human to ask.
+The wizard is the only place ambiguity gets resolved. (A pure no-op is not
+ambiguous.)
 
 Output goes to stderr (human-readable) while stdout is reserved for JSON (machine-readable).
 
