@@ -1656,6 +1656,108 @@ func TestIntegration_AdoptPiece_HappyPath(t *testing.T) {
 	}
 }
 
+// TestIntegration_AdoptPiece_BranchCheckedOutInMainRepo covers the natural flow
+// where the user has been working on a branch directly in the main repo and then
+// tries to adopt it. Git refuses a second worktree for an already-checked-out
+// branch, so AdoptPiece must fail with a clear, actionable message — and must not
+// silently move the main repo's checkout or leave a stray worktree behind.
+func TestIntegration_AdoptPiece_BranchCheckedOutInMainRepo(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	tmpDataHome, err := os.MkdirTemp("", "mp-data-*")
+	if err != nil {
+		t.Fatalf("failed to create temp data dir: %v", err)
+	}
+	t.Cleanup(func() {
+		os.RemoveAll(tmpDataHome)
+		paths.ResetDataDir()
+	})
+	paths.SetDataDir(tmpDataHome)
+
+	tmpDir, err := os.MkdirTemp("", "mp-integration-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	setupGitRepo(t, tmpDir)
+	setupMonkeypuzzleConfig(t, tmpDir)
+
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get working directory: %v", err)
+	}
+	defer func() { _ = os.Chdir(oldWd) }()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("failed to change directory: %v", err)
+	}
+
+	// Create a feature branch and commit, leaving it checked out in the main repo.
+	cmd := exec.Command("git", "checkout", "-b", "my-feature-branch")
+	cmd.Dir = tmpDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git checkout -b failed: %v\n%s", err, out)
+	}
+	testFile := filepath.Join(tmpDir, "feature.txt")
+	if err := os.WriteFile(testFile, []byte("feature content"), 0644); err != nil {
+		t.Fatalf("failed to write feature file: %v", err)
+	}
+	cmd = exec.Command("git", "add", ".")
+	cmd.Dir = tmpDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git add failed: %v\n%s", err, out)
+	}
+	cmd = exec.Command("git", "commit", "-m", "feature commit")
+	cmd.Dir = tmpDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git commit failed: %v\n%s", err, out)
+	}
+
+	// Adopt while my-feature-branch is still HEAD of the main repo.
+	deps := core.Deps{
+		FS:     adapters.NewOSFS(""),
+		Output: adapters.NewBufferOutput(),
+		Exec:   adapters.NewOSExec(),
+	}
+	handler := piece.NewHandler(deps)
+
+	_, err = handler.AdoptPiece(context.Background(), piece.AdoptPieceInput{Branch: "my-feature-branch"})
+	if err == nil {
+		t.Fatal("expected AdoptPiece to fail when the branch is checked out in the main repo")
+	}
+
+	// The error should name the branch and the main repo, and not be the bare
+	// git "exit status 128".
+	msg := err.Error()
+	if strings.Contains(msg, "exit status 128") {
+		t.Errorf("expected a friendly message, got raw git error: %v", err)
+	}
+	for _, want := range []string{"my-feature-branch", "checked out", tmpDir} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error message missing %q: %v", want, err)
+		}
+	}
+
+	git := adapters.NewGit(adapters.NewOSExec())
+
+	// The main repo must be left untouched on the feature branch (no silent switch).
+	mainBranch, err := git.CurrentBranch(context.Background(), tmpDir)
+	if err != nil {
+		t.Fatalf("failed to get main repo branch: %v", err)
+	}
+	if mainBranch != "my-feature-branch" {
+		t.Errorf("expected main repo left on 'my-feature-branch', got %q", mainBranch)
+	}
+
+	// No stray worktree should have been created for the failed adopt.
+	piecePath := filepath.Join(tmpDir, ".monkeypuzzle", "pieces", "my-feature-branch")
+	if _, err := os.Stat(piecePath); !os.IsNotExist(err) {
+		t.Errorf("expected no worktree at %s, stat err = %v", piecePath, err)
+	}
+}
+
 func TestIntegration_AdoptPiece_ErrorOnMainBranch(t *testing.T) {
 	// Skip if git is not available
 	if _, err := exec.LookPath("git"); err != nil {
