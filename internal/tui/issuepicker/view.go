@@ -16,33 +16,24 @@ func (m Model) View() string {
 	b.WriteString(styles.Title.Render("Select Issue"))
 	b.WriteString("\n\n")
 
-	// Filter input
-	b.WriteString(m.Input.View())
-	b.WriteString("\n\n")
-
-	// Show error if any
+	// Body: error, loading, the filtered list, or an empty-state message.
 	if m.Error != "" {
 		b.WriteString(styles.Subtle.Render("Error: " + m.Error))
 		b.WriteString("\n\n")
 	}
 
-	// Show loading indicator
-	if m.Loading {
+	switch {
+	case m.Loading:
 		b.WriteString(styles.Subtle.Render("Loading..."))
-		b.WriteString("\n\n")
-	}
-
-	if len(m.Filtered) == 0 {
-		if m.Loading {
-			// Don't show "no matches" while loading
-		} else if m.Input.Value() == "" {
+		b.WriteString("\n")
+	case len(m.Filtered) == 0:
+		if m.Input.Value() == "" {
 			b.WriteString(styles.Subtle.Render("No todo issues found. Create one with 'mp issue create'."))
-			b.WriteString("\n")
 		} else {
 			b.WriteString(styles.Subtle.Render("No matches found."))
-			b.WriteString("\n")
 		}
-	} else {
+		b.WriteString("\n")
+	default:
 		// Show count if filtering
 		if m.Input.Value() != "" {
 			b.WriteString(styles.Subtle.Render(fmt.Sprintf("Showing %d of %d issues", len(m.Filtered), len(m.AllIssues))))
@@ -63,12 +54,9 @@ func (m Model) View() string {
 		for i := start; i < end; i++ {
 			iss := m.Filtered[i]
 			cursor := "  "
-			if i == m.Selected {
-				cursor = styles.Cursor.Render("> ")
-			}
-
 			title := iss.Title
 			if i == m.Selected {
+				cursor = styles.Cursor.Render("→ ")
 				title = styles.Selected.Render(title)
 			}
 
@@ -77,13 +65,17 @@ func (m Model) View() string {
 
 		// Scroll indicator
 		if len(m.Filtered) > maxVisible {
-			b.WriteString(styles.Subtle.Render(fmt.Sprintf("\n  ... %d more", len(m.Filtered)-maxVisible)))
+			b.WriteString(styles.Subtle.Render(fmt.Sprintf("  ... %d more", len(m.Filtered)-maxVisible)))
 			b.WriteString("\n")
 		}
 	}
 
+	// Filter input sits at the bottom, just above the help line — matching the
+	// cross-project picker (internal/tui/dashboard).
 	b.WriteString("\n")
-	b.WriteString(styles.Subtle.Render("↑↓ navigate • enter select • esc cancel"))
+	b.WriteString(m.Input.View())
+	b.WriteString("\n")
+	b.WriteString(styles.Subtle.Render("type to filter • ↑/↓ move • enter select • esc cancel"))
 
 	return b.String()
 }

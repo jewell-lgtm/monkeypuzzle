@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/adapters"
@@ -140,20 +139,9 @@ func runSwitchInteractive(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	projects, err := collectDashboard(ctx, infos)
-	if err != nil {
-		return err
-	}
-	p := tea.NewProgram(dashboard.New(dashboardRows(projects)))
-	m, err := p.Run()
-	if err != nil {
-		return err
-	}
-	row, ok := m.(dashboard.Model).SelectedRow()
-	if !ok {
-		return nil
-	}
-	return dispatchPickedRow(ctx, row)
+	// Collect inside the Bubble Tea program (via the shared spinner-loading
+	// picker) so the same loading affordance as `mp go` applies here.
+	return runDashboardTUI(ctx, dashboardLoadCmd(ctx, infos))
 }
 
 // dispatchPickedRow takes a dashboard.Row chosen by the user and runs the

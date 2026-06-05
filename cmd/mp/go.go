@@ -129,12 +129,15 @@ func classifyCwd(ctx context.Context) (root string, state cwdState) {
 }
 
 func collectDashboard(ctx context.Context, infos []projectcmd.Info) ([]dashProject, error) {
+	// No-op loading: the dashboard renders interactively (and prints JSON in
+	// non-TTY mode), so a stray "⏳ Fetching issues..." line printed to stderr
+	// during collection would just linger above the picker.
 	deps := core.NewDeps(
 		adapters.NewOSFS(""),
 		adapters.NewTextOutput(os.Stderr),
 		adapters.NewOSExec(),
 		http.DefaultClient,
-		adapters.SetupCLILoading(os.Stderr),
+		adapters.SetupNoopLoading(),
 	)
 	handler := newPieceHandler(deps)
 	git := adapters.NewGit(adapters.NewOSExec())
@@ -408,22 +411,44 @@ func guideOutsideProject(state cwdState, root string) error {
 }
 
 func renderDashboard(ctx context.Context, infos []projectcmd.Info) error {
-	projects, err := collectDashboard(ctx, infos)
-	if err != nil {
-		return err
-	}
-
+	// Non-interactive: collect synchronously and print JSON.
 	if flagDashJSON || !cli.IsStdoutTerminal() || !cli.IsTerminal() {
+		projects, err := collectDashboard(ctx, infos)
+		if err != nil {
+			return err
+		}
 		return cli.PrintJSON(map[string]any{"projects": projects})
 	}
 
-	rows := dashboardRows(projects)
-	p := tea.NewProgram(dashboard.New(rows))
+	// Interactive: collect inside the Bubble Tea program so the spinner animates
+	// while loading and clears once the rows are ready.
+	return runDashboardTUI(ctx, dashboardLoadCmd(ctx, infos))
+}
+
+// dashboardLoadCmd returns a Bubble Tea command that collects the dashboard for
+// the given projects and delivers the rows (or an error) as a RowsMsg.
+func dashboardLoadCmd(ctx context.Context, infos []projectcmd.Info) tea.Cmd {
+	return func() tea.Msg {
+		projects, err := collectDashboard(ctx, infos)
+		if err != nil {
+			return dashboard.RowsMsg{Err: err}
+		}
+		return dashboard.RowsMsg{Rows: dashboardRows(projects)}
+	}
+}
+
+// runDashboardTUI runs the interactive picker with a spinner that loads via
+// loadCmd, then dispatches the chosen row. Shared by `mp go` and `mp switch`.
+func runDashboardTUI(ctx context.Context, loadCmd tea.Cmd) error {
+	p := tea.NewProgram(dashboard.NewLoading(loadCmd))
 	m, err := p.Run()
 	if err != nil {
 		return err
 	}
 	model := m.(dashboard.Model)
+	if model.Err != nil {
+		return model.Err
+	}
 	row, ok := model.SelectedRow()
 	if !ok {
 		return nil // cancelled

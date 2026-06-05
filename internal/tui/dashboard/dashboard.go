@@ -7,6 +7,7 @@ package dashboard
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -60,6 +61,26 @@ type Row struct {
 	Missing    bool // repo no longer on disk
 }
 
+// RowsMsg delivers the collected rows to a loading dashboard (see NewLoading).
+// A non-nil Err means collection failed; the program quits and the caller
+// surfaces it via Model.Err.
+type RowsMsg struct {
+	Rows []Row
+	Err  error
+}
+
+// spinnerTickMsg advances the loading spinner one frame.
+type spinnerTickMsg struct{}
+
+// spinnerFrames is a braille spinner; spinnerInterval is its frame rate.
+var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+
+const spinnerInterval = 80 * time.Millisecond
+
+func spinnerTick() tea.Cmd {
+	return tea.Tick(spinnerInterval, func(time.Time) tea.Msg { return spinnerTickMsg{} })
+}
+
 // Model is the Bubble Tea model for the dashboard.
 type Model struct {
 	Rows     []Row
@@ -67,20 +88,45 @@ type Model struct {
 	Selected int   // index into Filtered
 	Input    textinput.Model
 
+	// Loading state. When Loading is true the picker shows a spinner until a
+	// RowsMsg arrives; loadCmd is the command that produces it. Err captures a
+	// collection failure for the caller to return after the program exits.
+	Loading bool
+	frame   int
+	loadCmd tea.Cmd
+	Err     error
+
 	Cancelled bool
 }
 
-func New(rows []Row) Model {
+func newFilterInput() textinput.Model {
 	ti := textinput.New()
 	ti.Placeholder = "Type to filter..."
 	ti.Focus()
+	return ti
+}
 
-	m := Model{Rows: rows, Input: ti}
+// New builds a dashboard over already-collected rows.
+func New(rows []Row) Model {
+	m := Model{Rows: rows, Input: newFilterInput()}
 	m.refilter()
 	return m
 }
 
-func (m Model) Init() tea.Cmd { return textinput.Blink }
+// NewLoading builds a dashboard that shows a spinner until loadCmd delivers a
+// RowsMsg with the collected rows (or an error). Collection runs inside the
+// Bubble Tea program so the spinner animates and then disappears on its own —
+// no stray progress lines linger above the picker.
+func NewLoading(loadCmd tea.Cmd) Model {
+	return Model{Input: newFilterInput(), Loading: true, loadCmd: loadCmd}
+}
+
+func (m Model) Init() tea.Cmd {
+	if m.Loading {
+		return tea.Batch(textinput.Blink, m.loadCmd, spinnerTick())
+	}
+	return textinput.Blink
+}
 
 func (m *Model) refilter() {
 	q := strings.TrimSpace(m.Input.Value())
@@ -119,12 +165,30 @@ func rowHaystack(r Row) string {
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case RowsMsg:
+		m.Loading = false
+		if msg.Err != nil {
+			m.Err = msg.Err
+			return m, tea.Quit
+		}
+		m.Rows = msg.Rows
+		m.refilter()
+		return m, nil
+	case spinnerTickMsg:
+		if !m.Loading {
+			return m, nil // stop ticking once loaded
+		}
+		m.frame++
+		return m, spinnerTick()
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c", "esc":
 			m.Cancelled = true
 			return m, tea.Quit
 		case "enter":
+			if m.Loading {
+				return m, nil // ignore until rows arrive
+			}
 			if len(m.Filtered) == 0 {
 				m.Cancelled = true
 			}
@@ -158,45 +222,51 @@ func (m Model) View() string {
 	}
 
 	var b strings.Builder
-	b.WriteString(styles.Title.Render("monkeypuzzle"))
-	b.WriteString("\n")
-	b.WriteString(m.Input.View())
+	// Banner in the brand color (distinct from the pink used for the selected
+	// row) so it doesn't read as another repo you could switch to.
+	b.WriteString(styles.Brand.Render("monkeypuzzle"))
 	b.WriteString("\n\n")
 
-	if len(m.Rows) == 0 {
-		b.WriteString(styles.Subtle.Render("No registered projects. Run `mp init` in a repo, or `mp project add <path>`.\n"))
-		return b.String()
-	}
-
-	if len(m.Filtered) == 0 {
-		b.WriteString(styles.Subtle.Render("No matches.\n"))
-		return b.String()
-	}
-
-	visible := len(m.Filtered)
-	truncated := 0
-	if visible > MaxVisibleRows {
-		truncated = visible - MaxVisibleRows
-		visible = MaxVisibleRows
-	}
-
-	for vi := 0; vi < visible; vi++ {
-		r := m.Rows[m.Filtered[vi]]
-		cursor := "  "
-		if vi == m.Selected {
-			cursor = styles.Cursor.Render("→ ")
+	// Body: the result rows, or a status line when there's nothing to show.
+	switch {
+	case m.Loading:
+		frame := spinnerFrames[m.frame%len(spinnerFrames)]
+		b.WriteString(styles.Subtle.Render(frame + " Loading…"))
+		b.WriteString("\n")
+	case len(m.Rows) == 0:
+		b.WriteString(styles.Subtle.Render("No registered projects. Run `mp init` in a repo, or `mp project add <path>`."))
+		b.WriteString("\n")
+	case len(m.Filtered) == 0:
+		b.WriteString(styles.Subtle.Render("No matches."))
+		b.WriteString("\n")
+	default:
+		visible := len(m.Filtered)
+		truncated := 0
+		if visible > MaxVisibleRows {
+			truncated = visible - MaxVisibleRows
+			visible = MaxVisibleRows
 		}
-		b.WriteString(cursor)
-		b.WriteString(renderRow(r, vi == m.Selected))
-		b.WriteString("\n")
+
+		for vi := 0; vi < visible; vi++ {
+			r := m.Rows[m.Filtered[vi]]
+			cursor := "  "
+			if vi == m.Selected {
+				cursor = styles.Cursor.Render("→ ")
+			}
+			b.WriteString(cursor)
+			b.WriteString(renderRow(r, vi == m.Selected))
+			b.WriteString("\n")
+		}
+
+		if truncated > 0 {
+			b.WriteString(styles.Subtle.Render(fmt.Sprintf("… %d more (narrow your query)", truncated)))
+			b.WriteString("\n")
+		}
 	}
 
-	if truncated > 0 {
-		b.WriteString("\n")
-		b.WriteString(styles.Subtle.Render(fmt.Sprintf("… %d more (narrow your query)", truncated)))
-		b.WriteString("\n")
-	}
-
+	// Filter input sits at the bottom, just above the help line.
+	b.WriteString("\n")
+	b.WriteString(m.Input.View())
 	b.WriteString("\n")
 	b.WriteString(styles.Subtle.Render("type to filter • ↑/↓ move • enter select • esc cancel"))
 	return b.String()
