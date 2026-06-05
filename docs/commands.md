@@ -412,7 +412,9 @@ mp piece create --skip-switch  # Don't auto-switch to new piece
 6. Runs `on-piece-create.sh` hook (if exists)
 7. **Switches to the new piece** (unless `--skip-switch` is set)
 
-If the hook fails, the worktree and tmux session are cleaned up automatically.
+If the `on-piece-create.sh` hook fails, the worktree is kept and a warning is
+printed — setup steps (dependency installs, submodule init) often fail for
+transient reasons, so re-run the failed step manually inside the worktree.
 The auto-switch uses tmux attach/switch-client if available, otherwise prints the path.
 
 ### Output

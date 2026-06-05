@@ -189,9 +189,14 @@ func (h *Handler) CreatePiece(ctx context.Context, pieceName string, opts Create
 		SessionName:  sessionName,
 	}
 	if err := h.hooks.RunHook(ctx, repoRoot, HookOnPieceCreate, hookCtx); err != nil {
-		// Cleanup: remove worktree on hook failure
-		h.cleanupPiece(ctx, repoRoot, worktreePath, sessionName, false)
-		return PieceInfo{}, fmt.Errorf("on-piece-create hook failed: %w", err)
+		// A failing on-piece-create hook is non-fatal: keep the worktree and
+		// continue. Setup steps (dependency installs, submodule init) can fail
+		// for transient reasons, and discarding the worktree is worse than a
+		// warning the user can act on.
+		h.deps.Output.Write(core.Message{
+			Type:    core.MsgWarning,
+			Content: fmt.Sprintf("on-piece-create hook failed (piece kept): %v", err),
+		})
 	}
 
 	h.deps.Output.Write(core.Message{
@@ -365,8 +370,11 @@ func (h *Handler) AdoptPiece(ctx context.Context, input AdoptPieceInput) (PieceI
 		SessionName:  sessionName,
 	}
 	if err := h.hooks.RunHook(ctx, repoRoot, HookOnPieceCreate, hookCtx); err != nil {
-		h.cleanupPiece(ctx, repoRoot, worktreePath, sessionName, false)
-		return PieceInfo{}, fmt.Errorf("on-piece-create hook failed: %w", err)
+		// Non-fatal: keep the adopted worktree and warn. See CreatePiece.
+		h.deps.Output.Write(core.Message{
+			Type:    core.MsgWarning,
+			Content: fmt.Sprintf("on-piece-create hook failed (piece kept): %v", err),
+		})
 	}
 
 	h.deps.Output.Write(core.Message{
