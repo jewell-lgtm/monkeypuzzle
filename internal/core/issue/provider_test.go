@@ -6,11 +6,12 @@ import (
 	"github.com/jewell-lgtm/monkeypuzzle/internal/adapters"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core/issue"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core/piece"
+	"github.com/jewell-lgtm/monkeypuzzle/internal/core/workflow"
 )
 
 func TestMarkdownProvider_Create(t *testing.T) {
 	fs := adapters.NewMemoryFS()
-	provider := issue.NewMarkdownProvider(fs, "/issues")
+	provider := issue.NewMarkdownProvider(fs, "/issues", workflow.Default())
 
 	input := issue.CreateInput{
 		Title:       "Test Issue",
@@ -38,7 +39,7 @@ func TestMarkdownProvider_Get(t *testing.T) {
 	_ = fs.MkdirAll("/issues", 0755)
 	_ = fs.WriteFile("/issues/my-issue.md", []byte("---\ntitle: My Issue\nstatus: in-progress\n---\n"), 0644)
 
-	provider := issue.NewMarkdownProvider(fs, "/issues")
+	provider := issue.NewMarkdownProvider(fs, "/issues", workflow.Default())
 
 	result, err := provider.Get("/issues/my-issue.md")
 	if err != nil {
@@ -58,7 +59,7 @@ func TestMarkdownProvider_UpdateStatus(t *testing.T) {
 	_ = fs.MkdirAll("/issues", 0755)
 	_ = fs.WriteFile("/issues/my-issue.md", []byte("---\ntitle: My Issue\nstatus: todo\n---\n"), 0644)
 
-	provider := issue.NewMarkdownProvider(fs, "/issues")
+	provider := issue.NewMarkdownProvider(fs, "/issues", workflow.Default())
 
 	err := provider.UpdateStatus("/issues/my-issue.md", "done")
 	if err != nil {
@@ -79,7 +80,7 @@ func TestMarkdownProvider_List(t *testing.T) {
 	_ = fs.WriteFile("/issues/b.md", []byte("---\ntitle: Beta\nstatus: done\n---\n"), 0644)
 	_ = fs.WriteFile("/issues/c.md", []byte("---\ntitle: Gamma\nstatus: todo\n---\n"), 0644)
 
-	provider := issue.NewMarkdownProvider(fs, "/issues")
+	provider := issue.NewMarkdownProvider(fs, "/issues", workflow.Default())
 
 	// List all
 	all, err := provider.List(nil)

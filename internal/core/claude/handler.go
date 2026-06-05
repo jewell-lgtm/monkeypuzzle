@@ -136,6 +136,13 @@ mp switch --project app --issue issues/foo.md                        # create + 
 mp switch --project app --branch spike-feature                       # adopt + attach
 echo '{"project":"app","issue":"issues/foo.md"}' | mp switch
 echo '{"project":"app","branch":"spike-feature"}' | mp switch
+
+# Issue workflow transitions (per-project workflows in monkeypuzzle.json):
+echo '{"id":"issues/foo.md"}' | mp issue advance                      # next manual progress event
+echo '{"id":"issues/foo.md","event":"released"}' | mp issue fire      # explicit event
+echo '{"id":"issues/foo.md"}' | mp issue abandon                      # cancel axis
+echo '{"id":"issues/foo.md","to":"todo"}' | mp issue reopen           # exit cancel
+mp issue states --provider plane                                      # dump provider states for config
 ` + "```" + `
 
 ## Init & Config

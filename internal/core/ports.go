@@ -99,11 +99,17 @@ func (l *LoadingSignal) Pub(active bool, label string) {
 	}
 }
 
-// IssueSyncEvent represents a status change that should be synced to a provider.
+// IssueSyncEvent represents a status change that should be synced to a
+// provider. Event is the named workflow event that fired (branch.created,
+// pr.merged, etc.). NewStatus is preserved for back-compat: subscribers
+// that pre-date the workflow engine still use it. When Event is set, the
+// subscriber should run the workflow engine to derive the next status and
+// ignore NewStatus.
 type IssueSyncEvent struct {
 	Provider     string // Issue provider type (markdown, linear, etc.)
 	IssueID      string // Provider-specific issue ID
-	NewStatus    string // New status to sync (in-progress, done, etc.)
+	Event        string // Named workflow event (branch.created, pr.merged, abandoned, ...)
+	NewStatus    string // Resolved status (filled by the workflow-aware subscriber, or set directly by legacy callers)
 	PieceName    string // Name of the piece that triggered the sync
 	WorktreePath string // Path to the piece worktree (for updating marker dirty flag)
 }

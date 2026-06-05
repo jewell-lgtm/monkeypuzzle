@@ -41,6 +41,8 @@ mp piece done
 
 To jump between pieces, or to pick up a stray branch you left behind, just run `mp switch` again — pieces, open todo issues, and unadopted local branches all show in one fuzzy-filtered list.
 
+For projects with richer lifecycles than `todo → in-progress → done` (multi-stage QA, separate "merged" and "released", etc.), declare a `workflow` block in `.monkeypuzzle/monkeypuzzle.json`. `mp issue advance` walks the manual steps; `mp issue fire --event <name>` drives a specific transition; `mp issue abandon` and `mp issue reopen` handle the cancel axis. See [workflow customization](docs/workflow.md#issue-workflow-customization).
+
 ## More ways of working
 
 - **[Workflow guide](docs/workflow.md)** — stacked pieces, multiple projects, the full lifecycle, and integrating with GitHub PRs.

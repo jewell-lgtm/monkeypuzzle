@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
+	"github.com/jewell-lgtm/monkeypuzzle/internal/core/workflow"
 )
 
 // ProviderDeps holds dependencies available to providers
@@ -19,6 +20,10 @@ type ProviderConfig struct {
 	ProviderType string
 	Config       map[string]string
 	Deps         ProviderDeps
+	// Workflow is the resolved per-project workflow (Default if absent).
+	// Providers that translate native state into workflow state names
+	// consult provider_map.<provider>.<state> via Workflow.ProviderEntry.
+	Workflow workflow.Workflow
 }
 
 // ProviderFactory creates a provider from configuration
@@ -57,7 +62,7 @@ func init() {
 		if !ok || dir == "" {
 			dir = "issues"
 		}
-		return NewMarkdownProvider(cfg.Deps.FS, dir), nil
+		return NewMarkdownProvider(cfg.Deps.FS, dir, cfg.Workflow), nil
 	})
 
 	// Register linear provider
@@ -114,6 +119,6 @@ func init() {
 			return nil, fmt.Errorf("plane provider requires HTTP client")
 		}
 
-		return NewPlaneProvider(cfg.Deps.HTTP, baseURL, apiKey, workspace, project), nil
+		return NewPlaneProvider(cfg.Deps.HTTP, baseURL, apiKey, workspace, project, cfg.Workflow), nil
 	})
 }

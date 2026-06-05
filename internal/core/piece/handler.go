@@ -426,11 +426,14 @@ func (h *Handler) CreatePieceFromIssue(ctx context.Context, issueRef IssueRef, o
 		})
 	}
 
-	// Publish sync event to update issue status in provider
+	// Publish sync event to update issue status in provider. The workflow
+	// engine resolves branch.created → in-progress (or whatever the
+	// project's workflow says).
 	h.pubIssueSync(core.IssueSyncEvent{
 		Provider:     issueRef.Provider,
 		IssueID:      issueRef.ID,
-		NewStatus:    StatusInProgress,
+		Event:        "branch.created",
+		NewStatus:    StatusInProgress, // legacy fallback for subscribers without engine
 		PieceName:    pieceName,
 		WorktreePath: info.WorktreePath,
 	})
@@ -1008,6 +1011,20 @@ func (h *Handler) MergePiece(ctx context.Context, workDir string, input MergeInp
 		ReparentedChildren: reparented,
 	}
 
+	// Fire pr.merged through the workflow if the piece is linked to an issue.
+	// The workflow engine resolves what state name corresponds to "merged" for
+	// this project (done by default, ready_for_production for pima-one, etc.).
+	if marker, _ := h.ReadCurrentIssueMarker(status.WorktreePath); marker != nil && !marker.Issue.IsEmpty() {
+		h.pubIssueSync(core.IssueSyncEvent{
+			Provider:     marker.Issue.Provider,
+			IssueID:      marker.Issue.ID,
+			Event:        "pr.merged",
+			NewStatus:    StatusDone, // legacy fallback
+			PieceName:    status.PieceName,
+			WorktreePath: status.WorktreePath,
+		})
+	}
+
 	h.deps.Output.Write(core.Message{
 		Type:    core.MsgSuccess,
 		Content: fmt.Sprintf("Squash merged %s into %s", pieceBranch, targetBranch),
@@ -1236,11 +1253,12 @@ func (h *Handler) CleanupMergedPieces(ctx context.Context, repoRoot string, opts
 		if err == nil && marker != nil && !marker.Issue.IsEmpty() {
 			result.Issue = marker.Issue
 
-			// Publish sync event to mark issue as done
+			// Publish sync event: cleanup means the PR was merged.
 			h.pubIssueSync(core.IssueSyncEvent{
 				Provider:     marker.Issue.Provider,
 				IssueID:      marker.Issue.ID,
-				NewStatus:    StatusDone,
+				Event:        "pr.merged",
+				NewStatus:    StatusDone, // legacy fallback
 				PieceName:    pieceName,
 				WorktreePath: worktreePath,
 			})
@@ -1577,14 +1595,14 @@ func (h *Handler) DonePiece(ctx context.Context, workDir string, input DoneInput
 		MainPath:     mainRepoRoot,
 	}
 
-	// Read issue marker if exists and sync "done" status
+	// Read issue marker if exists and fire pr.merged through the workflow.
 	marker, _ := h.ReadCurrentIssueMarker(status.WorktreePath)
 	if marker != nil && !marker.Issue.IsEmpty() {
-		// Publish sync event to mark issue as done
 		h.pubIssueSync(core.IssueSyncEvent{
 			Provider:     marker.Issue.Provider,
 			IssueID:      marker.Issue.ID,
-			NewStatus:    StatusDone,
+			Event:        "pr.merged",
+			NewStatus:    StatusDone, // legacy fallback
 			PieceName:    status.PieceName,
 			WorktreePath: status.WorktreePath,
 		})

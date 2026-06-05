@@ -20,6 +20,15 @@ echo '{"title":"Feature X","description":"Details..."}' | mp issue create
 
 # Search issues (fuzzy match)
 echo '{"query":"auth","status":["todo"]}' | mp issue search
+
+# Workflow transitions (per-project workflows declared in monkeypuzzle.json):
+echo '{"id":"issues/foo.md"}' | mp issue advance                     # next manual progress event
+echo '{"id":"issues/foo.md","event":"released"}' | mp issue fire     # explicit event
+echo '{"id":"issues/foo.md"}' | mp issue abandon                     # cancel axis
+echo '{"id":"issues/foo.md","to":"todo"}' | mp issue reopen          # exit cancel
+
+# Provider state inspection (for populating workflow.provider_map):
+mp issue states --provider plane
 ```
 
 ## Pieces (worktrees)

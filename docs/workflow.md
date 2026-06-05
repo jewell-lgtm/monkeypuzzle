@@ -265,6 +265,98 @@ See [docs/commands.md](commands.md) for full hooks reference.
 
 ---
 
+## Issue Workflow Customization
+
+By default, mp uses a three-state issue lifecycle (`todo → in-progress → done`,
+plus `cancelled` reachable from any state). Two transitions fire automatically:
+
+- `mp piece create --issue …` fires `branch.created` and moves the issue to
+  `in-progress`.
+- `mp piece merge` fires `pr.merged` and moves the issue to `done`.
+
+Projects with richer lifecycles (multi-stage QA, separate "merged" vs.
+"released", etc.) declare a `workflow` block in `.monkeypuzzle/monkeypuzzle.json`.
+
+### Schema
+
+```jsonc
+{
+  "version": "1",
+  "project": { "name": "myproj" },
+  "issues": { "provider": "plane", "config": { … } },
+  "pr":     { "provider": "github", "config": {} },
+
+  "workflow": {
+    "states": ["backlog", "in_progress", "development_done", "ready_for_qa",
+               "ready_for_production", "production_smoke_test", "done"],
+    "initial": "backlog",
+    "terminal": ["done"],
+    "cancel": { "state": "cancelled", "from_any": true },
+    "transitions": [
+      { "from": "backlog",                "to": "in_progress",          "on": "branch.created"    },
+      { "from": "in_progress",            "to": "development_done",     "on": "pr.opened.ready"   },
+      { "from": "development_done",       "to": "ready_for_qa",         "on": "pr.checks.green"   },
+      { "from": "ready_for_qa",           "to": "ready_for_production", "on": "acceptance.passed" },
+      { "from": "ready_for_production",   "to": "production_smoke_test","on": "released"          },
+      { "from": "production_smoke_test",  "to": "done",                 "on": "smoke.passed"      },
+      { "from": "*",                      "to": "cancelled",            "on": "abandoned"         }
+    ],
+    "provider_map": {
+      "plane": {
+        "backlog":              { "state_id": "<plane-state-uuid>" },
+        "in_progress":          { "state_id": "<plane-state-uuid>" },
+        "development_done":     { "state_id": "<plane-state-uuid>" },
+        "ready_for_qa":         { "state_id": "<plane-state-uuid>" },
+        "ready_for_production": { "state_id": "<plane-state-uuid>" },
+        "production_smoke_test":{ "state_id": "<plane-state-uuid>" },
+        "done":                 { "state_id": "<plane-state-uuid>" },
+        "cancelled":            { "state_id": "<plane-state-uuid>" }
+      }
+    }
+  }
+}
+```
+
+Dump your provider's state UUIDs with `mp issue states --provider plane`.
+
+### Events
+
+Driven automatically:
+
+- `branch.created` — `mp piece create`
+- `pr.merged` — `mp piece merge`
+
+Driven manually (today): `acceptance.passed`, `released`, `smoke.passed`,
+`abandoned`. Use `mp issue advance` for the unambiguous "next progress
+step" or `mp issue fire --event <name>` for a specific one.
+
+Reserved for a follow-up: `pr.opened.ready`, `pr.checks.green`,
+`pr.preview.ready`, `pr.closed_unmerged`. Workflows that reference these
+can still drive them with `mp issue fire` until the automatic observer
+ships.
+
+### Cancel is an axis
+
+The cancel state (`cancelled` by default) is reachable from any other
+state via the `abandoned` event. `mp issue abandon` is the verb. To leave
+cancel, use `mp issue reopen --to <state>` — there is no event-driven
+transition out of cancel by design.
+
+A closed-but-unmerged PR is **not** an abandon signal. `pr.closed_unmerged`
+is observed but does not transition the issue: closing a PR is ambiguous
+(wrong approach, will reopen) and the developer must explicitly run
+`mp issue abandon` if the ticket should die.
+
+### Markdown-issues projects
+
+The markdown provider stores the workflow state name directly in the
+`status:` frontmatter field. The default workflow's `provider_map.markdown`
+maps each state to its own name. For a custom workflow with custom state
+names, declare them in `provider_map.markdown.<state>.frontmatter` (or
+leave it out — the provider treats absent entries as identity).
+
+---
+
 ## Troubleshooting
 
 ### "Main branch is ahead"

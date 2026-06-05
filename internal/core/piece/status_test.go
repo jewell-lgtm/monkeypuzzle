@@ -134,18 +134,24 @@ No frontmatter here.
 	}
 }
 
-func TestParseStatus_InvalidStatus(t *testing.T) {
+// ParseStatus no longer rejects unknown status values — the workflow engine
+// is authoritative on what status names are legal per project. This test
+// pins the new behavior: anything in the frontmatter round-trips.
+func TestParseStatus_AcceptsArbitraryStatus(t *testing.T) {
 	fs := adapters.NewMemoryFS()
 	content := `---
 title: Bad Status
-status: invalid-status
+status: ready_for_qa
 ---
 `
 	_ = fs.WriteFile("issue.md", []byte(content), 0644)
 
-	_, err := piece.ParseStatus("issue.md", fs)
-	if err == nil {
-		t.Error("expected error for invalid status")
+	got, err := piece.ParseStatus("issue.md", fs)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "ready_for_qa" {
+		t.Errorf("ParseStatus returned %q, want ready_for_qa", got)
 	}
 }
 
@@ -284,7 +290,10 @@ No frontmatter.
 	}
 }
 
-func TestUpdateStatus_InvalidStatus(t *testing.T) {
+// UpdateStatus accepts arbitrary status strings post-RFC: legality is a
+// workflow concern, and the markdown provider doesn't validate. Pinning the
+// new behavior so a regression here is loud.
+func TestUpdateStatus_AcceptsArbitraryStatus(t *testing.T) {
 	fs := adapters.NewMemoryFS()
 	content := `---
 status: todo
@@ -292,9 +301,12 @@ status: todo
 `
 	_ = fs.WriteFile("issue.md", []byte(content), 0644)
 
-	err := piece.UpdateStatus("issue.md", "invalid", fs)
-	if err == nil {
-		t.Error("expected error for invalid status")
+	if err := piece.UpdateStatus("issue.md", "ready_for_qa", fs); err != nil {
+		t.Fatalf("UpdateStatus rejected custom status: %v", err)
+	}
+	data, _ := fs.ReadFile("issue.md")
+	if !strings.Contains(string(data), "status: ready_for_qa") {
+		t.Errorf("expected status: ready_for_qa in frontmatter, got:\n%s", data)
 	}
 }
 

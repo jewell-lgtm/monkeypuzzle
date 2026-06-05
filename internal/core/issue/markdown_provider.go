@@ -10,6 +10,7 @@ import (
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
 	initcmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/init"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core/piece"
+	"github.com/jewell-lgtm/monkeypuzzle/internal/core/workflow"
 	"github.com/jewell-lgtm/monkeypuzzle/pkg/fuzzy"
 )
 
@@ -19,14 +20,40 @@ const defaultFilePerm = 0644
 type MarkdownProvider struct {
 	fs        core.FS
 	issuesDir string // Absolute path to issues directory
+	wf        workflow.Workflow
 }
 
 // NewMarkdownProvider creates a provider for markdown-based issues
-func NewMarkdownProvider(fs core.FS, issuesDir string) *MarkdownProvider {
+func NewMarkdownProvider(fs core.FS, issuesDir string, wf workflow.Workflow) *MarkdownProvider {
 	return &MarkdownProvider{
 		fs:        fs,
 		issuesDir: issuesDir,
+		wf:        wf,
 	}
+}
+
+// frontmatterForState returns the literal status string the markdown provider
+// should write to frontmatter for the given workflow state. The default
+// workflow's provider_map maps each state to its own name, so the function is
+// effectively identity for default-flow projects; custom workflows can
+// override via provider_map.markdown.<state>.frontmatter.
+func (p *MarkdownProvider) frontmatterForState(state string) string {
+	if entry, ok := p.wf.ProviderEntry("markdown", state); ok && entry.Frontmatter != "" {
+		return entry.Frontmatter
+	}
+	return state
+}
+
+// stateForFrontmatter is the inverse of frontmatterForState.
+func (p *MarkdownProvider) stateForFrontmatter(frontmatter string) string {
+	for _, s := range p.wf.AllStates() {
+		if entry, ok := p.wf.ProviderEntry("markdown", s); ok && entry.Frontmatter == frontmatter {
+			return s
+		}
+	}
+	// Round-trip identity: if no explicit mapping, the frontmatter value IS
+	// the workflow state name. This is the default-workflow case.
+	return frontmatter
 }
 
 // Create creates a new issue markdown file
@@ -43,8 +70,9 @@ func (p *MarkdownProvider) Create(input CreateInput) (Issue, error) {
 		return Issue{}, err
 	}
 
-	// Build markdown content
-	content := buildMarkdownContent(input)
+	// Build markdown content using the workflow's initial state.
+	initialFrontmatter := p.frontmatterForState(p.wf.Initial)
+	content := buildMarkdownContent(input, initialFrontmatter)
 
 	// Write file
 	filePath := filepath.Join(p.issuesDir, filename)
@@ -55,7 +83,7 @@ func (p *MarkdownProvider) Create(input CreateInput) (Issue, error) {
 	return Issue{
 		ID:          filePath,
 		Title:       input.Title,
-		Status:      piece.StatusTodo,
+		Status:      p.wf.Initial,
 		Description: input.Description,
 	}, nil
 }
@@ -175,7 +203,7 @@ func (p *MarkdownProvider) SearchIssues(input SearchInput) ([]Issue, error) {
 
 // Get returns an issue by its file path
 func (p *MarkdownProvider) Get(id string) (Issue, error) {
-	status, err := piece.ParseStatus(id, p.fs)
+	raw, err := piece.ParseStatus(id, p.fs)
 	if err != nil {
 		return Issue{}, fmt.Errorf("failed to parse status: %w", err)
 	}
@@ -188,13 +216,14 @@ func (p *MarkdownProvider) Get(id string) (Issue, error) {
 	return Issue{
 		ID:     id,
 		Title:  title,
-		Status: status,
+		Status: p.stateForFrontmatter(raw),
 	}, nil
 }
 
-// UpdateStatus updates the status in the issue's frontmatter
+// UpdateStatus translates the given workflow state to its frontmatter
+// representation and writes it to the issue file.
 func (p *MarkdownProvider) UpdateStatus(id string, status string) error {
-	return piece.UpdateStatus(id, status, p.fs)
+	return piece.UpdateStatus(id, p.frontmatterForState(status), p.fs)
 }
 
 // resolveUniqueFilename generates a unique filename, adding numeric suffix if needed
@@ -220,14 +249,16 @@ func (p *MarkdownProvider) resolveUniqueFilename(baseName string) (string, error
 	return "", fmt.Errorf("too many issues with similar names")
 }
 
-// buildMarkdownContent creates the markdown file content with YAML frontmatter
-func buildMarkdownContent(input CreateInput) []byte {
+// buildMarkdownContent creates the markdown file content with YAML
+// frontmatter. The status string is the literal value to write
+// (already translated from a workflow state name by the caller).
+func buildMarkdownContent(input CreateInput, status string) []byte {
 	var b strings.Builder
 
 	// YAML frontmatter
 	b.WriteString("---\n")
 	b.WriteString(fmt.Sprintf("title: %s\n", escapeYAMLString(input.Title)))
-	b.WriteString(fmt.Sprintf("status: %s\n", piece.StatusTodo))
+	b.WriteString(fmt.Sprintf("status: %s\n", status))
 	if input.Description != "" {
 		b.WriteString(fmt.Sprintf("description: %s\n", escapeYAMLString(input.Description)))
 	}

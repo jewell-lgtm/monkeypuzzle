@@ -242,7 +242,9 @@ func ResolveIssuePath(repoRoot, issuePath string, fs core.FS) (string, error) {
 	return absPath, nil
 }
 
-// ValidateStatus checks if a status value is valid
+// ValidateStatus checks if a status value is one of the built-in default-
+// workflow statuses. Kept for backwards compatibility; the workflow engine
+// is now authoritative on what status names are legal per project.
 func ValidateStatus(status string) bool {
 	for _, v := range validStatuses {
 		if v == status {
@@ -253,7 +255,8 @@ func ValidateStatus(status string) bool {
 }
 
 // ParseStatus reads the status field from an issue file's YAML frontmatter.
-// Returns DefaultStatus ("todo") if status field is missing.
+// Returns DefaultStatus ("todo") if the status field is missing. Status
+// values are not validated here — the workflow engine owns legality.
 func ParseStatus(issuePath string, fs core.FS) (string, error) {
 	content, err := fs.ReadFile(issuePath)
 	if err != nil {
@@ -264,21 +267,13 @@ func ParseStatus(issuePath string, fs core.FS) (string, error) {
 	if status == "" {
 		return DefaultStatus, nil
 	}
-
-	if !ValidateStatus(status) {
-		return "", fmt.Errorf("invalid status: %q (valid: %v)", status, validStatuses)
-	}
-
 	return status, nil
 }
 
-// UpdateStatus updates the status field in an issue file's YAML frontmatter.
-// Preserves all other frontmatter fields and file content.
+// UpdateStatus writes the given status into an issue file's YAML frontmatter,
+// preserving every other field. Accepts any string — workflow validity is
+// the caller's responsibility.
 func UpdateStatus(issuePath string, status string, fs core.FS) error {
-	if !ValidateStatus(status) {
-		return fmt.Errorf("invalid status: %q (valid: %v)", status, validStatuses)
-	}
-
 	content, err := fs.ReadFile(issuePath)
 	if err != nil {
 		return fmt.Errorf("failed to read issue file: %w", err)

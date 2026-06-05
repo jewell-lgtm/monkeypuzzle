@@ -20,10 +20,11 @@ const (
 
 // Config is the output config structure written to monkeypuzzle.json
 type Config struct {
-	Version string        `json:"version"`
-	Project ProjectConfig `json:"project"`
-	Issues  IssueConfig   `json:"issues"`
-	PR      PRConfig      `json:"pr"`
+	Version  string          `json:"version"`
+	Project  ProjectConfig   `json:"project"`
+	Issues   IssueConfig     `json:"issues"`
+	PR       PRConfig        `json:"pr"`
+	Workflow json.RawMessage `json:"workflow,omitempty"`
 }
 
 type ProjectConfig struct {

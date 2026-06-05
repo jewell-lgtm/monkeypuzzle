@@ -18,6 +18,7 @@ import (
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core/issue"
 	piececmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/piece"
+	"github.com/jewell-lgtm/monkeypuzzle/internal/core/workflow"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/registry"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/tui/chooser"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/tui/issuepicker"
@@ -664,13 +665,27 @@ func runPieceMerge(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to get working directory: %w", err)
 	}
 
-	deps := core.NewDeps(
+	// Setup deps with issue sync so MergePiece can fire pr.merged through
+	// the workflow engine.
+	issueSync := core.NewIssueSyncSignal()
+	deps := core.NewDepsWithSync(
 		adapters.NewOSFS(""),
 		adapters.NewTextOutput(os.Stderr),
 		adapters.NewOSExec(),
 		http.DefaultClient,
 		adapters.SetupCLILoading(os.Stderr),
+		issueSync,
 	)
+
+	// Subscriber: the merge runs from inside the worktree, but the
+	// monkeypuzzle config lives in the main repo. Use the main repo root as
+	// the sync subscriber's working directory so it reads the right config.
+	syncWD := wd
+	if root, rerr := adapters.NewGit(deps.Exec).GetMainRepoRoot(ctx, wd); rerr == nil {
+		syncWD = root
+	}
+	issueSync.Sub(newIssueSyncSubscriber(syncWD, deps, os.Stderr))
+
 	handler := newPieceHandler(deps)
 
 	// Get input
@@ -1300,17 +1315,29 @@ func formatTimeAgo(t time.Time) string {
 	}
 }
 
-// newIssueSyncSubscriber creates a subscriber that syncs status changes to providers.
+// newIssueSyncSubscriber creates a subscriber that resolves an IssueSyncEvent
+// through the workflow engine (when Event is set) and writes the resulting
+// state to the provider. Falls back to event.NewStatus for legacy callers
+// that don't yet name an event.
 func newIssueSyncSubscriber(workDir string, deps core.Deps, output io.Writer) func(event core.IssueSyncEvent) {
 	return func(event core.IssueSyncEvent) {
 		if event.IssueID == "" {
 			return
 		}
 
+		nextStatus, err := resolveSyncStatus(workDir, deps, event)
+		if err != nil {
+			fmt.Fprintf(output, "⚠ Failed to resolve workflow transition: %v\n", err)
+			return
+		}
+		if nextStatus == "" {
+			// No-op: the event doesn't fire from the current state.
+			return
+		}
+
 		// Sync to provider
 		handler := issue.NewHandler(deps, workDir)
-		err := handler.SyncStatus(event.IssueID, event.NewStatus)
-		if err != nil {
+		if err := handler.SyncStatus(event.IssueID, nextStatus); err != nil {
 			fmt.Fprintf(output, "⚠ Failed to sync: %v\n", err)
 			return
 		}
@@ -1320,8 +1347,47 @@ func newIssueSyncSubscriber(workDir string, deps core.Deps, output io.Writer) fu
 			_ = piececmd.ClearIssueDirtyFlag(event.WorktreePath, deps.FS)
 		}
 
-		fmt.Fprintf(output, "✓ Synced %s → %s\n", event.IssueID, event.NewStatus)
+		fmt.Fprintf(output, "✓ Synced %s → %s\n", event.IssueID, nextStatus)
 	}
+}
+
+// resolveSyncStatus runs the project's workflow engine for the given event.
+// If the event doesn't fire from the issue's current state, returns ("", nil)
+// so the subscriber can skip silently. If no Event is set on the message,
+// falls back to event.NewStatus verbatim (legacy callers).
+func resolveSyncStatus(workDir string, deps core.Deps, event core.IssueSyncEvent) (string, error) {
+	if event.Event == "" {
+		return event.NewStatus, nil
+	}
+	wf, err := workflow.LoadForRepo(workDir, deps.FS)
+	if err != nil {
+		return "", err
+	}
+	current, err := currentIssueStatus(workDir, deps, event.IssueID)
+	if err != nil {
+		// If we can't read the current state, assume initial — best-effort.
+		current = wf.Initial
+	}
+	result, ok := wf.Fire(current, event.Event)
+	if !ok {
+		return "", nil
+	}
+	return result.To, nil
+}
+
+// currentIssueStatus reads the provider's current view of an issue's status.
+func currentIssueStatus(workDir string, deps core.Deps, issueID string) (string, error) {
+	handler := issue.NewHandler(deps, workDir)
+	issues, err := handler.SearchIssues(issue.SearchInput{Limit: 0})
+	if err != nil {
+		return "", err
+	}
+	for _, it := range issues {
+		if it.ID == issueID {
+			return it.Status, nil
+		}
+	}
+	return "", fmt.Errorf("issue %q not found", issueID)
 }
 
 func runPieceSwitch(cmd *cobra.Command, args []string) error {

@@ -10,29 +10,28 @@ import (
 	"strings"
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
+	"github.com/jewell-lgtm/monkeypuzzle/internal/core/workflow"
 )
 
 // DefaultPlaneBaseURL is the API base URL for Plane Cloud.
 const DefaultPlaneBaseURL = "https://api.plane.so"
 
-// planeGroupToMpStatus maps Plane state groups to mp statuses.
-var planeGroupToMpStatus = map[string]string{
-	"backlog":   "todo",
-	"unstarted": "todo",
-	"triage":    "todo",
-	"started":   "in-progress",
-	"completed": "done",
-	"cancelled": "done",
-	"canceled":  "done",
-}
-
 // PlaneProvider implements Provider using the Plane REST API.
+//
+// State translation is workflow-driven: the project's workflow declares a
+// provider_map.plane.<state> entry per workflow state, naming either a
+// Plane state UUID (state_id) or a Plane state group (group). At read time
+// the provider walks the workflow's states in order and picks the first
+// whose provider_map entry matches the issue's current Plane state. At
+// write time it looks up the workflow state and writes the configured
+// Plane state UUID directly, or the first state in the configured group.
 type PlaneProvider struct {
 	http          core.HTTPClient
 	baseURL       string // no trailing slash
 	apiKey        string
 	workspaceSlug string
 	projectID     string
+	wf            workflow.Workflow
 
 	// lazily-loaded caches
 	stateGroups map[string]string // state uuid -> group
@@ -40,8 +39,11 @@ type PlaneProvider struct {
 	identifier  string            // project identifier prefix (e.g. "PROJ")
 }
 
-// NewPlaneProvider creates a provider backed by a Plane project.
-func NewPlaneProvider(httpClient core.HTTPClient, baseURL, apiKey, workspaceSlug, projectID string) *PlaneProvider {
+// NewPlaneProvider creates a provider backed by a Plane project. The
+// workflow tells the provider how to translate Plane states ↔ mp's
+// workflow state names; pass workflow.Default() for the historical
+// behavior.
+func NewPlaneProvider(httpClient core.HTTPClient, baseURL, apiKey, workspaceSlug, projectID string, wf workflow.Workflow) *PlaneProvider {
 	if baseURL == "" {
 		baseURL = DefaultPlaneBaseURL
 	}
@@ -51,6 +53,7 @@ func NewPlaneProvider(httpClient core.HTTPClient, baseURL, apiKey, workspaceSlug
 		apiKey:        apiKey,
 		workspaceSlug: workspaceSlug,
 		projectID:     projectID,
+		wf:            wf,
 	}
 }
 
@@ -124,21 +127,42 @@ func (p *PlaneProvider) Get(id string) (Issue, error) {
 	return p.toIssue(pi)
 }
 
-// UpdateStatus moves an issue to a state matching the target mp status.
+// UpdateStatus moves an issue to a Plane state matching the given workflow
+// state. The mapping comes from the workflow's provider_map.plane entry for
+// status, which may name a Plane state UUID (state_id) or a Plane state
+// group (group).
 func (p *PlaneProvider) UpdateStatus(id string, status string) error {
 	if err := p.ensureStates(); err != nil {
 		return err
 	}
-	group := mpStatusToPlaneGroup(status)
-	stateID, ok := p.groupState[group]
-	if !ok {
-		return fmt.Errorf("no Plane state found for group %q (status %q)", group, status)
-	}
-	_, err := p.do("PATCH", p.issuesPath(id), map[string]string{"state": stateID})
+	stateID, err := p.resolvePlaneState(status)
 	if err != nil {
+		return err
+	}
+	if _, err := p.do("PATCH", p.issuesPath(id), map[string]string{"state": stateID}); err != nil {
 		return fmt.Errorf("failed to update issue status: %w", err)
 	}
 	return nil
+}
+
+// resolvePlaneState turns a workflow state name into a Plane state UUID. It
+// prefers state_id when present; otherwise falls back to the configured
+// group's representative state.
+func (p *PlaneProvider) resolvePlaneState(workflowState string) (string, error) {
+	entry, ok := p.wf.ProviderEntry("plane", workflowState)
+	if !ok {
+		return "", fmt.Errorf("workflow has no provider_map.plane entry for %q", workflowState)
+	}
+	if entry.StateID != "" {
+		return entry.StateID, nil
+	}
+	if entry.Group != "" {
+		if stateID, ok := p.groupState[strings.ToLower(entry.Group)]; ok {
+			return stateID, nil
+		}
+		return "", fmt.Errorf("Plane has no state in group %q (for workflow state %q)", entry.Group, workflowState)
+	}
+	return "", fmt.Errorf("provider_map.plane.%s names neither state_id nor group", workflowState)
 }
 
 // fetchAllIssues walks the cursor-paginated issues endpoint, stopping early
@@ -227,12 +251,70 @@ func (p *PlaneProvider) issueFrom(pi planeIssue, status string) Issue {
 }
 
 func (p *PlaneProvider) statusForState(stateID string) string {
-	if group, ok := p.stateGroups[stateID]; ok {
-		if status, ok := planeGroupToMpStatus[strings.ToLower(group)]; ok {
-			return status
+	// Prefer an exact state_id mapping if the workflow declared one.
+	for _, ws := range p.wf.AllStates() {
+		entry, ok := p.wf.ProviderEntry("plane", ws)
+		if !ok {
+			continue
+		}
+		if entry.StateID != "" && entry.StateID == stateID {
+			return ws
 		}
 	}
-	return "todo"
+	// Otherwise fall back to a group match.
+	if group, ok := p.stateGroups[stateID]; ok {
+		gLower := strings.ToLower(group)
+		for _, ws := range p.wf.AllStates() {
+			entry, ok := p.wf.ProviderEntry("plane", ws)
+			if !ok {
+				continue
+			}
+			if entry.Group != "" && strings.ToLower(entry.Group) == gLower {
+				return ws
+			}
+		}
+	}
+	return p.wf.Initial
+}
+
+// PlaneState is the minimal projection of a Plane workflow state returned by
+// ListStates. Useful for `mp issue states --provider plane` so users can
+// populate workflow.provider_map.plane without curl.
+type PlaneState struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Group string `json:"group"`
+}
+
+// ListStates fetches every workflow state defined on this Plane project.
+func (p *PlaneProvider) ListStates() ([]PlaneState, error) {
+	var out []PlaneState
+	cursor := ""
+	for {
+		path := p.statesPath()
+		if cursor != "" {
+			path += "?cursor=" + url.QueryEscape(cursor)
+		}
+		respBody, err := p.do("GET", path, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list states: %w", err)
+		}
+		var env planeListResponse
+		if err := json.Unmarshal(respBody, &env); err != nil {
+			return nil, fmt.Errorf("failed to parse states response: %w", err)
+		}
+		var page []PlaneState
+		if len(env.Results) > 0 {
+			if err := json.Unmarshal(env.Results, &page); err != nil {
+				return nil, fmt.Errorf("failed to parse states page: %w", err)
+			}
+		}
+		out = append(out, page...)
+		if !env.NextPageResults || env.NextCursor == "" {
+			return out, nil
+		}
+		cursor = env.NextCursor
+	}
 }
 
 // ensureStates loads the project's workflow states and identifier once.
@@ -277,8 +359,9 @@ func (p *PlaneProvider) ensureStates() error {
 		}
 		for _, s := range page {
 			groups[s.ID] = s.Group
-			if _, ok := groupState[s.Group]; !ok {
-				groupState[s.Group] = s.ID
+			key := strings.ToLower(s.Group)
+			if _, ok := groupState[key]; !ok {
+				groupState[key] = s.ID
 			}
 		}
 		if !env.NextPageResults || env.NextCursor == "" {
@@ -345,14 +428,3 @@ func (p *PlaneProvider) do(method, path string, body interface{}) ([]byte, error
 	return respBody, nil
 }
 
-// mpStatusToPlaneGroup maps an mp status to a Plane state group.
-func mpStatusToPlaneGroup(status string) string {
-	switch status {
-	case "in-progress":
-		return "started"
-	case "done":
-		return "completed"
-	default:
-		return "backlog"
-	}
-}

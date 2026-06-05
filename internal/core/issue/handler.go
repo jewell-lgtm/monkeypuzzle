@@ -6,6 +6,7 @@ import (
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core/piece"
+	"github.com/jewell-lgtm/monkeypuzzle/internal/core/workflow"
 )
 
 // IssueFile represents created issue file info (kept for backwards compatibility)
@@ -171,6 +172,11 @@ func (h *Handler) getProvider() (providerInfo, error) {
 		providerCfg["directory"] = filepath.Join(h.workDir, issuesDir)
 	}
 
+	wf, err := workflow.LoadForRepo(h.workDir, h.deps.FS)
+	if err != nil {
+		return providerInfo{}, err
+	}
+
 	provider, err := NewProvider(ProviderConfig{
 		ProviderType: cfg.Issues.Provider,
 		Config:       providerCfg,
@@ -178,6 +184,7 @@ func (h *Handler) getProvider() (providerInfo, error) {
 			FS:   h.deps.FS,
 			HTTP: h.deps.HTTP,
 		},
+		Workflow: wf,
 	})
 	if err != nil {
 		return providerInfo{}, err

@@ -7,6 +7,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/jewell-lgtm/monkeypuzzle/internal/core/workflow"
 )
 
 // planeMockTransport routes requests by method + URL path to canned JSON responses.
@@ -50,7 +52,7 @@ func planeBasePath(suffix string) string {
 
 func newPlaneTestProvider(routes map[string]string) (*PlaneProvider, *planeMockTransport) {
 	mt := &planeMockTransport{routes: routes}
-	return NewPlaneProvider(mt, "https://api.plane.so", "test-key", planeWS, planeProj), mt
+	return NewPlaneProvider(mt, "https://api.plane.so", "test-key", planeWS, planeProj, workflow.Default()), mt
 }
 
 // statesResponse is a minimal Plane states list with the five default groups.
@@ -242,7 +244,7 @@ func TestPlaneProvider_Pagination(t *testing.T) {
 		"GET " + planeBasePath("states/"): statesResponse,
 	}}
 	// Custom Do: branch on cursor query param.
-	provider := NewPlaneProvider(&paginatingTransport{inner: mt}, "https://api.plane.so", "k", planeWS, planeProj)
+	provider := NewPlaneProvider(&paginatingTransport{inner: mt}, "https://api.plane.so", "k", planeWS, planeProj, workflow.Default())
 	issues, err := provider.List(nil)
 	if err != nil {
 		t.Fatalf("List() error = %v", err)
@@ -268,16 +270,25 @@ func (p *paginatingTransport) Do(req *http.Request) (*http.Response, error) {
 	return p.inner.Do(req)
 }
 
-func TestMpStatusToPlaneGroup(t *testing.T) {
+// The default workflow's provider_map.plane uses Plane state groups, matching
+// the historical behavior the old planeGroupToMpStatus table provided. This
+// regression-checks the default mapping the workflow now owns.
+func TestDefaultWorkflow_PlaneProviderMap(t *testing.T) {
+	wf := workflow.Default()
 	cases := map[string]string{
 		"todo":        "backlog",
 		"in-progress": "started",
 		"done":        "completed",
-		"weird":       "backlog",
+		"cancelled":   "cancelled",
 	}
-	for in, want := range cases {
-		if got := mpStatusToPlaneGroup(in); got != want {
-			t.Errorf("mpStatusToPlaneGroup(%q) = %q, want %q", in, got, want)
+	for state, wantGroup := range cases {
+		entry, ok := wf.ProviderEntry("plane", state)
+		if !ok {
+			t.Errorf("default workflow missing plane mapping for %q", state)
+			continue
+		}
+		if entry.Group != wantGroup {
+			t.Errorf("default plane.%s group = %q, want %q", state, entry.Group, wantGroup)
 		}
 	}
 }

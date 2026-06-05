@@ -177,6 +177,51 @@ Type to filter, ↑/↓ to move, `enter` to select, `esc` to cancel. The picker 
 
 ---
 
+## mp issue advance / fire / abandon / reopen
+
+Per-project workflows model an issue's lifecycle as named states + events.
+`mp piece create` and `mp piece merge` fire the two automatic events
+(`branch.created`, `pr.merged`); the verbs below fire everything else.
+
+### Usage
+
+```bash
+# Advance to the next progress event (refuses if multiple are available).
+mp issue advance --id issues/foo.md
+echo '{"id":"issues/foo.md"}' | mp issue advance
+
+# Fire a specific event by name.
+mp issue fire --id issues/foo.md --event acceptance.passed
+echo '{"id":"issues/foo.md","event":"released"}' | mp issue fire
+
+# Move to the cancel state (workflow's abandoned event).
+mp issue abandon --id issues/foo.md
+echo '{"id":"issues/foo.md","force":true}' | mp issue abandon
+
+# Move out of cancel: direct write to a named workflow state.
+mp issue reopen --id issues/foo.md --to todo
+echo '{"id":"issues/foo.md","to":"in-progress"}' | mp issue reopen
+```
+
+### Notes
+
+- `advance` filters out the `abandoned` event so it always picks the
+  forward-progress step. The cancel axis is reached only via `abandon`.
+- A workflow without a `workflow` block in `monkeypuzzle.json` uses the
+  built-in default: `todo → in-progress → done`, with `cancelled` reachable
+  from any state.
+- `mp issue states --provider plane` dumps a Plane project's states
+  (id/name/group) so you can populate `workflow.provider_map.plane` without
+  curl.
+
+### Workflow definition
+
+A custom workflow lives under the top-level `workflow` key in
+`.monkeypuzzle/monkeypuzzle.json`. See `docs/workflow.md` for the schema and a
+worked example.
+
+---
+
 ## mp move
 
 Relocate the current repository's monkeypuzzle directory to a new path relative
