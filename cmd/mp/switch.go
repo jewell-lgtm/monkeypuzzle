@@ -135,7 +135,8 @@ func validateSwitchSelectors(in switchAllInput) error {
 }
 
 func runSwitchInteractive(ctx context.Context) error {
-	projects, err := collectDashboard(ctx)
+	// `mp switch` is deliberately the cross-project picker.
+	projects, err := collectDashboard(ctx, "")
 	if err != nil {
 		return err
 	}

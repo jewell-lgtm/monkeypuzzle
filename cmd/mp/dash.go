@@ -16,6 +16,8 @@ import (
 	piececmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/piece"
 	projectcmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/project"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core/session"
+	"github.com/jewell-lgtm/monkeypuzzle/internal/projectdir"
+	"github.com/jewell-lgtm/monkeypuzzle/internal/registry"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/tui/dashboard"
 	"github.com/jewell-lgtm/monkeypuzzle/pkg/cli"
 )
@@ -38,13 +40,19 @@ the same data as JSON. Running bare 'mp' is equivalent to 'mp dash'.`,
 	RunE: runDash,
 }
 
-var flagDashJSON bool
+var (
+	flagDashJSON bool
+	flagDashAll  bool
+)
 
 func init() {
 	dashCmd.Flags().BoolVar(&flagDashJSON, "json", false, "Output JSON instead of the interactive dashboard")
+	dashCmd.Flags().BoolVar(&flagDashAll, "all", false, "Show all registered projects instead of just the current one")
 	rootCmd.AddCommand(dashCmd)
 
-	// Bare `mp` opens the dashboard.
+	// Bare `mp` opens the dashboard, so its flags must also live on the root.
+	rootCmd.Flags().BoolVar(&flagDashJSON, "json", false, "Output JSON instead of the interactive dashboard")
+	rootCmd.Flags().BoolVar(&flagDashAll, "all", false, "Show all registered projects instead of just the current one")
 	rootCmd.RunE = runDash
 }
 
@@ -82,10 +90,22 @@ type dashProject struct {
 	Error       string       `json:"error,omitempty"`
 }
 
-func collectDashboard(ctx context.Context) ([]dashProject, error) {
+// collectDashboard gathers projects and their pieces/issues/branches. When
+// onlyPath is non-empty, the result is scoped to the single project whose
+// registry path matches it; otherwise every registered project is included.
+func collectDashboard(ctx context.Context, onlyPath string) ([]dashProject, error) {
 	infos, err := projectcmd.List()
 	if err != nil {
 		return nil, err
+	}
+	if onlyPath != "" {
+		scoped := make([]projectcmd.Info, 0, 1)
+		for _, info := range infos {
+			if info.Path == onlyPath {
+				scoped = append(scoped, info)
+			}
+		}
+		infos = scoped
 	}
 
 	deps := core.NewDeps(
@@ -237,9 +257,38 @@ func dashboardRows(projects []dashProject) []dashboard.Row {
 	return rows
 }
 
+// currentProjectPath returns the registry path of the project the current
+// working directory belongs to, resolving piece worktrees back to their main
+// repo. It returns "" when the cwd is not inside any registered project, in
+// which case the dashboard falls back to showing every project.
+func currentProjectPath() string {
+	wd, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	root, err := projectdir.MainRepoRoot(wd)
+	if err != nil {
+		return ""
+	}
+	reg, err := registry.Load()
+	if err != nil {
+		return ""
+	}
+	if p, ok := reg.Find(root); ok {
+		return p.Path
+	}
+	return ""
+}
+
 func runDash(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
-	projects, err := collectDashboard(ctx)
+	onlyPath := ""
+	if !flagDashAll {
+		// Scope to the current repo's project when run inside one; bare `mp`
+		// outside any registered repo still shows the cross-project view.
+		onlyPath = currentProjectPath()
+	}
+	projects, err := collectDashboard(ctx, onlyPath)
 	if err != nil {
 		return err
 	}
