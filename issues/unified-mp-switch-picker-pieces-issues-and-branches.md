@@ -35,7 +35,7 @@ Make `mp switch` the single entry point for starting or resuming work — from e
 - `Git.ListLocalBranches` — `git for-each-ref refs/heads --format=%(refname:short)`.
 - `Git.CheckedOutBranches` — parses `git worktree list --porcelain` so the picker can exclude branches already checked out in any worktree (main or piece).
 
-### Data collection — `cmd/mp/dash.go`
+### Data collection — `cmd/mp/go.go` (was `dash.go`)
 - `collectDashboard` now gathers per project: open todo issues (capped at 10) and local branches (capped at 10), skipping main/master and any branch checked out in a worktree.
 - Issue rows surface only `todo` issues (creating a piece transitions issue status to in-progress, so claimed issues fall out automatically).
 - `dashProject` JSON shape extended with `issues` and `branches` arrays.

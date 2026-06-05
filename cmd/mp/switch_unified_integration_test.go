@@ -155,7 +155,7 @@ func TestSwitchUnified_DashJSON_IncludesIssuesAndBranches(t *testing.T) {
 	mpRun(t, e, repo, dataDir, "issue", "create", "--title", "Open issue one")
 	gitCmd(t, repo, "branch", "spike-branch", "main")
 
-	out, _ := mpJSON(t, e, e.tmpDir, dataDir, "dash", "--json")
+	out, _ := mpJSON(t, e, e.tmpDir, dataDir, "go", "--json")
 	var dash struct {
 		Projects []struct {
 			Name   string `json:"name"`
@@ -203,7 +203,7 @@ func TestSwitchUnified_DashJSON_IncludesIssuesAndBranches(t *testing.T) {
 
 // TestDash_BareMpScopesToCurrentProject verifies the headline behaviour: bare
 // `mp` run inside one registered project shows only that project (repo-local),
-// while `mp dash` still shows every registered project.
+// while `mp go` still shows every registered project.
 func TestDash_BareMpScopesToCurrentProject(t *testing.T) {
 	e := setupTestEnv(t)
 	defer e.cleanup()
@@ -219,28 +219,60 @@ func TestDash_BareMpScopesToCurrentProject(t *testing.T) {
 		t.Errorf("bare mp in alpha should show only [alpha], got %v", scoped)
 	}
 
-	// `mp dash` from inside alpha: both projects should appear.
-	all := dashProjectNames(t, e, alpha, dataDir, "dash")
+	// `mp go` from inside alpha: both projects should appear.
+	all := dashProjectNames(t, e, alpha, dataDir, "go")
 	if !contains(all, "alpha") || !contains(all, "beta") {
-		t.Errorf("mp dash should show both alpha and beta, got %v", all)
+		t.Errorf("mp go should show both alpha and beta, got %v", all)
 	}
 }
 
-// TestDash_BareMpFallsBackOutsideProject verifies bare `mp` from a directory
-// that isn't a registered project falls back to the cross-project view.
-func TestDash_BareMpFallsBackOutsideProject(t *testing.T) {
+// TestGo_BareMpOutsideProjectGuides verifies bare `mp` outside a monkeypuzzle
+// project prints context-aware guidance instead of falling back to a
+// cross-project view: an un-init'd git repo is pointed at `mp init`, a non-repo
+// directory at cd-ing into one, and both mention `mp go` when projects exist.
+func TestGo_BareMpOutsideProjectGuides(t *testing.T) {
 	e := setupTestEnv(t)
 	defer e.cleanup()
 
 	dataDir := filepath.Join(e.tmpDir, "data")
 	repos := filepath.Join(e.tmpDir, "repos")
 	_ = projectTestRepo(t, e, dataDir, repos, "alpha")
-	_ = projectTestRepo(t, e, dataDir, repos, "beta")
 
-	// e.tmpDir is not a registered project: expect the full list.
-	names := dashProjectNames(t, e, e.tmpDir, dataDir)
-	if !contains(names, "alpha") || !contains(names, "beta") {
-		t.Errorf("bare mp outside a project should fall back to all projects, got %v", names)
+	run := func(dir string) (string, error) {
+		cmd := exec.Command(e.binPath)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(), "MP_DATA_DIR="+dataDir, "MP_CONFIG_DIR="+e.configDir)
+		out, err := cmd.CombinedOutput()
+		return string(out), err
+	}
+
+	// A git repo that hasn't been `mp init`-ed: guide to `mp init`.
+	plainRepo := filepath.Join(e.tmpDir, "plain")
+	gitCmd(t, e.tmpDir, "init", plainRepo)
+	repoOut, _ := run(plainRepo)
+	if !strings.Contains(repoOut, "mp init") {
+		t.Errorf("bare mp in an un-init'd repo should suggest `mp init`, got: %s", repoOut)
+	}
+	if !strings.Contains(repoOut, "mp go") {
+		t.Errorf("bare mp should mention `mp go` when projects exist, got: %s", repoOut)
+	}
+
+	// A directory that is not a git repo at all: guide to cd-ing into one.
+	nonRepo := filepath.Join(e.tmpDir, "elsewhere")
+	if err := os.MkdirAll(nonRepo, 0o755); err != nil {
+		t.Fatalf("mkdir nonRepo: %v", err)
+	}
+	nonOut, _ := run(nonRepo)
+	if !strings.Contains(nonOut, "git repository") {
+		t.Errorf("bare mp outside a repo should say it's not in a git repo, got: %s", nonOut)
+	}
+	if !strings.Contains(nonOut, "mp init") {
+		t.Errorf("bare mp outside a repo should still suggest `mp init`, got: %s", nonOut)
+	}
+
+	// Neither case should leak the cross-project project list into stdout.
+	if strings.Contains(repoOut, "\"alpha\"") || strings.Contains(nonOut, "\"alpha\"") {
+		t.Errorf("bare mp outside a project must not fall back to the project list")
 	}
 }
 
@@ -279,7 +311,7 @@ func TestDash_RemoteOnlyBranchSurfaces(t *testing.T) {
 		t.Fatalf("mp init in gamma: %v\n%s", err, out)
 	}
 
-	out, _ := mpJSON(t, e, gamma, dataDir, "dash", "--json")
+	out, _ := mpJSON(t, e, gamma, dataDir, "go", "--json")
 	var dash struct {
 		Projects []struct {
 			Name     string `json:"name"`
@@ -326,7 +358,7 @@ func TestPiece_StatusCommand(t *testing.T) {
 }
 
 // dashProjectNames runs the dashboard (bare `mp` by default, or the given args
-// like "dash") in dir with JSON output and returns the project names.
+// like "go") in dir with JSON output and returns the project names.
 func dashProjectNames(t *testing.T, e *testEnv, dir, dataDir string, args ...string) []string {
 	t.Helper()
 	if len(args) == 0 {

@@ -92,6 +92,15 @@ func Get(nameOrPath string) (Info, bool, error) {
 	return enrich(p), true, nil
 }
 
+// Describe returns the enriched Info for a project at the given repo root,
+// whether or not it is in the registry. The name is taken from the directory
+// (registry.ProjectName), so it works for an init'd repo that hasn't been
+// registered yet. Callers should gate this on registry.IsProject(root).
+func Describe(root string) Info {
+	name, _ := registry.ProjectName(root)
+	return enrich(registry.Project{Name: name, Path: root})
+}
+
 func enrich(p registry.Project) Info {
 	info := Info{Name: p.Name, Path: p.Path}
 	fi, err := os.Stat(p.Path)

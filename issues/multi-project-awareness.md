@@ -45,12 +45,27 @@ Plan file: `~/.claude/plans/i-want-monkeypuzzle-to-joyful-firefly.md`
 
 - `internal/tui/dashboard` — flat, always-expanded list of projects + piece worktrees;
   Enter returns the chosen row.
-- `cmd/mp/dash.go` — `mp dash` and bare `mp`: interactive dashboard with a terminal,
-  JSON (`{"projects":[...]}`) otherwise / with `--json`. Enter attaches the worktree's
-  tmux session (or prints its path when no multiplexer is configured).
+- `cmd/mp/go.go` (was `dash.go`) — `mp go` and bare `mp`: interactive fuzzy picker with a
+  terminal, JSON (`{"projects":[...]}`) otherwise / with `--json`. Enter attaches the
+  worktree's tmux session (or prints its path when no multiplexer is configured).
 - `cmd/mp/switch.go` — `mp switch --project NAME [--piece NAME]` / stdin JSON / `--schema` /
   interactive picker; attaches the right session.
 - Integration test: `cmd/mp/project_integration_test.go:TestDashboardAndSwitch`.
+
+### Refinement — `mp go` + repo-scoped bare `mp` ✅
+
+- Renamed the cross-project command `mp dash` → **`mp go`** (no `dash`/`global` alias).
+  Bare `mp` is the same picker scoped to the current repo.
+- Bare `mp` outside a monkeypuzzle project no longer falls back to the cross-project view.
+  Instead `guideOutsideProject` prints context-aware guidance: an un-init'd git repo →
+  `mp init`; a non-repo dir → cd into one; both mention `mp go` when registered projects
+  exist. `--json` emits a structured `{in_project:false,reason,suggestion,...}` signal.
+- `classifyCwd` (in `cmd/mp/go.go`) splits cwd into in-project / repo-not-project /
+  not-repo using `registry.IsProject`; `project.Describe(root)` enriches the scoped repo
+  even if it isn't registered.
+- Tests: `cmd/mp/switch_unified_integration_test.go` —
+  `TestDash_BareMpScopesToCurrentProject` (now asserts `mp go`),
+  `TestGo_BareMpOutsideProjectGuides` (new, covers both guidance cases).
 
 ## Follow-up: merge any node of a stack ✅
 

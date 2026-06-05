@@ -154,8 +154,9 @@ func TestDashboardAndSwitch(t *testing.T) {
 	repoA := projectTestRepo(t, e, dataDir, reposDir, "alpha")
 	mpRun(t, e, repoA, dataDir, "create", "--name", "feature-x", "--skip-switch")
 
-	// Bare `mp` (non-TTY) prints the dashboard as JSON.
-	out, _ := mpJSON(t, e, e.tmpDir, dataDir)
+	// Bare `mp` (non-TTY) from inside the project prints the scoped dashboard as
+	// JSON (just this repo). Outside a project it would instead print guidance.
+	out, _ := mpJSON(t, e, repoA, dataDir)
 	var dash struct {
 		Projects []struct {
 			Name        string `json:"name"`

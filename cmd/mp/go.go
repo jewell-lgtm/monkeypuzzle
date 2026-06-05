@@ -18,6 +18,7 @@ import (
 	piececmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/piece"
 	projectcmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/project"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core/session"
+	"github.com/jewell-lgtm/monkeypuzzle/internal/registry"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/tui/dashboard"
 	"github.com/jewell-lgtm/monkeypuzzle/pkg/cli"
 )
@@ -29,27 +30,29 @@ const (
 	maxBranchesPerProject = 10
 )
 
-var dashCmd = &cobra.Command{
-	Use:   "dash",
-	Short: "Cross-project dashboard (projects, pieces, issues)",
+var goCmd = &cobra.Command{
+	Use:   "go",
+	Short: "Jump to any registered project, piece, or issue (cross-project)",
 	Long: `Show all registered monkeypuzzle projects and their piece worktrees, and jump
-into any worktree's tmux session.
+into any worktree's session — from anywhere, regardless of the current repo.
 
-With a terminal, opens an interactive dashboard. Otherwise (or with --json) prints
-the same data as JSON. Bare 'mp' shows the same dashboard scoped to the current
-project (repo-local); 'mp dash' always shows every registered project.`,
-	RunE: runDash,
+With a terminal, opens an interactive fuzzy picker. Otherwise (or with --json)
+prints the same data as JSON.
+
+Bare 'mp' shows a fuzzy picker scoped to the current repo; 'mp go' always spans
+every registered project so you can switch repos from anywhere.`,
+	RunE: runGo,
 }
 
 var flagDashJSON bool
 
 func init() {
-	dashCmd.Flags().BoolVar(&flagDashJSON, "json", false, "Output JSON instead of the interactive dashboard")
-	rootCmd.AddCommand(dashCmd)
+	goCmd.Flags().BoolVar(&flagDashJSON, "json", false, "Output JSON instead of the interactive picker")
+	rootCmd.AddCommand(goCmd)
 
-	// Bare `mp` opens a dashboard scoped to the current project (repo-local),
-	// falling back to the cross-project view when run outside a registered repo.
-	// `mp dash` always shows every project.
+	// Bare `mp` opens a fuzzy picker scoped to the current project (repo-local).
+	// Outside a monkeypuzzle project it prints context-aware guidance rather than
+	// falling back to a cross-project view — use `mp go` for that.
 	rootCmd.Flags().BoolVar(&flagDashJSON, "json", false, "Output JSON instead of the interactive dashboard")
 	rootCmd.RunE = runRoot
 }
@@ -89,20 +92,29 @@ type dashProject struct {
 	Error       string       `json:"error,omitempty"`
 }
 
-// currentProjectInfo returns the enriched Info for the registered project that
-// contains the current working directory, resolving the main repo root so it
-// also works from inside a piece worktree. The bool is false when cwd is not
-// inside a registered project (e.g. an unrelated repo, or no repo at all).
-func currentProjectInfo(ctx context.Context) (projectcmd.Info, bool) {
+// cwdState classifies the current working directory for bare `mp`.
+type cwdState int
+
+const (
+	cwdInProject      cwdState = iota // inside a monkeypuzzle project (.monkeypuzzle/monkeypuzzle.json present)
+	cwdRepoNotProject                 // inside a git repo that hasn't been `mp init`-ed
+	cwdNotRepo                        // not inside a git repo at all
+)
+
+// classifyCwd determines whether the current working directory is inside a
+// monkeypuzzle project, inside a plain (non-init'd) git repo, or outside any
+// repo. It resolves the main repo root so it also works from inside a piece
+// worktree, and returns that root for the in-project and repo-not-project cases.
+func classifyCwd(ctx context.Context) (root string, state cwdState) {
 	wd, err := os.Getwd()
 	if err != nil {
-		return projectcmd.Info{}, false
+		return "", cwdNotRepo
 	}
 	git := adapters.NewGit(adapters.NewOSExec())
-	root, err := git.GetMainRepoRoot(ctx, wd)
+	root, err = git.GetMainRepoRoot(ctx, wd)
 	if err != nil {
 		if root, err = git.RepoRoot(ctx, wd); err != nil {
-			return projectcmd.Info{}, false
+			return "", cwdNotRepo
 		}
 	}
 	// The registry stores symlink-resolved paths; match that so lookups succeed
@@ -110,23 +122,10 @@ func currentProjectInfo(ctx context.Context) (projectcmd.Info, bool) {
 	if resolved, rerr := filepath.EvalSymlinks(root); rerr == nil {
 		root = resolved
 	}
-	info, ok, err := projectcmd.Get(root)
-	if err != nil || !ok {
-		return projectcmd.Info{}, false
+	if registry.IsProject(root) {
+		return root, cwdInProject
 	}
-	return info, true
-}
-
-// dashboardInfos returns the projects to show. Bare `mp` scopes to the current
-// project (repo-local); when cwd isn't in a registered project it falls back to
-// every registered project so `mp` still works as a launcher from anywhere.
-func dashboardInfos(ctx context.Context, scopeToCurrent bool) ([]projectcmd.Info, error) {
-	if scopeToCurrent {
-		if info, ok := currentProjectInfo(ctx); ok {
-			return []projectcmd.Info{info}, nil
-		}
-	}
-	return projectcmd.List()
+	return root, cwdRepoNotProject
 }
 
 func collectDashboard(ctx context.Context, infos []projectcmd.Info) ([]dashProject, error) {
@@ -337,24 +336,78 @@ func dashboardRows(projects []dashProject) []dashboard.Row {
 	return rows
 }
 
-// runRoot handles bare `mp`: a dashboard scoped to the current project. When
-// cwd isn't inside a registered project it falls back to the cross-project view
-// so `mp` still works as a launcher from anywhere.
+// runRoot handles bare `mp`: a fuzzy picker scoped to the current monkeypuzzle
+// project. Outside a project it prints context-aware guidance (run `mp init`, or
+// `mp go` to jump to a known project) instead of falling back to anything.
 func runRoot(cmd *cobra.Command, args []string) error {
-	return runDashScoped(cmd.Context(), true)
+	ctx := cmd.Context()
+	root, state := classifyCwd(ctx)
+	if state != cwdInProject {
+		return guideOutsideProject(state, root)
+	}
+	return renderDashboard(ctx, []projectcmd.Info{projectcmd.Describe(root)})
 }
 
-// runDash handles `mp dash`: the explicit cross-project view over every
-// registered project, regardless of where it's run from.
-func runDash(cmd *cobra.Command, args []string) error {
-	return runDashScoped(cmd.Context(), false)
-}
-
-func runDashScoped(ctx context.Context, scopeToCurrent bool) error {
-	infos, err := dashboardInfos(ctx, scopeToCurrent)
+// runGo handles `mp go`: the explicit cross-project picker over every registered
+// project, regardless of where it's run from.
+func runGo(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
+	infos, err := projectcmd.List()
 	if err != nil {
 		return err
 	}
+	return renderDashboard(ctx, infos)
+}
+
+// guideOutsideProject prints context-aware guidance when bare `mp` runs outside
+// a monkeypuzzle project. It points an un-init'd git repo at `mp init`, and a
+// non-repo directory at cloning/cd-ing into one; both mention `mp go` when there
+// are registered projects to jump to. In JSON / non-TTY mode the same guidance
+// is emitted as a structured object so automation gets a loud, parseable signal.
+func guideOutsideProject(state cwdState, root string) error {
+	hasProjects := false
+	if infos, err := projectcmd.List(); err == nil {
+		hasProjects = len(infos) > 0
+	}
+
+	var reason, action string
+	switch state {
+	case cwdRepoNotProject:
+		reason = fmt.Sprintf("This repo (%s) isn't set up for monkeypuzzle yet.", root)
+		action = "Run `mp init` here to get started."
+	default: // cwdNotRepo
+		reason = "You're not inside a git repository."
+		action = "cd into a repo and run `mp init`, or clone one first."
+	}
+	goHint := ""
+	if hasProjects {
+		goHint = "Run `mp go` to jump to one of your registered projects."
+	}
+
+	// Human-readable guidance always goes to stderr (per the output convention),
+	// regardless of TTY — there is nothing to render and nothing to attach to.
+	fmt.Fprintln(os.Stderr, reason)
+	fmt.Fprintln(os.Stderr, action)
+	if goHint != "" {
+		fmt.Fprintln(os.Stderr, goHint)
+	}
+
+	// In explicit JSON mode, also emit a structured, parseable signal on stdout
+	// so automation gets a loud "no project here" answer instead of an empty list
+	// it might mistake for "no projects exist".
+	if flagDashJSON {
+		return cli.PrintJSON(map[string]any{
+			"projects":     []any{},
+			"in_project":   false,
+			"reason":       reason,
+			"suggestion":   action,
+			"has_projects": hasProjects,
+		})
+	}
+	return nil
+}
+
+func renderDashboard(ctx context.Context, infos []projectcmd.Info) error {
 	projects, err := collectDashboard(ctx, infos)
 	if err != nil {
 		return err

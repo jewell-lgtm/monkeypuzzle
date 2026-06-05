@@ -254,7 +254,7 @@ Type to filter, ↑/↓ to move, `enter` to select, `esc` to cancel. The picker 
 
 ### Non-interactive shape
 
-`mp dash --json` (and the JSON form of `mp switch` when stdout isn't a TTY) now includes per-project `issues` and `branches` arrays so callers can build their own pickers.
+`mp go --json` (and the JSON form of `mp switch` when stdout isn't a TTY) now includes per-project `issues` and `branches` arrays so callers can build their own pickers.
 
 ---
 
@@ -781,18 +781,24 @@ mp project remove --target /path/to/repo
 
 ---
 
-## mp dash
+## mp go
 
-Cross-project dashboard of every registered project and its piece worktrees. With a terminal it opens an interactive dashboard; otherwise (or with `--json`) it prints the same data as JSON.
+Cross-project picker of every registered project and its piece worktrees — jump to any repo from anywhere. With a terminal it opens an interactive fuzzy picker; otherwise (or with `--json`) it prints the same data as JSON.
 
-Bare `mp` opens the **same dashboard scoped to the current project** (repo-local) — it shows only the pieces, issues, and branches of the project you're standing in. When run outside any registered project it falls back to the cross-project view, so `mp` still works as a launcher from anywhere. Use `mp dash` for the explicit all-projects view.
+Bare `mp` opens the **same picker scoped to the current project** (repo-local) — it shows only the pieces, issues, and branches of the project you're standing in. When run **outside** a monkeypuzzle project, bare `mp` does *not* fall back to the cross-project view; instead it prints context-aware guidance:
+
+- Inside a git repo that hasn't been initialised → suggests `mp init`.
+- Outside any git repo → suggests cd-ing into a repo and running `mp init`.
+- Either way, if you have registered projects it points you at `mp go`.
+
+Use `mp go` for the explicit all-projects view from anywhere.
 
 ### Usage
 
 ```bash
-mp               # dashboard scoped to the current project (all projects if outside one)
-mp dash          # every registered project (or JSON when not a TTY)
-mp dash --json   # force JSON output
+mp               # picker scoped to the current project (guidance if outside one)
+mp go            # every registered project (or JSON when not a TTY)
+mp go --json     # force JSON output
 mp --json        # JSON for the current project
 ```
 

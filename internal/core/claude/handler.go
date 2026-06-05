@@ -181,9 +181,11 @@ mp project add
 mp project list
 mp project remove <name>
 
-# Cross-project dashboard of projects + piece worktrees (bare 'mp' is the same)
-mp dash
-mp dash --json
+# Cross-project picker of projects + piece worktrees (jump to any repo from anywhere).
+# Bare 'mp' is the same picker scoped to the current repo; outside a project it
+# prints guidance (run 'mp init', or 'mp go' to jump to a known project).
+mp go
+mp go --json
 ` + "```" + `
 
 ## Init & Config
