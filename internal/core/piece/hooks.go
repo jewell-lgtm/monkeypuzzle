@@ -12,9 +12,9 @@ import (
 
 // Hook types for piece operations
 const (
-	HookOnPieceCreate    = "on-piece-create.sh"
-	HookBeforePieceMerge = "before-piece-merge.sh"
-	HookAfterPieceMerge  = "after-piece-merge.sh"
+	HookOnPieceCreate     = "on-piece-create.sh"
+	HookBeforePieceMerge  = "before-piece-merge.sh"
+	HookAfterPieceMerge   = "after-piece-merge.sh"
 	HookBeforePieceUpdate = "before-piece-update.sh"
 	HookAfterPieceUpdate  = "after-piece-update.sh"
 )
@@ -156,4 +156,3 @@ func (h *HookRunner) execWithEnv(ctx context.Context, dir, script string, env []
 	// Use bash to execute the script
 	return h.exec.RunWithEnv(ctx, dir, env, "bash", script)
 }
-

@@ -21,7 +21,7 @@ Complete workflow for implementing an issue from start to PR.
 mp issue list --status todo
 
 # Create piece from issue (get worktree path)
-mp piece create --issue <issue-path> --skip-switch
+mp create --issue <issue-path> --skip-switch
 
 # Navigate to worktree
 cd <worktree-path>
@@ -117,7 +117,7 @@ Closes #<issue-number>"
 
 ```bash
 # From the piece worktree
-mp piece pr create --title "<PR title>" --body "<description>"
+mp pr create --title "<PR title>" --body "<description>"
 ```
 
 **PR body should include:**
@@ -129,7 +129,7 @@ mp piece pr create --title "<PR title>" --body "<description>"
 
 ```bash
 # Cleanup merged pieces
-mp piece cleanup --force
+mp cleanup --force
 ```
 
 Issue status automatically updates to `done`.
@@ -139,16 +139,16 @@ Issue status automatically updates to `done`.
 ```bash
 # Full workflow
 mp issue list --status todo                           # Find issue
-mp piece create --issue issues/foo.md --skip-switch      # Start work
+mp create --issue issues/foo.md --skip-switch      # Start work
 cd $(cat /dev/stdin | jq -r .worktree_path)           # Enter worktree
 
 # ... do work with outside-in testing ...
 
 git add -A && git commit -m "feat: implement foo"     # Commit
-mp piece pr create --title "Implement foo"            # Create PR
+mp pr create --title "Implement foo"            # Create PR
 
 # After merge
-mp piece cleanup --force                              # Cleanup
+mp cleanup --force                              # Cleanup
 ```
 
 ## Outside-In Testing Pattern

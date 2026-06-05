@@ -26,49 +26,46 @@ echo '{"query":"auth","status":["todo"]}' | mp issue search
 
 ```bash
 # Show current piece status
-mp piece status
+mp status
 
 # List all pieces (tree view or flat)
-mp piece list
-echo '{"flat":true}' | mp piece list
+mp list
+echo '{"flat":true}' | mp list
 
 # Create new piece from issue (via --issue flag)
-mp piece create --issue issues/feat.md --skip-switch
+mp create --issue issues/feat.md --skip-switch
 
 # Create new piece by name
-echo '{"name":"my-feature","skip_switch":true}' | mp piece create
+echo '{"name":"my-feature","skip_switch":true}' | mp create
 
 # Create piece from a prompt (name auto-generated from the prompt)
-mp piece create --prompt "add dark mode"
+mp create --prompt "add dark mode"
 
 # Create stacked piece (child of another piece)
-echo '{"name":"child-feat","parent":"parent-piece"}' | mp piece create
-
-# Switch to existing piece
-echo '{"name":"my-feature"}' | mp piece switch
+echo '{"name":"child-feat","parent":"parent-piece"}' | mp create
 
 # Update piece with latest from main
-echo '{}' | mp piece update
-echo '{"main_branch":"develop"}' | mp piece update
+echo '{}' | mp update
+echo '{"main_branch":"develop"}' | mp update
 
 # Merge piece back to main (requires no unmerged children)
-echo '{}' | mp piece merge
-echo '{"force":true}' | mp piece merge  # force even with children
+echo '{}' | mp merge
+echo '{"force":true}' | mp merge  # force even with children
 
 # Create PR for current piece
-echo '{}' | mp piece pr create
-echo '{"title":"Add X","body":"Description"}' | mp piece pr create
+echo '{}' | mp pr create
+echo '{"title":"Add X","body":"Description"}' | mp pr create
 
 # Cleanup after merge
-echo '{}' | mp piece done
+echo '{}' | mp done
 
 # Cleanup all merged pieces
-echo '{"force":true}' | mp piece cleanup
-echo '{"dry_run":true}' | mp piece cleanup
+echo '{"force":true}' | mp cleanup
+echo '{"dry_run":true}' | mp cleanup
 
 # Abandon unmerged piece
-echo '{"force":true}' | mp piece abandon
-echo '{"name":"piece-name","delete_branch":true}' | mp piece abandon
+echo '{"force":true}' | mp abandon
+echo '{"name":"piece-name","delete_branch":true}' | mp abandon
 
 # Flatten: remove ALL piece worktrees (regardless of merge status)
 echo '{"force":true}' | mp flatten
@@ -76,8 +73,8 @@ echo '{"force":true,"delete_branches":true}' | mp flatten
 echo '{"dry_run":true}' | mp flatten   # preview only
 
 # Convert existing branch to piece
-echo '{}' | mp piece adopt
-echo '{"name":"custom-name","parent":"main"}' | mp piece adopt
+echo '{}' | mp adopt
+echo '{"name":"custom-name","parent":"main"}' | mp adopt
 
 # Cross-project picker: pieces + open todo issues + unadopted branches.
 # Selecting an issue creates a piece from it; selecting a branch adopts it.
@@ -146,8 +143,8 @@ mp move .monkeypuzzle                # move back to the default
 ## Workflow
 
 1. `mp issue create` or find existing issue
-2. `mp piece create --issue issues/foo.md` creates worktree
+2. `mp create --issue issues/foo.md` creates worktree
 3. Work in worktree, commit changes
 4. For dependent work, stack with `mp stack append` and keep it in sync via `mp stack sync`
-5. `mp piece pr create` pushes and creates PR
-6. After PR merged: `mp piece done` or `mp piece cleanup`
+5. `mp pr create` pushes and creates PR
+6. After PR merged: `mp done` or `mp cleanup`

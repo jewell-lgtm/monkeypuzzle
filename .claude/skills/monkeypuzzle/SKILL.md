@@ -21,15 +21,15 @@ CLI tool for git worktree-based development workflow. Binary: `mp`
 |---------|----------------|-------|
 | `mp issue list` | ✅ | JSON output, stdin filter |
 | `mp issue create` | ✅ | JSON stdin or flags |
-| `mp piece create` | ✅ | Use `--skip-switch`; `--issue`/`--prompt`/`--parent` |
-| `mp piece list --flat` | ✅ | JSON output |
-| `mp piece update` | ✅ | Run from worktree |
-| `mp piece merge` | ✅ | Run from worktree |
-| `mp piece pr create` | ✅ | Flags for title/body |
-| `mp piece done` | ✅ | Run from worktree, after merge |
-| `mp piece adopt` | ✅ | Convert a branch into a piece |
-| `mp piece cleanup --force` | ✅ | Use `--force` to skip prompts |
-| `mp piece abandon` | ✅ | Use `--name` and `--force` |
+| `mp create` | ✅ | Use `--skip-switch`; `--issue`/`--prompt`/`--parent` |
+| `mp list --flat` | ✅ | JSON output |
+| `mp update` | ✅ | Run from worktree |
+| `mp merge` | ✅ | Run from worktree |
+| `mp pr create` | ✅ | Flags for title/body |
+| `mp done` | ✅ | Run from worktree, after merge |
+| `mp adopt` | ✅ | Convert a branch into a piece |
+| `mp cleanup --force` | ✅ | Use `--force` to skip prompts |
+| `mp abandon` | ✅ | Use `--name` and `--force` |
 | `mp flatten --yes` | ✅ | Removes ALL piece worktrees; `--force` for dirty trees |
 | `mp stack status/sync/append/prepend/continue` | ✅ | Whole-stack ops; non-interactive |
 | `mp project add/list/remove` | ✅ | Global project registry |
@@ -85,28 +85,28 @@ mp issue create --schema
 {"path": "issues/add-feature.md", "title": "Add feature", "filename": "add-feature.md"}
 ```
 
-## mp piece create
+## mp create
 
 Create new piece (git worktree). **Use `--skip-switch` for agents.**
 
 ```bash
 # From issue (recommended)
-mp piece create --issue issues/add-login.md --skip-switch
+mp create --issue issues/add-login.md --skip-switch
 
 # With name
-mp piece create --name my-feature --skip-switch
+mp create --name my-feature --skip-switch
 
 # From a prompt (name auto-generated)
-mp piece create --prompt "add dark mode" --skip-switch
+mp create --prompt "add dark mode" --skip-switch
 
 # Stacked on another piece
-mp piece create --name child-feat --parent parent-piece --skip-switch
+mp create --name child-feat --parent parent-piece --skip-switch
 
 # JSON stdin
-echo '{"issue_path":"issues/add-login.md","skip_switch":true}' | mp piece create
+echo '{"issue_path":"issues/add-login.md","skip_switch":true}' | mp create
 
 # Schema
-mp piece create --schema
+mp create --schema
 ```
 
 **Output:**
@@ -118,16 +118,16 @@ mp piece create --schema
 - Creates worktree in `~/.local/share/monkeypuzzle/pieces/<repo-id>/<name>`
 - If from issue: updates issue status to `in-progress`
 
-## mp piece list
+## mp list
 
 List all pieces.
 
 ```bash
 # JSON output (for agents)
-mp piece list --flat
+mp list --flat
 
 # Tree view (human readable)
-mp piece list
+mp list
 ```
 
 **Output (--flat):**
@@ -138,31 +138,31 @@ mp piece list
 ]
 ```
 
-## mp piece update
+## mp update
 
 Merge main into current piece. Run from piece worktree.
 
 ```bash
-mp piece update
-mp piece update --main-branch develop
+mp update
+mp update --main-branch develop
 ```
 
-## mp piece merge
+## mp merge
 
 Squash-merge piece into main. Run from piece worktree.
 
 ```bash
-mp piece merge
-mp piece merge --main-branch develop
+mp merge
+mp merge --main-branch develop
 ```
 
-## mp piece pr create
+## mp pr create
 
 Create GitHub PR. Run from piece worktree.
 
 ```bash
-mp piece pr create --title "Add login" --body "Implements login feature"
-mp piece pr create --base develop
+mp pr create --title "Add login" --body "Implements login feature"
+mp pr create --base develop
 ```
 
 **Output:**
@@ -170,56 +170,56 @@ mp piece pr create --base develop
 {"url": "https://github.com/owner/repo/pull/123", "number": 123}
 ```
 
-## mp piece cleanup
+## mp cleanup
 
 Remove merged piece worktrees.
 
 ```bash
 # For agents - skip confirmation
-mp piece cleanup --force
+mp cleanup --force
 
 # Preview
-mp piece cleanup --dry-run
+mp cleanup --dry-run
 ```
 
-## mp piece abandon
+## mp abandon
 
 Remove unmerged piece.
 
 ```bash
 # For agents
-mp piece abandon --name my-feature --force
+mp abandon --name my-feature --force
 
 # Also delete branch
-mp piece abandon --name my-feature --force --delete-branch
+mp abandon --name my-feature --force --delete-branch
 
 # JSON stdin
-echo '{"name":"my-feature","force":true}' | mp piece abandon
+echo '{"name":"my-feature","force":true}' | mp abandon
 ```
 
-## mp piece done
+## mp done
 
-Clean up the current piece (worktree + tmux) after its branch is merged. Run from the worktree; verifies merge first (use `mp piece abandon` for unmerged pieces).
+Clean up the current piece (worktree + tmux) after its branch is merged. Run from the worktree; verifies merge first (use `mp abandon` for unmerged pieces).
 
 ```bash
-mp piece done
-mp piece done --main-branch develop
+mp done
+mp done --main-branch develop
 ```
 
-## mp piece adopt
+## mp adopt
 
 Convert an existing git branch into a piece. Local name or remote ref (`origin/foo`).
 
 ```bash
-mp piece adopt                       # adopt current branch (from main repo)
-mp piece adopt my-spike              # adopt a local branch
-mp piece adopt --branch origin/foo   # fetch + adopt a remote branch
-mp piece adopt my-spike --parent feature-a   # stack under another piece
+mp adopt                       # adopt current branch (from main repo)
+mp adopt my-spike              # adopt a local branch
+mp adopt --branch origin/foo   # fetch + adopt a remote branch
+mp adopt my-spike --parent feature-a   # stack under another piece
 ```
 
 ## mp flatten
 
-Remove **all** piece worktrees for the repo, returning to a flat main-only state. Unlike `mp piece cleanup` (merged pieces only), flatten removes every piece regardless of merge status. Interactive runs confirm first; pass `--yes` (or `--force`) to skip the prompt. Branches are kept unless `--delete-branches`.
+Remove **all** piece worktrees for the repo, returning to a flat main-only state. Unlike `mp cleanup` (merged pieces only), flatten removes every piece regardless of merge status. Interactive runs confirm first; pass `--yes` (or `--force`) to skip the prompt. Branches are kept unless `--delete-branches`.
 
 ```bash
 # For agents (non-interactive; --yes/--force skip the prompt)
@@ -311,16 +311,16 @@ mp init --schema
 mp issue list --status todo
 
 # 2. Create piece from issue
-echo '{"issue_path":"issues/add-login.md","skip_switch":true}' | mp piece create
+echo '{"issue_path":"issues/add-login.md","skip_switch":true}' | mp create
 
 # 3. Work in the worktree path returned
 cd /path/to/worktree
 
 # 4. After commits, create PR
-mp piece pr create --title "Add login" --body "Description"
+mp pr create --title "Add login" --body "Description"
 
 # 5. After merge, cleanup
-mp piece cleanup --force
+mp cleanup --force
 ```
 
 ## Directory Structure

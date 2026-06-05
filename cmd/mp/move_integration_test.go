@@ -58,7 +58,7 @@ func TestMoveRelocatesMonkeypuzzleDir(t *testing.T) {
 	git("branch", "-M", "main")
 
 	mp(repo, "init", "--name", "demo", "--issue-provider", "markdown", "--pr-provider", "github")
-	mp(repo, "piece", "create", "--name", "feat", "--skip-switch")
+	mp(repo, "create", "--name", "feat", "--skip-switch")
 
 	mustDir := func(p string) {
 		t.Helper()
@@ -117,7 +117,7 @@ func TestMoveRelocatesMonkeypuzzleDir(t *testing.T) {
 	}
 
 	// mp still finds the piece via the relocated dir.
-	if listOut := mp(repo, "piece", "list"); !strings.Contains(listOut, "feat") {
+	if listOut := mp(repo, "list"); !strings.Contains(listOut, "feat") {
 		t.Fatalf("piece 'feat' not found after move: %s", listOut)
 	}
 

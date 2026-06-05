@@ -12,15 +12,13 @@ func TestCommandSkipsConfigCheck(t *testing.T) {
 	root := &cobra.Command{Use: "mp"}
 	configParent := &cobra.Command{Use: "config"}
 	configSet := &cobra.Command{Use: "set"}
-	pieceParent := &cobra.Command{Use: "piece"}
 	pieceCreate := &cobra.Command{Use: "create"}
 	pieceCreate.Flags().Bool("schema", false, "")
 	completion := &cobra.Command{Use: "completion"}
 	helpCmd := &cobra.Command{Use: "help"}
 
 	configParent.AddCommand(configSet)
-	pieceParent.AddCommand(pieceCreate)
-	root.AddCommand(configParent, pieceParent, completion, helpCmd)
+	root.AddCommand(configParent, pieceCreate, completion, helpCmd)
 
 	cases := []struct {
 		name string

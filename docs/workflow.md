@@ -34,7 +34,7 @@ mp init
 ### 2. Start a new feature
 
 ```bash
-mp piece create
+mp create
 ```
 
 This creates:
@@ -49,7 +49,7 @@ Navigate to the piece and make changes:
 
 ```bash
 # Check where you are
-mp piece status
+mp status
 
 # Make commits as usual
 git add .
@@ -61,7 +61,7 @@ git commit -m "feat: add user authentication"
 If main branch has new commits:
 
 ```bash
-mp piece update
+mp update
 ```
 
 This merges main into your piece, keeping it up to date.
@@ -71,7 +71,7 @@ This merges main into your piece, keeping it up to date.
 When ready to merge back:
 
 ```bash
-mp piece merge
+mp merge
 ```
 
 This:
@@ -86,11 +86,11 @@ Work on multiple features simultaneously:
 
 ```bash
 # From main repo, create first piece
-mp piece create --name feature-a
+mp create --name feature-a
 # Work on feature A...
 
 # From main repo, create second piece
-mp piece create --name feature-b
+mp create --name feature-b
 # Work on feature B...
 
 # Switch between pieces (or jump straight to an open issue / unadopted branch)
@@ -98,15 +98,14 @@ mp switch                          # Cross-project fuzzy picker over pieces, iss
 mp switch --project app --piece feature-a
 mp switch --project app --issue issues/auth.md   # creates the piece, then attaches
 mp switch --project app --branch spike-token     # adopts the branch, then attaches
-mp piece switch                    # Same-project TUI selector (legacy)
 
 # Merge feature A when ready
-mp piece switch --name feature-a
-mp piece merge
+mp switch --project app --piece feature-a
+mp merge
 
 # Update feature B with changes from A
-mp piece switch --name feature-b
-mp piece update
+mp switch --project app --piece feature-b
+mp update
 ```
 
 ## Stacked Pieces
@@ -124,7 +123,7 @@ mp stack append --name api-layer
 mp stack append --name api-ui
 
 # Equivalent low-level form
-mp piece create --name api-ui --parent api-layer
+mp create --name api-ui --parent api-layer
 
 # Insert a piece between the current piece and its parent
 mp stack prepend --name shared-types
@@ -147,7 +146,7 @@ mp stack continue
 
 `mp stack` operations are non-interactive — anything risky aborts cleanly and
 prints the next steps (e.g. which PR base to change on GitHub). Open a PR per
-piece with `mp piece pr create`; the base auto-detects to the parent's branch.
+piece with `mp pr create`; the base auto-detects to the parent's branch.
 
 ## Integration with GitHub PRs
 
@@ -155,27 +154,27 @@ Recommended workflow:
 
 ```bash
 # Create piece
-mp piece create
+mp create
 
 # Work on feature, commit changes
 git add . && git commit -m "feat: new feature"
 
 # Push the branch and open a PR (run from inside the worktree).
 # For a stacked piece the PR base auto-detects to the parent piece's branch.
-mp piece pr create
-mp piece pr create --title "Add feature" --body "Description"
+mp pr create
+mp pr create --title "Add feature" --body "Description"
 
 # After the PR is merged, sweep up the worktree and tmux session
-mp piece done
+mp done
 ```
 
-`mp piece pr create` pushes to origin and creates the PR via the `gh` CLI, so you
-don't need to run `git push` / `gh pr create` by hand. `mp piece done` verifies
-the branch is merged before cleaning up (use `mp piece abandon` for unmerged work).
+`mp pr create` pushes to origin and creates the PR via the `gh` CLI, so you
+don't need to run `git push` / `gh pr create` by hand. `mp done` verifies
+the branch is merged before cleaning up (use `mp abandon` for unmerged work).
 
 ## Tmux Integration
 
-`mp piece create` creates tmux sessions automatically. Sessions are namespaced by
+`mp create` creates tmux sessions automatically. Sessions are namespaced by
 project so worktrees from different repositories never collide:
 
 - **Main repo session**: `mp/<project>` (created once, reused)
@@ -193,15 +192,15 @@ main repo via the `Ctrl+b s` session picker.
 Switch between pieces:
 
 ```bash
-mp piece switch              # TUI selector (works with/without tmux)
-mp piece switch --name foo   # By name
+mp switch                              # Fuzzy picker (works with/without tmux)
+mp switch --project app --piece foo    # Jump straight to a piece
 
 # Or use tmux directly:
 tmux list-sessions           # See all sessions
 tmux attach -t mp/<project>/<piece>  # Attach to a specific piece
 ```
 
-`mp piece switch` automatically detects if you're in tmux and uses `switch-client` for seamless session switching.
+`mp switch` automatically detects if you're in tmux and uses `switch-client` for seamless session switching.
 
 ### Tmux for Beginners
 
@@ -246,14 +245,14 @@ sudo dnf install tmux
 
 ```bash
 # Create piece (auto-creates tmux session)
-mp piece create --name my-feature
+mp create --name my-feature
 
 # You're now in session "mp/<project>/my-feature"
 # Work on code, then detach:
 # Press Ctrl+b, then d
 
 # Later, switch back:
-mp piece switch --name my-feature
+mp switch --project app --piece my-feature
 
 # Or list all piece sessions:
 tmux ls | grep "^mp/"
@@ -262,7 +261,7 @@ tmux ls | grep "^mp/"
 **Tips:**
 
 - Sessions persist after detaching - your work stays running
-- Use `mp piece switch` instead of raw tmux commands for easier navigation
+- Use `mp switch` instead of raw tmux commands for easier navigation
 - If tmux isn't installed, monkeypuzzle falls back to printing the path
 
 ## Hooks
@@ -313,12 +312,12 @@ See [docs/commands.md](commands.md) for full hooks reference.
 
 ### "Main branch is ahead"
 
-If `mp piece merge` fails because main has commits not in your piece:
+If `mp merge` fails because main has commits not in your piece:
 
 ```bash
-mp piece update   # Merge main into piece first
+mp update   # Merge main into piece first
 # Resolve any conflicts
-mp piece merge    # Now safe to merge
+mp merge    # Now safe to merge
 ```
 
 ### Finding pieces
@@ -337,7 +336,8 @@ Each repository has its own pieces directory (identified by a hash of the repo r
 List and switch between pieces:
 
 ```bash
-mp piece switch               # Interactive TUI with all pieces (for current repo)
+mp switch               # Interactive fuzzy picker over pieces, issues, and branches
+mp list                 # List this repo's pieces as a tree
 ls ~/.local/share/monkeypuzzle/pieces/  # Manual listing (shows all repos)
 ```
 
@@ -346,16 +346,16 @@ ls ~/.local/share/monkeypuzzle/pieces/  # Manual listing (shows all repos)
 **Merged pieces** - use cleanup to remove all merged pieces at once:
 
 ```bash
-mp piece cleanup              # Remove all merged pieces
-mp piece cleanup --dry-run    # Preview what would be removed
+mp cleanup              # Remove all merged pieces
+mp cleanup --dry-run    # Preview what would be removed
 ```
 
 **Unmerged pieces** - use abandon to discard work:
 
 ```bash
-mp piece abandon --name my-feature            # Remove piece
-mp piece abandon --name my-feature --force    # Discard uncommitted changes
-mp piece abandon --name foo --delete-branch   # Also delete git branch
+mp abandon --name my-feature            # Remove piece
+mp abandon --name my-feature --force    # Discard uncommitted changes
+mp abandon --name foo --delete-branch   # Also delete git branch
 ```
 
 **All pieces** - use flatten to wipe every worktree at once (regardless of merge

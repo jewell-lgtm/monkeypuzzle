@@ -97,7 +97,7 @@ func TestCLI_StackSync_PropagatesMainThroughTwoPieceStack(t *testing.T) {
 // createPiece creates a piece with the given name and parent, returning its worktree path.
 func createPiece(t *testing.T, env *testEnv, name, parent string) string {
 	t.Helper()
-	args := []string{"piece", "create", "--name", name, "--skip-switch"}
+	args := []string{"create", "--name", name, "--skip-switch"}
 	if parent != "" && parent != "main" {
 		args = append(args, "--parent", parent)
 	}

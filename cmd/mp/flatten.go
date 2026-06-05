@@ -30,7 +30,7 @@ var flattenCmd = &cobra.Command{
 	Long: `Remove every piece worktree for the current repository, returning it to a flat
 main-only state. Each piece's tmux session is killed and its worktree removed.
 
-Unlike "mp piece cleanup" (which only removes merged pieces), flatten removes ALL
+Unlike "mp cleanup" (which only removes merged pieces), flatten removes ALL
 pieces regardless of merge status. Branches are kept by default; pass
 --delete-branches to remove them too. By default worktrees with uncommitted
 changes are left in place — pass --force to discard those changes.

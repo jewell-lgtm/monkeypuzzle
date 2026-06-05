@@ -458,14 +458,8 @@ func (h *Handler) CreatePieceFromIssue(ctx context.Context, issueRef IssueRef, o
 	return info, nil
 }
 
-// PieceMd represents the contents of a piece.md file.
-type PieceMd struct {
-	Title  string `json:"title"`
-	Status string `json:"status"`
-	Body   string `json:"body"`
-}
-
-// CreatePieceFromPrompt creates a new piece with a piece.md describing the work.
+// CreatePieceFromPrompt creates a new piece, recording the prompt it was
+// created from in the piece's (gitignored) metadata.
 func (h *Handler) CreatePieceFromPrompt(ctx context.Context, name, prompt string, opts CreatePieceOptions) (PieceInfo, error) {
 	if prompt == "" {
 		return PieceInfo{}, fmt.Errorf("prompt is empty")
@@ -482,66 +476,21 @@ func (h *Handler) CreatePieceFromPrompt(ctx context.Context, name, prompt string
 		return PieceInfo{}, err
 	}
 
-	// Write piece.md in worktree root
-	title := name
-	md := PieceMd{Title: title, Status: StatusInProgress, Body: prompt}
-	if err := WritePieceMd(info.WorktreePath, md, h.deps.FS); err != nil {
+	// Record the prompt in piece metadata so `mp status` can surface it.
+	metadata, err := ReadPieceMetadata(info.WorktreePath, h.deps.FS)
+	if err != nil {
+		def := DefaultPieceMetadata()
+		metadata = &def
+	}
+	metadata.Prompt = prompt
+	if err := WritePieceMetadata(info.WorktreePath, *metadata, h.deps.FS); err != nil {
 		h.deps.Output.Write(core.Message{
 			Type:    core.MsgWarning,
-			Content: fmt.Sprintf("Failed to write piece.md: %v", err),
+			Content: fmt.Sprintf("Failed to record piece prompt: %v", err),
 		})
 	}
 
 	return info, nil
-}
-
-// WritePieceMd writes a piece.md file with YAML frontmatter to the given directory.
-func WritePieceMd(dir string, md PieceMd, fs core.FS) error {
-	content := fmt.Sprintf("---\ntitle: %s\nstatus: %s\n---\n\n# %s\n\n%s\n",
-		md.Title, md.Status, md.Title, md.Body)
-	return fs.WriteFile(filepath.Join(dir, "piece.md"), []byte(content), initcmd.DefaultFilePerm)
-}
-
-// ReadPieceMd reads and parses a piece.md file from the given directory.
-// Returns nil if the file doesn't exist.
-func ReadPieceMd(dir string, fs core.FS) (*PieceMd, error) {
-	data, err := fs.ReadFile(filepath.Join(dir, "piece.md"))
-	if err != nil {
-		return nil, err
-	}
-
-	content := string(data)
-
-	// Parse YAML frontmatter
-	if !strings.HasPrefix(content, "---\n") {
-		return &PieceMd{Body: content}, nil
-	}
-
-	endIdx := strings.Index(content[4:], "\n---\n")
-	if endIdx < 0 {
-		return &PieceMd{Body: content}, nil
-	}
-
-	frontmatter := content[4 : 4+endIdx]
-	body := strings.TrimSpace(content[4+endIdx+5:])
-
-	md := &PieceMd{Body: body}
-	for _, line := range strings.Split(frontmatter, "\n") {
-		parts := strings.SplitN(line, ":", 2)
-		if len(parts) != 2 {
-			continue
-		}
-		key := strings.TrimSpace(parts[0])
-		val := strings.TrimSpace(parts[1])
-		switch key {
-		case "title":
-			md.Title = val
-		case "status":
-			md.Status = val
-		}
-	}
-
-	return md, nil
 }
 
 // writeCurrentIssueMarker writes the current issue marker file to the worktree.
@@ -915,7 +864,7 @@ func (h *Handler) MergePiece(ctx context.Context, workDir string, input MergeInp
 	}
 
 	if isAhead {
-		return MergeResult{}, fmt.Errorf("cannot merge: %s has commits not in piece worktree. Run 'mp piece update' first", targetBranch)
+		return MergeResult{}, fmt.Errorf("cannot merge: %s has commits not in piece worktree. Run 'mp update' first", targetBranch)
 	}
 
 	// Get commit messages from piece branch for the squash commit message
@@ -1681,7 +1630,7 @@ func (h *Handler) DonePiece(ctx context.Context, workDir string, input DoneInput
 	}
 
 	if !mergeStatus.IsMerged {
-		return DoneResult{}, fmt.Errorf("piece is not merged; use 'mp piece abandon' to remove unmerged pieces")
+		return DoneResult{}, fmt.Errorf("piece is not merged; use 'mp abandon' to remove unmerged pieces")
 	}
 
 	result := DoneResult{
@@ -1752,7 +1701,7 @@ func (h *Handler) mergeIntoChild(ctx context.Context, piecesDir, childName, targ
 	childWorktree := filepath.Join(piecesDir, childName)
 	if err := h.git.Merge(ctx, childWorktree, targetBranch); err != nil {
 		_ = h.git.MergeAbort(ctx, childWorktree)
-		return fmt.Errorf("failed to merge %s into piece %q (resolve manually with `mp piece update` from that worktree): %w", targetBranch, childName, err)
+		return fmt.Errorf("failed to merge %s into piece %q (resolve manually with `mp update` from that worktree): %w", targetBranch, childName, err)
 	}
 	return nil
 }
@@ -1918,9 +1867,9 @@ func (h *Handler) ListPieces(ctx context.Context, repoRoot string) ([]PieceListI
 
 // TreeNode represents a node in the piece tree
 type TreeNode struct {
-	Piece      *PieceListItem // nil for root/main node
-	Children   []*TreeNode
-	IsOrphan   bool // true if parent piece doesn't exist
+	Piece    *PieceListItem // nil for root/main node
+	Children []*TreeNode
+	IsOrphan bool // true if parent piece doesn't exist
 }
 
 // BuildPieceTree builds a tree structure from a list of pieces.
@@ -2085,7 +2034,7 @@ func (h *Handler) SwitchPiece(ctx context.Context, name string) (SwitchResult, e
 		return result, nil
 	}
 
-	// Fallback: print path for cd $(mp piece switch --name foo)
+	// Fallback: print path for cd $(mp switch ...)
 	result.Method = "path"
 	fmt.Println(target.WorktreePath)
 

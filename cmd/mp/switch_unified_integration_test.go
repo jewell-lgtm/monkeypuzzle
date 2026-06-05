@@ -48,7 +48,7 @@ func TestSwitchUnified_FromIssue_CreatesPieceAndAttaches(t *testing.T) {
 	}
 
 	// The piece must now show up in `piece list --all`.
-	listOut, _ := mpJSON(t, e, e.tmpDir, dataDir, "piece", "list", "--all")
+	listOut, _ := mpJSON(t, e, e.tmpDir, dataDir, "list", "--all")
 	var listed struct {
 		Projects []struct {
 			Name   string `json:"name"`
@@ -110,7 +110,7 @@ func TestSwitchUnified_FromBranch_AdoptsAndAttaches(t *testing.T) {
 	}
 
 	// The adopted piece must now show up.
-	listOut, _ := mpJSON(t, e, e.tmpDir, dataDir, "piece", "list", "--all")
+	listOut, _ := mpJSON(t, e, e.tmpDir, dataDir, "list", "--all")
 	var listed struct {
 		Projects []struct {
 			Name   string `json:"name"`
@@ -158,8 +158,8 @@ func TestSwitchUnified_DashJSON_IncludesIssuesAndBranches(t *testing.T) {
 	out, _ := mpJSON(t, e, e.tmpDir, dataDir, "dash", "--json")
 	var dash struct {
 		Projects []struct {
-			Name     string `json:"name"`
-			Issues   []struct {
+			Name   string `json:"name"`
+			Issues []struct {
 				Title string `json:"title"`
 				Path  string `json:"path"`
 			} `json:"issues"`
@@ -309,9 +309,8 @@ func TestDash_RemoteOnlyBranchSurfaces(t *testing.T) {
 	}
 }
 
-// TestPiece_BareListsAndStatusSubcommand verifies bare `mp piece` prints a
-// human overview (not JSON) while `mp piece status` returns the status JSON.
-func TestPiece_BareListsAndStatusSubcommand(t *testing.T) {
+// TestPiece_StatusCommand verifies `mp status` returns the status JSON.
+func TestPiece_StatusCommand(t *testing.T) {
 	e := setupTestEnv(t)
 	defer e.cleanup()
 
@@ -319,22 +318,10 @@ func TestPiece_BareListsAndStatusSubcommand(t *testing.T) {
 	repos := filepath.Join(e.tmpDir, "repos")
 	alpha := projectTestRepo(t, e, dataDir, repos, "alpha")
 
-	// Bare `mp piece` should print the subcommand hint to stderr.
-	pieceCmd := exec.Command(e.binPath, "piece")
-	pieceCmd.Dir = alpha
-	pieceCmd.Env = append(os.Environ(), "MP_DATA_DIR="+dataDir, "MP_CONFIG_DIR="+e.configDir)
-	pieceOut, err := pieceCmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("mp piece: %v\n%s", err, pieceOut)
-	}
-	if !strings.Contains(string(pieceOut), "Subcommands:") {
-		t.Errorf("expected bare `mp piece` to list subcommands, got: %q", pieceOut)
-	}
-
-	// `mp piece status` should emit JSON with in_piece on stdout.
-	statusOut := mpRun(t, e, alpha, dataDir, "piece", "status")
+	// `mp status` should emit JSON with in_piece on stdout.
+	statusOut := mpRun(t, e, alpha, dataDir, "status")
 	if !strings.Contains(statusOut, "in_piece") {
-		t.Errorf("expected `mp piece status` to emit status JSON, got: %q", statusOut)
+		t.Errorf("expected `mp status` to emit status JSON, got: %q", statusOut)
 	}
 }
 

@@ -247,6 +247,21 @@ func TestSanitizePieceName(t *testing.T) {
 			input:    "My---Feature",
 			expected: "my-feature",
 		},
+		{
+			name:     "long prompt capped to five words",
+			input:    "add dark mode to the settings page and persist it",
+			expected: "add-dark-mode-to-the",
+		},
+		{
+			name:     "long words capped by length before word count",
+			input:    "refactor the authentication middleware configuration system",
+			expected: "refactor-the-authentication-middleware",
+		},
+		{
+			name:     "single oversized word hard-cut to length",
+			input:    "supercalifragilisticexpialidocioussupercalifragilistic",
+			expected: "supercalifragilisticexpialidocioussuperc", // first 40 chars
+		},
 	}
 
 	for _, tt := range tests {

@@ -1806,7 +1806,7 @@ func TestIntegration_AdoptPiece_CreatesTmuxSessions(t *testing.T) {
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux not available")
 	}
-	t.Skip("AdoptPiece no longer creates tmux sessions itself; session orchestration moved to the `mp piece adopt` CLI command")
+	t.Skip("AdoptPiece no longer creates tmux sessions itself; session orchestration moved to the `mp adopt` CLI command")
 
 	tmpDataHome, err := os.MkdirTemp("", "mp-data-*")
 	if err != nil {
@@ -2023,7 +2023,7 @@ func (r *recordingMux) Exists(_ context.Context, sessionName string) bool {
 	return r.sessions[sessionName]
 }
 
-func (r *recordingMux) InSession() bool                   { return r.inSession }
+func (r *recordingMux) InSession() bool                    { return r.inSession }
 func (r *recordingMux) IsInstalled(_ context.Context) bool { return true }
 
 func TestIntegration_AbandonPiece_SwitchesToMainSessionWhenInsideWorktree(t *testing.T) {

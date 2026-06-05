@@ -6,7 +6,7 @@
 
 - Go 1.24+ (use [mise](https://mise.jdx.dev/) for version management)
 - Git
-- tmux (for `mp piece` command)
+- tmux (for the piece commands)
 - gh CLI (for GitHub PR provider)
 
 ### Clone and build

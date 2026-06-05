@@ -51,8 +51,8 @@ go build -o mp .
 **Prerequisites:**
 
 - Go 1.24+ (see `go.mod` for exact version)
-- git (for `mp piece` command)
-- tmux (for `mp piece` command)
+- git (for the piece commands)
+- tmux (for the piece commands)
 - gh CLI (for GitHub PR provider)
 
 ## Project Structure

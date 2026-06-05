@@ -27,12 +27,12 @@ type StackNode struct {
 
 // StackStatusResult is the output of `mp stack status`.
 type StackStatusResult struct {
-	MainBranch    string       `json:"main_branch"`
-	Tree          *StackNode   `json:"tree"`
-	GitHubChecked bool         `json:"github_checked"`
-	Reconstructed []string     `json:"reconstructed,omitempty"` // pieces whose parent was rewritten by --from-github
-	Applied       []string     `json:"applied,omitempty"`       // PRs whose base was edited by --apply-bases
-	Drift         []string     `json:"drift,omitempty"`         // flat list of all drift messages
+	MainBranch    string     `json:"main_branch"`
+	Tree          *StackNode `json:"tree"`
+	GitHubChecked bool       `json:"github_checked"`
+	Reconstructed []string   `json:"reconstructed,omitempty"` // pieces whose parent was rewritten by --from-github
+	Applied       []string   `json:"applied,omitempty"`       // PRs whose base was edited by --apply-bases
+	Drift         []string   `json:"drift,omitempty"`         // flat list of all drift messages
 }
 
 // SyncResult is the output of `mp stack sync`.
@@ -65,7 +65,7 @@ func driftBaseMessage(prNumber int, prURL, ghBase, localParent string) string {
 
 // driftMergedMessage notes a merged PR whose piece still exists locally.
 func driftMergedMessage(prNumber int, pieceName string) string {
-	return fmt.Sprintf("PR #%d is merged — run 'mp piece done' to clean up %q.", prNumber, pieceName)
+	return fmt.Sprintf("PR #%d is merged — run 'mp done' to clean up %q.", prNumber, pieceName)
 }
 
 // driftOrphanMessage notes a piece whose parent doesn't exist locally.

@@ -270,7 +270,7 @@ func (s *Server) executeTool(name string, args map[string]string) (string, bool)
 		}
 
 	case "mp_piece_new":
-		cmdArgs = []string{"piece", "new"}
+		cmdArgs = []string{"create"}
 		if v := args["name"]; v != "" {
 			cmdArgs = append(cmdArgs, "--name", v)
 		}
@@ -279,13 +279,13 @@ func (s *Server) executeTool(name string, args map[string]string) (string, bool)
 		}
 
 	case "mp_piece_update":
-		cmdArgs = []string{"piece", "update"}
+		cmdArgs = []string{"update"}
 		if v := args["main_branch"]; v != "" {
 			cmdArgs = append(cmdArgs, "--main-branch", v)
 		}
 
 	case "mp_piece_merge":
-		cmdArgs = []string{"piece", "merge"}
+		cmdArgs = []string{"merge"}
 		if v := args["main_branch"]; v != "" {
 			cmdArgs = append(cmdArgs, "--main-branch", v)
 		}

@@ -11,7 +11,7 @@ import (
 const (
 	DirName    = ".monkeypuzzle"
 	ConfigFile = "monkeypuzzle.json"
-	
+
 	// DefaultDirPerm is the default permission for directories (0755 = rwxr-xr-x)
 	DefaultDirPerm = 0755
 	// DefaultFilePerm is the default permission for files (0644 = rw-r--r--)

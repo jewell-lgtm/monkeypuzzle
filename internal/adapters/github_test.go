@@ -109,10 +109,10 @@ func TestGitHub_IsPRMerged(t *testing.T) {
 			want:       false,
 		},
 		{
-			name:       "error",
-			prNumber:   42,
-			mockErr:    MockError("not found"),
-			wantErr:    true,
+			name:     "error",
+			prNumber: 42,
+			mockErr:  MockError("not found"),
+			wantErr:  true,
 		},
 	}
 

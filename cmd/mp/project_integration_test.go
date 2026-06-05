@@ -87,11 +87,11 @@ func TestPieceAndIssueListAll(t *testing.T) {
 	repoB := projectTestRepo(t, e, dataDir, reposDir, "bravo")
 
 	// A piece in alpha, an issue in bravo.
-	mpRun(t, e, repoA, dataDir, "piece", "create", "--name", "feature-x", "--skip-switch")
+	mpRun(t, e, repoA, dataDir, "create", "--name", "feature-x", "--skip-switch")
 	mpRun(t, e, repoB, dataDir, "issue", "create", "--title", "Fix the thing")
 
 	// piece list --all
-	out, _ := mpJSON(t, e, e.tmpDir, dataDir, "piece", "list", "--all")
+	out, _ := mpJSON(t, e, e.tmpDir, dataDir, "list", "--all")
 	var pieceResult struct {
 		Projects []struct {
 			Name   string `json:"name"`
@@ -152,7 +152,7 @@ func TestDashboardAndSwitch(t *testing.T) {
 	dataDir := filepath.Join(e.tmpDir, "data")
 	reposDir := filepath.Join(e.tmpDir, "repos")
 	repoA := projectTestRepo(t, e, dataDir, reposDir, "alpha")
-	mpRun(t, e, repoA, dataDir, "piece", "create", "--name", "feature-x", "--skip-switch")
+	mpRun(t, e, repoA, dataDir, "create", "--name", "feature-x", "--skip-switch")
 
 	// Bare `mp` (non-TTY) prints the dashboard as JSON.
 	out, _ := mpJSON(t, e, e.tmpDir, dataDir)
@@ -211,17 +211,17 @@ func TestMergeStackBaseReparentsChildren(t *testing.T) {
 	repo := projectTestRepo(t, e, dataDir, filepath.Join(e.tmpDir, "repos"), "stacked")
 
 	// base piece off main, with a commit.
-	mpRun(t, e, repo, dataDir, "piece", "create", "--name", "base", "--skip-switch")
+	mpRun(t, e, repo, dataDir, "create", "--name", "base", "--skip-switch")
 	baseWt := filepath.Join(repo, ".monkeypuzzle", "pieces", "base")
 	writeAndCommit(t, baseWt, "base.txt", "base change\n", "feat: base")
 
 	// top piece stacked on base, with a commit.
-	mpRun(t, e, repo, dataDir, "piece", "create", "--name", "top", "--parent", "base", "--skip-switch")
+	mpRun(t, e, repo, dataDir, "create", "--name", "top", "--parent", "base", "--skip-switch")
 	topWt := filepath.Join(repo, ".monkeypuzzle", "pieces", "top")
 	writeAndCommit(t, topWt, "top.txt", "top change\n", "feat: top")
 
 	// Merge the BASE of the stack, re-homing children.
-	out := mpRun(t, e, baseWt, dataDir, "piece", "merge", "--reparent-children")
+	out := mpRun(t, e, baseWt, dataDir, "merge", "--reparent-children")
 	if !strings.Contains(out, "Re-homed top") {
 		t.Errorf("expected merge output to mention re-homing top, got:\n%s", out)
 	}
@@ -274,15 +274,15 @@ func TestMergeStackBaseReparentMergeStrategy(t *testing.T) {
 	dataDir := filepath.Join(e.tmpDir, "data")
 	repo := projectTestRepo(t, e, dataDir, filepath.Join(e.tmpDir, "repos"), "stacked-merge")
 
-	mpRun(t, e, repo, dataDir, "piece", "create", "--name", "base", "--skip-switch")
+	mpRun(t, e, repo, dataDir, "create", "--name", "base", "--skip-switch")
 	baseWt := filepath.Join(repo, ".monkeypuzzle", "pieces", "base")
 	writeAndCommit(t, baseWt, "base.txt", "base change\n", "feat: base")
 
-	mpRun(t, e, repo, dataDir, "piece", "create", "--name", "top", "--parent", "base", "--skip-switch")
+	mpRun(t, e, repo, dataDir, "create", "--name", "top", "--parent", "base", "--skip-switch")
 	topWt := filepath.Join(repo, ".monkeypuzzle", "pieces", "top")
 	writeAndCommit(t, topWt, "top.txt", "top change\n", "feat: top")
 
-	out := mpRun(t, e, baseWt, dataDir, "piece", "merge", "--reparent-strategy", "merge")
+	out := mpRun(t, e, baseWt, dataDir, "merge", "--reparent-strategy", "merge")
 	if !strings.Contains(out, "Re-homed top onto main") {
 		t.Errorf("expected re-home message, got:\n%s", out)
 	}

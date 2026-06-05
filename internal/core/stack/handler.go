@@ -432,7 +432,7 @@ func (h *Handler) Append(ctx context.Context, workDir string, in AppendInput) (p
 		return piece.PieceInfo{}, err
 	}
 	if !st.InPiece {
-		return piece.PieceInfo{}, fmt.Errorf("'mp stack append' must run from inside a piece worktree; use 'mp piece create' to start a new root piece")
+		return piece.PieceInfo{}, fmt.Errorf("'mp stack append' must run from inside a piece worktree; use 'mp create' to start a new root piece")
 	}
 	mainRepoRoot, _, err := h.resolveRepo(ctx, workDir)
 	if err != nil {

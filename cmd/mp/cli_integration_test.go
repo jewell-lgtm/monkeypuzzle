@@ -401,7 +401,7 @@ func (e *testEnv) initGitRepo() {
 	}
 }
 
-// TestCLI_PieceCreate tests mp piece create outputs valid JSON
+// TestCLI_PieceCreate tests mp create outputs valid JSON
 func TestCLI_PieceCreate(t *testing.T) {
 	env := setupTestEnv(t)
 	defer env.cleanup()
@@ -410,7 +410,7 @@ func TestCLI_PieceCreate(t *testing.T) {
 	env.initProject("test")
 	env.createIssue("add-feature.md", "Add Feature", "todo")
 
-	stdout, stderr, err := env.run("piece", "create", "--issue", "Add Feature", "--skip-switch")
+	stdout, stderr, err := env.run("create", "--issue", "Add Feature", "--skip-switch")
 	if err != nil {
 		t.Fatalf("piece create failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
 	}
@@ -424,7 +424,7 @@ func TestCLI_PieceCreate(t *testing.T) {
 	}
 }
 
-// TestCLI_PieceCreate_WithName tests mp piece create --name outputs valid JSON
+// TestCLI_PieceCreate_WithName tests mp create --name outputs valid JSON
 func TestCLI_PieceCreate_WithName(t *testing.T) {
 	env := setupTestEnv(t)
 	defer env.cleanup()
@@ -432,7 +432,7 @@ func TestCLI_PieceCreate_WithName(t *testing.T) {
 	env.initGitRepo()
 	env.initProject("test")
 
-	stdout, stderr, err := env.run("piece", "create", "--name", "my-piece", "--skip-switch")
+	stdout, stderr, err := env.run("create", "--name", "my-piece", "--skip-switch")
 	if err != nil {
 		t.Fatalf("piece create --name failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
 	}
@@ -443,12 +443,12 @@ func TestCLI_PieceCreate_WithName(t *testing.T) {
 	}
 }
 
-// TestCLI_PieceCreate_Schema tests mp piece create --schema outputs valid JSON
+// TestCLI_PieceCreate_Schema tests mp create --schema outputs valid JSON
 func TestCLI_PieceCreate_Schema(t *testing.T) {
 	env := setupTestEnv(t)
 	defer env.cleanup()
 
-	stdout, _, err := env.run("piece", "create", "--schema")
+	stdout, _, err := env.run("create", "--schema")
 	if err != nil {
 		t.Fatalf("piece create --schema failed: %v", err)
 	}
@@ -459,7 +459,7 @@ func TestCLI_PieceCreate_Schema(t *testing.T) {
 	}
 }
 
-// TestCLI_PieceList tests mp piece list --flat outputs valid JSON
+// TestCLI_PieceList tests mp list --flat outputs valid JSON
 func TestCLI_PieceList(t *testing.T) {
 	env := setupTestEnv(t)
 	defer env.cleanup()
@@ -467,12 +467,12 @@ func TestCLI_PieceList(t *testing.T) {
 	env.initGitRepo()
 	env.initProject("test")
 
-	_, _, err := env.run("piece", "create", "--name", "test-piece", "--skip-switch")
+	_, _, err := env.run("create", "--name", "test-piece", "--skip-switch")
 	if err != nil {
 		t.Fatalf("piece create failed: %v", err)
 	}
 
-	stdout, _, err := env.run("piece", "list", "--flat")
+	stdout, _, err := env.run("list", "--flat")
 	if err != nil {
 		t.Fatalf("piece list failed: %v", err)
 	}
@@ -483,28 +483,12 @@ func TestCLI_PieceList(t *testing.T) {
 	}
 }
 
-// TestCLI_PieceSwitch_Schema tests mp piece switch --schema outputs valid JSON
-func TestCLI_PieceSwitch_Schema(t *testing.T) {
-	env := setupTestEnv(t)
-	defer env.cleanup()
-
-	stdout, _, err := env.run("piece", "switch", "--schema")
-	if err != nil {
-		t.Fatalf("piece switch --schema failed: %v", err)
-	}
-
-	var schema map[string]any
-	if err := json.Unmarshal([]byte(stdout), &schema); err != nil {
-		t.Fatalf("invalid JSON schema: %v\noutput: %s", err, stdout)
-	}
-}
-
-// TestCLI_PRCreate_Schema tests mp piece pr create --schema outputs valid JSON
+// TestCLI_PRCreate_Schema tests mp pr create --schema outputs valid JSON
 func TestCLI_PRCreate_Schema(t *testing.T) {
 	env := setupTestEnv(t)
 	defer env.cleanup()
 
-	stdout, _, err := env.run("piece", "pr", "create", "--schema")
+	stdout, _, err := env.run("pr", "create", "--schema")
 	if err != nil {
 		t.Fatalf("pr create --schema failed: %v", err)
 	}
@@ -575,7 +559,7 @@ func TestCLI_Init_SkipsSkill(t *testing.T) {
 	}
 }
 
-// TestCLI_PieceDone_FromMergedPiece tests mp piece done from inside merged piece
+// TestCLI_PieceDone_FromMergedPiece tests mp done from inside merged piece
 func TestCLI_PieceDone_FromMergedPiece(t *testing.T) {
 	env := setupTestEnv(t)
 	defer env.cleanup()
@@ -584,7 +568,7 @@ func TestCLI_PieceDone_FromMergedPiece(t *testing.T) {
 	env.initProject("test")
 
 	// Create a piece
-	stdout, stderr, err := env.run("piece", "create", "--name", "test-done", "--skip-switch")
+	stdout, stderr, err := env.run("create", "--name", "test-done", "--skip-switch")
 	if err != nil {
 		t.Fatalf("piece create failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
 	}
@@ -603,7 +587,7 @@ func TestCLI_PieceDone_FromMergedPiece(t *testing.T) {
 	}
 
 	// Run piece done from the worktree
-	stdout, stderr, err = env.runInDirWithStdin(worktreePath, "{}", "piece", "done")
+	stdout, stderr, err = env.runInDirWithStdin(worktreePath, "{}", "done")
 	if err != nil {
 		t.Fatalf("piece done failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
 	}
@@ -624,7 +608,7 @@ func TestCLI_PieceDone_FromMergedPiece(t *testing.T) {
 	}
 }
 
-// TestCLI_PieceAbandon_CurrentPiece tests mp piece abandon from current piece without --name
+// TestCLI_PieceAbandon_CurrentPiece tests mp abandon from current piece without --name
 func TestCLI_PieceAbandon_CurrentPiece(t *testing.T) {
 	env := setupTestEnv(t)
 	defer env.cleanup()
@@ -633,7 +617,7 @@ func TestCLI_PieceAbandon_CurrentPiece(t *testing.T) {
 	env.initProject("test")
 
 	// Create a piece
-	stdout, stderr, err := env.run("piece", "create", "--name", "test-abandon", "--skip-switch")
+	stdout, stderr, err := env.run("create", "--name", "test-abandon", "--skip-switch")
 	if err != nil {
 		t.Fatalf("piece create failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
 	}
@@ -645,7 +629,7 @@ func TestCLI_PieceAbandon_CurrentPiece(t *testing.T) {
 	worktreePath := newResult["worktree_path"].(string)
 
 	// Run piece abandon from the worktree (no --name, detect current)
-	stdout, stderr, err = env.runInDirWithStdin(worktreePath, `{"force":true}`, "piece", "abandon")
+	stdout, stderr, err = env.runInDirWithStdin(worktreePath, `{"force":true}`, "abandon")
 	if err != nil {
 		t.Fatalf("piece abandon failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
 	}
@@ -678,7 +662,7 @@ func TestCLI_Flatten_RemovesAllPieces(t *testing.T) {
 	// Create a couple of pieces.
 	var worktrees []string
 	for _, name := range []string{"piece-a", "piece-b"} {
-		stdout, stderr, err := env.run("piece", "create", "--name", name, "--skip-switch")
+		stdout, stderr, err := env.run("create", "--name", name, "--skip-switch")
 		if err != nil {
 			t.Fatalf("piece create %s failed: %v\nstdout: %s\nstderr: %s", name, err, stdout, stderr)
 		}
@@ -719,7 +703,7 @@ func TestCLI_Flatten_RemovesAllPieces(t *testing.T) {
 	}
 
 	// And listing pieces should now return an empty set.
-	stdout, _, err = env.run("piece", "list", "--flat")
+	stdout, _, err = env.run("list", "--flat")
 	if err != nil {
 		t.Fatalf("piece list failed: %v", err)
 	}
@@ -757,7 +741,7 @@ func TestCLI_Flatten_DryRun(t *testing.T) {
 	env.initGitRepo()
 	env.initProject("test")
 
-	stdout, stderr, err := env.run("piece", "create", "--name", "keep-me", "--skip-switch")
+	stdout, stderr, err := env.run("create", "--name", "keep-me", "--skip-switch")
 	if err != nil {
 		t.Fatalf("piece create failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
 	}

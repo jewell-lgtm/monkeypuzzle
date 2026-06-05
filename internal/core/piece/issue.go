@@ -20,6 +20,13 @@ const (
 	StatusDone       = "done"
 	DefaultStatus    = StatusTodo
 	DefaultFilePerm  = 0644
+
+	// maxPieceNameWords and maxPieceNameLen bound the length of a name derived
+	// from a free-form prompt. The full prompt is preserved in piece metadata,
+	// so the name only needs to be a short, readable identifier rather than
+	// carrying the whole sentence into the branch name.
+	maxPieceNameWords = 5
+	maxPieceNameLen   = 40
 )
 
 var validStatuses = []string{StatusTodo, StatusInProgress, StatusDone}
@@ -199,7 +206,38 @@ func SanitizePieceName(name string) string {
 		return "piece"
 	}
 
-	return resultStr
+	return shortenSlug(resultStr)
+}
+
+// shortenSlug trims a hyphen-separated slug to a short identifier, keeping whole
+// words up to maxPieceNameWords and maxPieceNameLen. At least the first word is
+// always kept (hard-cut if that single word exceeds the length budget).
+func shortenSlug(slug string) string {
+	words := strings.Split(slug, "-")
+
+	var kept []string
+	length := 0
+	for _, w := range words {
+		if len(kept) >= maxPieceNameWords {
+			break
+		}
+		// +1 accounts for the joining hyphen between words.
+		next := length + len(w)
+		if len(kept) > 0 {
+			next++
+		}
+		if len(kept) > 0 && next > maxPieceNameLen {
+			break
+		}
+		kept = append(kept, w)
+		length = next
+	}
+
+	result := strings.Join(kept, "-")
+	if len(result) > maxPieceNameLen {
+		result = strings.TrimRight(result[:maxPieceNameLen], "-")
+	}
+	return result
 }
 
 // ReadConfig reads the monkeypuzzle config from the repository root.

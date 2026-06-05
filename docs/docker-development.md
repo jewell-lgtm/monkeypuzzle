@@ -10,7 +10,7 @@ The Docker development environment provides:
 - **Go 1.24.11** (matching the project's toolchain)
 - **mp CLI** pre-built and available in PATH
 - **git** for version control
-- **tmux** for terminal multiplexing (required by `mp piece`)
+- **tmux** for terminal multiplexing (required by the piece commands)
 - **gh CLI** (GitHub CLI) for PR management
 - **Essential development tools** (vim, nano, curl, wget, etc.)
 
@@ -137,9 +137,9 @@ echo '{"name":"test","issue_provider":"markdown","pr_provider":"github"}' | mp i
    ./mp --help
    ```
 
-### Using mp piece Command
+### Using mp Command
 
-The `mp piece` command requires git and tmux, both available in the container:
+The piece commands (`mp create`, `mp switch`, …) require git and tmux, both available in the container:
 
 ```bash
 # Start container
@@ -152,7 +152,7 @@ docker run -it --rm \
 mp init --name myproject --issue-provider markdown --pr-provider github
 
 # Create a new piece
-mp piece create
+mp create
 
 # This will create a git worktree and tmux session
 ```

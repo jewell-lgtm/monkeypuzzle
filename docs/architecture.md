@@ -9,7 +9,7 @@ monkeypuzzle/
 ├── cmd/mp/              # CLI wiring (Cobra commands)
 │   ├── root.go          # Root command
 │   ├── init.go          # mp init command
-│   └── piece.go         # mp piece subcommands
+│   └── piece.go         # piece commands (create, status, list, merge, …)
 ├── internal/
 │   ├── core/            # Business logic + interfaces
 │   │   ├── ports.go     # Interface definitions

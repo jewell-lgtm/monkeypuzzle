@@ -146,10 +146,10 @@ func TestMapLinearStatus_UnknownState(t *testing.T) {
 // mockFS implements core.FS for testing
 type mockFS struct{}
 
-func (m *mockFS) MkdirAll(path string, perm os.FileMode) error { return nil }
+func (m *mockFS) MkdirAll(path string, perm os.FileMode) error               { return nil }
 func (m *mockFS) WriteFile(name string, data []byte, perm os.FileMode) error { return nil }
-func (m *mockFS) ReadFile(name string) ([]byte, error) { return nil, nil }
-func (m *mockFS) Stat(name string) (os.FileInfo, error) { return nil, os.ErrNotExist }
-func (m *mockFS) Remove(name string) error { return nil }
-func (m *mockFS) Symlink(oldname, newname string) error { return nil }
-func (m *mockFS) ReadDir(name string) ([]os.DirEntry, error) { return nil, nil }
+func (m *mockFS) ReadFile(name string) ([]byte, error)                       { return nil, nil }
+func (m *mockFS) Stat(name string) (os.FileInfo, error)                      { return nil, os.ErrNotExist }
+func (m *mockFS) Remove(name string) error                                   { return nil }
+func (m *mockFS) Symlink(oldname, newname string) error                      { return nil }
+func (m *mockFS) ReadDir(name string) ([]os.DirEntry, error)                 { return nil, nil }

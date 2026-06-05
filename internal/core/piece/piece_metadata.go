@@ -19,6 +19,9 @@ type PieceMetadata struct {
 	Parent string `json:"parent"`
 	// CreatedFromBranch is the git branch the piece was created from
 	CreatedFromBranch string `json:"created_from_branch"`
+	// Prompt is the free-form description a prompt-created piece was made from.
+	// Empty for pieces created from an issue or a bare name.
+	Prompt string `json:"prompt,omitempty"`
 }
 
 // DefaultPieceMetadata returns metadata with default values (parent=main)

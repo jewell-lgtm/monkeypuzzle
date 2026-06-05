@@ -12,7 +12,7 @@ import (
 type Mode int
 
 const (
-	ModeIssue  Mode = iota
+	ModeIssue Mode = iota
 	ModePrompt
 )
 

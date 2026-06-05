@@ -43,7 +43,7 @@ func init() {
 	prCreateCmd.Flags().StringVar(&flagPRBase, "base", "", "Base branch to merge into (default: auto-detect from parent)")
 	prCreateCmd.Flags().BoolVar(&flagPRSchema, "schema", false, "Output JSON schema and exit")
 	prCmd.AddCommand(prCreateCmd)
-	pieceCmd.AddCommand(prCmd)
+	rootCmd.AddCommand(prCmd)
 }
 
 func runPRCreate(cmd *cobra.Command, args []string) error {

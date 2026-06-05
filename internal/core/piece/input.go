@@ -145,43 +145,6 @@ func WithNewPieceDefaults(input NewPieceInput) NewPieceInput {
 	}
 }
 
-// SwitchInput holds input for the piece switch command.
-type SwitchInput struct {
-	Name string `json:"name"`
-}
-
-// SwitchSchema returns the JSON schema for piece switch input.
-func SwitchSchema() ([]byte, error) {
-	schema := map[string]any{
-		"name": "",
-	}
-	return json.MarshalIndent(schema, "", "  ")
-}
-
-// ParseSwitchJSON parses JSON input into SwitchInput.
-func ParseSwitchJSON(data []byte) (SwitchInput, error) {
-	var input SwitchInput
-	if err := json.Unmarshal(data, &input); err != nil {
-		return SwitchInput{}, fmt.Errorf("invalid JSON: %w", err)
-	}
-	return input, nil
-}
-
-// ValidateSwitchInput validates the switch input.
-func ValidateSwitchInput(input SwitchInput) error {
-	if strings.TrimSpace(input.Name) == "" {
-		return fmt.Errorf("name is required")
-	}
-	return nil
-}
-
-// WithSwitchDefaults returns input with whitespace trimmed.
-func WithSwitchDefaults(input SwitchInput) SwitchInput {
-	return SwitchInput{
-		Name: strings.TrimSpace(input.Name),
-	}
-}
-
 // AbandonInput holds input for the piece abandon command.
 type AbandonInput struct {
 	Name         string `json:"name"`

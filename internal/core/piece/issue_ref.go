@@ -3,10 +3,10 @@ package piece
 // IssueRef is a provider-agnostic issue reference.
 // Stored in piece markers to track which issue a piece is working on.
 type IssueRef struct {
-	Provider string `json:"provider"`          // "markdown", "linear", etc.
-	ID       string `json:"id"`                // Provider-specific ID
-	Number   string `json:"number,omitempty"`  // Human-readable (e.g., "ABC-123")
-	Title    string `json:"title"`             // Cached display title
+	Provider string `json:"provider"`         // "markdown", "linear", etc.
+	ID       string `json:"id"`               // Provider-specific ID
+	Number   string `json:"number,omitempty"` // Human-readable (e.g., "ABC-123")
+	Title    string `json:"title"`            // Cached display title
 }
 
 // IsEmpty returns true if this ref has no data

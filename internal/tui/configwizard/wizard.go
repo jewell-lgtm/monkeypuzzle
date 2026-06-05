@@ -23,7 +23,7 @@ type Choice struct {
 var Choices = []Choice{
 	{Value: "tmux", Label: "tmux", Description: "Manage piece sessions with tmux"},
 	{Value: "zellij", Label: "zellij", Description: "Manage piece sessions with zellij"},
-	{Value: "none", Label: "none", Description: "No session management — print paths for `cd $(mp piece switch ...)`"},
+	{Value: "none", Label: "none", Description: "No session management — print paths for `cd $(mp switch ...)`"},
 }
 
 // Model is the Bubble Tea model for the wizard.

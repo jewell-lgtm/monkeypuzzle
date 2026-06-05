@@ -50,13 +50,12 @@ mp completion powershell | Out-String | Invoke-Expression
 
 | Flag                            | Completes To            |
 | ------------------------------- | ----------------------- |
-| `mp piece switch --name`        | Available piece names   |
-| `mp piece abandon --name`       | Available piece names   |
-| `mp piece create --issue`          | Files (for issue paths) |
+| `mp abandon --name`       | Available piece names   |
+| `mp create --issue`          | Files (for issue paths) |
 | `mp init --issue-provider`      | `markdown`, `linear`, `plane` |
 | `mp init --pr-provider`         | `github`                |
-| `mp piece update --main-branch` | Git branch names        |
-| `mp piece merge --main-branch`  | Git branch names        |
+| `mp update --main-branch` | Git branch names        |
+| `mp merge --main-branch`  | Git branch names        |
 
 ---
 
@@ -227,8 +226,8 @@ mp switch --schema
 With a terminal, opens a fuzzy-filtered list of rows across every registered project:
 
 - **Pieces** — existing worktrees, with a `[tmux]` indicator if a session is live.
-- **Issues** — open `todo` issues that don't yet have a piece. Selecting one runs `mp piece create --issue`.
-- **Branches** — local git branches not currently checked out anywhere (excludes main/master and any branch already adopted as a piece). Selecting one runs `mp piece adopt`.
+- **Issues** — open `todo` issues that don't yet have a piece. Selecting one runs `mp create --issue`.
+- **Branches** — local git branches not currently checked out anywhere (excludes main/master and any branch already adopted as a piece). Selecting one runs `mp adopt`.
 
 Type to filter, ↑/↓ to move, `enter` to select, `esc` to cancel. The picker caps the visible rows at 20; narrow the query to surface anything below the cut.
 
@@ -286,7 +285,7 @@ list of `pieces` that were moved/repaired. Human-readable summary to stderr.
 Remove **all** piece worktrees for the current repository, returning it to a flat
 main-only state. Each piece's tmux session is killed and its worktree removed.
 
-Unlike `mp piece cleanup` (which only removes _merged_ pieces), flatten removes every
+Unlike `mp cleanup` (which only removes _merged_ pieces), flatten removes every
 piece regardless of merge status. Branches are kept by default.
 
 ### Usage
@@ -337,26 +336,14 @@ Pieces that could not be removed (e.g. uncommitted changes without `--force`) ap
 
 ---
 
-## mp piece
-
-With no subcommand, lists the project's pieces as a tree and prints the
-available subcommands — a discoverable overview for getting your bearings.
-
-### Usage
-
-```bash
-mp piece          # list pieces + show subcommands
-mp piece status   # current-piece status as JSON (see below)
-```
-
-## mp piece status
+## mp status
 
 Show current piece status.
 
 ### Usage
 
 ```bash
-mp piece status
+mp status
 ```
 
 ### Output
@@ -376,19 +363,19 @@ Human-readable message to stderr.
 
 ---
 
-## mp piece create
+## mp create
 
 Create a new piece (git worktree + tmux session).
 
 ### Usage
 
 ```bash
-mp piece create
-mp piece create --name my-feature
-mp piece create --issue issues/my-feature.md
-mp piece create --prompt "add dark mode"        # name auto-generated from the prompt
-mp piece create --parent parent-piece           # stack on another piece
-mp piece create --skip-switch  # Don't auto-switch to new piece
+mp create
+mp create --name my-feature
+mp create --issue issues/my-feature.md
+mp create --prompt "add dark mode"        # name auto-generated from the prompt
+mp create --parent parent-piece           # stack on another piece
+mp create --skip-switch  # Don't auto-switch to new piece
 ```
 
 ### Flags
@@ -445,16 +432,16 @@ The `{repo-hash}` is a unique identifier derived from the repository's absolute 
 
 ---
 
-## mp piece list
+## mp list
 
 List pieces for the current repo as a tree (parent → child) or a flat list.
 
 ### Usage
 
 ```bash
-mp piece list           # tree view (human readable)
-mp piece list --flat    # flat list (JSON-friendly)
-mp piece list --all     # across all registered projects
+mp list           # tree view (human readable)
+mp list --flat    # flat list (JSON-friendly)
+mp list --all     # across all registered projects
 ```
 
 ### Flags
@@ -475,15 +462,15 @@ mp piece list --all     # across all registered projects
 
 ---
 
-## mp piece update
+## mp update
 
 Merge main branch into current piece.
 
 ### Usage
 
 ```bash
-mp piece update                  # Merge from 'main'
-mp piece update --main-branch develop  # Merge from 'develop'
+mp update                  # Merge from 'main'
+mp update --main-branch develop  # Merge from 'develop'
 ```
 
 ### Flags
@@ -508,15 +495,15 @@ If any hook fails, the operation is aborted.
 
 ---
 
-## mp piece merge
+## mp merge
 
 Merge piece back to main branch.
 
 ### Usage
 
 ```bash
-mp piece merge                   # Merge to 'main'
-mp piece merge --main-branch develop  # Merge to 'develop'
+mp merge                   # Merge to 'main'
+mp merge --main-branch develop  # Merge to 'develop'
 ```
 
 ### Flags
@@ -548,76 +535,20 @@ If any hook fails, the operation is aborted.
 
 ### Safety check
 
-If main has commits not in the piece, merge fails. Run `mp piece update` first to incorporate those changes.
+If main has commits not in the piece, merge fails. Run `mp update` first to incorporate those changes.
 
 ---
 
-## mp piece switch
-
-Switch to an existing piece.
-
-### Usage
-
-```bash
-mp piece switch                    # Interactive TUI selector
-mp piece switch --name my-feature  # Switch by name
-echo '{"name":"my-feature"}' | mp piece switch  # JSON stdin
-cd $(mp piece switch --name foo)   # Change directory to piece
-```
-
-### Flags
-
-| Flag     | Description             | Default |
-| -------- | ----------------------- | ------- |
-| `--name` | Piece name to switch to | -       |
-
-### What it does
-
-1. Lists available pieces (sorted by modification time, newest first)
-2. Shows TUI selector if no name provided
-3. Checks if tmux session exists for the piece
-4. If in tmux: uses `switch-client` to swap sessions
-5. If outside tmux: uses `attach-session` to attach
-6. Falls back to printing path if tmux unavailable
-
-### Output
-
-When switching via tmux, outputs JSON:
-
-```json
-{
-  "piece": {
-    "name": "my-feature",
-    "worktree_path": "/home/user/.local/share/monkeypuzzle/pieces/abc123def456/my-feature",
-    "session_name": "mp-piece-my-feature",
-    "has_session": true
-  },
-  "method": "tmux-switch"
-}
-```
-
-When printing path (no tmux), outputs just the path to stdout for use with `cd $(...)`.
-
-### TUI Selector
-
-Interactive mode shows:
-
-- Piece names sorted by modification time (newest first)
-- `[tmux]` indicator for pieces with active sessions
-- Navigation: up/down or j/k, enter to select, esc to cancel
-
----
-
-## mp piece cleanup
+## mp cleanup
 
 Remove worktrees for merged pieces.
 
 ### Usage
 
 ```bash
-mp piece cleanup              # Cleanup merged pieces
-mp piece cleanup --dry-run    # Preview what would be cleaned
-mp piece cleanup --force      # Skip confirmation
+mp cleanup              # Cleanup merged pieces
+mp cleanup --dry-run    # Preview what would be cleaned
+mp cleanup --force      # Skip confirmation
 ```
 
 ### Flags
@@ -637,17 +568,17 @@ mp piece cleanup --force      # Skip confirmation
 
 ---
 
-## mp piece abandon
+## mp abandon
 
 Remove an unmerged piece (worktree, tmux session, optionally branch).
 
 ### Usage
 
 ```bash
-mp piece abandon                              # Interactive TUI selector
-mp piece abandon --name my-feature            # By name
-mp piece abandon --name my-feature --force    # Discard uncommitted changes
-mp piece abandon --name foo --delete-branch   # Also delete git branch
+mp abandon                              # Interactive TUI selector
+mp abandon --name my-feature            # By name
+mp abandon --name my-feature --force    # Discard uncommitted changes
+mp abandon --name foo --delete-branch   # Also delete git branch
 ```
 
 ### Flags
@@ -678,18 +609,18 @@ mp piece abandon --name foo --delete-branch   # Also delete git branch
 
 ---
 
-## mp piece pr create
+## mp pr create
 
 Create a GitHub pull request for the current piece. Pushes the branch to origin and creates the PR via the `gh` CLI. Run from within a piece worktree.
 
 ### Usage
 
 ```bash
-mp piece pr create                                  # title/body from issue or piece name
-mp piece pr create --title "Add login" --body "..."
-mp piece pr create --base develop                   # override the base branch
-echo '{"title":"Add login","body":"..."}' | mp piece pr create
-mp piece pr create --schema
+mp pr create                                  # title/body from issue or piece name
+mp pr create --title "Add login" --body "..."
+mp pr create --base develop                   # override the base branch
+echo '{"title":"Add login","body":"..."}' | mp pr create
+mp pr create --schema
 ```
 
 ### Flags
@@ -710,15 +641,15 @@ For a stacked piece, the base auto-detects to the parent piece's branch so the P
 
 ---
 
-## mp piece done
+## mp done
 
-Clean up the current piece (worktree + tmux session) after its branch has been merged. Run from within a piece worktree. Verifies the piece is merged first — use [`mp piece abandon`](#mp-piece-abandon) for unmerged pieces.
+Clean up the current piece (worktree + tmux session) after its branch has been merged. Run from within a piece worktree. Verifies the piece is merged first — use [`mp abandon`](#mp-piece-abandon) for unmerged pieces.
 
 ### Usage
 
 ```bash
-mp piece done
-mp piece done --main-branch develop
+mp done
+mp done --main-branch develop
 ```
 
 ### Flags
@@ -729,18 +660,18 @@ mp piece done --main-branch develop
 
 ---
 
-## mp piece adopt
+## mp adopt
 
 Convert an existing git branch into a piece worktree. Accepts a local branch name or a remote ref like `origin/foo` (remote refs are fetched and a tracking branch is created). Run from the main repo with no branch to adopt the current branch; from inside a piece worktree `--branch` is required.
 
 ### Usage
 
 ```bash
-mp piece adopt                       # adopt the current branch (from main repo)
-mp piece adopt my-spike              # adopt a local branch
-mp piece adopt --branch origin/foo   # fetch + adopt a remote branch
-mp piece adopt my-spike --parent feature-a   # adopt as a child of another piece
-echo '{}' | mp piece adopt
+mp adopt                       # adopt the current branch (from main repo)
+mp adopt my-spike              # adopt a local branch
+mp adopt --branch origin/foo   # fetch + adopt a remote branch
+mp adopt my-spike --parent feature-a   # adopt as a child of another piece
+echo '{}' | mp adopt
 ```
 
 ### Flags
@@ -812,7 +743,7 @@ mp stack prepend --name base-feat
 | Flag       | Description                          | Default        |
 | ---------- | ------------------------------------ | -------------- |
 | `--name`   | Piece name                           | Auto-generated |
-| `--prompt` | Piece prompt (written to `piece.md`) | -              |
+| `--prompt` | Piece prompt (recorded in piece metadata; used to name the piece) | -              |
 
 ---
 
@@ -885,9 +816,9 @@ Hooks are executable shell scripts in `.monkeypuzzle/hooks/` that run at key poi
 | Hook                     | Trigger                  |
 | ------------------------ | ------------------------ |
 | `on-piece-create.sh`     | After piece creation     |
-| `before-piece-update.sh` | Before `mp piece update` |
+| `before-piece-update.sh` | Before `mp update` |
 | `after-piece-update.sh`  | After successful update  |
-| `before-piece-merge.sh`  | Before `mp piece merge`  |
+| `before-piece-merge.sh`  | Before `mp merge`  |
 | `after-piece-merge.sh`   | After successful merge   |
 
 ### Environment Variables
@@ -931,11 +862,11 @@ Monkeypuzzle is designed for programmatic use:
 mp init --schema | jq '.name = "myproject"' | mp init
 
 # Check status programmatically
-STATUS=$(mp piece status)
+STATUS=$(mp status)
 IN_PIECE=$(echo "$STATUS" | jq -r '.in_piece')
 
 # Parse piece creation output
-OUTPUT=$(mp piece create)
+OUTPUT=$(mp create)
 WORKTREE=$(echo "$OUTPUT" | jq -r '.worktree_path')
 ```
 

@@ -33,10 +33,10 @@ mp switch
 # ... do the work in the attached tmux session ...
 
 # 5. Open a PR for the piece (run from inside the worktree)
-mp piece pr create
+mp pr create
 
 # 6. After it's merged, sweep up the worktree and tmux session
-mp piece done
+mp done
 ```
 
 To jump between pieces, or to pick up a stray branch you left behind, just run `mp switch` again — pieces, open todo issues, and unadopted local branches all show in one fuzzy-filtered list.

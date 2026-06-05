@@ -27,17 +27,6 @@ import (
 	"github.com/jewell-lgtm/monkeypuzzle/pkg/cli"
 )
 
-var pieceCmd = &cobra.Command{
-	Use:   "piece",
-	Short: "Manage puzzle pieces",
-	Long: `Manage puzzle pieces (git worktrees).
-
-With no subcommand, lists the project's pieces and the available subcommands.
-Use 'mp piece status' for the current piece's status as JSON.`,
-	Args: cobra.NoArgs,
-	RunE: runPieceDefault,
-}
-
 var pieceStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show current piece status",
@@ -75,15 +64,6 @@ var pieceCleanupCmd = &cobra.Command{
 	RunE:  runPieceCleanup,
 }
 
-var pieceSwitchCmd = &cobra.Command{
-	Use:   "switch [name]",
-	Short: "Switch to an existing piece",
-	Long: `Switch to an existing piece worktree.
-Tries to attach to the tmux session first, falls back to printing the path.
-Use with: cd $(mp piece switch --name foo)`,
-	RunE: runPieceSwitch,
-}
-
 var pieceAbandonCmd = &cobra.Command{
 	Use:   "abandon",
 	Short: "Abandon an unmerged piece",
@@ -99,7 +79,7 @@ var pieceDoneCmd = &cobra.Command{
 	Short: "Cleanup current piece after merge",
 	Long: `Remove the current piece worktree and tmux session after the branch has been merged.
 Must be run from within a piece worktree. Verifies the piece is merged before cleanup.
-Use 'mp piece abandon' for unmerged pieces.`,
+Use 'mp abandon' for unmerged pieces.`,
 	RunE: runPieceDone,
 }
 
@@ -122,7 +102,6 @@ var pieceListCmd = &cobra.Command{
 }
 
 var flagMainBranch string
-var flagSwitchName string
 var flagPieceName string
 var flagIssuePath string
 var flagParent string
@@ -138,7 +117,6 @@ var flagPieceMergeSchema bool
 var flagPieceMergeReparent bool
 var flagPieceMergeReparentStrategy string
 var flagPieceCleanupSchema bool
-var flagPieceSwitchSchema bool
 var flagPieceAbandonSchema bool
 var flagPieceDoneSchema bool
 var flagPieceAdoptBranch string
@@ -168,8 +146,6 @@ func init() {
 	pieceCleanupCmd.Flags().BoolVar(&flagDryRun, "dry-run", false, "Show what would be cleaned without making changes")
 	pieceCleanupCmd.Flags().BoolVar(&flagForce, "force", false, "Skip confirmation prompts")
 	pieceCleanupCmd.Flags().BoolVar(&flagPieceCleanupSchema, "schema", false, "Output JSON schema and exit")
-	pieceSwitchCmd.Flags().StringVar(&flagSwitchName, "name", "", "Piece name to switch to")
-	pieceSwitchCmd.Flags().BoolVar(&flagPieceSwitchSchema, "schema", false, "Output JSON schema and exit")
 	pieceAbandonCmd.Flags().StringVar(&flagAbandonName, "name", "", "Piece name to abandon (optional if in piece)")
 	pieceAbandonCmd.Flags().BoolVar(&flagForce, "force", false, "Force removal even with uncommitted changes")
 	pieceAbandonCmd.Flags().BoolVar(&flagDeleteBranch, "delete-branch", false, "Also delete the git branch")
@@ -183,20 +159,17 @@ func init() {
 	pieceStatusCmd.Flags().StringVar(&flagMainBranch, "main-branch", "main", "Main branch name (default: main)")
 	pieceListCmd.Flags().BoolVar(&flagPieceListFlat, "flat", false, "Display pieces in a flat list instead of tree view")
 	pieceListCmd.Flags().BoolVar(&flagPieceListAll, "all", false, "List pieces across all registered projects")
-	pieceCmd.AddCommand(pieceStatusCmd)
-	pieceCmd.AddCommand(pieceCreateCmd)
-	pieceCmd.AddCommand(pieceUpdateCmd)
-	pieceCmd.AddCommand(pieceMergeCmd)
-	pieceCmd.AddCommand(pieceCleanupCmd)
-	pieceCmd.AddCommand(pieceSwitchCmd)
-	pieceCmd.AddCommand(pieceAbandonCmd)
-	pieceCmd.AddCommand(pieceDoneCmd)
-	pieceCmd.AddCommand(pieceAdoptCmd)
-	pieceCmd.AddCommand(pieceListCmd)
-	rootCmd.AddCommand(pieceCmd)
+	rootCmd.AddCommand(pieceStatusCmd)
+	rootCmd.AddCommand(pieceCreateCmd)
+	rootCmd.AddCommand(pieceUpdateCmd)
+	rootCmd.AddCommand(pieceMergeCmd)
+	rootCmd.AddCommand(pieceCleanupCmd)
+	rootCmd.AddCommand(pieceAbandonCmd)
+	rootCmd.AddCommand(pieceDoneCmd)
+	rootCmd.AddCommand(pieceAdoptCmd)
+	rootCmd.AddCommand(pieceListCmd)
 
 	// Register completion functions (errors ignored - completion is optional)
-	_ = pieceSwitchCmd.RegisterFlagCompletionFunc("name", completePieceNames)
 	_ = pieceAbandonCmd.RegisterFlagCompletionFunc("name", completePieceNames)
 	_ = pieceCreateCmd.RegisterFlagCompletionFunc("issue", completeIssueFiles)
 	_ = pieceUpdateCmd.RegisterFlagCompletionFunc("main-branch", completeGitBranches)
@@ -277,35 +250,6 @@ func completeGitBranches(cmd *cobra.Command, args []string, toComplete string) (
 	return filtered, cobra.ShellCompDirectiveNoFileComp
 }
 
-// runPieceDefault handles bare `mp piece`: a quick, discoverable overview that
-// lists the project's pieces as a tree and points to the subcommands. The
-// machine-readable current-piece status lives at `mp piece status`.
-func runPieceDefault(cmd *cobra.Command, args []string) error {
-	ctx := cmd.Context()
-	deps := core.NewDeps(
-		adapters.NewOSFS(""),
-		adapters.NewTextOutput(os.Stderr),
-		adapters.NewOSExec(),
-		http.DefaultClient,
-		adapters.SetupCLILoading(os.Stderr),
-	)
-	handler := newPieceHandler(deps)
-
-	pieces, err := handler.ListPieces(ctx, "")
-	if err != nil {
-		return err
-	}
-	if len(pieces) == 0 {
-		fmt.Fprintln(os.Stderr, "No pieces yet. Create one with `mp piece create`.")
-	} else {
-		renderTree(piececmd.BuildPieceTree(pieces))
-	}
-
-	fmt.Fprintln(os.Stderr, "\nSubcommands: status, create, list, switch, adopt, update, merge, done, abandon, cleanup")
-	fmt.Fprintln(os.Stderr, "Run `mp piece <command> --help` for details, or `mp piece status` for current-piece JSON.")
-	return nil
-}
-
 func runPieceStatus(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	wd, err := os.Getwd()
@@ -364,10 +308,10 @@ func runPieceStatus(cmd *cobra.Command, args []string) error {
 			fmt.Fprintf(os.Stderr, "\n⚠ Cannot merge: has unmerged children\n")
 		}
 
-		// Display piece.md information if available
-		pieceMd, pmdErr := piececmd.ReadPieceMd(status.WorktreePath, deps.FS)
-		if pmdErr == nil && pieceMd != nil {
-			fmt.Fprintf(os.Stderr, "\nPrompt: %s\n", pieceMd.Body)
+		// Display the prompt the piece was created from, if any.
+		meta, metaErr := piececmd.ReadPieceMetadata(status.WorktreePath, deps.FS)
+		if metaErr == nil && meta != nil && meta.Prompt != "" {
+			fmt.Fprintf(os.Stderr, "\nPrompt: %s\n", meta.Prompt)
 		}
 
 		// Display issue information if available
@@ -1223,7 +1167,7 @@ func runPieceList(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// projectPieces is the per-project entry in `mp piece list --all` JSON output.
+// projectPieces is the per-project entry in `mp list --all` JSON output.
 type projectPieces struct {
 	Name   string                   `json:"name"`
 	Path   string                   `json:"path"`
@@ -1362,125 +1306,4 @@ func newIssueSyncSubscriber(workDir string, deps core.Deps, output io.Writer) fu
 
 		_, _ = fmt.Fprintf(output, "✓ Synced %s → %s\n", event.IssueID, event.NewStatus)
 	}
-}
-
-func runPieceSwitch(cmd *cobra.Command, args []string) error {
-	// --schema mode
-	if flagPieceSwitchSchema {
-		schema, err := piececmd.SwitchSchema()
-		if err != nil {
-			return err
-		}
-		fmt.Println(string(schema))
-		return nil
-	}
-
-	// Positional arg takes precedence over --name flag
-	if len(args) > 0 && flagSwitchName == "" {
-		flagSwitchName = args[0]
-	}
-
-	ctx := cmd.Context()
-	deps := core.NewDeps(
-		adapters.NewOSFS(""),
-		adapters.NewTextOutput(os.Stderr),
-		adapters.NewOSExec(),
-		http.DefaultClient,
-		adapters.SetupCLILoading(os.Stderr),
-	)
-	handler := newPieceHandler(deps)
-
-	// Get validated input
-	input, err := getSwitchInput(ctx, handler)
-	if err != nil {
-		if err.Error() == "cancelled" || err.Error() == "no pieces" {
-			return nil
-		}
-		return err
-	}
-
-	result, err := handler.SwitchPiece(ctx, input.Name)
-	if err != nil {
-		return err
-	}
-
-	// Always output JSON to stdout
-	jsonData, err := json.MarshalIndent(result, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to marshal result: %w", err)
-	}
-	fmt.Println(string(jsonData))
-
-	return nil
-}
-
-func getSwitchInput(ctx context.Context, handler *piececmd.Handler) (piececmd.SwitchInput, error) {
-	var input piececmd.SwitchInput
-	var err error
-
-	if flagSwitchName != "" {
-		input = piececmd.SwitchInput{Name: flagSwitchName}
-	} else if cli.HasStdinData() {
-		data, err := io.ReadAll(os.Stdin)
-		if err != nil {
-			return piececmd.SwitchInput{}, fmt.Errorf("failed to read stdin: %w", err)
-		}
-		input, err = piececmd.ParseSwitchJSON(data)
-		if err != nil {
-			return piececmd.SwitchInput{}, err
-		}
-	} else if cli.IsTerminal() {
-		input, err = runSwitchTUI(ctx, handler)
-		if err != nil {
-			return piececmd.SwitchInput{}, err
-		}
-	} else {
-		return piececmd.SwitchInput{}, fmt.Errorf("no input provided; use --name flag or run interactively")
-	}
-
-	input = piececmd.WithSwitchDefaults(input)
-	if err := piececmd.ValidateSwitchInput(input); err != nil {
-		return piececmd.SwitchInput{}, err
-	}
-
-	return input, nil
-}
-
-func runSwitchTUI(ctx context.Context, handler *piececmd.Handler) (piececmd.SwitchInput, error) {
-	// Get repo root from current directory (use GetMainRepoRoot for worktree support)
-	repoRoot := ""
-	wd, err := os.Getwd()
-	if err == nil {
-		git := adapters.NewGit(adapters.NewOSExec())
-		detectedRoot, err := git.GetMainRepoRoot(ctx, wd)
-		if err != nil {
-			detectedRoot, err = git.RepoRoot(ctx, wd)
-		}
-		if err == nil {
-			repoRoot = detectedRoot
-		}
-	}
-
-	pieces, err := handler.ListPieces(ctx, repoRoot)
-	if err != nil {
-		return piececmd.SwitchInput{}, err
-	}
-
-	if len(pieces) == 0 {
-		fmt.Fprintln(os.Stderr, "No pieces found. Use 'mp piece create' to create one.")
-		return piececmd.SwitchInput{}, fmt.Errorf("no pieces")
-	}
-
-	p := tea.NewProgram(pieceswitch.New(pieces))
-	m, err := p.Run()
-	if err != nil {
-		return piececmd.SwitchInput{}, fmt.Errorf("TUI error: %w", err)
-	}
-
-	finalModel := m.(pieceswitch.Model)
-	if finalModel.Cancelled {
-		return piececmd.SwitchInput{}, fmt.Errorf("cancelled")
-	}
-
-	return piececmd.SwitchInput{Name: pieces[finalModel.Selected].Name}, nil
 }

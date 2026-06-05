@@ -57,9 +57,9 @@ var stackContinueCmd = &cobra.Command{
 }
 
 var (
-	flagStackMain       string
-	flagStackFromGitHub bool
-	flagStackApplyBases bool
+	flagStackMain         string
+	flagStackFromGitHub   bool
+	flagStackApplyBases   bool
 	flagStackStatusSchema bool
 
 	flagStackStrategy   string
@@ -67,8 +67,8 @@ var (
 	flagStackStackScope bool
 	flagStackSyncSchema bool
 
-	flagStackName     string
-	flagStackPrompt   string
+	flagStackName          string
+	flagStackPrompt        string
 	flagStackAppendSchema  bool
 	flagStackPrependSchema bool
 
@@ -88,11 +88,11 @@ func init() {
 	stackSyncCmd.Flags().BoolVar(&flagStackSyncSchema, "schema", false, "Output JSON schema and exit")
 
 	stackAppendCmd.Flags().StringVar(&flagStackName, "name", "", "Piece name")
-	stackAppendCmd.Flags().StringVar(&flagStackPrompt, "prompt", "", "Piece prompt (written to piece.md)")
+	stackAppendCmd.Flags().StringVar(&flagStackPrompt, "prompt", "", "Piece prompt (recorded in piece metadata; used to name the piece)")
 	stackAppendCmd.Flags().BoolVar(&flagStackAppendSchema, "schema", false, "Output JSON schema and exit")
 
 	stackPrependCmd.Flags().StringVar(&flagStackName, "name", "", "Piece name")
-	stackPrependCmd.Flags().StringVar(&flagStackPrompt, "prompt", "", "Piece prompt (written to piece.md)")
+	stackPrependCmd.Flags().StringVar(&flagStackPrompt, "prompt", "", "Piece prompt (recorded in piece metadata; used to name the piece)")
 	stackPrependCmd.Flags().BoolVar(&flagStackPrependSchema, "schema", false, "Output JSON schema and exit")
 
 	stackContinueCmd.Flags().BoolVar(&flagStackContinueSchema, "schema", false, "Output JSON schema and exit")
