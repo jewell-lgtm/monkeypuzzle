@@ -45,3 +45,6 @@ Thumbs.db
 # Debug
 __debug_bin*
 /mp-mcp
+
+# Claude Code agent worktrees
+.claude/worktrees/
