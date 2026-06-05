@@ -2,8 +2,13 @@ package adapters
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
+
+const submoduleRemoveErr = "fatal: working trees containing submodules cannot be moved or removed"
 
 func TestGit_WorktreeAdd(t *testing.T) {
 	tests := []struct {
@@ -321,5 +326,102 @@ func TestGit_BranchExistsOnRemote(t *testing.T) {
 				t.Errorf("BranchExistsOnRemote() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+// makeWorktreeDir creates a real on-disk directory to stand in for a worktree
+// so os.RemoveAll has something concrete to delete in the fallback tests.
+func makeWorktreeDir(t *testing.T) string {
+	t.Helper()
+	dir := filepath.Join(t.TempDir(), "wt")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("setup worktree dir: %v", err)
+	}
+	return dir
+}
+
+func TestGit_WorktreeRemove_SubmoduleFallback(t *testing.T) {
+	tests := []struct {
+		name        string
+		statusOut   []byte // git status --porcelain output (empty = clean)
+		wantErr     bool
+		wantRemoved bool // directory deleted via fallback
+		wantPrune   bool // git worktree prune invoked
+	}{
+		{
+			name:        "clean tree falls back to manual removal",
+			statusOut:   []byte(""),
+			wantErr:     false,
+			wantRemoved: true,
+			wantPrune:   true,
+		},
+		{
+			name:        "dirty tree refuses removal",
+			statusOut:   []byte(" M file.go"),
+			wantErr:     true,
+			wantRemoved: false,
+			wantPrune:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			worktreePath := makeWorktreeDir(t)
+			exec := NewMockExec()
+			exec.AddResponse("git", []string{"worktree", "remove", worktreePath},
+				[]byte(submoduleRemoveErr), MockError("exit status 128"))
+			exec.AddResponse("git", []string{"status", "--porcelain"}, tt.statusOut, nil)
+			exec.AddResponse("git", []string{"worktree", "prune"}, []byte(""), nil)
+
+			git := NewGit(exec)
+			err := git.WorktreeRemove(context.Background(), "/repo", worktreePath)
+
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("WorktreeRemove() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			_, statErr := os.Stat(worktreePath)
+			removed := os.IsNotExist(statErr)
+			if removed != tt.wantRemoved {
+				t.Errorf("worktree removed = %v, want %v", removed, tt.wantRemoved)
+			}
+			if pruned := exec.WasCalled("git", "worktree", "prune"); pruned != tt.wantPrune {
+				t.Errorf("prune called = %v, want %v", pruned, tt.wantPrune)
+			}
+		})
+	}
+}
+
+func TestGit_WorktreeRemoveForce_SubmoduleFallback(t *testing.T) {
+	worktreePath := makeWorktreeDir(t)
+	exec := NewMockExec()
+	exec.AddResponse("git", []string{"worktree", "remove", "--force", worktreePath},
+		[]byte(submoduleRemoveErr), MockError("exit status 128"))
+	exec.AddResponse("git", []string{"worktree", "prune"}, []byte(""), nil)
+
+	git := NewGit(exec)
+	if err := git.WorktreeRemoveForce(context.Background(), "/repo", worktreePath); err != nil {
+		t.Fatalf("WorktreeRemoveForce() unexpected error = %v", err)
+	}
+	if _, err := os.Stat(worktreePath); !os.IsNotExist(err) {
+		t.Errorf("expected worktree dir to be removed, stat err = %v", err)
+	}
+	if !exec.WasCalled("git", "worktree", "prune") {
+		t.Error("expected git worktree prune to be called")
+	}
+}
+
+func TestGit_WorktreeRemove_SurfacesGitDetail(t *testing.T) {
+	worktreePath := makeWorktreeDir(t)
+	exec := NewMockExec()
+	exec.AddResponse("git", []string{"worktree", "remove", worktreePath},
+		[]byte("fatal: some other git failure"), MockError("exit status 1"))
+
+	git := NewGit(exec)
+	err := git.WorktreeRemove(context.Background(), "/repo", worktreePath)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "some other git failure") {
+		t.Errorf("error should surface git output, got: %v", err)
 	}
 }

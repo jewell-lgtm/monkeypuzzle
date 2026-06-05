@@ -3,6 +3,7 @@ package adapters
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -160,20 +161,69 @@ func (g *Git) CheckedOutBranches(ctx context.Context, workDir string) (map[strin
 
 // WorktreeRemove removes a git worktree
 func (g *Git) WorktreeRemove(ctx context.Context, repoRoot, worktreePath string) error {
-	_, err := g.exec.RunWithDir(ctx, repoRoot, "git", "worktree", "remove", worktreePath)
-	if err != nil {
-		return fmt.Errorf("failed to remove worktree at %s from repo %s: %w", worktreePath, repoRoot, err)
+	output, err := g.exec.RunWithDir(ctx, repoRoot, "git", "worktree", "remove", worktreePath)
+	if err == nil {
+		return nil
 	}
-	return nil
+	// git refuses to remove worktrees containing submodules even when the tree
+	// is clean. Fall back to manual removal, but preserve non-force semantics by
+	// only doing so when there are no uncommitted changes.
+	if isSubmoduleWorktreeError(output) {
+		if clean, cerr := g.IsClean(ctx, worktreePath); cerr == nil && clean {
+			return g.removeWorktreeManually(ctx, repoRoot, worktreePath)
+		}
+	}
+	return fmt.Errorf("failed to remove worktree at %s from repo %s: %s: %w", worktreePath, repoRoot, gitErrDetail(output), err)
 }
 
 // WorktreeRemoveForce removes a git worktree, discarding uncommitted changes
 func (g *Git) WorktreeRemoveForce(ctx context.Context, repoRoot, worktreePath string) error {
-	_, err := g.exec.RunWithDir(ctx, repoRoot, "git", "worktree", "remove", "--force", worktreePath)
+	output, err := g.exec.RunWithDir(ctx, repoRoot, "git", "worktree", "remove", "--force", worktreePath)
+	if err == nil {
+		return nil
+	}
+	// git refuses to remove worktrees containing submodules regardless of
+	// --force; fall back to manual removal since force means discard changes.
+	if isSubmoduleWorktreeError(output) {
+		return g.removeWorktreeManually(ctx, repoRoot, worktreePath)
+	}
+	return fmt.Errorf("failed to force remove worktree at %s from repo %s: %s: %w", worktreePath, repoRoot, gitErrDetail(output), err)
+}
+
+// WorktreePrune removes worktree administrative records whose directories no
+// longer exist on disk.
+func (g *Git) WorktreePrune(ctx context.Context, repoRoot string) error {
+	output, err := g.exec.RunWithDir(ctx, repoRoot, "git", "worktree", "prune")
 	if err != nil {
-		return fmt.Errorf("failed to force remove worktree at %s from repo %s: %w", worktreePath, repoRoot, err)
+		return fmt.Errorf("failed to prune worktrees in %s: %s: %w", repoRoot, gitErrDetail(output), err)
 	}
 	return nil
+}
+
+// removeWorktreeManually deletes the worktree directory directly and prunes the
+// stale admin record. Used when `git worktree remove` refuses (e.g. the tree
+// contains submodules).
+func (g *Git) removeWorktreeManually(ctx context.Context, repoRoot, worktreePath string) error {
+	if err := os.RemoveAll(worktreePath); err != nil {
+		return fmt.Errorf("failed to remove worktree directory %s: %w", worktreePath, err)
+	}
+	return g.WorktreePrune(ctx, repoRoot)
+}
+
+// isSubmoduleWorktreeError reports whether git refused a worktree operation
+// because the worktree contains submodules.
+func isSubmoduleWorktreeError(output []byte) bool {
+	return strings.Contains(string(output), "working trees containing submodules cannot be moved or removed")
+}
+
+// gitErrDetail trims git's stderr/stdout for inclusion in a wrapped error,
+// falling back to a placeholder when git produced no output.
+func gitErrDetail(output []byte) string {
+	detail := strings.TrimSpace(string(output))
+	if detail == "" {
+		return "no output"
+	}
+	return detail
 }
 
 // BranchDelete deletes a local git branch
