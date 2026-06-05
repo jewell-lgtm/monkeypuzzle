@@ -964,3 +964,106 @@ func TestCLI_ConfigSet_InvalidValue(t *testing.T) {
 		t.Error("expected error for invalid multiplexer value, got nil")
 	}
 }
+
+// initLinearProject writes a config whose import source is linear (with creds),
+// proving the local store still works under a tracker config.
+func (e *testEnv) initLinearProject(name string) {
+	e.t.Helper()
+	input := `{"name":"` + name + `","issue_provider":"linear","issue_config":{"team":"ENG","api_key":"k"},"pr_provider":"github"}`
+	stdout, stderr, err := e.runWithStdin(input, "init")
+	if err != nil {
+		e.t.Fatalf("init (linear) failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+}
+
+// TestCLI_IssueCreate_LinearConfig_WritesLocalMarkdown is AC1: with a config
+// whose issue_provider is linear, issue create still writes a local markdown
+// file under issues/.
+func TestCLI_IssueCreate_LinearConfig_WritesLocalMarkdown(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	env.initLinearProject("test")
+
+	stdout, stderr, err := env.runWithStdin(`{"title":"Local Under Linear"}`, "issue", "create")
+	if err != nil {
+		t.Fatalf("issue create failed: %v\nstderr: %s", err, stderr)
+	}
+
+	var result map[string]any
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("invalid JSON output: %v\noutput: %s", err, stdout)
+	}
+	path, ok := result["path"].(string)
+	if !ok || !strings.HasSuffix(path, ".md") {
+		t.Fatalf("expected a local .md path, got %v", result["path"])
+	}
+	if !strings.HasPrefix(path, "issues/") {
+		t.Errorf("expected path under issues/, got %q", path)
+	}
+	if _, err := os.Stat(filepath.Join(env.tmpDir, path)); os.IsNotExist(err) {
+		t.Errorf("local markdown issue not written at %s", path)
+	}
+}
+
+// TestCLI_IssueList_LinearConfig_ReturnsLocal is AC1: listing under a linear
+// config returns the local markdown issues.
+func TestCLI_IssueList_LinearConfig_ReturnsLocal(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	env.initLinearProject("test")
+	env.createIssue("local.md", "A Local Issue", "todo")
+
+	stdout, stderr, err := env.run("issue", "list")
+	if err != nil {
+		t.Fatalf("issue list failed: %v\nstderr: %s", err, stderr)
+	}
+	var items []map[string]any
+	if err := json.Unmarshal([]byte(stdout), &items); err != nil {
+		t.Fatalf("invalid JSON: %v\noutput: %s", err, stdout)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected 1 local issue, got %d (%s)", len(items), stdout)
+	}
+	if items[0]["provider"] != "markdown" {
+		t.Errorf("expected provider markdown, got %v", items[0]["provider"])
+	}
+}
+
+// TestCLI_IssueImport_Schema is AC2: --schema prints a JSON shape.
+func TestCLI_IssueImport_Schema(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	stdout, _, err := env.run("issue", "import", "--schema")
+	if err != nil {
+		t.Fatalf("issue import --schema failed: %v", err)
+	}
+	var schema map[string]any
+	if err := json.Unmarshal([]byte(stdout), &schema); err != nil {
+		t.Fatalf("schema is not valid JSON: %v\noutput: %s", err, stdout)
+	}
+	for _, key := range []string{"from", "id", "query"} {
+		if _, ok := schema[key]; !ok {
+			t.Errorf("schema missing key %q: %v", key, schema)
+		}
+	}
+}
+
+// TestCLI_IssueImport_NoSelector_Fails is AC4: piping an empty JSON object with
+// no source/selector fails loudly.
+func TestCLI_IssueImport_NoSelector_Fails(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	env.initLinearProject("test")
+
+	_, stderr, err := env.runWithStdin(`{}`, "issue", "import")
+	if err == nil {
+		t.Fatal("issue import with empty selector should fail")
+	}
+	if !strings.Contains(stderr, "id") && !strings.Contains(stderr, "query") {
+		t.Errorf("error should mention missing id/query selector, got: %s", stderr)
+	}
+}

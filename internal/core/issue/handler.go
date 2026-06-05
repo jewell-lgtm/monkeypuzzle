@@ -145,7 +145,12 @@ type providerInfo struct {
 	issuesDir    string
 }
 
-// getProvider returns the configured provider and issues directory
+// getProvider returns the local issue store and issues directory.
+//
+// The local store is unconditionally markdown, regardless of any
+// issue_provider in the config (which now only names an import source consumed
+// by `mp issue import`). This keeps mp issue create/list/search/get operating
+// on local issues/*.md even for configs carrying a tracker provider.
 func (h *Handler) getProvider() (providerInfo, error) {
 	cfg, err := piece.ReadConfig(h.workDir, h.deps.FS)
 	if err != nil {
@@ -157,31 +162,11 @@ func (h *Handler) getProvider() (providerInfo, error) {
 		issuesDir = "issues"
 	}
 
-	// Build config with absolute paths for markdown provider
-	providerCfg := cfg.Issues.Config
-	if cfg.Issues.Provider == "markdown" {
-		providerCfg = make(map[string]string)
-		for k, v := range cfg.Issues.Config {
-			providerCfg[k] = v
-		}
-		providerCfg["directory"] = filepath.Join(h.workDir, issuesDir)
-	}
-
-	provider, err := NewProvider(ProviderConfig{
-		ProviderType: cfg.Issues.Provider,
-		Config:       providerCfg,
-		Deps: ProviderDeps{
-			FS:   h.deps.FS,
-			HTTP: h.deps.HTTP,
-		},
-	})
-	if err != nil {
-		return providerInfo{}, err
-	}
+	provider := NewMarkdownProvider(h.deps.FS, filepath.Join(h.workDir, issuesDir))
 
 	return providerInfo{
 		provider:     provider,
-		providerType: cfg.Issues.Provider,
+		providerType: "markdown",
 		issuesDir:    issuesDir,
 	}, nil
 }

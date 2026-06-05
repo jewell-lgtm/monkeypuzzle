@@ -5,6 +5,106 @@ import (
 	"testing"
 )
 
+func TestNewImporter_Linear_MissingAPIKey(t *testing.T) {
+	_ = os.Unsetenv("LINEAR_API_KEY")
+
+	_, err := NewImporter(ImporterConfig{
+		Source: "linear",
+		Config: map[string]string{"team": "ENG"},
+		Deps:   ImporterDeps{HTTP: &mockHTTPClient{}},
+	})
+	if err == nil {
+		t.Error("NewImporter(linear) without API key should fail")
+	}
+}
+
+func TestNewImporter_Linear_MissingTeam(t *testing.T) {
+	t.Setenv("LINEAR_API_KEY", "test-key")
+
+	_, err := NewImporter(ImporterConfig{
+		Source: "linear",
+		Config: map[string]string{},
+		Deps:   ImporterDeps{HTTP: &mockHTTPClient{}},
+	})
+	if err == nil {
+		t.Error("NewImporter(linear) without team should fail")
+	}
+}
+
+func TestNewImporter_Linear_MissingHTTP(t *testing.T) {
+	t.Setenv("LINEAR_API_KEY", "test-key")
+
+	_, err := NewImporter(ImporterConfig{
+		Source: "linear",
+		Config: map[string]string{"team": "ENG"},
+		Deps:   ImporterDeps{},
+	})
+	if err == nil {
+		t.Error("NewImporter(linear) without HTTP client should fail")
+	}
+}
+
+func TestNewImporter_Linear_Success(t *testing.T) {
+	t.Setenv("LINEAR_API_KEY", "test-key")
+
+	imp, err := NewImporter(ImporterConfig{
+		Source: "linear",
+		Config: map[string]string{"team": "ENG"},
+		Deps:   ImporterDeps{HTTP: &mockHTTPClient{}},
+	})
+	if err != nil {
+		t.Fatalf("NewImporter(linear) error = %v", err)
+	}
+	if _, ok := imp.(*LinearImporter); !ok {
+		t.Errorf("NewImporter(linear) returned %T, want *LinearImporter", imp)
+	}
+}
+
+func TestNewImporter_Linear_APIKeyFromConfig(t *testing.T) {
+	_ = os.Unsetenv("LINEAR_API_KEY")
+
+	imp, err := NewImporter(ImporterConfig{
+		Source: "linear",
+		Config: map[string]string{"team": "ENG", "api_key": "config-key"},
+		Deps:   ImporterDeps{HTTP: &mockHTTPClient{}},
+	})
+	if err != nil {
+		t.Fatalf("NewImporter(linear) with config api_key error = %v", err)
+	}
+	if _, ok := imp.(*LinearImporter); !ok {
+		t.Errorf("NewImporter(linear) returned %T, want *LinearImporter", imp)
+	}
+}
+
+func TestNewImporter_Unknown(t *testing.T) {
+	_, err := NewImporter(ImporterConfig{Source: "unknown"})
+	if err == nil {
+		t.Error("NewImporter(unknown) should fail")
+	}
+}
+
+func TestRegisteredImporters(t *testing.T) {
+	importers := RegisteredImporters()
+
+	hasLinear := false
+	hasPlane := false
+	for _, p := range importers {
+		if p == "linear" {
+			hasLinear = true
+		}
+		if p == "plane" {
+			hasPlane = true
+		}
+	}
+	if !hasLinear {
+		t.Error("RegisteredImporters() should include 'linear'")
+	}
+	if !hasPlane {
+		t.Error("RegisteredImporters() should include 'plane'")
+	}
+}
+
+// TestNewProvider_Markdown verifies the local store is still markdown-only.
 func TestNewProvider_Markdown(t *testing.T) {
 	provider, err := NewProvider(ProviderConfig{
 		ProviderType: "markdown",
@@ -19,108 +119,13 @@ func TestNewProvider_Markdown(t *testing.T) {
 	}
 }
 
-func TestNewProvider_Linear_MissingAPIKey(t *testing.T) {
-	// Ensure env var is not set
-	_ = os.Unsetenv("LINEAR_API_KEY")
-
-	_, err := NewProvider(ProviderConfig{
-		ProviderType: "linear",
-		Config:       map[string]string{"team": "ENG"},
-		Deps:         ProviderDeps{HTTP: &mockHTTPClient{}},
-	})
-	if err == nil {
-		t.Error("NewProvider(linear) without API key should fail")
-	}
-}
-
-func TestNewProvider_Linear_MissingTeam(t *testing.T) {
-	t.Setenv("LINEAR_API_KEY", "test-key")
-
-	_, err := NewProvider(ProviderConfig{
-		ProviderType: "linear",
-		Config:       map[string]string{},
-		Deps:         ProviderDeps{HTTP: &mockHTTPClient{}},
-	})
-	if err == nil {
-		t.Error("NewProvider(linear) without team should fail")
-	}
-}
-
-func TestNewProvider_Linear_MissingHTTP(t *testing.T) {
-	t.Setenv("LINEAR_API_KEY", "test-key")
-
-	_, err := NewProvider(ProviderConfig{
-		ProviderType: "linear",
-		Config:       map[string]string{"team": "ENG"},
-		Deps:         ProviderDeps{},
-	})
-	if err == nil {
-		t.Error("NewProvider(linear) without HTTP client should fail")
-	}
-}
-
-func TestNewProvider_Linear_Success(t *testing.T) {
-	t.Setenv("LINEAR_API_KEY", "test-key")
-
-	provider, err := NewProvider(ProviderConfig{
-		ProviderType: "linear",
-		Config:       map[string]string{"team": "ENG"},
-		Deps:         ProviderDeps{HTTP: &mockHTTPClient{}},
-	})
-	if err != nil {
-		t.Fatalf("NewProvider(linear) error = %v", err)
-	}
-	if _, ok := provider.(*LinearProvider); !ok {
-		t.Errorf("NewProvider(linear) returned %T, want *LinearProvider", provider)
-	}
-}
-
-func TestNewProvider_Linear_APIKeyFromConfig(t *testing.T) {
-	// Ensure env var is not set
-	_ = os.Unsetenv("LINEAR_API_KEY")
-
-	provider, err := NewProvider(ProviderConfig{
-		ProviderType: "linear",
-		Config:       map[string]string{"team": "ENG", "api_key": "config-key"},
-		Deps:         ProviderDeps{HTTP: &mockHTTPClient{}},
-	})
-	if err != nil {
-		t.Fatalf("NewProvider(linear) with config api_key error = %v", err)
-	}
-	if _, ok := provider.(*LinearProvider); !ok {
-		t.Errorf("NewProvider(linear) returned %T, want *LinearProvider", provider)
-	}
-}
-
-func TestNewProvider_Unknown(t *testing.T) {
-	_, err := NewProvider(ProviderConfig{
-		ProviderType: "unknown",
-		Config:       map[string]string{},
-	})
-	if err == nil {
-		t.Error("NewProvider(unknown) should fail")
-	}
-}
-
-func TestRegisteredProviders(t *testing.T) {
-	providers := RegisteredProviders()
-
-	hasMarkdown := false
-	hasLinear := false
-	for _, p := range providers {
-		if p == "markdown" {
-			hasMarkdown = true
+// TestNewProvider_TrackerNotALocalStore confirms trackers are no longer local
+// store providers.
+func TestNewProvider_TrackerNotALocalStore(t *testing.T) {
+	for _, name := range []string{"linear", "plane"} {
+		if _, err := NewProvider(ProviderConfig{ProviderType: name}); err == nil {
+			t.Errorf("NewProvider(%q) should fail; trackers are import sources, not local stores", name)
 		}
-		if p == "linear" {
-			hasLinear = true
-		}
-	}
-
-	if !hasMarkdown {
-		t.Error("RegisteredProviders() should include 'markdown'")
-	}
-	if !hasLinear {
-		t.Error("RegisteredProviders() should include 'linear'")
 	}
 }
 

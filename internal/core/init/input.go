@@ -29,7 +29,7 @@ var fields = []Field{
 	},
 	{
 		Name:        "issue_provider",
-		Description: "How issues/features are managed",
+		Description: "Issue import source (markdown = none; local store is always markdown). Consumed only by `mp issue import`.",
 		Required:    true,
 		Default:     "markdown",
 		ValidValues: []string{"markdown", "linear", "plane"},

@@ -2,6 +2,7 @@ package issue
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"net/http"
 	"os"
@@ -48,166 +49,132 @@ func planeBasePath(suffix string) string {
 	return "/api/v1/workspaces/" + planeWS + "/projects/" + planeProj + "/" + suffix
 }
 
-func newPlaneTestProvider(routes map[string]string) (*PlaneProvider, *planeMockTransport) {
+func newPlaneTestImporter(routes map[string]string) (*PlaneImporter, *planeMockTransport) {
 	mt := &planeMockTransport{routes: routes}
-	return NewPlaneProvider(mt, "https://api.plane.so", "test-key", planeWS, planeProj), mt
+	return NewPlaneImporter(mt, "https://api.plane.so", "test-key", planeWS, planeProj), mt
 }
-
-// statesResponse is a minimal Plane states list with the five default groups.
-const statesResponse = `{"results":[
-	{"id":"s-backlog","group":"backlog"},
-	{"id":"s-unstarted","group":"unstarted"},
-	{"id":"s-started","group":"started"},
-	{"id":"s-completed","group":"completed"},
-	{"id":"s-cancelled","group":"cancelled"}
-],"next_page_results":false,"next_cursor":""}`
 
 const projectResponse = `{"id":"proj-uuid","identifier":"PROJ","name":"My Project"}`
 
-func TestNewProvider_Plane_MissingAPIKey(t *testing.T) {
+func TestNewImporter_Plane_MissingAPIKey(t *testing.T) {
 	_ = os.Unsetenv("PLANE_API_KEY")
-	_, err := NewProvider(ProviderConfig{
-		ProviderType: "plane",
-		Config:       map[string]string{"workspace": "acme", "project": "p"},
-		Deps:         ProviderDeps{HTTP: &planeMockTransport{}},
+	_, err := NewImporter(ImporterConfig{
+		Source: "plane",
+		Config: map[string]string{"workspace": "acme", "project": "p"},
+		Deps:   ImporterDeps{HTTP: &planeMockTransport{}},
 	})
 	if err == nil {
-		t.Error("NewProvider(plane) without API key should fail")
+		t.Error("NewImporter(plane) without API key should fail")
 	}
 }
 
-func TestNewProvider_Plane_MissingWorkspace(t *testing.T) {
+func TestNewImporter_Plane_MissingWorkspace(t *testing.T) {
 	t.Setenv("PLANE_API_KEY", "k")
-	_, err := NewProvider(ProviderConfig{
-		ProviderType: "plane",
-		Config:       map[string]string{"project": "p"},
-		Deps:         ProviderDeps{HTTP: &planeMockTransport{}},
+	_, err := NewImporter(ImporterConfig{
+		Source: "plane",
+		Config: map[string]string{"project": "p"},
+		Deps:   ImporterDeps{HTTP: &planeMockTransport{}},
 	})
 	if err == nil {
-		t.Error("NewProvider(plane) without workspace should fail")
+		t.Error("NewImporter(plane) without workspace should fail")
 	}
 }
 
-func TestNewProvider_Plane_MissingProject(t *testing.T) {
+func TestNewImporter_Plane_MissingProject(t *testing.T) {
 	t.Setenv("PLANE_API_KEY", "k")
-	_, err := NewProvider(ProviderConfig{
-		ProviderType: "plane",
-		Config:       map[string]string{"workspace": "acme"},
-		Deps:         ProviderDeps{HTTP: &planeMockTransport{}},
+	_, err := NewImporter(ImporterConfig{
+		Source: "plane",
+		Config: map[string]string{"workspace": "acme"},
+		Deps:   ImporterDeps{HTTP: &planeMockTransport{}},
 	})
 	if err == nil {
-		t.Error("NewProvider(plane) without project should fail")
+		t.Error("NewImporter(plane) without project should fail")
 	}
 }
 
-func TestNewProvider_Plane_Success(t *testing.T) {
+func TestNewImporter_Plane_Success(t *testing.T) {
 	t.Setenv("PLANE_API_KEY", "k")
-	provider, err := NewProvider(ProviderConfig{
-		ProviderType: "plane",
-		Config:       map[string]string{"workspace": "acme", "project": "p"},
-		Deps:         ProviderDeps{HTTP: &planeMockTransport{}},
+	imp, err := NewImporter(ImporterConfig{
+		Source: "plane",
+		Config: map[string]string{"workspace": "acme", "project": "p"},
+		Deps:   ImporterDeps{HTTP: &planeMockTransport{}},
 	})
 	if err != nil {
-		t.Fatalf("NewProvider(plane) error = %v", err)
+		t.Fatalf("NewImporter(plane) error = %v", err)
 	}
-	if _, ok := provider.(*PlaneProvider); !ok {
-		t.Errorf("NewProvider(plane) returned %T, want *PlaneProvider", provider)
+	if _, ok := imp.(*PlaneImporter); !ok {
+		t.Errorf("NewImporter(plane) returned %T, want *PlaneImporter", imp)
 	}
 }
 
-func TestNewProvider_Plane_DefaultBaseURL(t *testing.T) {
+func TestNewImporter_Plane_DefaultBaseURL(t *testing.T) {
 	_ = os.Unsetenv("PLANE_API_KEY")
-	provider, err := NewProvider(ProviderConfig{
-		ProviderType: "plane",
-		Config:       map[string]string{"workspace": "acme", "project": "p", "api_key": "k"},
-		Deps:         ProviderDeps{HTTP: &planeMockTransport{}},
+	imp, err := NewImporter(ImporterConfig{
+		Source: "plane",
+		Config: map[string]string{"workspace": "acme", "project": "p", "api_key": "k"},
+		Deps:   ImporterDeps{HTTP: &planeMockTransport{}},
 	})
 	if err != nil {
-		t.Fatalf("NewProvider(plane) error = %v", err)
+		t.Fatalf("NewImporter(plane) error = %v", err)
 	}
-	pp := provider.(*PlaneProvider)
+	pp := imp.(*PlaneImporter)
 	if pp.baseURL != DefaultPlaneBaseURL {
 		t.Errorf("baseURL = %q, want %q", pp.baseURL, DefaultPlaneBaseURL)
 	}
 }
 
-func TestPlaneProvider_HappyPath(t *testing.T) {
+func TestPlaneImporter_Fetch(t *testing.T) {
 	routes := map[string]string{
-		"GET " + planeBasePath(""):             projectResponse,
-		"GET " + planeBasePath("states/"):      statesResponse,
-		"POST " + planeBasePath("issues/"):     `{"id":"i1","sequence_id":7,"name":"New issue","description_stripped":"body","state":"s-backlog"}`,
-		"GET " + planeBasePath("issues/"):      `{"results":[{"id":"i1","sequence_id":7,"name":"New issue","description_stripped":"body","state":"s-backlog"},{"id":"i2","sequence_id":8,"name":"Doing","description_stripped":"","state":"s-started"},{"id":"i3","sequence_id":9,"name":"Done one","description_stripped":"","state":"s-completed"}],"next_page_results":false,"next_cursor":""}`,
-		"GET " + planeBasePath("issues/i1/"):   `{"id":"i1","sequence_id":7,"name":"New issue","description_stripped":"body","state":"s-backlog"}`,
-		"PATCH " + planeBasePath("issues/i1/"): `{"id":"i1","sequence_id":7,"name":"New issue","state":"s-started"}`,
+		"GET " + planeBasePath(""):           projectResponse,
+		"GET " + planeBasePath("issues/i1/"): `{"id":"i1","sequence_id":7,"name":"New issue","description_stripped":"body"}`,
 	}
-	provider, mt := newPlaneTestProvider(routes)
+	imp, mt := newPlaneTestImporter(routes)
 
-	// Create
-	created, err := provider.Create(CreateInput{Title: "New issue", Description: "body"})
+	got, err := imp.Fetch(context.Background(), "i1")
 	if err != nil {
-		t.Fatalf("Create() error = %v", err)
+		t.Fatalf("Fetch() error = %v", err)
 	}
-	if created.ID != "i1" || created.Number != "PROJ-7" || created.Title != "New issue" {
-		t.Errorf("Create() = %+v", created)
-	}
-
-	// List
-	issues, err := provider.List()
-	if err != nil {
-		t.Fatalf("List() error = %v", err)
-	}
-	if len(issues) != 3 {
-		t.Fatalf("List() returned %d issues, want 3", len(issues))
+	if got.ID != "PROJ-7" || got.Title != "New issue" || got.Body != "body" {
+		t.Errorf("Fetch() = %+v", got)
 	}
 
-	// Get
-	got, err := provider.Get("i1")
-	if err != nil {
-		t.Fatalf("Get() error = %v", err)
-	}
-	if got.Title != "New issue" || got.Description != "body" {
-		t.Errorf("Get() = %+v", got)
-	}
-
-	// All requests carry the API key header
 	for _, r := range mt.requests {
 		if r.Header.Get("X-API-Key") != "test-key" {
 			t.Errorf("request %s %s missing X-API-Key header", r.Method, r.URL.Path)
 		}
+		if r.Method != "GET" {
+			t.Errorf("importer must be read-only, saw %s %s", r.Method, r.URL.Path)
+		}
 	}
 }
 
-func TestPlaneProvider_SearchQueryFiltersByTitle(t *testing.T) {
+func TestPlaneImporter_SearchQueryFiltersByTitle(t *testing.T) {
 	routes := map[string]string{
 		"GET " + planeBasePath(""):        projectResponse,
-		"GET " + planeBasePath("states/"): statesResponse,
-		"GET " + planeBasePath("issues/"): `{"results":[{"id":"i1","sequence_id":1,"name":"Add auth flow","state":"s-backlog"},{"id":"i2","sequence_id":2,"name":"Fix typo","state":"s-backlog"}],"next_page_results":false,"next_cursor":""}`,
+		"GET " + planeBasePath("issues/"): `{"results":[{"id":"i1","sequence_id":1,"name":"Add auth flow"},{"id":"i2","sequence_id":2,"name":"Fix typo"}],"next_page_results":false,"next_cursor":""}`,
 	}
-	provider, _ := newPlaneTestProvider(routes)
+	imp, _ := newPlaneTestImporter(routes)
 
-	issues, err := provider.SearchIssues(SearchInput{Query: "AUTH"})
+	issues, err := imp.Search(context.Background(), "AUTH", 0)
 	if err != nil {
-		t.Fatalf("SearchIssues() error = %v", err)
+		t.Fatalf("Search() error = %v", err)
 	}
-	if len(issues) != 1 || issues[0].ID != "i1" {
-		t.Errorf("SearchIssues(auth) = %+v", issues)
+	if len(issues) != 1 || issues[0].ID != "PROJ-1" {
+		t.Errorf("Search(auth) = %+v", issues)
 	}
 }
 
-func TestPlaneProvider_Pagination(t *testing.T) {
-	// First page points to a cursor; second page ends the walk.
+func TestPlaneImporter_Pagination(t *testing.T) {
 	mt := &planeMockTransport{routes: map[string]string{
-		"GET " + planeBasePath(""):        projectResponse,
-		"GET " + planeBasePath("states/"): statesResponse,
+		"GET " + planeBasePath(""): projectResponse,
 	}}
-	// Custom Do: branch on cursor query param.
-	provider := NewPlaneProvider(&paginatingTransport{inner: mt}, "https://api.plane.so", "k", planeWS, planeProj)
-	issues, err := provider.List()
+	imp := NewPlaneImporter(&paginatingTransport{inner: mt}, "https://api.plane.so", "k", planeWS, planeProj)
+	issues, err := imp.Search(context.Background(), "", 0)
 	if err != nil {
-		t.Fatalf("List() error = %v", err)
+		t.Fatalf("Search() error = %v", err)
 	}
 	if len(issues) != 2 {
-		t.Errorf("List() across pages returned %d, want 2", len(issues))
+		t.Errorf("Search() across pages returned %d, want 2", len(issues))
 	}
 }
 
@@ -218,9 +185,9 @@ func (p *paginatingTransport) Do(req *http.Request) (*http.Response, error) {
 	if req.URL.Path == planeBasePath("issues/") {
 		var body string
 		if req.URL.Query().Get("cursor") == "page2" {
-			body = `{"results":[{"id":"i2","sequence_id":2,"name":"two","state":"s-backlog"}],"next_page_results":false,"next_cursor":""}`
+			body = `{"results":[{"id":"i2","sequence_id":2,"name":"two"}],"next_page_results":false,"next_cursor":""}`
 		} else {
-			body = `{"results":[{"id":"i1","sequence_id":1,"name":"one","state":"s-backlog"}],"next_page_results":true,"next_cursor":"page2"}`
+			body = `{"results":[{"id":"i1","sequence_id":1,"name":"one"}],"next_page_results":true,"next_cursor":"page2"}`
 		}
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
 	}

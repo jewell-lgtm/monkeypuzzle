@@ -2,6 +2,7 @@ package issue
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,179 +13,78 @@ import (
 
 const linearAPIURL = "https://api.linear.app/graphql"
 
-// LinearProvider implements Provider using Linear API
-type LinearProvider struct {
+// LinearImporter is a read-only import source backed by the Linear GraphQL API.
+// It fetches remote issues so they can be materialised as local markdown; it
+// never creates or mutates Linear state.
+type LinearImporter struct {
 	http    core.HTTPClient
 	apiKey  string
 	teamKey string
 }
 
-// NewLinearProvider creates a provider for Linear-based issues
-func NewLinearProvider(http core.HTTPClient, apiKey, teamKey string) *LinearProvider {
-	return &LinearProvider{
+// NewLinearImporter creates a read-only Linear import source.
+func NewLinearImporter(http core.HTTPClient, apiKey, teamKey string) *LinearImporter {
+	return &LinearImporter{
 		http:    http,
 		apiKey:  apiKey,
 		teamKey: teamKey,
 	}
 }
 
-// Create creates a new issue in Linear
-func (p *LinearProvider) Create(input CreateInput) (Issue, error) {
-	query := `mutation CreateIssue($title: String!, $description: String, $teamId: String!) {
-		issueCreate(input: {title: $title, description: $description, teamId: $teamId}) {
-			issue {
-				id
-				identifier
-				title
-				description
-				state {
-					name
-				}
-			}
-		}
-	}`
-
-	variables := map[string]interface{}{
-		"title":       input.Title,
-		"description": input.Description,
-		"teamId":      p.teamKey,
-	}
-
-	resp, err := p.doGraphQL(query, variables)
-	if err != nil {
-		return Issue{}, fmt.Errorf("failed to create issue: %w", err)
-	}
-
-	var result struct {
-		Data struct {
-			IssueCreate struct {
-				Issue struct {
-					ID          string `json:"id"`
-					Identifier  string `json:"identifier"`
-					Title       string `json:"title"`
-					Description string `json:"description"`
-					State       struct {
-						Name string `json:"name"`
-					} `json:"state"`
-				} `json:"issue"`
-			} `json:"issueCreate"`
-		} `json:"data"`
-	}
-
-	if err := json.Unmarshal(resp, &result); err != nil {
-		return Issue{}, fmt.Errorf("failed to parse response: %w", err)
-	}
-
-	issue := result.Data.IssueCreate.Issue
-	return Issue{
-		ID:          issue.ID,
-		Number:      issue.Identifier,
-		Title:       issue.Title,
-		Description: issue.Description,
-	}, nil
+// linearNode is the subset of a Linear issue payload we consume.
+type linearNode struct {
+	ID          string `json:"id"`
+	Identifier  string `json:"identifier"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	URL         string `json:"url"`
 }
 
-// List returns all issues from Linear.
-func (p *LinearProvider) List() ([]Issue, error) {
-	query := `query Issues($teamId: String!) {
-		issues(filter: {team: {key: {eq: $teamId}}}) {
-			nodes {
-				id
-				identifier
-				title
-				description
-				state {
-					name
-				}
-			}
-		}
-	}`
-
-	variables := map[string]interface{}{
-		"teamId": p.teamKey,
+func (n linearNode) toRemote() RemoteIssue {
+	return RemoteIssue{
+		ID:    n.Identifier,
+		Title: n.Title,
+		Body:  n.Description,
+		URL:   n.URL,
 	}
-
-	resp, err := p.doGraphQL(query, variables)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list issues: %w", err)
-	}
-
-	var result struct {
-		Data struct {
-			Issues struct {
-				Nodes []struct {
-					ID          string `json:"id"`
-					Identifier  string `json:"identifier"`
-					Title       string `json:"title"`
-					Description string `json:"description"`
-					State       struct {
-						Name string `json:"name"`
-					} `json:"state"`
-				} `json:"nodes"`
-			} `json:"issues"`
-		} `json:"data"`
-	}
-
-	if err := json.Unmarshal(resp, &result); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
-	}
-
-	var issues []Issue
-	for _, node := range result.Data.Issues.Nodes {
-		issues = append(issues, Issue{
-			ID:          node.ID,
-			Number:      node.Identifier,
-			Title:       node.Title,
-			Description: node.Description,
-		})
-	}
-
-	return issues, nil
 }
 
-// SearchIssues returns issues matching search criteria from Linear
-func (p *LinearProvider) SearchIssues(input SearchInput) ([]Issue, error) {
-	limit := input.Limit
+// Search returns remote issues matching query (empty = recent issues), capped
+// at limit (0 = DefaultSearchLimit).
+func (p *LinearImporter) Search(_ context.Context, query string, limit int) ([]RemoteIssue, error) {
 	if limit <= 0 {
 		limit = DefaultSearchLimit
 	}
 
-	// Use server-side search when query provided
-	if input.Query != "" {
-		return p.searchIssuesWithQuery(input.Query, limit)
-	}
-
-	// No query - use regular list
-	return p.listIssuesWithLimit(limit)
-}
-
-// searchIssuesWithQuery uses Linear's issues query with title filter for text search
-func (p *LinearProvider) searchIssuesWithQuery(query string, limit int) ([]Issue, error) {
-	gql := `query issues($teamKey: String!, $first: Int!, $query: String!) {
-		issues(
-			filter: {
-				team: {key: {eq: $teamKey}}
-				title: {containsIgnoreCase: $query}
-			}
-			first: $first
-			orderBy: updatedAt
-		) {
-			nodes {
-				id
-				identifier
-				title
-				description
-				state {
-					name
-				}
-			}
-		}
-	}`
-
+	var gql string
 	variables := map[string]interface{}{
 		"teamKey": p.teamKey,
-		"query":   query,
 		"first":   limit,
+	}
+	if query != "" {
+		gql = `query issues($teamKey: String!, $first: Int!, $query: String!) {
+			issues(
+				filter: {
+					team: {key: {eq: $teamKey}}
+					title: {containsIgnoreCase: $query}
+				}
+				first: $first
+				orderBy: updatedAt
+			) {
+				nodes { id identifier title description url }
+			}
+		}`
+		variables["query"] = query
+	} else {
+		gql = `query issues($teamKey: String!, $first: Int!) {
+			issues(
+				filter: {team: {key: {eq: $teamKey}}}
+				first: $first
+				orderBy: updatedAt
+			) {
+				nodes { id identifier title description url }
+			}
+		}`
 	}
 
 	resp, err := p.doGraphQL(gql, variables)
@@ -195,151 +95,56 @@ func (p *LinearProvider) searchIssuesWithQuery(query string, limit int) ([]Issue
 	var result struct {
 		Data struct {
 			Issues struct {
-				Nodes []struct {
-					ID          string `json:"id"`
-					Identifier  string `json:"identifier"`
-					Title       string `json:"title"`
-					Description string `json:"description"`
-					State       struct {
-						Name string `json:"name"`
-					} `json:"state"`
-				} `json:"nodes"`
+				Nodes []linearNode `json:"nodes"`
 			} `json:"issues"`
 		} `json:"data"`
 	}
-
 	if err := json.Unmarshal(resp, &result); err != nil {
 		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}
 
-	var issues []Issue
+	issues := make([]RemoteIssue, 0, len(result.Data.Issues.Nodes))
 	for _, node := range result.Data.Issues.Nodes {
-		issues = append(issues, Issue{
-			ID:          node.ID,
-			Number:      node.Identifier,
-			Title:       node.Title,
-			Description: node.Description,
-		})
+		issues = append(issues, node.toRemote())
 	}
-
 	return issues, nil
 }
 
-// listIssuesWithLimit fetches issues without text search
-func (p *LinearProvider) listIssuesWithLimit(limit int) ([]Issue, error) {
-	gql := `query issues($teamKey: String!, $first: Int!) {
-		issues(
-			filter: {team: {key: {eq: $teamKey}}}
-			first: $first
-			orderBy: createdAt
-		) {
-			nodes {
-				id
-				identifier
-				title
-				description
-				state {
-					name
-				}
-			}
-		}
-	}`
-
-	variables := map[string]interface{}{
-		"teamKey": p.teamKey,
-		"first":   limit,
-	}
-
-	resp, err := p.doGraphQL(gql, variables)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list issues: %w", err)
-	}
-
-	var result struct {
-		Data struct {
-			Issues struct {
-				Nodes []struct {
-					ID          string `json:"id"`
-					Identifier  string `json:"identifier"`
-					Title       string `json:"title"`
-					Description string `json:"description"`
-					State       struct {
-						Name string `json:"name"`
-					} `json:"state"`
-				} `json:"nodes"`
-			} `json:"issues"`
-		} `json:"data"`
-	}
-
-	if err := json.Unmarshal(resp, &result); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
-	}
-
-	var issues []Issue
-	for _, node := range result.Data.Issues.Nodes {
-		issues = append(issues, Issue{
-			ID:          node.ID,
-			Number:      node.Identifier,
-			Title:       node.Title,
-			Description: node.Description,
-		})
-	}
-
-	return issues, nil
-}
-
-// Get returns an issue by ID
-func (p *LinearProvider) Get(id string) (Issue, error) {
+// Fetch returns a single remote issue by its Linear identifier (UUID or human
+// key like "ENG-123").
+func (p *LinearImporter) Fetch(_ context.Context, id string) (RemoteIssue, error) {
 	query := `query Issue($id: String!) {
 		issue(id: $id) {
 			id
 			identifier
 			title
 			description
-			state {
-				name
-			}
+			url
 		}
 	}`
-
-	variables := map[string]interface{}{
-		"id": id,
-	}
+	variables := map[string]interface{}{"id": id}
 
 	resp, err := p.doGraphQL(query, variables)
 	if err != nil {
-		return Issue{}, fmt.Errorf("failed to get issue: %w", err)
+		return RemoteIssue{}, fmt.Errorf("failed to fetch issue: %w", err)
 	}
 
 	var result struct {
 		Data struct {
-			Issue struct {
-				ID          string `json:"id"`
-				Identifier  string `json:"identifier"`
-				Title       string `json:"title"`
-				Description string `json:"description"`
-				State       struct {
-					Name string `json:"name"`
-				} `json:"state"`
-			} `json:"issue"`
+			Issue linearNode `json:"issue"`
 		} `json:"data"`
 	}
-
 	if err := json.Unmarshal(resp, &result); err != nil {
-		return Issue{}, fmt.Errorf("failed to parse response: %w", err)
+		return RemoteIssue{}, fmt.Errorf("failed to parse response: %w", err)
 	}
-
-	issue := result.Data.Issue
-	return Issue{
-		ID:          issue.ID,
-		Number:      issue.Identifier,
-		Title:       issue.Title,
-		Description: issue.Description,
-	}, nil
+	if result.Data.Issue.ID == "" && result.Data.Issue.Title == "" {
+		return RemoteIssue{}, fmt.Errorf("linear issue not found: %s", id)
+	}
+	return result.Data.Issue.toRemote(), nil
 }
 
-// doGraphQL executes a GraphQL request
-func (p *LinearProvider) doGraphQL(query string, variables map[string]interface{}) ([]byte, error) {
+// doGraphQL executes a GraphQL request.
+func (p *LinearImporter) doGraphQL(query string, variables map[string]interface{}) ([]byte, error) {
 	body := map[string]interface{}{
 		"query":     query,
 		"variables": variables,

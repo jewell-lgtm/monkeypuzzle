@@ -74,11 +74,11 @@ func (h *Handler) Run(input Input, workDir string) (Config, error) {
 		return Config{}, err
 	}
 
+	// The local issue store is always markdown, so the issues directory is
+	// always created regardless of any import source (issue_provider).
 	issuesDir := "issues"
-	if input.IssueProvider == "markdown" {
-		if err := h.deps.FS.MkdirAll(issuesDir, DefaultDirPerm); err != nil {
-			return Config{}, err
-		}
+	if err := h.deps.FS.MkdirAll(issuesDir, DefaultDirPerm); err != nil {
+		return Config{}, err
 	}
 
 	// Build config
@@ -102,9 +102,9 @@ func (h *Handler) Run(input Input, workDir string) (Config, error) {
 		}
 	}
 
-	if input.IssueProvider == "markdown" {
-		cfg.Issues.Config["directory"] = issuesDir
-	}
+	// Always record the local markdown issues directory; issue_provider only
+	// names an optional import source consumed by `mp issue import`.
+	cfg.Issues.Config["directory"] = issuesDir
 
 	// Write config
 	data, err := json.MarshalIndent(cfg, "", "  ")

@@ -2,13 +2,14 @@ package issue
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
 )
 
-// mockHTTPClient implements core.HTTPClient for testing
+// mockHTTPClient implements core.HTTPClient for testing the Linear importer.
 type mockHTTPClient struct {
 	requests  []*http.Request
 	responses map[string]string // operation -> response JSON
@@ -23,12 +24,6 @@ func (m *mockHTTPClient) Do(req *http.Request) (*http.Response, error) {
 
 	var responseJSON string
 	switch {
-	case strings.Contains(bodyStr, "issueCreate"):
-		responseJSON = m.responses["createIssue"]
-	case strings.Contains(bodyStr, "issueUpdate"):
-		responseJSON = m.responses["updateIssue"]
-	case strings.Contains(bodyStr, "searchIssues"):
-		responseJSON = m.responses["searchIssues"]
 	case strings.Contains(bodyStr, "issues"):
 		responseJSON = m.responses["issues"]
 	case strings.Contains(bodyStr, "issue"):
@@ -48,124 +43,106 @@ func (m *mockHTTPClient) Do(req *http.Request) (*http.Response, error) {
 	}, nil
 }
 
-func TestLinearProvider_HappyPath(t *testing.T) {
+func TestLinearImporter_Fetch(t *testing.T) {
 	mockHTTP := &mockHTTPClient{
 		responses: map[string]string{
-			"createIssue": `{"data":{"issueCreate":{"issue":{"id":"abc123","title":"Test Issue","description":"Test description","state":{"name":"Backlog"}}}}}`,
-			"issues":      `{"data":{"issues":{"nodes":[{"id":"abc123","title":"Test Issue","description":"Test description","state":{"name":"Backlog"}}]}}}`,
-			"issue":       `{"data":{"issue":{"id":"abc123","title":"Test Issue","description":"Test description","state":{"name":"Backlog"}}}}`,
-			"updateIssue": `{"data":{"issueUpdate":{"issue":{"id":"abc123","state":{"name":"In Progress"}}}}}`,
+			"issue": `{"data":{"issue":{"id":"abc123","identifier":"ENG-7","title":"Test Issue","description":"Test description","url":"https://linear.app/x/issue/ENG-7"}}}`,
 		},
 	}
 
-	provider := NewLinearProvider(mockHTTP, "test-api-key", "ENG")
+	imp := NewLinearImporter(mockHTTP, "test-api-key", "ENG")
 
-	// Test Create
-	issue, err := provider.Create(CreateInput{Title: "Test Issue", Description: "Test description"})
+	got, err := imp.Fetch(context.Background(), "ENG-7")
 	if err != nil {
-		t.Fatalf("Create() error = %v", err)
+		t.Fatalf("Fetch() error = %v", err)
 	}
-	if issue.ID != "abc123" {
-		t.Errorf("Create() ID = %v, want abc123", issue.ID)
+	if got.ID != "ENG-7" {
+		t.Errorf("Fetch() ID = %v, want ENG-7", got.ID)
 	}
-	if issue.Title != "Test Issue" {
-		t.Errorf("Create() Title = %v, want Test Issue", issue.Title)
+	if got.Title != "Test Issue" {
+		t.Errorf("Fetch() Title = %v, want Test Issue", got.Title)
 	}
-
-	// Test List
-	issues, err := provider.List()
-	if err != nil {
-		t.Fatalf("List() error = %v", err)
+	if got.Body != "Test description" {
+		t.Errorf("Fetch() Body = %v, want Test description", got.Body)
 	}
-	if len(issues) != 1 {
-		t.Errorf("List() returned %d issues, want 1", len(issues))
-	}
-
-	// Test Get
-	issue, err = provider.Get("abc123")
-	if err != nil {
-		t.Fatalf("Get() error = %v", err)
-	}
-	if issue.Title != "Test Issue" {
-		t.Errorf("Get() Title = %v, want Test Issue", issue.Title)
+	if got.URL != "https://linear.app/x/issue/ENG-7" {
+		t.Errorf("Fetch() URL = %v", got.URL)
 	}
 
 	// Verify API key was sent in requests
 	for _, req := range mockHTTP.requests {
-		auth := req.Header.Get("Authorization")
-		if auth != "test-api-key" {
+		if auth := req.Header.Get("Authorization"); auth != "test-api-key" {
 			t.Errorf("Request missing/wrong Authorization header: %v", auth)
 		}
 	}
 }
 
-func TestLinearProvider_SearchIssues_UsesServerSideFilter(t *testing.T) {
+func TestLinearImporter_Fetch_NotFound(t *testing.T) {
 	mockHTTP := &mockHTTPClient{
-		responses: map[string]string{
-			"issues": `{"data":{"issues":{"nodes":[
-				{"id":"match1","identifier":"ENG-123","title":"Auth feature","description":"Add authentication","state":{"name":"Todo"}}
-			]}}}`,
-		},
+		responses: map[string]string{"issue": `{"data":{"issue":null}}`},
 	}
-
-	provider := NewLinearProvider(mockHTTP, "key", "TEAM")
-
-	// Search with query should use issues with containsIgnoreCase filter
-	issues, err := provider.SearchIssues(SearchInput{Query: "auth"})
-	if err != nil {
-		t.Fatalf("SearchIssues() error = %v", err)
-	}
-
-	// Verify issues query was called with filter
-	if len(mockHTTP.requests) == 0 {
-		t.Fatal("No requests made")
-	}
-
-	lastReq := mockHTTP.requests[len(mockHTTP.requests)-1]
-	body, _ := io.ReadAll(lastReq.Body)
-	bodyStr := string(body)
-
-	if !strings.Contains(bodyStr, "containsIgnoreCase") {
-		t.Errorf("Expected containsIgnoreCase filter in query, got: %s", bodyStr)
-	}
-
-	// Should return filtered results
-	if len(issues) != 1 {
-		t.Errorf("SearchIssues() returned %d issues, want 1", len(issues))
-	}
-	if len(issues) > 0 && issues[0].ID != "match1" {
-		t.Errorf("SearchIssues() returned wrong issue ID: %v", issues[0].ID)
+	imp := NewLinearImporter(mockHTTP, "k", "ENG")
+	if _, err := imp.Fetch(context.Background(), "ENG-999"); err == nil {
+		t.Error("Fetch() of missing issue should error")
 	}
 }
 
-func TestLinearProvider_SearchIssues_EmptyQuery_NoFilter(t *testing.T) {
+func TestLinearImporter_Search_UsesServerSideFilter(t *testing.T) {
 	mockHTTP := &mockHTTPClient{
 		responses: map[string]string{
 			"issues": `{"data":{"issues":{"nodes":[
-				{"id":"1","identifier":"ENG-1","title":"Issue 1","state":{"name":"Backlog"}},
-				{"id":"2","identifier":"ENG-2","title":"Issue 2","state":{"name":"Todo"}}
+				{"id":"match1","identifier":"ENG-123","title":"Auth feature","description":"Add authentication"}
 			]}}}`,
 		},
 	}
 
-	provider := NewLinearProvider(mockHTTP, "key", "TEAM")
+	imp := NewLinearImporter(mockHTTP, "key", "TEAM")
 
-	// Empty query should use regular issues list without title filter
-	issues, err := provider.SearchIssues(SearchInput{})
+	issues, err := imp.Search(context.Background(), "auth", 0)
 	if err != nil {
-		t.Fatalf("SearchIssues() error = %v", err)
+		t.Fatalf("Search() error = %v", err)
 	}
 
-	if len(issues) != 2 {
-		t.Errorf("SearchIssues() returned %d issues, want 2", len(issues))
+	if len(mockHTTP.requests) == 0 {
+		t.Fatal("No requests made")
 	}
-
-	// Verify issues query was used without containsIgnoreCase filter
 	lastReq := mockHTTP.requests[len(mockHTTP.requests)-1]
 	body, _ := io.ReadAll(lastReq.Body)
-	bodyStr := string(body)
+	if !strings.Contains(string(body), "containsIgnoreCase") {
+		t.Errorf("Expected containsIgnoreCase filter in query, got: %s", string(body))
+	}
 
-	if strings.Contains(bodyStr, "containsIgnoreCase") {
-		t.Errorf("Empty query should not use title filter, got: %s", bodyStr)
+	if len(issues) != 1 {
+		t.Fatalf("Search() returned %d issues, want 1", len(issues))
+	}
+	if issues[0].ID != "ENG-123" {
+		t.Errorf("Search() returned wrong issue ID: %v", issues[0].ID)
+	}
+}
+
+func TestLinearImporter_Search_EmptyQuery_NoFilter(t *testing.T) {
+	mockHTTP := &mockHTTPClient{
+		responses: map[string]string{
+			"issues": `{"data":{"issues":{"nodes":[
+				{"id":"1","identifier":"ENG-1","title":"Issue 1"},
+				{"id":"2","identifier":"ENG-2","title":"Issue 2"}
+			]}}}`,
+		},
+	}
+
+	imp := NewLinearImporter(mockHTTP, "key", "TEAM")
+
+	issues, err := imp.Search(context.Background(), "", 0)
+	if err != nil {
+		t.Fatalf("Search() error = %v", err)
+	}
+	if len(issues) != 2 {
+		t.Errorf("Search() returned %d issues, want 2", len(issues))
+	}
+
+	lastReq := mockHTTP.requests[len(mockHTTP.requests)-1]
+	body, _ := io.ReadAll(lastReq.Body)
+	if strings.Contains(string(body), "containsIgnoreCase") {
+		t.Errorf("Empty query should not use title filter, got: %s", string(body))
 	}
 }

@@ -43,12 +43,13 @@ func (m Model) viewProjectName() string {
 
 func (m Model) viewIssueMethod() string {
 	return fmt.Sprintf(
-		"%s\n\n%s\n\n%s\n\n%s",
+		"%s\n\n%s\n%s\n\n%s\n\n%s",
 		styles.Title.Render("Monkeypuzzle Init"),
-		styles.Label.Render("Issue/feature management:"),
+		styles.Label.Render("Configure an issue import source?"),
+		styles.Subtle.Render("Issues are always stored locally as markdown. An import source (optional) lets `mp issue import` pull issues in from a tracker."),
 		renderOptions([]string{
-			"Markdown files in issues/",
-			"Linear (external issue tracker)",
+			"None (markdown only)",
+			"Linear (import source)",
 		}, m.IssueMethod),
 		styles.Subtle.Render("↑/↓ to select • enter to continue • esc to cancel"),
 	)
@@ -93,22 +94,22 @@ func (m Model) viewConfirm() string {
 	}
 
 	issueProvider := IssueProviders[m.IssueMethod]
-	issueInfo := issueProvider
+	importInfo := "none (markdown only)"
 	if issueProvider == "linear" {
 		team := m.LinearTeam.Value()
 		apiKeyInfo := "(from env var)"
 		if m.LinearAPIKey.Value() != "" {
 			apiKeyInfo = "(configured)"
 		}
-		issueInfo = fmt.Sprintf("linear (team: %s, api key: %s)", team, apiKeyInfo)
+		importInfo = fmt.Sprintf("linear (team: %s, api key: %s)", team, apiKeyInfo)
 	}
 
 	return fmt.Sprintf(
-		"%s\n\n%s\n  Project: %s\n  Issues:  %s\n  PR:      %s\n\n%s",
+		"%s\n\n%s\n  Project:       %s\n  Local store:   markdown (issues/)\n  Import source: %s\n  PR:            %s\n\n%s",
 		styles.Title.Render("Monkeypuzzle Init"),
 		styles.Label.Render("Configuration:"),
 		name,
-		issueInfo,
+		importInfo,
 		"github",
 		styles.Subtle.Render("enter to create config • esc to cancel"),
 	)

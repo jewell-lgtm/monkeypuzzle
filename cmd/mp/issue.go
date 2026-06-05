@@ -1,6 +1,7 @@
 package mp
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core/issue"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/registry"
+	"github.com/jewell-lgtm/monkeypuzzle/internal/tui/importwizard"
 	issueTUI "github.com/jewell-lgtm/monkeypuzzle/internal/tui/issue"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/tui/issuepicker"
 	"github.com/jewell-lgtm/monkeypuzzle/pkg/cli"
@@ -26,6 +28,10 @@ var (
 	flagIssueListAll      bool
 	flagIssueSearchQuery  string
 	flagIssueSearchSchema bool
+	flagIssueImportFrom   string
+	flagIssueImportID     string
+	flagIssueImportQuery  string
+	flagIssueImportSchema bool
 )
 
 var issueCmd = &cobra.Command{
@@ -84,6 +90,29 @@ Examples:
 	RunE: runIssueSearch,
 }
 
+var issueImportCmd = &cobra.Command{
+	Use:   "import",
+	Short: "Import a remote tracker issue as a local markdown issue",
+	Long: `Fetch an issue from a configured import source (linear, plane) and write
+it as a local markdown issue. Trackers are read-only one-shot import sources;
+the local store is always markdown.
+
+Modes:
+  Interactive (default): pick source (if >1), search, pick issue
+  Flags:                 --from <source> --id <id>  OR  --from <source> --query <q>
+  Stdin JSON:            echo '{"from":"linear","id":"ABC-123"}' | mp issue import
+  --schema:              Output expected JSON format
+
+Non-interactive invocations fail loudly on ambiguity: no source with multiple
+configured, or a --query matching multiple remote issues with no --id.
+
+Examples:
+  mp issue import --from linear --id ENG-123
+  mp issue import --from plane --query "auth"
+  echo '{"from":"linear","query":"login"}' | mp issue import`,
+	RunE: runIssueImport,
+}
+
 func init() {
 	issueCreateCmd.Flags().StringVar(&flagIssueTitle, "title", "", "Issue title")
 	issueCreateCmd.Flags().StringVar(&flagIssueDescription, "description", "", "Issue description")
@@ -95,9 +124,15 @@ func init() {
 	issueSearchCmd.Flags().StringVar(&flagIssueSearchQuery, "query", "", "Search query (fuzzy match)")
 	issueSearchCmd.Flags().BoolVar(&flagIssueSearchSchema, "schema", false, "Output JSON schema and exit")
 
+	issueImportCmd.Flags().StringVar(&flagIssueImportFrom, "from", "", "Import source (linear, plane)")
+	issueImportCmd.Flags().StringVar(&flagIssueImportID, "id", "", "Remote issue identifier (unique match)")
+	issueImportCmd.Flags().StringVar(&flagIssueImportQuery, "query", "", "Text search to resolve a remote issue")
+	issueImportCmd.Flags().BoolVar(&flagIssueImportSchema, "schema", false, "Output JSON schema and exit")
+
 	issueCmd.AddCommand(issueCreateCmd)
 	issueCmd.AddCommand(issueListCmd)
 	issueCmd.AddCommand(issueSearchCmd)
+	issueCmd.AddCommand(issueImportCmd)
 	rootCmd.AddCommand(issueCmd)
 }
 
@@ -420,4 +455,141 @@ func getIssueSearchInput() (issue.SearchInput, bool, error) {
 	}
 
 	return input, false, nil
+}
+
+func runIssueImport(cmd *cobra.Command, args []string) error {
+	if flagIssueImportSchema {
+		schema, err := issue.ImportSchema()
+		if err != nil {
+			return err
+		}
+		fmt.Println(string(schema))
+		return nil
+	}
+
+	wd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("failed to get working directory: %w", err)
+	}
+
+	deps := core.NewDeps(
+		adapters.NewOSFS(""),
+		adapters.NewTextOutput(os.Stderr),
+		adapters.NewOSExec(),
+		http.DefaultClient,
+		adapters.SetupCLILoading(os.Stderr),
+	)
+	handler := issue.NewHandler(deps, wd)
+	ctx := context.Background()
+
+	// Interactive mode: TTY with no flags/stdin selectors.
+	hasSelectors := flagIssueImportFrom != "" || flagIssueImportID != "" || flagIssueImportQuery != ""
+	if cli.IsTerminal() && !hasSelectors && !cli.HasStdinData() {
+		return runIssueImportInteractive(ctx, handler)
+	}
+
+	in, err := getIssueImportInput()
+	if err != nil {
+		return err
+	}
+
+	result, err := handler.Import(ctx, in)
+	if err != nil {
+		return err
+	}
+	return cli.PrintJSON(result)
+}
+
+func getIssueImportInput() (issue.ImportInput, error) {
+	switch {
+	case flagIssueImportFrom != "" || flagIssueImportID != "" || flagIssueImportQuery != "":
+		return issue.ImportInput{
+			From:  flagIssueImportFrom,
+			ID:    flagIssueImportID,
+			Query: flagIssueImportQuery,
+		}, nil
+
+	case cli.HasStdinData():
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return issue.ImportInput{}, fmt.Errorf("failed to read stdin: %w", err)
+		}
+		return issue.ParseImportJSON(data)
+
+	default:
+		return issue.ImportInput{}, fmt.Errorf("no import source/selector provided; use --from with --id or --query, pipe JSON, or run in a terminal (see --schema)")
+	}
+}
+
+func runIssueImportInteractive(ctx context.Context, handler *issue.Handler) error {
+	// Step 1: resolve the import source (pick if >1 configured).
+	sources, err := handler.ConfiguredImportSources()
+	if err != nil {
+		return err
+	}
+	if len(sources) == 0 {
+		return fmt.Errorf("no import source configured; run `mp init` and configure linear or plane")
+	}
+
+	src := sources[0]
+	if len(sources) > 1 {
+		labels := make([]string, len(sources))
+		for i, s := range sources {
+			labels[i] = s.Name
+		}
+		picker := importwizard.NewListPicker("Choose import source", labels)
+		m, perr := tea.NewProgram(picker).Run()
+		if perr != nil {
+			return perr
+		}
+		final := m.(importwizard.ListPicker)
+		if final.Cancelled {
+			return fmt.Errorf("cancelled")
+		}
+		src = sources[final.Chosen]
+	}
+
+	// Step 2: prompt for a search query.
+	qp := importwizard.NewQueryPrompt("Import from " + src.Name)
+	qm, err := tea.NewProgram(qp).Run()
+	if err != nil {
+		return err
+	}
+	finalQP := qm.(importwizard.QueryPrompt)
+	if finalQP.Cancelled {
+		return fmt.Errorf("cancelled")
+	}
+
+	// Step 3: search and pick a remote issue.
+	results, err := handler.SearchRemote(ctx, src, finalQP.Query, issue.DefaultSearchLimit)
+	if err != nil {
+		return err
+	}
+	if len(results) == 0 {
+		return fmt.Errorf("no %s issues matched query %q", src.Name, finalQP.Query)
+	}
+
+	labels := make([]string, len(results))
+	for i, r := range results {
+		if r.Title != "" {
+			labels[i] = fmt.Sprintf("%s — %s", r.ID, r.Title)
+		} else {
+			labels[i] = r.ID
+		}
+	}
+	picker := importwizard.NewListPicker("Choose issue to import", labels)
+	pm, err := tea.NewProgram(picker).Run()
+	if err != nil {
+		return err
+	}
+	finalPicker := pm.(importwizard.ListPicker)
+	if finalPicker.Cancelled {
+		return fmt.Errorf("cancelled")
+	}
+
+	result, err := handler.WriteImported(results[finalPicker.Chosen])
+	if err != nil {
+		return err
+	}
+	return cli.PrintJSON(result)
 }
