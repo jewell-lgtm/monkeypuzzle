@@ -410,6 +410,27 @@ func TestGit_WorktreeRemoveForce_SubmoduleFallback(t *testing.T) {
 	}
 }
 
+func TestGit_WorktreeRemoveForce_FallsBackOnAnyError(t *testing.T) {
+	// --force means "always win": even a non-submodule refusal (e.g. a locked
+	// worktree) must fall back to manual removal.
+	worktreePath := makeWorktreeDir(t)
+	exec := NewMockExec()
+	exec.AddResponse("git", []string{"worktree", "remove", "--force", worktreePath},
+		[]byte("fatal: '"+worktreePath+"' is locked"), MockError("exit status 128"))
+	exec.AddResponse("git", []string{"worktree", "prune"}, []byte(""), nil)
+
+	git := NewGit(exec)
+	if err := git.WorktreeRemoveForce(context.Background(), "/repo", worktreePath); err != nil {
+		t.Fatalf("WorktreeRemoveForce() unexpected error = %v", err)
+	}
+	if _, err := os.Stat(worktreePath); !os.IsNotExist(err) {
+		t.Errorf("expected worktree dir to be removed, stat err = %v", err)
+	}
+	if !exec.WasCalled("git", "worktree", "prune") {
+		t.Error("expected git worktree prune to be called")
+	}
+}
+
 func TestGit_WorktreeRemove_SurfacesGitDetail(t *testing.T) {
 	worktreePath := makeWorktreeDir(t)
 	exec := NewMockExec()

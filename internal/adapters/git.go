@@ -176,18 +176,15 @@ func (g *Git) WorktreeRemove(ctx context.Context, repoRoot, worktreePath string)
 	return fmt.Errorf("failed to remove worktree at %s from repo %s: %s: %w", worktreePath, repoRoot, gitErrDetail(output), err)
 }
 
-// WorktreeRemoveForce removes a git worktree, discarding uncommitted changes
+// WorktreeRemoveForce removes a git worktree, discarding uncommitted changes.
+// Force means "always win": if git refuses for any reason — submodules, a
+// locked worktree, or anything else — fall back to deleting the directory
+// directly and pruning the stale admin record.
 func (g *Git) WorktreeRemoveForce(ctx context.Context, repoRoot, worktreePath string) error {
-	output, err := g.exec.RunWithDir(ctx, repoRoot, "git", "worktree", "remove", "--force", worktreePath)
-	if err == nil {
+	if _, err := g.exec.RunWithDir(ctx, repoRoot, "git", "worktree", "remove", "--force", worktreePath); err == nil {
 		return nil
 	}
-	// git refuses to remove worktrees containing submodules regardless of
-	// --force; fall back to manual removal since force means discard changes.
-	if isSubmoduleWorktreeError(output) {
-		return g.removeWorktreeManually(ctx, repoRoot, worktreePath)
-	}
-	return fmt.Errorf("failed to force remove worktree at %s from repo %s: %s: %w", worktreePath, repoRoot, gitErrDetail(output), err)
+	return g.removeWorktreeManually(ctx, repoRoot, worktreePath)
 }
 
 // WorktreePrune removes worktree administrative records whose directories no
