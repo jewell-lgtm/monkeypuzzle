@@ -76,7 +76,7 @@ func (m Model) View() string {
 			cursor = styles.Cursor.Render("→ ")
 			label = styles.Selected.Render(label)
 		}
-		b.WriteString(fmt.Sprintf("%s%s\n", cursor, label))
+		fmt.Fprintf(&b, "%s%s\n", cursor, label)
 		if i == m.Selected && opt.Desc != "" {
 			b.WriteString("    ")
 			b.WriteString(styles.Subtle.Render(opt.Desc))

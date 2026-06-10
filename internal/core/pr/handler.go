@@ -155,12 +155,7 @@ func (h *Handler) CreatePR(ctx context.Context, workDir string, input Input) (*P
 		Content: "Creating PR...",
 	})
 
-	prResult, err := provider.Create(ctx, workDir, CreateInput{
-		Title: input.Title,
-		Body:  input.Body,
-		Base:  input.Base,
-		Draft: input.Draft,
-	})
+	prResult, err := provider.Create(ctx, workDir, CreateInput(input))
 	if err != nil {
 		return nil, err
 	}
