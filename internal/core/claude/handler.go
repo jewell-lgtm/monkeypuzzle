@@ -104,6 +104,19 @@ echo '{"force":true}' | mp cleanup
 echo '{"force":true,"delete_branch":true}' | mp abandon
 ` + "```" + `
 
+## Stacks (git-town-style stacked branches)
+
+` + "```bash" + `
+mp stack status                      # tree + PR state + drift vs the forge
+mp stack sync                        # propagate main + parents down the stack (snapshots first)
+mp stack sync --strategy rebase --push
+mp stack append --name <child>       # new piece on top of the current one
+mp stack prepend --name <between>    # insert between current piece and its parent
+mp stack set-parent --parent <piece|main>  # re-parent the current piece; sync restacks
+mp stack continue                    # resume after resolving a rebase conflict
+mp stack undo                        # restore every branch to the pre-sync snapshot
+` + "```" + `
+
 ## PRs / MRs (forge-agnostic via configured pr_provider)
 
 ` + "```bash" + `

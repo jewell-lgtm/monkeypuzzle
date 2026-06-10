@@ -8,7 +8,10 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
@@ -20,7 +23,15 @@ jobs:
         run: go build -o mp .
 
       - name: Test
-        run: go test ./...
+        run: go test -race ./...
+
+      - name: Integration tests
+        run: go test -race -tags=integration ./...
+        env:
+          GIT_AUTHOR_NAME: ci
+          GIT_AUTHOR_EMAIL: ci@example.com
+          GIT_COMMITTER_NAME: ci
+          GIT_COMMITTER_EMAIL: ci@example.com
 
       - name: Vet
         run: go vet ./...
@@ -34,6 +45,6 @@ jobs:
         with:
           go-version: "1.24"
 
-      - uses: golangci/golangci-lint-action@v6
+      - uses: golangci/golangci-lint-action@v8
         with:
           version: latest
