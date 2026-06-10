@@ -176,17 +176,19 @@ func init() {
 }
 
 // newPieceHandler creates a piece handler with multiplexer based on user config.
+// Config problems degrade to the noop multiplexer with a warning on stderr —
+// piece commands must keep working even with a broken user config.
 func newPieceHandler(deps core.Deps) *piececmd.Handler {
 	userCfg, err := config.LoadUserConfig()
 	if err != nil {
-		// Fall back to noop on config error
-		return newPieceHandler(deps)
+		fmt.Fprintf(os.Stderr, "warning: ignoring user config: %v\n", err)
+		return piececmd.NewHandlerWithMultiplexer(deps, adapters.NewNoopMultiplexer())
 	}
 
 	mux, err := adapters.NewMultiplexer(userCfg.Multiplexer, deps.Exec)
 	if err != nil {
-		// Fall back to noop on unknown provider
-		return newPieceHandler(deps)
+		fmt.Fprintf(os.Stderr, "warning: %v; session management disabled\n", err)
+		return piececmd.NewHandlerWithMultiplexer(deps, adapters.NewNoopMultiplexer())
 	}
 
 	return piececmd.NewHandlerWithMultiplexer(deps, mux)
