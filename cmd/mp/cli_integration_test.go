@@ -749,3 +749,22 @@ func (e *testEnv) initLinearProject(name string) {
 	}
 }
 
+
+// TestCLI_Version ensures `mp --version` reports a non-empty version so beta
+// users can verify installs and report versions in bugs.
+func TestCLI_Version(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	stdout, _, err := env.run("--version")
+	if err != nil {
+		t.Fatalf("--version failed: %v", err)
+	}
+	out := strings.TrimSpace(stdout)
+	if out == "" {
+		t.Fatal("--version printed nothing")
+	}
+	if !strings.Contains(out, "mp") {
+		t.Errorf("expected version output to mention mp, got %q", out)
+	}
+}
