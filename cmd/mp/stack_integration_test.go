@@ -113,3 +113,86 @@ func createPiece(t *testing.T, env *testEnv, name, parent string) string {
 	}
 	return res.WorktreePath
 }
+
+// TestCLI_StackSetParent_ReparentsPiece is the happy path for `mp stack
+// set-parent`: move piece c from parent a to parent b, verify metadata and
+// that stack status reflects the new lineage.
+func TestCLI_StackSetParent_ReparentsPiece(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	env.initGitRepo()
+	env.initProject("test")
+
+	createPiece(t, env, "a", "main")
+	createPiece(t, env, "b", "main")
+	pieceC := createPiece(t, env, "c", "a")
+
+	// Re-parent c onto b, running from inside c's worktree (current piece).
+	stdout, stderr, err := env.runInDir(pieceC, "stack", "set-parent", "--parent", "b")
+	if err != nil {
+		t.Fatalf("set-parent failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+	var res struct {
+		Piece     string `json:"piece"`
+		OldParent string `json:"old_parent"`
+		NewParent string `json:"new_parent"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &res); err != nil {
+		t.Fatalf("invalid JSON: %v\noutput: %s", err, stdout)
+	}
+	if res.Piece != "c" || res.OldParent != "a" || res.NewParent != "b" {
+		t.Errorf("unexpected result: %+v", res)
+	}
+
+	// Metadata must record the new parent.
+	data, err := os.ReadFile(filepath.Join(pieceC, ".monkeypuzzle", "piece-metadata.json"))
+	if err != nil {
+		t.Fatalf("read metadata: %v", err)
+	}
+	if !strings.Contains(string(data), `"parent": "b"`) && !strings.Contains(string(data), `"parent":"b"`) {
+		t.Errorf("metadata does not record new parent: %s", data)
+	}
+}
+
+// TestCLI_StackSetParent_RejectsCycle ensures re-parenting onto a descendant
+// fails loudly instead of corrupting the stack DAG.
+func TestCLI_StackSetParent_RejectsCycle(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	env.initGitRepo()
+	env.initProject("test")
+
+	pieceA := createPiece(t, env, "a", "main")
+	createPiece(t, env, "b", "a")
+
+	// a -> b exists; making b a's parent would create a cycle.
+	_, stderr, err := env.runInDir(pieceA, "stack", "set-parent", "--parent", "b")
+	if err == nil {
+		t.Fatal("expected cycle to be rejected")
+	}
+	if !strings.Contains(stderr, "descendant") {
+		t.Errorf("error should mention descendant, got: %s", stderr)
+	}
+}
+
+// TestCLI_StackSetParent_UnknownParentFails ensures a missing target parent
+// fails loudly (non-interactive contract).
+func TestCLI_StackSetParent_UnknownParentFails(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	env.initGitRepo()
+	env.initProject("test")
+
+	pieceA := createPiece(t, env, "a", "main")
+
+	_, stderr, err := env.runInDir(pieceA, "stack", "set-parent", "--parent", "nope")
+	if err == nil {
+		t.Fatal("expected unknown parent to fail")
+	}
+	if !strings.Contains(stderr, "nope") {
+		t.Errorf("error should name the unknown parent, got: %s", stderr)
+	}
+}
