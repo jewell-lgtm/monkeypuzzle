@@ -113,7 +113,7 @@ func (g *GitHub) Push(ctx context.Context, workDir string) error {
 func (g *GitHub) MarkPRReady(ctx context.Context, workDir string, prNumber int) error {
 	_, err := g.exec.RunWithDir(ctx, workDir, "gh", "pr", "ready", fmt.Sprintf("%d", prNumber))
 	if err != nil {
-		return fmt.Errorf("failed to mark PR ready: %w", err)
+		return fmt.Errorf("failed to mark PR ready: %w%s", err, cliHint("gh", ghInstallHint))
 	}
 	return nil
 }
@@ -122,7 +122,7 @@ func (g *GitHub) MarkPRReady(ctx context.Context, workDir string, prNumber int) 
 func (g *GitHub) GetPRStatus(ctx context.Context, workDir string, prNumber int) (string, error) {
 	output, err := g.exec.RunWithDir(ctx, workDir, "gh", "pr", "view", fmt.Sprintf("%d", prNumber), "--json", "state", "--jq", ".state")
 	if err != nil {
-		return "", fmt.Errorf("failed to get PR status: %w", err)
+		return "", fmt.Errorf("failed to get PR status: %w%s", err, cliHint("gh", ghInstallHint))
 	}
 	return strings.TrimSpace(string(output)), nil
 }
@@ -131,7 +131,7 @@ func (g *GitHub) GetPRStatus(ctx context.Context, workDir string, prNumber int) 
 func (g *GitHub) IsPRMerged(ctx context.Context, workDir string, prNumber int) (bool, error) {
 	output, err := g.exec.RunWithDir(ctx, workDir, "gh", "pr", "view", fmt.Sprintf("%d", prNumber), "--json", "mergedAt")
 	if err != nil {
-		return false, fmt.Errorf("failed to get PR merge status: %w", err)
+		return false, fmt.Errorf("failed to get PR merge status: %w%s", err, cliHint("gh", ghInstallHint))
 	}
 
 	var result struct {
