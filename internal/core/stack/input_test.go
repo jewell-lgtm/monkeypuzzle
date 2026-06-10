@@ -82,3 +82,24 @@ func TestValidateAppendInput(t *testing.T) {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
+
+func TestValidateSetParentInput(t *testing.T) {
+	tests := []struct {
+		name    string
+		in      SetParentInput
+		wantErr bool
+	}{
+		{"parent required", SetParentInput{}, true},
+		{"whitespace parent rejected", SetParentInput{Parent: "  "}, true},
+		{"parent only ok (defaults to current piece)", SetParentInput{Parent: "main"}, false},
+		{"piece and parent ok", SetParentInput{Piece: "a", Parent: "b"}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateSetParentInput(tt.in)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateSetParentInput(%+v) error = %v, wantErr %v", tt.in, err, tt.wantErr)
+			}
+		})
+	}
+}
