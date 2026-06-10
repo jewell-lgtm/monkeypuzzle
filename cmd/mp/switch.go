@@ -269,7 +269,11 @@ func tempChdir(dir string) (func(), error) {
 	if err := os.Chdir(dir); err != nil {
 		return nil, fmt.Errorf("failed to chdir to %s: %w", dir, err)
 	}
-	return func() { _ = os.Chdir(prev) }, nil
+	return func() {
+		if err := os.Chdir(prev); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to restore working directory to %s: %v\n", prev, err)
+		}
+	}, nil
 }
 
 func getSwitchAllInput() (switchAllInput, bool, error) {
