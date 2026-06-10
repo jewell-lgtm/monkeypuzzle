@@ -525,3 +525,23 @@ func (g *Git) RebaseContinue(ctx context.Context, workDir string) error {
 	}
 	return nil
 }
+
+// ResetHard resets the worktree to the given commit, discarding local changes.
+// Callers are responsible for checking IsClean first when work could be lost.
+func (g *Git) ResetHard(ctx context.Context, workDir, commit string) error {
+	output, err := g.exec.RunWithDir(ctx, workDir, "git", "reset", "--hard", commit)
+	if err != nil {
+		return fmt.Errorf("failed to reset to %s: %s", commit, strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
+// HasTrackedChanges reports whether tracked files have uncommitted changes.
+// Untracked files are ignored — they survive `git reset --hard` unharmed.
+func (g *Git) HasTrackedChanges(ctx context.Context, workDir string) (bool, error) {
+	output, err := g.exec.RunWithDir(ctx, workDir, "git", "status", "--porcelain", "--untracked-files=no")
+	if err != nil {
+		return false, fmt.Errorf("failed to check git status: %w", err)
+	}
+	return strings.TrimSpace(string(output)) != "", nil
+}
