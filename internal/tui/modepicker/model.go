@@ -78,7 +78,7 @@ func (m Model) View() string {
 		if i == m.Selected {
 			name = styles.Selected.Render(name)
 		}
-		b.WriteString(fmt.Sprintf("%s%s\n", cursor, name))
+		fmt.Fprintf(&b, "%s%s\n", cursor, name)
 	}
 
 	b.WriteString("\n")

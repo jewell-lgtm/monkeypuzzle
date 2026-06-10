@@ -178,14 +178,14 @@ func (p *PlaneProvider) do(method, path string, body interface{}) ([]byte, error
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("Plane API %s %s returned status %d: %s", method, path, resp.StatusCode, string(respBody))
+		return nil, fmt.Errorf("plane API %s %s returned status %d: %s", method, path, resp.StatusCode, string(respBody))
 	}
 	return respBody, nil
 }

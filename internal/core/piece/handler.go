@@ -485,28 +485,6 @@ func (h *Handler) CreatePieceFromPrompt(ctx context.Context, name, prompt string
 	return info, nil
 }
 
-// cleanupPiece removes a partially created piece (worktree and session).
-// Errors during cleanup are logged as warnings but not returned.
-func (h *Handler) cleanupPiece(ctx context.Context, repoRoot, worktreePath, sessionName string, _ bool) {
-	// Kill session if it exists
-	if h.mux.Exists(ctx, sessionName) {
-		if err := h.mux.Kill(ctx, sessionName); err != nil {
-			h.deps.Output.Write(core.Message{
-				Type:    core.MsgWarning,
-				Content: fmt.Sprintf("Failed to cleanup session: %v", err),
-			})
-		}
-	}
-
-	// Remove worktree
-	if err := h.git.WorktreeRemove(ctx, repoRoot, worktreePath); err != nil {
-		h.deps.Output.Write(core.Message{
-			Type:    core.MsgWarning,
-			Content: fmt.Sprintf("Failed to cleanup worktree: %v", err),
-		})
-	}
-}
-
 // Status detects if we're currently in a piece worktree or main repo
 func (h *Handler) Status(ctx context.Context, workDir string) (PieceStatus, error) {
 	gitDir, err := h.git.RevParseGitDir(ctx, workDir)
