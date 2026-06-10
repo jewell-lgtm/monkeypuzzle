@@ -1,150 +1,131 @@
 ---
 name: managing-monkeypuzzle
-description: Manages development workflow with mp CLI. Creates pieces (git worktrees), tracks issues, creates PRs. Use when working with .monkeypuzzle projects, mp commands, or piece-based development.
+description: Drives the mp CLI — worktree-per-piece git-flow with issue-aware hooks. Use when working in a .monkeypuzzle project: create pieces, switch between them, open draft PRs/MRs, flip them ready, merge and clean up.
 ---
 
 # mp CLI
 
-All commands support JSON stdin (`echo '{...}' | mp <cmd>`) with JSON output to stdout. Use `mp <cmd> --schema` for input schema.
+All commands accept JSON stdin (`echo '{...}' | mp <cmd>`) and emit JSON to stdout.
+Use `mp <cmd> --schema` to see the expected input shape.
 
-## Issues
-
-```bash
-# List issues (all or filtered by status)
-echo '{}' | mp issue list
-echo '{"status":["todo"]}' | mp issue list
-echo '{"status":["todo","in-progress"]}' | mp issue list
-
-# Create issue
-echo '{"title":"Feature X","description":"Details..."}' | mp issue create
-
-# Search issues (fuzzy match)
-echo '{"query":"auth","status":["todo"]}' | mp issue search
-```
-
-## Pieces (worktrees)
+## Pieces (worktree + tmux session)
 
 ```bash
-# Show current piece status
+# Show current piece status (no piece = main repo)
 mp status
 
-# List all pieces (tree view or flat)
+# Create a new piece, optionally linked to a tracker issue
+mp create --issue <id-or-path> --skip-switch
+echo '{"name":"my-feature","skip_switch":true}' | mp create
+
+# Tree or flat list of pieces (--all = across registered projects)
 mp list
 echo '{"flat":true}' | mp list
 
-# Create new piece from issue (via --issue flag)
-mp create --issue issues/feat.md --skip-switch
+# Switch to a piece (uses tmux switch-client if you're in tmux)
+echo '{"name":"my-feature"}' | mp switch
 
-# Create new piece by name
-echo '{"name":"my-feature","skip_switch":true}' | mp create
-
-# Create piece from a prompt (name auto-generated from the prompt)
-mp create --prompt "add dark mode"
-
-# Create stacked piece (child of another piece)
-echo '{"name":"child-feat","parent":"parent-piece"}' | mp create
-
-# Update piece with latest from main
+# Sync piece with main
 echo '{}' | mp update
-echo '{"main_branch":"develop"}' | mp update
 
-# Merge piece back to main (requires no unmerged children)
+# Merge piece back to main
 echo '{}' | mp merge
-echo '{"force":true}' | mp merge  # force even with children
 
-# Create PR for current piece
-echo '{}' | mp pr create
-echo '{"title":"Add X","body":"Description"}' | mp pr create
+# Bring an existing branch into mp's worktree management
+echo '{}' | mp adopt
+echo '{"name":"custom","parent":"main"}' | mp adopt
 
-# Cleanup after merge
+# After merge: clean up worktree + tmux session
 echo '{}' | mp done
 
-# Cleanup all merged pieces
-echo '{"force":true}' | mp cleanup
+# Sweep all merged pieces
 echo '{"dry_run":true}' | mp cleanup
+echo '{"force":true}' | mp cleanup
 
-# Abandon unmerged piece
-echo '{"force":true}' | mp abandon
-echo '{"name":"piece-name","delete_branch":true}' | mp abandon
-
-# Flatten: remove ALL piece worktrees (regardless of merge status)
-echo '{"force":true}' | mp flatten
-echo '{"force":true,"delete_branches":true}' | mp flatten
-echo '{"dry_run":true}' | mp flatten   # preview only
-
-# Convert existing branch to piece
-echo '{}' | mp adopt
-echo '{"name":"custom-name","parent":"main"}' | mp adopt
-
-# Cross-project picker: pieces + open todo issues + unadopted branches.
-# Selecting an issue creates a piece from it; selecting a branch adopts it.
-mp switch --project app --piece my-feature                           # attach existing piece
-mp switch --project app --issue issues/foo.md                        # create + attach
-mp switch --project app --branch spike-feature                       # adopt + attach
-echo '{"project":"app","issue":"issues/foo.md"}' | mp switch
-echo '{"project":"app","branch":"spike-feature"}' | mp switch
+# Discard an unmerged piece
+echo '{"force":true,"delete_branch":true}' | mp abandon
 ```
 
-## Stacks (git-town-style whole-stack ops)
-
-Pieces stacked via `--parent` form a stack. `mp stack` operates over the whole
-stack. All operations are non-interactive: anything risky aborts cleanly and
-prints plain-English next steps (e.g. which PR base to change on GitHub).
+## Stacks (git-town-style stacked branches)
 
 ```bash
-# Show the stack tree, PR state, and drift vs the GitHub PR list
-mp stack status
-
-# Propagate main and each parent down through the stack
-mp stack sync
-mp stack sync --strategy rebase   # rebase instead of merge
-
-# Resume a conflicted rebase started by 'mp stack sync --strategy rebase'
-mp stack continue
-
-# Create a new piece as a child of the current piece
-mp stack append --name child-feat
-
-# Insert a new piece between the current piece and its parent
-mp stack prepend --name base-feat
+mp stack status                      # tree + PR state + drift vs the forge
+mp stack sync                        # propagate main + parents down the stack (snapshots first)
+mp stack sync --strategy rebase --push
+mp stack append --name <child>       # new piece on top of the current one
+mp stack prepend --name <between>    # insert between current piece and its parent
+mp stack set-parent --parent <piece|main>  # re-parent the current piece; sync restacks
+mp stack continue                    # resume after resolving a rebase conflict
+mp stack undo                        # restore every branch to the pre-sync snapshot
 ```
 
-## Projects & Dashboard
-
-A "project" is any git repo initialised with `mp init`. Registering projects lets
-mp list pieces and issues across all of them and jump between their sessions.
+## PRs / MRs (forge-agnostic via configured pr_provider)
 
 ```bash
-# Register / list / unregister projects (current dir by default)
-mp project add
-mp project list
-mp project remove <name>
+# Open a PR/MR for the current piece
+echo '{}' | mp pr create
+echo '{"draft":true,"title":"WIP: ..."}' | mp pr create
 
-# Cross-project dashboard of projects + piece worktrees (bare 'mp' is the same)
-mp dash
-mp dash --json
+# Flip a draft to ready-for-review (always a separate step — never auto)
+mp pr ready
 ```
+
+Draft creation fires `before-pr-create.sh` / `after-pr-create.sh`.
+Ready-flip fires `before-pr-ready.sh` / `after-pr-ready.sh`.
+Both pass `MP_PR_NUMBER`, `MP_PR_URL`, `MP_PR_BASE_BRANCH` and (if linked) `MP_ISSUE_ID`, `MP_ISSUE_NUMBER` in env.
+
+## Issues — resolution only
+
+mp does not list / search / create issues — the tracker's own CLI (`glab issue`, `linear`, `plane`, your editor) does that. mp only resolves an opaque id when you pass `--issue <id>` to `mp create`.
+
+| Provider | What `--issue` accepts |
+| --- | --- |
+| markdown | path to the file (e.g. `issues/feat.md`) |
+| linear | identifier (e.g. `ABC-123`) or UUID |
+| plane | UUID |
+| gitlab | iid (e.g. `1845`) |
+
+## Hooks
+
+Drop executable scripts in `.monkeypuzzle/hooks/`:
+
+| Hook | Fires | Env beyond piece basics |
+| --- | --- | --- |
+| `on-piece-create.sh` | after worktree+session ready | `MP_ISSUE_ID`, `MP_ISSUE_NUMBER`, `MP_SESSION_NAME` |
+| `before-piece-update.sh` / `after-piece-update.sh` | around `mp update` | `MP_MAIN_BRANCH` |
+| `before-piece-merge.sh` / `after-piece-merge.sh` | around `mp merge` | `MP_MAIN_BRANCH` |
+| `before-pr-create.sh` / `after-pr-create.sh` | around `mp pr create` | `MP_PR_NUMBER`, `MP_PR_URL`, `MP_PR_BASE_BRANCH`, `MP_ISSUE_ID`, `MP_ISSUE_NUMBER` |
+| `before-pr-ready.sh` / `after-pr-ready.sh` | around `mp pr ready` | same as PR create |
+| `is-piece-done.sh` | consulted first by `IsBranchMerged` | exit 0 = merged |
+
+Piece basics always set: `MP_PIECE_NAME`, `MP_WORKTREE_PATH`, `MP_REPO_ROOT`.
+
+Non-zero exit aborts the calling operation, except for `after-*` hooks which warn but don't fail (the side-effect already happened).
 
 ## Init & Config
 
 ```bash
-# Init monkeypuzzle in repo
+# One-time per repo
 echo '{"name":"project","issue_provider":"markdown","pr_provider":"github"}' | mp init
+# pr_provider: github | gitlab
+# issue_provider: markdown | linear | plane | gitlab
 
-# Config (uses args, not JSON stdin)
+# User-level multiplexer choice (uses args, not stdin)
 mp config get multiplexer
-mp config set multiplexer tmux  # tmux or none
+mp config set multiplexer tmux   # tmux or none
 
 # Relocate the .monkeypuzzle state dir (e.g. into a gitignored path)
 mp move .DONOTCOMMIT/monkeypuzzle
 mp move .monkeypuzzle                # move back to the default
 ```
 
-## Workflow
+## Typical flow
 
-1. `mp issue create` or find existing issue
-2. `mp create --issue issues/foo.md` creates worktree
-3. Work in worktree, commit changes
-4. For dependent work, stack with `mp stack append` and keep it in sync via `mp stack sync`
-5. `mp pr create` pushes and creates PR
-6. After PR merged: `mp done` or `mp cleanup`
+1. `mp create --issue <id>` — worktree + session + on-piece-create hook
+2. Work in the worktree, commit normally
+3. `mp pr create --draft` — push, open draft PR/MR, fires pr-create hooks
+4. Human reviews
+5. `mp pr ready` — flip to ready (separate command, never auto), fires pr-ready hooks
+6. After merge: `mp done` or `mp cleanup`
+
+Draft → ready is always a manual step. Don't call `mp pr ready` unless the human has approved the flip.

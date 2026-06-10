@@ -17,17 +17,17 @@ Complete workflow for implementing an issue from start to PR.
 ### 1. Select and Start Issue
 
 ```bash
-# List available issues
-mp issue list --status todo
+# Pick an issue file (issues are plain markdown in issues/; author them directly)
+ls issues/
 
 # Create piece from issue (get worktree path)
-mp create --issue <issue-path> --skip-switch
+mp create --issue issues/<file>.md --skip-switch
 
 # Navigate to worktree
 cd <worktree-path>
 ```
 
-The issue status automatically updates to `in-progress`.
+mp does not track issue status; hooks handle any tracker transitions.
 
 ### 2. Read and Understand Issue
 
@@ -138,7 +138,7 @@ Issue status automatically updates to `done`.
 
 ```bash
 # Full workflow
-mp issue list --status todo                           # Find issue
+ls issues/                                            # Find issue (plain markdown files)
 mp create --issue issues/foo.md --skip-switch      # Start work
 cd $(cat /dev/stdin | jq -r .worktree_path)           # Enter worktree
 
