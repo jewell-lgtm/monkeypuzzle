@@ -86,9 +86,9 @@ func TestPieceListAll(t *testing.T) {
 	repoA := projectTestRepo(t, e, dataDir, reposDir, "alpha")
 	_ = projectTestRepo(t, e, dataDir, reposDir, "bravo")
 
-	mpRun(t, e, repoA, dataDir, "piece", "create", "--name", "feature-x", "--skip-switch")
+	mpRun(t, e, repoA, dataDir, "create", "--name", "feature-x", "--skip-switch")
 
-	out, _ := mpJSON(t, e, e.tmpDir, dataDir, "piece", "list", "--all")
+	out, _ := mpJSON(t, e, e.tmpDir, dataDir, "list", "--all")
 	var pieceResult struct {
 		Projects []struct {
 			Name   string `json:"name"`

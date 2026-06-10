@@ -27,7 +27,7 @@ func TestSwitchUnified_FromIssue_CreatesPieceAndAttaches(t *testing.T) {
 	gitCmd(t, repo, "commit", "-m", "chore: claude")
 
 	// Seed an issue in alpha.
-	mpRun(t, e, repo, dataDir, "issue", "create", "--title", "Wire the picker")
+	writeIssueFile(t, repo, "wire-the-picker.md", "Wire the picker")
 
 	// Switch by issue path (markdown provider).
 	cmd := exec.Command(e.binPath,
@@ -152,7 +152,7 @@ func TestSwitchUnified_DashJSON_IncludesIssuesAndBranches(t *testing.T) {
 	gitCmd(t, repo, "add", ".claude")
 	gitCmd(t, repo, "commit", "-m", "chore: claude")
 
-	mpRun(t, e, repo, dataDir, "issue", "create", "--title", "Open issue one")
+	writeIssueFile(t, repo, "open-issue-one.md", "Open issue one")
 	gitCmd(t, repo, "branch", "spike-branch", "main")
 
 	out, _ := mpJSON(t, e, e.tmpDir, dataDir, "go", "--json")
@@ -404,5 +404,19 @@ func TestSwitchUnified_MutuallyExclusiveSelectors(t *testing.T) {
 	}
 	if !strings.Contains(string(out), "mutually exclusive") {
 		t.Errorf("expected 'mutually exclusive' in error, got: %s", out)
+	}
+}
+
+// writeIssueFile seeds a local markdown issue directly — `mp issue create` no
+// longer exists; issue authoring is the user's job.
+func writeIssueFile(t *testing.T, repo, filename, title string) {
+	t.Helper()
+	issuesDir := filepath.Join(repo, "issues")
+	if err := os.MkdirAll(issuesDir, 0755); err != nil {
+		t.Fatalf("failed to create issues dir: %v", err)
+	}
+	content := "---\ntitle: " + title + "\n---\n\n# " + title + "\n"
+	if err := os.WriteFile(filepath.Join(issuesDir, filename), []byte(content), 0644); err != nil {
+		t.Fatalf("failed to write issue: %v", err)
 	}
 }

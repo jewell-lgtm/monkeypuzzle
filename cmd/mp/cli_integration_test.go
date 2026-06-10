@@ -270,7 +270,7 @@ func TestCLI_PieceCreate(t *testing.T) {
 	env.initProject("test")
 	env.createIssue("add-feature.md", "Add Feature", "todo")
 
-	stdout, stderr, err := env.run("piece", "create", "--issue", "issues/add-feature.md", "--skip-switch")
+	stdout, stderr, err := env.run("create", "--issue", "issues/add-feature.md", "--skip-switch")
 	if err != nil {
 		t.Fatalf("piece create failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
 	}
@@ -656,10 +656,10 @@ func TestCLI_ConfigGet(t *testing.T) {
 	env := setupTestEnv(t)
 	defer env.cleanup()
 
-	// Use temp dir for XDG_CONFIG_HOME to isolate config
+	// Use temp dir for MP_CONFIG_DIR to isolate config
 	configHome := filepath.Join(env.tmpDir, "config")
 
-	stdout, stderr, err := env.runWithEnv(map[string]string{"XDG_CONFIG_HOME": configHome}, "config", "get", "multiplexer")
+	stdout, stderr, err := env.runWithEnv(map[string]string{"MP_CONFIG_DIR": configHome}, "config", "get", "multiplexer")
 	if err != nil {
 		t.Fatalf("config get failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
 	}
@@ -683,7 +683,7 @@ func TestCLI_ConfigSet(t *testing.T) {
 	configHome := filepath.Join(env.tmpDir, "config")
 
 	// Set multiplexer to tmux
-	stdout, stderr, err := env.runWithEnv(map[string]string{"XDG_CONFIG_HOME": configHome}, "config", "set", "multiplexer", "tmux")
+	stdout, stderr, err := env.runWithEnv(map[string]string{"MP_CONFIG_DIR": configHome}, "config", "set", "multiplexer", "tmux")
 	if err != nil {
 		t.Fatalf("config set failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
 	}
@@ -698,7 +698,7 @@ func TestCLI_ConfigSet(t *testing.T) {
 	}
 
 	// Verify get returns new value
-	stdout, stderr, err = env.runWithEnv(map[string]string{"XDG_CONFIG_HOME": configHome}, "config", "get", "multiplexer")
+	stdout, stderr, err = env.runWithEnv(map[string]string{"MP_CONFIG_DIR": configHome}, "config", "get", "multiplexer")
 	if err != nil {
 		t.Fatalf("config get after set failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
 	}
@@ -719,7 +719,7 @@ func TestCLI_ConfigSet_InvalidKey(t *testing.T) {
 
 	configHome := filepath.Join(env.tmpDir, "config")
 
-	_, _, err := env.runWithEnv(map[string]string{"XDG_CONFIG_HOME": configHome}, "config", "set", "unknown_key", "value")
+	_, _, err := env.runWithEnv(map[string]string{"MP_CONFIG_DIR": configHome}, "config", "set", "unknown_key", "value")
 	if err == nil {
 		t.Error("expected error for unknown key, got nil")
 	}
@@ -732,7 +732,7 @@ func TestCLI_ConfigSet_InvalidValue(t *testing.T) {
 
 	configHome := filepath.Join(env.tmpDir, "config")
 
-	_, _, err := env.runWithEnv(map[string]string{"XDG_CONFIG_HOME": configHome}, "config", "set", "multiplexer", "invalid")
+	_, _, err := env.runWithEnv(map[string]string{"MP_CONFIG_DIR": configHome}, "config", "set", "multiplexer", "invalid")
 	if err == nil {
 		t.Error("expected error for invalid multiplexer value, got nil")
 	}
@@ -749,94 +749,3 @@ func (e *testEnv) initLinearProject(name string) {
 	}
 }
 
-// TestCLI_IssueCreate_LinearConfig_WritesLocalMarkdown is AC1: with a config
-// whose issue_provider is linear, issue create still writes a local markdown
-// file under issues/.
-func TestCLI_IssueCreate_LinearConfig_WritesLocalMarkdown(t *testing.T) {
-	env := setupTestEnv(t)
-	defer env.cleanup()
-
-	env.initLinearProject("test")
-
-	stdout, stderr, err := env.runWithStdin(`{"title":"Local Under Linear"}`, "issue", "create")
-	if err != nil {
-		t.Fatalf("issue create failed: %v\nstderr: %s", err, stderr)
-	}
-
-	var result map[string]any
-	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
-		t.Fatalf("invalid JSON output: %v\noutput: %s", err, stdout)
-	}
-	path, ok := result["path"].(string)
-	if !ok || !strings.HasSuffix(path, ".md") {
-		t.Fatalf("expected a local .md path, got %v", result["path"])
-	}
-	if !strings.HasPrefix(path, "issues/") {
-		t.Errorf("expected path under issues/, got %q", path)
-	}
-	if _, err := os.Stat(filepath.Join(env.tmpDir, path)); os.IsNotExist(err) {
-		t.Errorf("local markdown issue not written at %s", path)
-	}
-}
-
-// TestCLI_IssueList_LinearConfig_ReturnsLocal is AC1: listing under a linear
-// config returns the local markdown issues.
-func TestCLI_IssueList_LinearConfig_ReturnsLocal(t *testing.T) {
-	env := setupTestEnv(t)
-	defer env.cleanup()
-
-	env.initLinearProject("test")
-	env.createIssue("local.md", "A Local Issue", "todo")
-
-	stdout, stderr, err := env.run("issue", "list")
-	if err != nil {
-		t.Fatalf("issue list failed: %v\nstderr: %s", err, stderr)
-	}
-	var items []map[string]any
-	if err := json.Unmarshal([]byte(stdout), &items); err != nil {
-		t.Fatalf("invalid JSON: %v\noutput: %s", err, stdout)
-	}
-	if len(items) != 1 {
-		t.Fatalf("expected 1 local issue, got %d (%s)", len(items), stdout)
-	}
-	if items[0]["provider"] != "markdown" {
-		t.Errorf("expected provider markdown, got %v", items[0]["provider"])
-	}
-}
-
-// TestCLI_IssueImport_Schema is AC2: --schema prints a JSON shape.
-func TestCLI_IssueImport_Schema(t *testing.T) {
-	env := setupTestEnv(t)
-	defer env.cleanup()
-
-	stdout, _, err := env.run("issue", "import", "--schema")
-	if err != nil {
-		t.Fatalf("issue import --schema failed: %v", err)
-	}
-	var schema map[string]any
-	if err := json.Unmarshal([]byte(stdout), &schema); err != nil {
-		t.Fatalf("schema is not valid JSON: %v\noutput: %s", err, stdout)
-	}
-	for _, key := range []string{"from", "id", "query"} {
-		if _, ok := schema[key]; !ok {
-			t.Errorf("schema missing key %q: %v", key, schema)
-		}
-	}
-}
-
-// TestCLI_IssueImport_NoSelector_Fails is AC4: piping an empty JSON object with
-// no source/selector fails loudly.
-func TestCLI_IssueImport_NoSelector_Fails(t *testing.T) {
-	env := setupTestEnv(t)
-	defer env.cleanup()
-
-	env.initLinearProject("test")
-
-	_, stderr, err := env.runWithStdin(`{}`, "issue", "import")
-	if err == nil {
-		t.Fatal("issue import with empty selector should fail")
-	}
-	if !strings.Contains(stderr, "id") && !strings.Contains(stderr, "query") {
-		t.Errorf("error should mention missing id/query selector, got: %s", stderr)
-	}
-}
