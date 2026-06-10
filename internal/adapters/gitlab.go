@@ -44,9 +44,9 @@ func (g *GitLab) CreatePR(ctx context.Context, workDir string, input PRCreateInp
 	if err != nil {
 		errMsg := string(output)
 		if errMsg != "" {
-			return nil, fmt.Errorf("failed to create MR: %s", strings.TrimSpace(errMsg))
+			return nil, fmt.Errorf("failed to create MR: %s%s", strings.TrimSpace(errMsg), cliHint("glab", glabInstallHint))
 		}
-		return nil, fmt.Errorf("failed to create MR: %w", err)
+		return nil, fmt.Errorf("failed to create MR: %w%s", err, cliHint("glab", glabInstallHint))
 	}
 
 	mrURL := extractGitLabMRURL(string(output))
@@ -78,7 +78,7 @@ func (g *GitLab) Push(ctx context.Context, workDir string) error {
 func (g *GitLab) MarkPRReady(ctx context.Context, workDir string, mrNumber int) error {
 	_, err := g.exec.RunWithDir(ctx, workDir, "glab", "mr", "update", fmt.Sprintf("%d", mrNumber), "--ready")
 	if err != nil {
-		return fmt.Errorf("failed to mark MR ready: %w", err)
+		return fmt.Errorf("failed to mark MR ready: %w%s", err, cliHint("glab", glabInstallHint))
 	}
 	return nil
 }
@@ -87,7 +87,7 @@ func (g *GitLab) MarkPRReady(ctx context.Context, workDir string, mrNumber int) 
 func (g *GitLab) GetPRStatus(ctx context.Context, workDir string, mrNumber int) (string, error) {
 	output, err := g.exec.RunWithDir(ctx, workDir, "glab", "mr", "view", fmt.Sprintf("%d", mrNumber), "-F", "json")
 	if err != nil {
-		return "", fmt.Errorf("failed to get MR status: %w", err)
+		return "", fmt.Errorf("failed to get MR status: %w%s", err, cliHint("glab", glabInstallHint))
 	}
 	var result struct {
 		State string `json:"state"`
@@ -102,7 +102,7 @@ func (g *GitLab) GetPRStatus(ctx context.Context, workDir string, mrNumber int) 
 func (g *GitLab) IsPRMerged(ctx context.Context, workDir string, mrNumber int) (bool, error) {
 	output, err := g.exec.RunWithDir(ctx, workDir, "glab", "mr", "view", fmt.Sprintf("%d", mrNumber), "-F", "json")
 	if err != nil {
-		return false, fmt.Errorf("failed to get MR view: %w", err)
+		return false, fmt.Errorf("failed to get MR view: %w%s", err, cliHint("glab", glabInstallHint))
 	}
 	var result struct {
 		State    string  `json:"state"`
