@@ -207,7 +207,7 @@ func TestCLI_StackUndo_RestoresPreSyncSHAs(t *testing.T) {
 	env.initProject("test")
 
 	pieceA := createPiece(t, env, "a", "main")
-	pieceB := createPiece(t, env, "b", "a")
+	createPiece(t, env, "b", "a")
 
 	shaA := strings.TrimSpace(gitOut(t, env.tmpDir, "rev-parse", "a"))
 	shaB := strings.TrimSpace(gitOut(t, env.tmpDir, "rev-parse", "b"))
@@ -241,7 +241,6 @@ func TestCLI_StackUndo_RestoresPreSyncSHAs(t *testing.T) {
 	if got := strings.TrimSpace(gitOut(t, env.tmpDir, "rev-parse", "b")); got != shaB {
 		t.Errorf("b not restored: got %s want %s", got, shaB)
 	}
-	_ = pieceB
 }
 
 // TestCLI_StackUndo_NoSnapshotFails: undo without a prior sync fails loudly.

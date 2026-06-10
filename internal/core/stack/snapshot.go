@@ -142,11 +142,20 @@ func (h *Handler) Undo(ctx context.Context, workDir string) (UndoResult, error) 
 
 	for _, p := range plan {
 		if err := h.git.ResetHard(ctx, p.worktree, p.to); err != nil {
-			return result, fmt.Errorf("failed to restore %q to %s: %w (already restored: %d piece(s))", p.name, p.to[:12], err, len(result.Restored))
+			return result, fmt.Errorf("failed to restore %q to %s: %w (already restored: %d piece(s))", p.name, shortSHA(p.to), err, len(result.Restored))
 		}
 		result.Restored = append(result.Restored, UndoRestoredPiece{Piece: p.name, From: p.from, To: p.to})
 	}
 
 	h.emit(core.MsgSuccess, fmt.Sprintf("Restored %d piece(s) to the pre-sync snapshot. Remotes were not touched; force-push with lease if you had pushed.", len(result.Restored)))
 	return result, nil
+}
+
+// shortSHA abbreviates a commit SHA for messages, tolerating malformed input
+// (e.g. a hand-edited snapshot file).
+func shortSHA(sha string) string {
+	if len(sha) > 12 {
+		return sha[:12]
+	}
+	return sha
 }
