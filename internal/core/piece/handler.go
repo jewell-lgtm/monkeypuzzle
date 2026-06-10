@@ -1952,29 +1952,29 @@ func (h *Handler) SwitchPiece(ctx context.Context, name string) (SwitchResult, e
 
 	result := SwitchResult{Piece: *target}
 
-	// Check if multiplexer is noop (no session management)
+	// No session management: callers surface the path from the result JSON.
 	if adapters.IsNoopMultiplexer(h.mux) {
 		result.Method = "path"
-		fmt.Println(target.WorktreePath)
 		return result, nil
 	}
 
 	// Try to switch using multiplexer (creates session if needed)
-	if err := h.mux.SwitchTo(ctx, target.SessionName, target.WorktreePath); err == nil {
-		result.Method = "multiplexer"
-		result.Piece.HasSession = true
+	if err := h.mux.SwitchTo(ctx, target.SessionName, target.WorktreePath); err != nil {
 		h.deps.Output.Write(core.Message{
-			Type:    core.MsgSuccess,
-			Content: fmt.Sprintf("Switched to piece: %s", name),
-			Data:    result,
+			Type:    core.MsgWarning,
+			Content: fmt.Sprintf("session switch failed (%v); falling back to path", err),
 		})
+		result.Method = "path"
 		return result, nil
 	}
 
-	// Fallback: print path for cd $(mp switch ...)
-	result.Method = "path"
-	fmt.Println(target.WorktreePath)
-
+	result.Method = "multiplexer"
+	result.Piece.HasSession = true
+	h.deps.Output.Write(core.Message{
+		Type:    core.MsgSuccess,
+		Content: fmt.Sprintf("Switched to piece: %s", name),
+		Data:    result,
+	})
 	return result, nil
 }
 
@@ -1992,28 +1992,28 @@ func (h *Handler) switchToMain(ctx context.Context, mainRepoRoot, name string) (
 		},
 	}
 
-	// Check if multiplexer is noop (no session management)
+	// No session management: callers surface the path from the result JSON.
 	if adapters.IsNoopMultiplexer(h.mux) {
 		result.Method = "path"
-		fmt.Println(mainRepoRoot)
 		return result, nil
 	}
 
 	// Try to switch using multiplexer (creates session if needed)
-	if err := h.mux.SwitchTo(ctx, sessionName, mainRepoRoot); err == nil {
-		result.Method = "multiplexer"
-		result.Piece.HasSession = true
+	if err := h.mux.SwitchTo(ctx, sessionName, mainRepoRoot); err != nil {
 		h.deps.Output.Write(core.Message{
-			Type:    core.MsgSuccess,
-			Content: fmt.Sprintf("Switched to %s", name),
-			Data:    result,
+			Type:    core.MsgWarning,
+			Content: fmt.Sprintf("session switch failed (%v); falling back to path", err),
 		})
+		result.Method = "path"
 		return result, nil
 	}
 
-	// Fallback: print path
-	result.Method = "path"
-	fmt.Println(mainRepoRoot)
-
+	result.Method = "multiplexer"
+	result.Piece.HasSession = true
+	h.deps.Output.Write(core.Message{
+		Type:    core.MsgSuccess,
+		Content: fmt.Sprintf("Switched to %s", name),
+		Data:    result,
+	})
 	return result, nil
 }

@@ -5,10 +5,23 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os/exec"
 	"strings"
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
 )
+
+// cliHint annotates forge-CLI errors with an install pointer when the binary
+// is missing from PATH — "exit status 1" alone is a dead end for new users.
+func cliHint(bin, installURL string) string {
+	if _, err := exec.LookPath(bin); err != nil {
+		return fmt.Sprintf(" (%s CLI not found in PATH; install from %s)", bin, installURL)
+	}
+	return ""
+}
+
+const ghInstallHint = "https://cli.github.com"
+const glabInstallHint = "https://gitlab.com/gitlab-org/cli"
 
 // ErrGHUnavailable indicates the gh CLI is missing or unauthenticated, so GitHub
 // state can't be read. Callers should degrade to local-only behavior.
@@ -63,9 +76,9 @@ func (g *GitHub) CreatePR(ctx context.Context, workDir string, input PRCreateInp
 		// Extract meaningful error message from gh output
 		errMsg := string(output)
 		if errMsg != "" {
-			return nil, fmt.Errorf("failed to create PR: %s", strings.TrimSpace(errMsg))
+			return nil, fmt.Errorf("failed to create PR: %s%s", strings.TrimSpace(errMsg), cliHint("gh", ghInstallHint))
 		}
-		return nil, fmt.Errorf("failed to create PR: %w", err)
+		return nil, fmt.Errorf("failed to create PR: %w%s", err, cliHint("gh", ghInstallHint))
 	}
 
 	// gh pr create outputs the PR URL
@@ -100,7 +113,7 @@ func (g *GitHub) Push(ctx context.Context, workDir string) error {
 func (g *GitHub) MarkPRReady(ctx context.Context, workDir string, prNumber int) error {
 	_, err := g.exec.RunWithDir(ctx, workDir, "gh", "pr", "ready", fmt.Sprintf("%d", prNumber))
 	if err != nil {
-		return fmt.Errorf("failed to mark PR ready: %w", err)
+		return fmt.Errorf("failed to mark PR ready: %w%s", err, cliHint("gh", ghInstallHint))
 	}
 	return nil
 }
@@ -109,7 +122,7 @@ func (g *GitHub) MarkPRReady(ctx context.Context, workDir string, prNumber int) 
 func (g *GitHub) GetPRStatus(ctx context.Context, workDir string, prNumber int) (string, error) {
 	output, err := g.exec.RunWithDir(ctx, workDir, "gh", "pr", "view", fmt.Sprintf("%d", prNumber), "--json", "state", "--jq", ".state")
 	if err != nil {
-		return "", fmt.Errorf("failed to get PR status: %w", err)
+		return "", fmt.Errorf("failed to get PR status: %w%s", err, cliHint("gh", ghInstallHint))
 	}
 	return strings.TrimSpace(string(output)), nil
 }
@@ -118,7 +131,7 @@ func (g *GitHub) GetPRStatus(ctx context.Context, workDir string, prNumber int) 
 func (g *GitHub) IsPRMerged(ctx context.Context, workDir string, prNumber int) (bool, error) {
 	output, err := g.exec.RunWithDir(ctx, workDir, "gh", "pr", "view", fmt.Sprintf("%d", prNumber), "--json", "mergedAt")
 	if err != nil {
-		return false, fmt.Errorf("failed to get PR merge status: %w", err)
+		return false, fmt.Errorf("failed to get PR merge status: %w%s", err, cliHint("gh", ghInstallHint))
 	}
 
 	var result struct {
