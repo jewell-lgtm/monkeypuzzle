@@ -156,3 +156,34 @@ func ValidateAppendInput(in AppendInput) error {
 func ValidatePrependInput(in PrependInput) error {
 	return ValidateAppendInput(AppendInput(in))
 }
+
+// SetParentInput holds input for `mp stack set-parent` (re-parent a piece).
+type SetParentInput struct {
+	Piece  string `json:"piece,omitempty"` // piece to re-parent; defaults to the current piece
+	Parent string `json:"parent"`          // new parent piece name, or "main"
+}
+
+// SetParentSchema returns the JSON schema for stack set-parent input.
+func SetParentSchema() ([]byte, error) {
+	return json.MarshalIndent(map[string]any{
+		"piece":  "",
+		"parent": "",
+	}, "", "  ")
+}
+
+// ParseSetParentJSON parses JSON input into SetParentInput.
+func ParseSetParentJSON(data []byte) (SetParentInput, error) {
+	var in SetParentInput
+	if err := json.Unmarshal(data, &in); err != nil {
+		return SetParentInput{}, fmt.Errorf("invalid JSON: %w", err)
+	}
+	return in, nil
+}
+
+// ValidateSetParentInput requires a target parent.
+func ValidateSetParentInput(in SetParentInput) error {
+	if strings.TrimSpace(in.Parent) == "" {
+		return fmt.Errorf("must specify parent (a piece name, or \"main\")")
+	}
+	return nil
+}

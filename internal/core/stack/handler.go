@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/adapters"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
@@ -500,6 +501,83 @@ func (h *Handler) Prepend(ctx context.Context, workDir string, in PrependInput) 
 	}
 	h.emit(core.MsgSuccess, fmt.Sprintf("Inserted %q between %q and %q. Run 'mp stack sync' to restack.", info.Name, st.PieceName, grandParent))
 	return info, nil
+}
+
+// ---- SetParent --------------------------------------------------------------
+
+// SetParentResult reports a completed re-parenting.
+type SetParentResult struct {
+	Piece     string `json:"piece"`
+	OldParent string `json:"old_parent"`
+	NewParent string `json:"new_parent"`
+}
+
+// SetParent re-points a piece onto a new parent (another piece, or "main").
+// Metadata-only: no history is rewritten; run `mp stack sync` to restack.
+func (h *Handler) SetParent(ctx context.Context, workDir string, in SetParentInput) (SetParentResult, error) {
+	var result SetParentResult
+	if err := ValidateSetParentInput(in); err != nil {
+		return result, err
+	}
+	_, piecesDir, err := h.resolveRepo(ctx, workDir)
+	if err != nil {
+		return result, err
+	}
+
+	pieceName := strings.TrimSpace(in.Piece)
+	if pieceName == "" {
+		st, err := h.pieces.Status(ctx, workDir)
+		if err != nil {
+			return result, err
+		}
+		if !st.InPiece {
+			return result, fmt.Errorf("no piece given: pass --piece, or run from inside a piece worktree")
+		}
+		pieceName = st.PieceName
+	}
+
+	// ReadPieceMetadata returns defaults for missing files, so existence is
+	// checked on the worktree directories themselves.
+	worktree := filepath.Join(piecesDir, pieceName)
+	if _, err := h.deps.FS.Stat(worktree); err != nil {
+		return result, fmt.Errorf("unknown piece %q: no worktree at %s", pieceName, worktree)
+	}
+	meta, err := piece.ReadPieceMetadata(worktree, h.deps.FS)
+	if err != nil {
+		return result, fmt.Errorf("unknown piece %q: %w", pieceName, err)
+	}
+
+	newParent := strings.TrimSpace(in.Parent)
+	if newParent == pieceName {
+		return result, fmt.Errorf("cannot make %q its own parent", pieceName)
+	}
+	if newParent != "main" {
+		if _, err := h.deps.FS.Stat(filepath.Join(piecesDir, newParent)); err != nil {
+			return result, fmt.Errorf("unknown parent piece %q (use \"main\" for a root piece)", newParent)
+		}
+	}
+	for _, d := range h.subtreeMembers(pieceName, piecesDir) {
+		if d == newParent {
+			return result, fmt.Errorf("%q is a descendant of %q; re-parenting would create a cycle", newParent, pieceName)
+		}
+	}
+
+	oldParent := meta.Parent
+	if oldParent == "" {
+		oldParent = "main"
+	}
+	result = SetParentResult{Piece: pieceName, OldParent: oldParent, NewParent: newParent}
+	if oldParent == newParent {
+		h.emit(core.MsgInfo, fmt.Sprintf("%q already has parent %q; nothing to do.", pieceName, newParent))
+		return result, nil
+	}
+
+	meta.Parent = newParent
+	if err := piece.WritePieceMetadata(worktree, *meta, h.deps.FS); err != nil {
+		return result, fmt.Errorf("failed to write piece metadata: %w", err)
+	}
+	h.emit(core.MsgSuccess, fmt.Sprintf("Re-parented %q: %s -> %s. Run 'mp stack sync' to restack.", pieceName, oldParent, newParent))
+	return result, nil
 }
 
 // ---- Continue --------------------------------------------------------------

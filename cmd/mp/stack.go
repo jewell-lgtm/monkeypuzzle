@@ -56,6 +56,18 @@ var stackContinueCmd = &cobra.Command{
 	RunE:  runStackContinue,
 }
 
+var stackSetParentCmd = &cobra.Command{
+	Use:   "set-parent",
+	Short: "Re-point a piece onto a new parent (metadata only; sync restacks)",
+	Long: `Move a piece to a different parent in the stack. Defaults to the current
+piece when run from a piece worktree. The target parent is another piece's
+name, or "main" to make it a root piece.
+
+Only piece metadata changes; run 'mp stack sync' afterwards to restack the
+branches onto the new lineage.`,
+	RunE: runStackSetParent,
+}
+
 var (
 	flagStackMain         string
 	flagStackFromGitHub   bool
@@ -73,6 +85,10 @@ var (
 	flagStackPrependSchema bool
 
 	flagStackContinueSchema bool
+
+	flagStackSetParentPiece  string
+	flagStackSetParentParent string
+	flagStackSetParentSchema bool
 )
 
 func init() {
@@ -97,11 +113,16 @@ func init() {
 
 	stackContinueCmd.Flags().BoolVar(&flagStackContinueSchema, "schema", false, "Output JSON schema and exit")
 
+	stackSetParentCmd.Flags().StringVar(&flagStackSetParentPiece, "piece", "", "Piece to re-parent (default: current piece)")
+	stackSetParentCmd.Flags().StringVar(&flagStackSetParentParent, "parent", "", "New parent piece name, or \"main\"")
+	stackSetParentCmd.Flags().BoolVar(&flagStackSetParentSchema, "schema", false, "Output JSON schema and exit")
+
 	stackCmd.AddCommand(stackStatusCmd)
 	stackCmd.AddCommand(stackSyncCmd)
 	stackCmd.AddCommand(stackAppendCmd)
 	stackCmd.AddCommand(stackPrependCmd)
 	stackCmd.AddCommand(stackContinueCmd)
+	stackCmd.AddCommand(stackSetParentCmd)
 	rootCmd.AddCommand(stackCmd)
 }
 
@@ -292,6 +313,45 @@ func runStackContinue(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	result, err := handler.Continue(cmd.Context(), wd)
+	if err != nil {
+		return err
+	}
+	return cli.PrintJSON(result)
+}
+
+func runStackSetParent(cmd *cobra.Command, args []string) error {
+	if flagStackSetParentSchema {
+		schema, err := stackcmd.SetParentSchema()
+		if err != nil {
+			return err
+		}
+		fmt.Println(string(schema))
+		return nil
+	}
+
+	wd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("failed to get working directory: %w", err)
+	}
+
+	var input stackcmd.SetParentInput
+	if flagStackSetParentPiece != "" || flagStackSetParentParent != "" {
+		input = stackcmd.SetParentInput{Piece: flagStackSetParentPiece, Parent: flagStackSetParentParent}
+	} else if cli.HasStdinData() {
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return fmt.Errorf("failed to read stdin: %w", err)
+		}
+		if input, err = stackcmd.ParseSetParentJSON(data); err != nil {
+			return err
+		}
+	}
+
+	handler, err := newStackHandler()
+	if err != nil {
+		return err
+	}
+	result, err := handler.SetParent(cmd.Context(), wd, input)
 	if err != nil {
 		return err
 	}
