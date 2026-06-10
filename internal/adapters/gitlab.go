@@ -44,9 +44,9 @@ func (g *GitLab) CreatePR(ctx context.Context, workDir string, input PRCreateInp
 	if err != nil {
 		errMsg := string(output)
 		if errMsg != "" {
-			return nil, fmt.Errorf("failed to create MR: %s", strings.TrimSpace(errMsg))
+			return nil, fmt.Errorf("failed to create MR: %s%s", strings.TrimSpace(errMsg), cliHint("glab", glabInstallHint))
 		}
-		return nil, fmt.Errorf("failed to create MR: %w", err)
+		return nil, fmt.Errorf("failed to create MR: %w%s", err, cliHint("glab", glabInstallHint))
 	}
 
 	mrURL := extractGitLabMRURL(string(output))

@@ -5,10 +5,23 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os/exec"
 	"strings"
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
 )
+
+// cliHint annotates forge-CLI errors with an install pointer when the binary
+// is missing from PATH — "exit status 1" alone is a dead end for new users.
+func cliHint(bin, installURL string) string {
+	if _, err := exec.LookPath(bin); err != nil {
+		return fmt.Sprintf(" (%s CLI not found in PATH; install from %s)", bin, installURL)
+	}
+	return ""
+}
+
+const ghInstallHint = "https://cli.github.com"
+const glabInstallHint = "https://gitlab.com/gitlab-org/cli"
 
 // ErrGHUnavailable indicates the gh CLI is missing or unauthenticated, so GitHub
 // state can't be read. Callers should degrade to local-only behavior.
@@ -63,9 +76,9 @@ func (g *GitHub) CreatePR(ctx context.Context, workDir string, input PRCreateInp
 		// Extract meaningful error message from gh output
 		errMsg := string(output)
 		if errMsg != "" {
-			return nil, fmt.Errorf("failed to create PR: %s", strings.TrimSpace(errMsg))
+			return nil, fmt.Errorf("failed to create PR: %s%s", strings.TrimSpace(errMsg), cliHint("gh", ghInstallHint))
 		}
-		return nil, fmt.Errorf("failed to create PR: %w", err)
+		return nil, fmt.Errorf("failed to create PR: %w%s", err, cliHint("gh", ghInstallHint))
 	}
 
 	// gh pr create outputs the PR URL
