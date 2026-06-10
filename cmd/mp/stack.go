@@ -68,6 +68,16 @@ branches onto the new lineage.`,
 	RunE: runStackSetParent,
 }
 
+var stackUndoCmd = &cobra.Command{
+	Use:   "undo",
+	Short: "Restore every piece branch to the snapshot taken by the last 'mp stack sync'",
+	Long: `Reset each piece branch back to the commit recorded before the last stack
+sync. Refuses to run if an affected worktree has uncommitted changes. Local
+only: remote branches are untouched (force-push with lease afterwards if you
+had pushed).`,
+	RunE: runStackUndo,
+}
+
 var (
 	flagStackMain         string
 	flagStackFromGitHub   bool
@@ -123,6 +133,7 @@ func init() {
 	stackCmd.AddCommand(stackPrependCmd)
 	stackCmd.AddCommand(stackContinueCmd)
 	stackCmd.AddCommand(stackSetParentCmd)
+	stackCmd.AddCommand(stackUndoCmd)
 	rootCmd.AddCommand(stackCmd)
 }
 
@@ -352,6 +363,23 @@ func runStackSetParent(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	result, err := handler.SetParent(cmd.Context(), wd, input)
+	if err != nil {
+		return err
+	}
+	return cli.PrintJSON(result)
+}
+
+func runStackUndo(cmd *cobra.Command, args []string) error {
+	wd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("failed to get working directory: %w", err)
+	}
+
+	handler, err := newStackHandler()
+	if err != nil {
+		return err
+	}
+	result, err := handler.Undo(cmd.Context(), wd)
 	if err != nil {
 		return err
 	}

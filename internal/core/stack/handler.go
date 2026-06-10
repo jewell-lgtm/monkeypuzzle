@@ -152,6 +152,11 @@ func (h *Handler) Sync(ctx context.Context, workDir string, in SyncInput) (SyncR
 		return SyncResult{}, err
 	}
 
+	// Record every piece branch's SHA so 'mp stack undo' can restore them.
+	if err := h.writeSnapshot(ctx, mainRepoRoot, piecesDir, "sync"); err != nil {
+		return SyncResult{}, fmt.Errorf("failed to write undo snapshot: %w", err)
+	}
+
 	// Update main from origin (no-op when there's no remote).
 	if err := h.updateMain(ctx, mainRepoRoot, in.MainBranch); err != nil {
 		result.Status = "aborted"

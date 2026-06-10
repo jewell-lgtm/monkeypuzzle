@@ -196,3 +196,101 @@ func TestCLI_StackSetParent_UnknownParentFails(t *testing.T) {
 		t.Errorf("error should name the unknown parent, got: %s", stderr)
 	}
 }
+
+// TestCLI_StackUndo_RestoresPreSyncSHAs: sync writes a snapshot before mutating;
+// undo restores every piece branch to its pre-sync commit.
+func TestCLI_StackUndo_RestoresPreSyncSHAs(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	env.initGitRepo()
+	env.initProject("test")
+
+	pieceA := createPiece(t, env, "a", "main")
+	createPiece(t, env, "b", "a")
+
+	shaA := strings.TrimSpace(gitOut(t, env.tmpDir, "rev-parse", "a"))
+	shaB := strings.TrimSpace(gitOut(t, env.tmpDir, "rev-parse", "b"))
+
+	// Advance main so sync has something to propagate.
+	gitCmd(t, env.tmpDir, "checkout", "main")
+	if err := os.WriteFile(filepath.Join(env.tmpDir, "main-change.txt"), []byte("from main\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	gitCmd(t, env.tmpDir, "add", "main-change.txt")
+	gitCmd(t, env.tmpDir, "commit", "-m", "main moves on")
+
+	if _, stderr, err := env.run("stack", "sync"); err != nil {
+		t.Fatalf("stack sync failed: %v\nstderr: %s", err, stderr)
+	}
+
+	// Sanity: sync moved the branches.
+	if strings.TrimSpace(gitOut(t, env.tmpDir, "rev-parse", "a")) == shaA {
+		t.Fatal("sync did not move a; test setup broken")
+	}
+
+	stdout, stderr, err := env.runInDir(pieceA, "stack", "undo")
+	if err != nil {
+		t.Logf("porcelain in a:\n%s", gitOut(t, pieceA, "status", "--porcelain"))
+		t.Fatalf("stack undo failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+
+	if got := strings.TrimSpace(gitOut(t, env.tmpDir, "rev-parse", "a")); got != shaA {
+		t.Errorf("a not restored: got %s want %s", got, shaA)
+	}
+	if got := strings.TrimSpace(gitOut(t, env.tmpDir, "rev-parse", "b")); got != shaB {
+		t.Errorf("b not restored: got %s want %s", got, shaB)
+	}
+}
+
+// TestCLI_StackUndo_NoSnapshotFails: undo without a prior sync fails loudly.
+func TestCLI_StackUndo_NoSnapshotFails(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	env.initGitRepo()
+	env.initProject("test")
+	pieceA := createPiece(t, env, "a", "main")
+
+	_, stderr, err := env.runInDir(pieceA, "stack", "undo")
+	if err == nil {
+		t.Fatal("expected undo without snapshot to fail")
+	}
+	if !strings.Contains(stderr, "snapshot") {
+		t.Errorf("error should mention snapshot, got: %s", stderr)
+	}
+}
+
+// TestCLI_StackUndo_DirtyWorktreeFails: undo refuses to discard uncommitted work.
+func TestCLI_StackUndo_DirtyWorktreeFails(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	env.initGitRepo()
+	env.initProject("test")
+	pieceA := createPiece(t, env, "a", "main")
+
+	gitCmd(t, env.tmpDir, "checkout", "main")
+	if err := os.WriteFile(filepath.Join(env.tmpDir, "main-change.txt"), []byte("x\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	gitCmd(t, env.tmpDir, "add", "main-change.txt")
+	gitCmd(t, env.tmpDir, "commit", "-m", "main moves on")
+
+	if _, stderr, err := env.run("stack", "sync"); err != nil {
+		t.Fatalf("stack sync failed: %v\nstderr: %s", err, stderr)
+	}
+
+	// Dirty a's worktree with a tracked modification, then try to undo.
+	// (Untracked files survive reset --hard, so only tracked changes block.)
+	if err := os.WriteFile(filepath.Join(pieceA, "README.md"), []byte("locally modified\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	_, stderr, err := env.runInDir(pieceA, "stack", "undo")
+	if err == nil {
+		t.Fatal("expected undo with dirty worktree to fail")
+	}
+	if !strings.Contains(stderr, "uncommitted") && !strings.Contains(stderr, "dirty") {
+		t.Errorf("error should mention dirty/uncommitted state, got: %s", stderr)
+	}
+}
