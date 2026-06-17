@@ -22,19 +22,12 @@ import (
 )
 
 var (
-	flagName           string
-	flagIssueProvider  string
-	flagPRProvider     string
-	flagLinearAPIKey   string
-	flagLinearTeam     string
-	flagPlaneAPIKey    string
-	flagPlaneWorkspace string
-	flagPlaneProject   string
-	flagPlaneBaseURL   string
-	flagInitDir        string
-	flagYes            bool
-	flagSchema         bool
-	flagInitGitignore  bool
+	flagName          string
+	flagPRProvider    string
+	flagInitDir       string
+	flagYes           bool
+	flagSchema        bool
+	flagInitGitignore bool
 )
 
 var initCmd = &cobra.Command{
@@ -57,7 +50,7 @@ Examples:
   mp init                                    # First time: wizard. Already set up: refresh.
   mp reinit                                  # Synonym for the refresh case.
   mp init --schema | jq '.name = "foo"' | mp init  # Pipe JSON (reconfigure)
-  mp init --name foo --issue-provider markdown --pr-provider github  # Reconfigure`,
+  mp init --name foo --pr-provider github  # Reconfigure`,
 	RunE: runInit,
 }
 
@@ -76,23 +69,13 @@ func init() {
 	// reinit shares init's flags so behaviour stays identical.
 	reinitCmd.Flags().AddFlagSet(initCmd.Flags())
 	initCmd.Flags().StringVar(&flagName, "name", "", "Project name")
-	initCmd.Flags().StringVar(&flagIssueProvider, "issue-provider", "", "Issue provider (markdown, linear, plane)")
 	initCmd.Flags().StringVar(&flagPRProvider, "pr-provider", "", "PR provider (github)")
-	initCmd.Flags().StringVar(&flagLinearAPIKey, "linear-api-key", "", "Linear API key (or use LINEAR_API_KEY env var)")
-	initCmd.Flags().StringVar(&flagLinearTeam, "linear-team", "", "Linear team key (required for linear provider)")
-	initCmd.Flags().StringVar(&flagPlaneAPIKey, "plane-api-key", "", "Plane API key (or use PLANE_API_KEY env var)")
-	initCmd.Flags().StringVar(&flagPlaneWorkspace, "plane-workspace", "", "Plane workspace slug (required for plane provider)")
-	initCmd.Flags().StringVar(&flagPlaneProject, "plane-project", "", "Plane project ID (required for plane provider)")
-	initCmd.Flags().StringVar(&flagPlaneBaseURL, "plane-base-url", "", "Plane API base URL (defaults to https://api.plane.so; set for self-hosted)")
 	initCmd.Flags().StringVar(&flagInitDir, "dir", "", "Directory (relative to the repo root) for monkeypuzzle state (default .monkeypuzzle); the mapping is recorded in ~/.config/monkeypuzzle/project-dirs.json")
 	initCmd.Flags().BoolVarP(&flagYes, "yes", "y", false, "Overwrite existing config without prompting")
 	initCmd.Flags().BoolVar(&flagSchema, "schema", false, "Output JSON schema with defaults and exit")
 	initCmd.Flags().BoolVar(&flagInitGitignore, "gitignore", false, "Regenerate .monkeypuzzle/.gitignore only")
 
 	// Register completion functions (errors ignored - completion is optional)
-	_ = initCmd.RegisterFlagCompletionFunc("issue-provider", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-		return []string{"markdown", "linear", "plane"}, cobra.ShellCompDirectiveNoFileComp
-	})
 	_ = initCmd.RegisterFlagCompletionFunc("pr-provider", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		return []string{"github"}, cobra.ShellCompDirectiveNoFileComp
 	})
@@ -149,7 +132,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	// intent is signalled by --yes, any provider flag, or piped JSON.
 	if handler.ConfigExists(mpDir) {
 		explicitReconfigure := flagYes ||
-			flagName != "" || flagIssueProvider != "" || flagPRProvider != "" ||
+			flagName != "" || flagPRProvider != "" ||
 			cli.HasStdinData()
 
 		if !explicitReconfigure {
@@ -205,7 +188,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 }
 
 func getInput(workDir, mpDir string) (initcmd.Input, error) {
-	allFlagsProvided := flagName != "" && flagIssueProvider != "" && flagPRProvider != ""
+	allFlagsProvided := flagName != "" && flagPRProvider != ""
 
 	var input initcmd.Input
 	var err error
@@ -213,34 +196,8 @@ func getInput(workDir, mpDir string) (initcmd.Input, error) {
 	switch {
 	case allFlagsProvided:
 		input = initcmd.Input{
-			Name:          flagName,
-			IssueProvider: flagIssueProvider,
-			PRProvider:    flagPRProvider,
-		}
-		// Build issue config from flags
-		if flagIssueProvider == "linear" {
-			input.IssueConfig = make(map[string]string)
-			if flagLinearTeam != "" {
-				input.IssueConfig["team"] = flagLinearTeam
-			}
-			if flagLinearAPIKey != "" {
-				input.IssueConfig["api_key"] = flagLinearAPIKey
-			}
-		}
-		if flagIssueProvider == "plane" {
-			input.IssueConfig = make(map[string]string)
-			if flagPlaneWorkspace != "" {
-				input.IssueConfig["workspace"] = flagPlaneWorkspace
-			}
-			if flagPlaneProject != "" {
-				input.IssueConfig["project"] = flagPlaneProject
-			}
-			if flagPlaneAPIKey != "" {
-				input.IssueConfig["api_key"] = flagPlaneAPIKey
-			}
-			if flagPlaneBaseURL != "" {
-				input.IssueConfig["base_url"] = flagPlaneBaseURL
-			}
+			Name:       flagName,
+			PRProvider: flagPRProvider,
 		}
 
 	case cli.HasStdinData():
@@ -299,9 +256,6 @@ func runInteractiveMode(workDir string) (initcmd.Input, error) {
 		name = finalModel.ProjectName.Placeholder
 	}
 
-	// Get issue provider from selection
-	issueProvider := initTUI.IssueProviders[finalModel.IssueMethod]
-
 	// Get PR provider default
 	fields := initcmd.Fields()
 	var prProvider string
@@ -313,20 +267,8 @@ func runInteractiveMode(workDir string) (initcmd.Input, error) {
 	}
 
 	input := initcmd.Input{
-		Name:          name,
-		IssueProvider: issueProvider,
-		PRProvider:    prProvider,
-	}
-
-	// Build issue config for linear provider
-	if issueProvider == "linear" {
-		input.IssueConfig = make(map[string]string)
-		if team := finalModel.LinearTeam.Value(); team != "" {
-			input.IssueConfig["team"] = team
-		}
-		if apiKey := finalModel.LinearAPIKey.Value(); apiKey != "" {
-			input.IssueConfig["api_key"] = apiKey
-		}
+		Name:       name,
+		PRProvider: prProvider,
 	}
 
 	return input, nil

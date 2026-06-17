@@ -28,13 +28,6 @@ var fields = []Field{
 		Default:     "", // set dynamically from directory name
 	},
 	{
-		Name:        "issue_provider",
-		Description: "Issue import source (markdown = none; local store is always markdown). Consumed only by `mp issue import`.",
-		Required:    true,
-		Default:     "markdown",
-		ValidValues: []string{"markdown", "linear", "plane", "gitlab"},
-	},
-	{
 		Name:        "pr_provider",
 		Description: "How PRs/MRs are managed",
 		Required:    true,
@@ -51,12 +44,10 @@ var fields = []Field{
 
 // Input holds validated input for the init command
 type Input struct {
-	Name          string            `json:"name"`
-	IssueProvider string            `json:"issue_provider"`
-	IssueConfig   map[string]string `json:"issue_config,omitempty"` // provider-specific config (e.g., api_key, team for linear)
-	PRProvider    string            `json:"pr_provider"`
-	Dir           string            `json:"dir,omitempty"`          // monkeypuzzle state dir, relative to repo root; defaults to ".monkeypuzzle"
-	CreateSkill   *bool             `json:"create_skill,omitempty"` // nil means default (true)
+	Name        string `json:"name"`
+	PRProvider  string `json:"pr_provider"`
+	Dir         string `json:"dir,omitempty"`          // monkeypuzzle state dir, relative to repo root; defaults to ".monkeypuzzle"
+	CreateSkill *bool  `json:"create_skill,omitempty"` // nil means default (true)
 }
 
 // Schema returns the JSON schema with defaults for the init command
@@ -136,32 +127,6 @@ func Validate(input Input) error {
 		errs = append(errs, fmt.Sprintf("dir %q must be a relative path within the repo (no \"..\", no absolute paths)", input.Dir))
 	}
 
-	// Linear provider requires team config
-	if input.IssueProvider == "linear" {
-		team := ""
-		if input.IssueConfig != nil {
-			team = input.IssueConfig["team"]
-		}
-		if team == "" {
-			errs = append(errs, "linear provider requires 'team' config")
-		}
-	}
-
-	// Plane provider requires workspace and project config
-	if input.IssueProvider == "plane" {
-		var workspace, project string
-		if input.IssueConfig != nil {
-			workspace = input.IssueConfig["workspace"]
-			project = input.IssueConfig["project"]
-		}
-		if workspace == "" {
-			errs = append(errs, "plane provider requires 'workspace' config")
-		}
-		if project == "" {
-			errs = append(errs, "plane provider requires 'project' config")
-		}
-	}
-
 	if len(errs) > 0 {
 		return fmt.Errorf("validation failed: %v", errs)
 	}
@@ -194,15 +159,11 @@ func SanitizeProjectName(name string) string {
 // Also trims whitespace from all fields
 func WithDefaults(input Input, workDir string) Input {
 	input.Name = strings.TrimSpace(input.Name)
-	input.IssueProvider = strings.TrimSpace(input.IssueProvider)
 	input.PRProvider = strings.TrimSpace(input.PRProvider)
 	input.Dir = strings.TrimSpace(input.Dir)
 
 	if input.Name == "" {
 		input.Name = filepath.Base(workDir)
-	}
-	if input.IssueProvider == "" {
-		input.IssueProvider = "markdown"
 	}
 	if input.PRProvider == "" {
 		input.PRProvider = "github"
@@ -232,8 +193,6 @@ func getFieldValue(input Input, name string) string {
 	switch name {
 	case "name":
 		return input.Name
-	case "issue_provider":
-		return input.IssueProvider
 	case "pr_provider":
 		return input.PRProvider
 	case "dir":

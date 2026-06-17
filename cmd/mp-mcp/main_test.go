@@ -59,8 +59,6 @@ func TestHandleToolsList(t *testing.T) {
 		"mp_piece_new",
 		"mp_piece_update",
 		"mp_piece_merge",
-		"mp_issue_list",
-		"mp_issue_read",
 	}
 
 	if len(result.Tools) != len(expectedTools) {
@@ -112,10 +110,10 @@ func TestHandleInitializedNotification(t *testing.T) {
 	}
 }
 
-func TestToolCallInvalidArguments(t *testing.T) {
+func TestToolCallUnknownTool(t *testing.T) {
 	server := &Server{mpPath: "mp"}
 	params, _ := json.Marshal(ToolCallParams{
-		Name:      "mp_issue_read",
+		Name:      "mp_does_not_exist",
 		Arguments: json.RawMessage(`{}`),
 	})
 	req := &Request{
@@ -135,44 +133,6 @@ func TestToolCallInvalidArguments(t *testing.T) {
 		t.Fatalf("unexpected result type: %T", resp.Result)
 	}
 	if !result.IsError {
-		t.Error("expected IsError=true for missing required path")
-	}
-}
-
-func TestParseIssue(t *testing.T) {
-	tests := []struct {
-		name           string
-		content        string
-		expectedTitle  string
-		expectedStatus string
-	}{
-		{
-			name: "frontmatter with title and status",
-			content: `---
-title: Test Issue
-status: in-progress
----
-
-# Test Issue`,
-			expectedTitle:  "Test Issue",
-			expectedStatus: "in-progress",
-		},
-		{
-			name: "frontmatter without status",
-			content: `---
-title: Another Issue
----
-
-# Another Issue`,
-			expectedTitle:  "Another Issue",
-			expectedStatus: "todo",
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			// Note: parseIssue requires a file path, this is a simplified test
-			// Full integration testing would require temp files
-		})
+		t.Error("expected IsError=true for unknown tool")
 	}
 }

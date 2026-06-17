@@ -62,26 +62,18 @@ type SwitchResult struct {
 }
 
 // NewPieceInput holds input for the piece create command.
-// Must provide one of: Issue, Name, or Prompt.
-// Issue and Prompt are mutually exclusive. Name can coexist with Prompt.
+// Must provide one of: Name or Prompt. Name can coexist with Prompt.
 type NewPieceInput struct {
-	Issue            IssueRef `json:"issue,omitempty"`
-	Name             string   `json:"name,omitempty"`
-	Prompt           string   `json:"prompt,omitempty"`
-	Parent           string   `json:"parent,omitempty"` // Parent piece name, defaults to "main"
-	SkipSwitch       bool     `json:"skip_switch,omitempty"`
-	OverwriteSession bool     `json:"overwrite_session,omitempty"`
+	Name             string `json:"name,omitempty"`
+	Prompt           string `json:"prompt,omitempty"`
+	Parent           string `json:"parent,omitempty"` // Parent piece name, defaults to "main"
+	SkipSwitch       bool   `json:"skip_switch,omitempty"`
+	OverwriteSession bool   `json:"overwrite_session,omitempty"`
 }
 
 // NewPieceSchema returns the JSON schema for piece create input.
 func NewPieceSchema() ([]byte, error) {
 	schema := map[string]any{
-		"issue": map[string]any{
-			"provider": "",
-			"id":       "",
-			"number":   "",
-			"title":    "",
-		},
 		"name":              "",
 		"prompt":            "",
 		"parent":            "main",
@@ -101,21 +93,13 @@ func ParseNewPieceJSON(data []byte) (NewPieceInput, error) {
 }
 
 // ValidateNewPieceInput validates the input.
-// Must provide one of: Issue, Name, or Prompt.
-// Issue and Prompt are mutually exclusive. Name can coexist with Prompt.
+// Must provide one of: Name or Prompt. Name can coexist with Prompt.
 func ValidateNewPieceInput(input NewPieceInput) error {
-	hasIssue := !input.Issue.IsEmpty()
 	hasName := strings.TrimSpace(input.Name) != ""
 	hasPrompt := strings.TrimSpace(input.Prompt) != ""
 
-	if hasIssue && hasPrompt {
-		return fmt.Errorf("cannot specify both issue and prompt")
-	}
-	if hasIssue && hasName {
-		return fmt.Errorf("cannot specify both issue and name")
-	}
-	if !hasIssue && !hasName && !hasPrompt {
-		return fmt.Errorf("must specify issue, name, or prompt")
+	if !hasName && !hasPrompt {
+		return fmt.Errorf("must specify name or prompt")
 	}
 	return nil
 }
@@ -136,7 +120,6 @@ func WithNewPieceDefaults(input NewPieceInput) NewPieceInput {
 	}
 
 	return NewPieceInput{
-		Issue:            input.Issue,
 		Name:             name,
 		Prompt:           prompt,
 		Parent:           parent,

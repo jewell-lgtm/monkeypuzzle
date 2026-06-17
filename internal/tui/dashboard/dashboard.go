@@ -1,7 +1,6 @@
-// Package dashboard renders the cross-project monkeypuzzle dashboard: a flat,
-// always-expanded list of every registered project and its piece worktrees, with
-// fuzzy-filterable rows for open issues and unadopted branches the user can
-// turn into pieces on the fly.
+// Package dashboard renders the cross-project monkeypuzzle dashboard: a
+// fuzzy-filterable list of every registered project, its piece worktrees, and
+// unadopted branches the user can turn into pieces on the fly.
 package dashboard
 
 import (
@@ -35,7 +34,6 @@ type RowKind int
 const (
 	RowProject RowKind = iota
 	RowPiece
-	RowIssue
 	RowBranch
 	RowNewPiece
 )
@@ -50,11 +48,6 @@ type Row struct {
 	SessionName  string
 	HasSession   bool
 
-	// Issue-row fields (used when Kind == RowIssue).
-	IssuePath   string
-	IssueTitle  string
-	IssueNumber string
-
 	// Branch-row field (used when Kind == RowBranch). Also reused for the
 	// project's current branch on RowProject rows for display.
 	Branch string
@@ -65,7 +58,6 @@ type Row struct {
 
 	// Display-only metadata for RowProject rows.
 	PieceCount int
-	OpenIssues int
 	Missing    bool // repo no longer on disk
 }
 
@@ -102,7 +94,7 @@ type Model struct {
 	height int
 
 	// Expand/collapse. collapsed[projectKey] hides a project's child rows
-	// (pieces/issues/branches/new-piece) until expanded; hasChild marks which
+	// (pieces/branches/new-piece) until expanded; hasChild marks which
 	// projects have any children to expand. A non-empty filter query overrides
 	// collapse so search can reveal children anywhere.
 	collapsed map[string]bool
@@ -293,7 +285,7 @@ func rowHaystack(r Row) string {
 	if r.Kind == RowNewPiece {
 		return strings.ToLower(r.Project)
 	}
-	parts := []string{r.Project, r.Piece, r.Branch, r.IssueTitle, r.IssuePath, r.IssueNumber}
+	parts := []string{r.Project, r.Piece, r.Branch}
 	return strings.ToLower(strings.Join(parts, " "))
 }
 
@@ -447,7 +439,6 @@ func renderRow(r Row, selected bool) string {
 				meta = append(meta, r.Branch)
 			}
 			meta = append(meta, fmt.Sprintf("%d pieces", r.PieceCount))
-			meta = append(meta, fmt.Sprintf("%d open issues", r.OpenIssues))
 		}
 		return fmt.Sprintf("%s  %s", label, styles.Subtle.Render("("+strings.Join(meta, " · ")+")"))
 	case RowPiece:
@@ -460,19 +451,6 @@ func renderRow(r Row, selected bool) string {
 			indicator = styles.Subtle.Render(" [tmux]")
 		}
 		return fmt.Sprintf("  %s%s", name, indicator)
-	case RowIssue:
-		title := r.IssueTitle
-		if title == "" {
-			title = r.IssuePath
-		}
-		if selected {
-			title = styles.Selected.Render(title)
-		}
-		tag := "issue"
-		if r.IssueNumber != "" {
-			tag = "issue " + r.IssueNumber
-		}
-		return fmt.Sprintf("  %s %s", styles.Subtle.Render("["+tag+"]"), title)
 	case RowBranch:
 		name := r.Branch
 		if selected {

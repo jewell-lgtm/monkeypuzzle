@@ -11,7 +11,6 @@ A **piece** is an isolated git worktree for a single change. Each piece:
 - Lives in its own directory under `~/.local/share/monkeypuzzle/pieces/{repo-hash}/` (Linux) or `~/Library/Application Support/monkeypuzzle/pieces/{repo-hash}/` (macOS)
 - Has its own branch
 - Has its own tmux session (`mp/<project>/<piece>`) **when you work interactively from inside tmux** — agents and scripts driving mp through its stateless API get the worktree path instead of a session (see [Sessions are interactive-only](#sessions-are-interactive-only))
-- Can optionally be linked to a tracker issue, surfaced to hooks as `MP_ISSUE_ID` / `MP_ISSUE_NUMBER`
 
 ### Why worktrees?
 
@@ -27,10 +26,10 @@ Workflows differ. PHProcess flips GitLab labels on draft→ready; another team a
 ## The lifecycle
 
 ```
-mp create [--issue <id>]
+mp create [--name <name> | --prompt <text>]
         │
         ▼  on-piece-create.sh   (detached, fire-and-forget; logs to .monkeypuzzle/logs/)
-        │                       (env: MP_ISSUE_ID, MP_ISSUE_NUMBER, MP_SESSION_NAME)
+        │                       (env: MP_SESSION_NAME)
    worktree + tmux session ready
         │
         ▼  (work, commit)
@@ -38,13 +37,13 @@ mp create [--issue <id>]
         ▼  before-piece-update.sh / after-piece-update.sh   (env: MP_MAIN_BRANCH)
    mp update — merge main in
         │
-        ▼  before-pr-create.sh               (env: MP_PR_BASE_BRANCH, MP_ISSUE_*)
+        ▼  before-pr-create.sh               (env: MP_PR_BASE_BRANCH)
    mp pr create [--draft] — push + open PR/MR
-        ▼  after-pr-create.sh                (env: MP_PR_NUMBER, MP_PR_URL, MP_PR_BASE_BRANCH, MP_ISSUE_*)
+        ▼  after-pr-create.sh                (env: MP_PR_NUMBER, MP_PR_URL, MP_PR_BASE_BRANCH)
         │
         ▼  (review, iterate)
         │
-        ▼  before-pr-ready.sh                (env: MP_PR_NUMBER, MP_PR_URL, MP_PR_BASE_BRANCH, MP_ISSUE_*)
+        ▼  before-pr-ready.sh                (env: MP_PR_NUMBER, MP_PR_URL, MP_PR_BASE_BRANCH)
    mp pr ready — flip draft to ready
         ▼  after-pr-ready.sh                 (same env)
         │
@@ -58,34 +57,34 @@ mp create [--issue <id>]
 
 Piece basics always available to every hook: `MP_PIECE_NAME`, `MP_WORKTREE_PATH`, `MP_REPO_ROOT`.
 
-## A worked example — GitLab MR with two label flips
+## A worked example — GitLab MR with a label flip + reviewer
 
-PHProcess-shape workflow: pickup flips the ticket to "Doing", the user-driven ready-flip flips it to "Code Review ausstehend" and assigns a reviewer.
+PHProcess-shape workflow: opening the MR flips it to "Doing", the user-driven ready-flip flips it to "Code Review ausstehend" and assigns a reviewer.
 
-`.monkeypuzzle/hooks/on-piece-create.sh`:
+`.monkeypuzzle/hooks/after-pr-create.sh`:
 
 ```bash
 #!/bin/bash
-[ -z "$MP_ISSUE_NUMBER" ] && exit 0
-glab issue update "$MP_ISSUE_NUMBER" --label Doing --unlabel Dev-Backlog
+[ -z "$MP_PR_NUMBER" ] && exit 0
+glab mr update "$MP_PR_NUMBER" --label Doing
 ```
 
 `.monkeypuzzle/hooks/after-pr-ready.sh`:
 
 ```bash
 #!/bin/bash
-[ -z "$MP_ISSUE_NUMBER" ] && exit 0
-glab issue update "$MP_ISSUE_NUMBER" \
+[ -z "$MP_PR_NUMBER" ] && exit 0
+glab mr update "$MP_PR_NUMBER" \
   --label "Code Review ausstehend" --unlabel Doing \
-  --assignee my-reviewer
+  --reviewer my-reviewer
 ```
 
 Then:
 
 ```bash
-mp create --issue 1845       # pickup label flip fires
+mp create --name add-login   # spawn the piece
 # ... work ...
-mp pr create --draft         # opens draft MR
+mp pr create --draft         # opens draft MR, "Doing" label flip fires
 # ... self-review ...
 mp pr ready                  # ready label flip + reviewer assignment fires
 ```
@@ -173,15 +172,12 @@ Long-running processes survive switching — each piece's session keeps its own 
 
 ## Forge support
 
-| Provider | Issues | PRs/MRs |
-| --- | --- | --- |
-| GitHub | (use `gh` directly; no mp issue provider needed for the typical flow) | `pr_provider: github`, uses `gh` |
-| GitLab | `issue_provider: gitlab`, uses `glab issue view` | `pr_provider: gitlab`, uses `glab mr` |
-| Linear | `issue_provider: linear`, GraphQL API | — |
-| Plane | `issue_provider: plane`, REST API | — |
-| Markdown | `issue_provider: markdown`, files in `issues/` | — |
+| Provider | PRs/MRs |
+| --- | --- |
+| GitHub | `pr_provider: github`, uses `gh` |
+| GitLab | `pr_provider: gitlab`, uses `glab mr` |
 
-`mp create --issue <id>` resolves the id via the configured issue provider — file path for markdown, identifier for Linear, iid for GitLab, etc. The provider returns title (for the piece name) and URL/Open-state; everything else is hook territory.
+`mp pr create` pushes the branch and opens a PR/MR via the configured provider; its title defaults to the piece name. Everything beyond that — labels, reviewers, downstream tickets — is hook territory.
 
 ## Tmux integration
 

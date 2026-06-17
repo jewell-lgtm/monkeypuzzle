@@ -154,10 +154,9 @@ func (s *Server) handleToolsList(req *Request) *Response {
 			InputSchema: JSONSchema{
 				Type: "object",
 				Properties: map[string]Property{
-					"name":           {Type: "string", Description: "Project name"},
-					"issue_provider": {Type: "string", Description: "Issue provider (default: markdown)"},
-					"pr_provider":    {Type: "string", Description: "PR provider (default: github)"},
-					"cwd":            {Type: "string", Description: "Working directory"},
+					"name":        {Type: "string", Description: "Project name"},
+					"pr_provider": {Type: "string", Description: "PR provider (default: github)"},
+					"cwd":         {Type: "string", Description: "Working directory"},
 				},
 			},
 		},
@@ -167,9 +166,8 @@ func (s *Server) handleToolsList(req *Request) *Response {
 			InputSchema: JSONSchema{
 				Type: "object",
 				Properties: map[string]Property{
-					"name":  {Type: "string", Description: "Piece name"},
-					"issue": {Type: "string", Description: "Path to issue file"},
-					"cwd":   {Type: "string", Description: "Working directory"},
+					"name": {Type: "string", Description: "Piece name"},
+					"cwd":  {Type: "string", Description: "Working directory"},
 				},
 			},
 		},
@@ -193,26 +191,6 @@ func (s *Server) handleToolsList(req *Request) *Response {
 					"main_branch": {Type: "string", Description: "Main branch name (default: main)"},
 					"cwd":         {Type: "string", Description: "Working directory (piece worktree)"},
 				},
-			},
-		},
-		{
-			Name:        "mp_issue_list",
-			Description: "List issues in the issues directory",
-			InputSchema: JSONSchema{
-				Type: "object",
-				Properties: map[string]Property{
-					"status": {Type: "string", Description: "Filter by status: todo, in-progress, done"},
-					"cwd":    {Type: "string", Description: "Working directory"},
-				},
-			},
-		},
-		{
-			Name:        "mp_issue_read",
-			Description: "Read content of an issue file",
-			InputSchema: JSONSchema{
-				Type:       "object",
-				Properties: map[string]Property{"path": {Type: "string", Description: "Path to issue file"}, "cwd": {Type: "string", Description: "Working directory"}},
-				Required:   []string{"path"},
 			},
 		},
 	}
@@ -258,9 +236,6 @@ func (s *Server) executeTool(name string, args map[string]string) (string, bool)
 		if v := args["name"]; v != "" {
 			input["name"] = v
 		}
-		if v := args["issue_provider"]; v != "" {
-			input["issue_provider"] = v
-		}
 		if v := args["pr_provider"]; v != "" {
 			input["pr_provider"] = v
 		}
@@ -274,9 +249,6 @@ func (s *Server) executeTool(name string, args map[string]string) (string, bool)
 		if v := args["name"]; v != "" {
 			cmdArgs = append(cmdArgs, "--name", v)
 		}
-		if v := args["issue"]; v != "" {
-			cmdArgs = append(cmdArgs, "--issue", v)
-		}
 
 	case "mp_piece_update":
 		cmdArgs = []string{"update"}
@@ -289,15 +261,6 @@ func (s *Server) executeTool(name string, args map[string]string) (string, bool)
 		if v := args["main_branch"]; v != "" {
 			cmdArgs = append(cmdArgs, "--main-branch", v)
 		}
-
-	case "mp_issue_list":
-		return s.listIssues(cwd, args["status"])
-
-	case "mp_issue_read":
-		if path := args["path"]; path != "" {
-			return s.readIssue(cwd, path)
-		}
-		return "Error: path is required", true
 
 	default:
 		return fmt.Sprintf("Unknown tool: %s", name), true
@@ -320,81 +283,6 @@ func (s *Server) runMp(cwd string, args []string, stdin string) (string, bool) {
 		return string(output), true
 	}
 	return string(output), false
-}
-
-func (s *Server) listIssues(cwd, statusFilter string) (string, bool) {
-	issuesDir := filepath.Join(cwd, "issues")
-	entries, err := os.ReadDir(issuesDir)
-	if err != nil {
-		return fmt.Sprintf("Error: %v", err), true
-	}
-
-	type Issue struct {
-		Path   string `json:"path"`
-		Title  string `json:"title"`
-		Status string `json:"status"`
-	}
-	var issues []Issue
-
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
-			continue
-		}
-		path := filepath.Join("issues", e.Name())
-		title, status := parseIssue(filepath.Join(cwd, path))
-		if statusFilter != "" && status != statusFilter {
-			continue
-		}
-		issues = append(issues, Issue{Path: path, Title: title, Status: status})
-	}
-
-	data, _ := json.MarshalIndent(issues, "", "  ")
-	return string(data), false
-}
-
-func (s *Server) readIssue(cwd, path string) (string, bool) {
-	content, err := os.ReadFile(filepath.Join(cwd, path))
-	if err != nil {
-		return fmt.Sprintf("Error: %v", err), true
-	}
-	return string(content), false
-}
-
-func parseIssue(path string) (title, status string) {
-	content, err := os.ReadFile(path)
-	if err != nil {
-		return filepath.Base(path), "todo"
-	}
-	text := string(content)
-	status = "todo"
-
-	if strings.HasPrefix(text, "---\n") {
-		if end := strings.Index(text[4:], "\n---"); end > 0 {
-			fm := text[4 : 4+end]
-			for _, line := range strings.Split(fm, "\n") {
-				line = strings.TrimSpace(line)
-				if strings.HasPrefix(line, "title:") {
-					title = strings.Trim(strings.TrimSpace(strings.TrimPrefix(line, "title:")), `"'`)
-				}
-				if strings.HasPrefix(line, "status:") {
-					status = strings.Trim(strings.TrimSpace(strings.TrimPrefix(line, "status:")), `"'`)
-				}
-			}
-		}
-	}
-
-	if title == "" {
-		for _, line := range strings.Split(text, "\n") {
-			if strings.HasPrefix(strings.TrimSpace(line), "# ") {
-				title = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "# "))
-				break
-			}
-		}
-	}
-	if title == "" {
-		title = strings.TrimSuffix(filepath.Base(path), ".md")
-	}
-	return
 }
 
 func successResponse(id any, result any) *Response {

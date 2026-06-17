@@ -24,7 +24,6 @@ func setupTestPieceWorktree(t *testing.T, mockExec *adapters.MockExec, fs *adapt
 	configData := `{
   "version": "1",
   "project": {"name": "test"},
-  "issues": {"provider": "markdown", "config": {"directory": "issues"}},
   "pr": {"provider": "github", "config": {}}
 }`
 	_ = fs.WriteFile(filepath.Join(mainRepoPath, ".monkeypuzzle/monkeypuzzle.json"), []byte(configData), 0644)
@@ -100,70 +99,6 @@ func TestCreatePR_HappyPath(t *testing.T) {
 	}
 }
 
-func TestCreatePR_UsesIssueTitleWhenAvailable(t *testing.T) {
-	fs := adapters.NewMemoryFS()
-	mockExec := adapters.NewMockExec()
-	output := adapters.NewBufferOutput()
-
-	worktreePath := "/pieces/test-piece"
-	mainRepoPath := "/repo"
-
-	setupTestPieceWorktree(t, mockExec, fs, worktreePath, mainRepoPath)
-
-	// Record the issue ref in piece metadata (the PR handler reads it for the
-	// default PR title).
-	meta := piece.PieceMetadata{
-		Parent: "main",
-		Issue: piece.IssueRef{
-			Provider: "markdown",
-			ID:       "issues/my-feature.md",
-			Title:    "My Awesome Feature",
-		},
-	}
-	metaData, _ := json.Marshal(meta)
-	_ = fs.WriteFile(filepath.Join(worktreePath, ".monkeypuzzle", "piece-metadata.json"), metaData, 0644)
-
-	// Mock git push
-	mockExec.AddResponse("git", []string{"push", "-u", "origin", "HEAD"}, []byte(""), nil)
-
-	// Mock gh pr create - should use issue title since no title provided
-	mockExec.AddResponse("gh", []string{"pr", "create", "--title", "My Awesome Feature", "--body", "", "--base", "main"},
-		[]byte("https://github.com/owner/repo/pull/99\n"), nil)
-
-	deps := core.Deps{
-		FS:     fs,
-		Output: output,
-		Exec:   mockExec,
-	}
-
-	handler := pr.NewHandler(deps)
-
-	// No title provided - should use issue title
-	input := pr.Input{
-		Title: "",
-		Body:  "",
-		Base:  "main",
-	}
-
-	result, err := handler.CreatePR(context.Background(), worktreePath, input)
-	if err != nil {
-		t.Fatalf("CreatePR failed: %v", err)
-	}
-
-	if result.PRNumber != 99 {
-		t.Errorf("expected PR number 99, got %d", result.PRNumber)
-	}
-
-	// Verify issue ref was stored in metadata
-	metadata, err := piece.ReadPRMetadata(worktreePath, fs)
-	if err != nil {
-		t.Fatalf("failed to read PR metadata: %v", err)
-	}
-	if metadata.Issue.ID != "issues/my-feature.md" {
-		t.Errorf("metadata Issue.ID = %q, want 'issues/my-feature.md'", metadata.Issue.ID)
-	}
-}
-
 func TestCreatePR_UsesPieceNameAsFallback(t *testing.T) {
 	fs := adapters.NewMemoryFS()
 	mockExec := adapters.NewMockExec()
@@ -180,7 +115,6 @@ func TestCreatePR_UsesPieceNameAsFallback(t *testing.T) {
 	_ = fs.WriteFile(filepath.Join(mainRepoPath, ".monkeypuzzle/monkeypuzzle.json"), []byte(`{
   "version": "1",
   "project": {"name": "test"},
-  "issues": {"provider": "markdown", "config": {"directory": "issues"}},
   "pr": {"provider": "github", "config": {}}
 }`), 0644)
 
@@ -339,7 +273,6 @@ func TestCreatePR_UsesParentBranchAsBase(t *testing.T) {
 	_ = fs.WriteFile(filepath.Join(mainRepoPath, ".monkeypuzzle/monkeypuzzle.json"), []byte(`{
   "version": "1",
   "project": {"name": "test"},
-  "issues": {"provider": "markdown", "config": {"directory": "issues"}},
   "pr": {"provider": "github", "config": {}}
 }`), 0644)
 
@@ -405,7 +338,6 @@ func TestCreatePR_ExplicitBaseOverridesParent(t *testing.T) {
 	_ = fs.WriteFile(filepath.Join(mainRepoPath, ".monkeypuzzle/monkeypuzzle.json"), []byte(`{
   "version": "1",
   "project": {"name": "test"},
-  "issues": {"provider": "markdown", "config": {"directory": "issues"}},
   "pr": {"provider": "github", "config": {}}
 }`), 0644)
 
@@ -471,7 +403,6 @@ func TestCreatePR_MainParentUsesMain(t *testing.T) {
 	_ = fs.WriteFile(filepath.Join(mainRepoPath, ".monkeypuzzle/monkeypuzzle.json"), []byte(`{
   "version": "1",
   "project": {"name": "test"},
-  "issues": {"provider": "markdown", "config": {"directory": "issues"}},
   "pr": {"provider": "github", "config": {}}
 }`), 0644)
 

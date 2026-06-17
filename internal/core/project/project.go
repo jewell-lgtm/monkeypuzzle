@@ -3,11 +3,9 @@
 package project
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/projectdir"
@@ -22,7 +20,6 @@ type Info struct {
 	IsProject  bool   `json:"is_project"` // .monkeypuzzle/monkeypuzzle.json present
 	Branch     string `json:"branch,omitempty"`
 	PieceCount int    `json:"piece_count"`
-	OpenIssues int    `json:"open_issues"`
 }
 
 // Add registers the project containing dir. It returns the stored project and
@@ -113,7 +110,6 @@ func enrich(p registry.Project) Info {
 		info.Branch = b
 	}
 	info.PieceCount = pieceCount(p.Path)
-	info.OpenIssues = openIssueCount(p.Path)
 	return info
 }
 
@@ -143,52 +139,3 @@ func pieceCount(repoRoot string) int {
 	return n
 }
 
-// openIssueCount counts markdown issue files without a "done" status. It only
-// supports the markdown provider; other providers report 0.
-func openIssueCount(repoRoot string) int {
-	dir := issuesDir(repoRoot)
-	if dir == "" {
-		return 0
-	}
-	entries, err := os.ReadDir(filepath.Join(repoRoot, dir))
-	if err != nil {
-		return 0
-	}
-	n := 0
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
-			continue
-		}
-		data, err := os.ReadFile(filepath.Join(repoRoot, dir, e.Name()))
-		if err != nil {
-			continue
-		}
-		if strings.Contains(string(data), "status: done") || strings.Contains(string(data), "status: \"done\"") {
-			continue
-		}
-		n++
-	}
-	return n
-}
-
-// issuesDir returns the configured issues directory for a markdown-provider
-// project, or "" if not applicable.
-func issuesDir(repoRoot string) string {
-	data, err := os.ReadFile(registry.ConfigPath(repoRoot))
-	if err != nil {
-		return ""
-	}
-	var cfg struct {
-		Issues struct {
-			Provider string            `json:"provider"`
-			Config   map[string]string `json:"config"`
-		} `json:"issues"`
-	}
-	if err := json.Unmarshal(data, &cfg); err != nil || cfg.Issues.Provider != "markdown" {
-		return ""
-	}
-	if d := cfg.Issues.Config["directory"]; d != "" {
-		return d
-	}
-	return "issues"
-}

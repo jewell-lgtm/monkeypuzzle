@@ -4,7 +4,6 @@ package pr_test
 
 import (
 	"context"
-	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -100,7 +99,6 @@ func setupTestRepo(t *testing.T) (repoDir, worktreeDir string, cleanup func()) {
 	if err := os.WriteFile(filepath.Join(repoDir, ".monkeypuzzle/monkeypuzzle.json"), []byte(`{
   "version": "1",
   "project": {"name": "test"},
-  "issues": {"provider": "markdown", "config": {"directory": "issues"}},
   "pr": {"provider": "github", "config": {}}
 }`), 0644); err != nil {
 		cleanup()
@@ -183,78 +181,6 @@ func TestIntegration_CreatePR_HappyPath(t *testing.T) {
 	}
 	if metadata.Branch != "test-piece" {
 		t.Errorf("metadata branch = %q, want 'test-piece'", metadata.Branch)
-	}
-}
-
-func TestIntegration_CreatePR_WithIssueMarker(t *testing.T) {
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not available")
-	}
-
-	_, worktreeDir, cleanup := setupTestRepo(t)
-	defer cleanup()
-
-	// Record the issue ref in piece metadata (the PR handler reads it for the
-	// default PR title).
-	meta := piece.PieceMetadata{
-		Parent: "main",
-		Issue: piece.IssueRef{
-			Provider: "markdown",
-			ID:       "issues/my-feature.md",
-			Title:    "My Awesome Feature",
-		},
-	}
-	metaData, _ := json.Marshal(meta)
-	metaPath := filepath.Join(worktreeDir, ".monkeypuzzle", "piece-metadata.json")
-	if err := os.WriteFile(metaPath, metaData, 0644); err != nil {
-		t.Fatalf("failed to write piece metadata: %v", err)
-	}
-
-	mockExec := adapters.NewMockExec()
-	mockExec.AddResponse("git", []string{"push", "-u", "origin", "HEAD"}, []byte(""), nil)
-	// Note: title should come from the recorded issue ref since input.Title is empty
-	mockExec.AddResponse("gh", []string{"pr", "create", "--title", "My Awesome Feature", "--body", "", "--base", "main"},
-		[]byte("https://github.com/test/repo/pull/99\n"), nil)
-
-	hybridExec := &hybridExec{
-		real: adapters.NewOSExec(),
-		mock: mockExec,
-	}
-
-	deps := core.Deps{
-		FS:     adapters.NewOSFS(""),
-		Output: adapters.NewBufferOutput(),
-		Exec:   hybridExec,
-	}
-
-	handler := pr.NewHandler(deps)
-
-	// No title - should use issue marker
-	input := pr.Input{
-		Title: "",
-		Body:  "",
-		Base:  "main",
-	}
-
-	result, err := handler.CreatePR(context.Background(), worktreeDir, input)
-	if err != nil {
-		t.Fatalf("CreatePR failed: %v", err)
-	}
-
-	if result.PRNumber != 99 {
-		t.Errorf("PR number = %d, want 99", result.PRNumber)
-	}
-
-	// Verify issue path stored in metadata
-	metadata, err := piece.ReadPRMetadata(worktreeDir, adapters.NewOSFS(""))
-	if err != nil {
-		t.Fatalf("failed to read PR metadata: %v", err)
-	}
-	if metadata.Issue.ID != "issues/my-feature.md" {
-		t.Errorf("metadata Issue.ID = %q, want 'issues/my-feature.md'", metadata.Issue.ID)
-	}
-	if metadata.Issue.Title != "My Awesome Feature" {
-		t.Errorf("metadata Issue.Title = %q, want 'My Awesome Feature'", metadata.Issue.Title)
 	}
 }
 

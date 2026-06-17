@@ -15,27 +15,6 @@ func TestValidateNewPieceInput_BothEmpty_Error(t *testing.T) {
 	}
 }
 
-func TestValidateNewPieceInput_BothSet_Error(t *testing.T) {
-	input := piece.NewPieceInput{
-		Issue: piece.IssueRef{Provider: "markdown", ID: "issues/foo.md", Title: "Test"},
-		Name:  "my-piece",
-	}
-	err := piece.ValidateNewPieceInput(input)
-	if err == nil {
-		t.Error("expected error when both set")
-	}
-}
-
-func TestValidateNewPieceInput_OnlyIssue_Valid(t *testing.T) {
-	input := piece.NewPieceInput{
-		Issue: piece.IssueRef{Provider: "markdown", ID: "issues/foo.md", Title: "Test"},
-	}
-	err := piece.ValidateNewPieceInput(input)
-	if err != nil {
-		t.Errorf("expected valid, got error: %v", err)
-	}
-}
-
 func TestValidateNewPieceInput_OnlyName_Valid(t *testing.T) {
 	input := piece.NewPieceInput{Name: "my-piece"}
 	err := piece.ValidateNewPieceInput(input)
@@ -55,9 +34,6 @@ func TestNewPieceSchema(t *testing.T) {
 		t.Fatalf("invalid JSON: %v", err)
 	}
 
-	if _, ok := data["issue"]; !ok {
-		t.Error("expected 'issue' in schema")
-	}
 	if _, ok := data["name"]; !ok {
 		t.Error("expected 'name' in schema")
 	}
@@ -70,13 +46,16 @@ func TestNewPieceSchema(t *testing.T) {
 }
 
 func TestParseNewPieceJSON(t *testing.T) {
-	jsonData := `{"issue":{"provider":"markdown","id":"issues/foo.md","title":"Test Issue"}}`
+	jsonData := `{"name":"my-piece","prompt":"add dark mode"}`
 	input, err := piece.ParseNewPieceJSON([]byte(jsonData))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if input.Issue.ID != "issues/foo.md" {
-		t.Errorf("expected issue ID 'issues/foo.md', got %q", input.Issue.ID)
+	if input.Name != "my-piece" {
+		t.Errorf("expected name 'my-piece', got %q", input.Name)
+	}
+	if input.Prompt != "add dark mode" {
+		t.Errorf("expected prompt 'add dark mode', got %q", input.Prompt)
 	}
 }
 
@@ -93,17 +72,6 @@ func TestValidateNewPieceInput_PromptAndName_Valid(t *testing.T) {
 	err := piece.ValidateNewPieceInput(input)
 	if err != nil {
 		t.Errorf("expected valid, got error: %v", err)
-	}
-}
-
-func TestValidateNewPieceInput_PromptAndIssue_Error(t *testing.T) {
-	input := piece.NewPieceInput{
-		Prompt: "add dark mode",
-		Issue:  piece.IssueRef{Provider: "markdown", ID: "issues/foo.md", Title: "Test"},
-	}
-	err := piece.ValidateNewPieceInput(input)
-	if err == nil {
-		t.Error("expected error when both prompt and issue set")
 	}
 }
 

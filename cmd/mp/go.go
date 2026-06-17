@@ -14,8 +14,6 @@ import (
 	"github.com/jewell-lgtm/monkeypuzzle/internal/adapters"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/config"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
-	"github.com/jewell-lgtm/monkeypuzzle/internal/core/issue"
-	piececmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/piece"
 	projectcmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/project"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core/session"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/registry"
@@ -23,12 +21,9 @@ import (
 	"github.com/jewell-lgtm/monkeypuzzle/pkg/cli"
 )
 
-// Caps applied to the cross-project dashboard's per-project issue and branch
-// lists to keep the picker bounded before fuzzy filtering.
-const (
-	maxIssuesPerProject   = 10
-	maxBranchesPerProject = 10
-)
+// maxBranchesPerProject caps the cross-project dashboard's per-project branch
+// list to keep the picker bounded before fuzzy filtering.
+const maxBranchesPerProject = 10
 
 var goCmd = &cobra.Command{
 	Use:   "go",
@@ -37,9 +32,9 @@ var goCmd = &cobra.Command{
 anywhere, regardless of the current repo.
 
 With a terminal, opens an interactive fuzzy picker. Each repo starts collapsed
-(one row per repo); press → to expand it and reveal its pieces, issues, and
-branches, or just press Enter on a collapsed repo to jump to its main worktree.
-Typing filters across everything (expanded or not); ↑/↓ and PgUp/PgDn scroll.
+(one row per repo); press → to expand it and reveal its pieces and branches, or
+just press Enter on a collapsed repo to jump to its main worktree. Typing filters
+across everything (expanded or not); ↑/↓ and PgUp/PgDn scroll.
 
 With --json (or no TTY) it prints the full per-project detail so automation can
 build its own pickers.`,
@@ -67,15 +62,6 @@ type dashPiece struct {
 	HasSession   bool   `json:"has_session"`
 }
 
-// dashIssue is the JSON shape for an open issue surfaced by the dashboard.
-// Only issues without an associated piece appear here — the picker uses these
-// rows to create a piece on the fly.
-type dashIssue struct {
-	Path   string `json:"path"`
-	Title  string `json:"title"`
-	Number string `json:"number,omitempty"`
-}
-
 // dashBranch is the JSON shape for a git branch that is not yet adopted as a
 // piece. The picker uses these rows to adopt a branch on the fly. Remote marks
 // a remote-only ref (e.g. "origin/foo") with no local branch yet.
@@ -89,7 +75,6 @@ type dashProject struct {
 	projectcmd.Info
 	MainSession string       `json:"main_session"`
 	Pieces      []dashPiece  `json:"pieces"`
-	Issues      []dashIssue  `json:"issues,omitempty"`
 	Branches    []dashBranch `json:"branches,omitempty"`
 	Error       string       `json:"error,omitempty"`
 }
@@ -132,7 +117,7 @@ func classifyCwd(ctx context.Context) (root string, state cwdState) {
 
 func collectDashboard(ctx context.Context, infos []projectcmd.Info) ([]dashProject, error) {
 	// No-op loading: the dashboard renders interactively (and prints JSON in
-	// non-TTY mode), so a stray "⏳ Fetching issues..." line printed to stderr
+	// non-TTY mode), so a stray "⏳ Fetching projects..." line printed to stderr
 	// during collection would just linger above the picker.
 	deps := core.NewDeps(
 		adapters.NewOSFS(""),
@@ -161,73 +146,11 @@ func collectDashboard(ctx context.Context, infos []projectcmd.Info) ([]dashProje
 					})
 				}
 			}
-			dp.Issues = collectProjectIssues(deps, info.Path, dp.Pieces)
 			dp.Branches = collectProjectBranches(ctx, git, info.Path)
 		}
 		out = append(out, dp)
 	}
 	return out, nil
-}
-
-// collectProjectIssues returns up to maxIssuesPerProject local markdown issues
-// for a project, excluding any that already have a piece. Core issue handling
-// is resolution-only, so this is a cmd-layer directory scan; tracker-backed
-// projects list issues with the tracker's own CLI, not in the dashboard.
-func collectProjectIssues(deps core.Deps, projectPath string, pieces []dashPiece) []dashIssue {
-	cfg, err := piececmd.ReadConfig(projectPath, deps.FS)
-	if err != nil || cfg.Issues.Provider != "markdown" {
-		return nil
-	}
-	issuesDir := cfg.Issues.Config["directory"]
-	if issuesDir == "" {
-		issuesDir = "issues"
-	}
-
-	entries, err := deps.FS.ReadDir(filepath.Join(projectPath, issuesDir))
-	if err != nil {
-		return nil
-	}
-
-	worked := workedIssueIDs(deps, pieces)
-	handler := issue.NewHandler(deps, projectPath)
-
-	out := make([]dashIssue, 0, maxIssuesPerProject)
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
-			continue
-		}
-		rel := filepath.Join(issuesDir, e.Name())
-		abs := filepath.Join(projectPath, rel)
-		if worked[rel] || worked[abs] {
-			continue
-		}
-		it, err := handler.Get(abs)
-		if err != nil {
-			continue
-		}
-		out = append(out, dashIssue{
-			Path:  rel,
-			Title: it.Title,
-		})
-		if len(out) >= maxIssuesPerProject {
-			break
-		}
-	}
-	return out
-}
-
-// workedIssueIDs returns the set of issue IDs that already have a piece, derived
-// from each piece's recorded issue ref in its metadata.
-func workedIssueIDs(deps core.Deps, pieces []dashPiece) map[string]bool {
-	worked := make(map[string]bool)
-	for _, pc := range pieces {
-		meta, err := piececmd.ReadPieceMetadata(pc.WorktreePath, deps.FS)
-		if err != nil || meta == nil || meta.Issue.IsEmpty() {
-			continue
-		}
-		worked[meta.Issue.ID] = true
-	}
-	return worked
 }
 
 // collectProjectBranches returns git branches that are candidates for adoption:
@@ -311,7 +234,6 @@ func dashboardRows(projects []dashProject) []dashboard.Row {
 			SessionName:  p.MainSession,
 			Branch:       p.Branch,
 			PieceCount:   p.PieceCount,
-			OpenIssues:   p.OpenIssues,
 			Missing:      !p.Exists,
 		})
 		// Only existing project repos can host a new piece. Missing projects
@@ -332,16 +254,6 @@ func dashboardRows(projects []dashProject) []dashboard.Row {
 				WorktreePath: pc.WorktreePath,
 				SessionName:  pc.SessionName,
 				HasSession:   pc.HasSession,
-			})
-		}
-		for _, is := range p.Issues {
-			rows = append(rows, dashboard.Row{
-				Kind:        dashboard.RowIssue,
-				Project:     p.Name,
-				ProjectPath: p.Path,
-				IssuePath:   is.Path,
-				IssueTitle:  is.Title,
-				IssueNumber: is.Number,
 			})
 		}
 		for _, br := range p.Branches {
@@ -371,9 +283,9 @@ func runRoot(cmd *cobra.Command, args []string) error {
 
 // runGo handles `mp go`: a repo switcher across every registered project. The
 // interactive picker shows each repo collapsed (one row per repo) and lets you
-// expand a repo to reveal its pieces/issues/branches; Enter on a collapsed repo
-// jumps straight to its main worktree. With --json (or no TTY) it prints the
-// full per-project detail.
+// expand a repo to reveal its pieces/branches; Enter on a collapsed repo jumps
+// straight to its main worktree. With --json (or no TTY) it prints the full
+// per-project detail.
 func runGo(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	infos, err := projectcmd.List()

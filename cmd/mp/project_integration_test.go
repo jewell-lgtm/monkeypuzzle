@@ -23,7 +23,7 @@ func projectTestRepo(t *testing.T, e *testEnv, dataDir, root, name string) strin
 	gitCmd(t, dir, "commit", "--allow-empty", "-m", "init")
 	gitCmd(t, dir, "branch", "-M", "main")
 
-	cmd := exec.Command(e.binPath, "init", "--name", name, "--issue-provider", "markdown", "--pr-provider", "github")
+	cmd := exec.Command(e.binPath, "init", "--name", name, "--pr-provider", "github")
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "MP_DATA_DIR="+dataDir, "MP_CONFIG_DIR="+e.configDir)
 	if out, err := cmd.CombinedOutput(); err != nil {

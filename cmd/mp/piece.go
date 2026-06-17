@@ -16,7 +16,6 @@ import (
 	"github.com/jewell-lgtm/monkeypuzzle/internal/adapters"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/config"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
-	"github.com/jewell-lgtm/monkeypuzzle/internal/core/issue"
 	piececmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/piece"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/registry"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/tui/chooser"
@@ -27,7 +26,7 @@ import (
 var pieceStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show current piece status",
-	Long:  `Print the current piece's status (parent, children, issue, branch) as JSON. Run from within a piece worktree, or the main repo.`,
+	Long:  `Print the current piece's status (parent, children, branch) as JSON. Run from within a piece worktree, or the main repo.`,
 	RunE:  runPieceStatus,
 }
 
@@ -57,7 +56,7 @@ var pieceMergeCmd = &cobra.Command{
 var pieceCleanupCmd = &cobra.Command{
 	Use:   "cleanup",
 	Short: "Cleanup merged pieces",
-	Long:  `Finds and removes pieces whose branches have been merged. Removes worktrees, kills tmux sessions, and updates issue status to done.`,
+	Long:  `Finds and removes pieces whose branches have been merged. Removes worktrees and kills tmux sessions.`,
 	RunE:  runPieceCleanup,
 }
 
@@ -100,7 +99,6 @@ var pieceListCmd = &cobra.Command{
 
 var flagMainBranch string
 var flagPieceName string
-var flagIssuePath string
 var flagParent string
 var flagSkipSwitch bool
 var flagDryRun bool
@@ -126,7 +124,6 @@ var flagPieceListAll bool
 
 func init() {
 	pieceCreateCmd.Flags().StringVar(&flagPieceName, "name", "", "Optional piece name (default: auto-generated)")
-	pieceCreateCmd.Flags().StringVar(&flagIssuePath, "issue", "", "Create piece from issue file (e.g., issues/foo.md)")
 	pieceCreateCmd.Flags().StringVar(&flagPiecePrompt, "prompt", "", "Create piece from prompt (e.g., \"add dark mode\")")
 	pieceCreateCmd.Flags().StringVarP(&flagParent, "parent", "p", "", "Parent piece name to branch from (default: main)")
 	pieceCreateCmd.Flags().BoolVar(&flagSkipSwitch, "skip-switch", false, "Don't switch to the new piece after creation")
@@ -168,7 +165,6 @@ func init() {
 
 	// Register completion functions (errors ignored - completion is optional)
 	_ = pieceAbandonCmd.RegisterFlagCompletionFunc("name", completePieceNames)
-	_ = pieceCreateCmd.RegisterFlagCompletionFunc("issue", completeIssueFiles)
 	_ = pieceUpdateCmd.RegisterFlagCompletionFunc("main-branch", completeGitBranches)
 	_ = pieceMergeCmd.RegisterFlagCompletionFunc("main-branch", completeGitBranches)
 	_ = pieceCleanupCmd.RegisterFlagCompletionFunc("main-branch", completeGitBranches)
@@ -257,11 +253,6 @@ func completePieceNames(cmd *cobra.Command, args []string, toComplete string) ([
 	return names, cobra.ShellCompDirectiveNoFileComp
 }
 
-func completeIssueFiles(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-	// Allow file completion, filtered to issues/ directory by default
-	return nil, cobra.ShellCompDirectiveDefault
-}
-
 func completeGitBranches(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	exec := adapters.NewOSExec()
 	out, err := exec.Run(cmd.Context(), "git", "branch", "--format=%(refname:short)")
@@ -340,11 +331,6 @@ func runPieceStatus(cmd *cobra.Command, args []string) error {
 		meta, metaErr := piececmd.ReadPieceMetadata(status.WorktreePath, deps.FS)
 		if metaErr == nil && meta != nil && meta.Prompt != "" {
 			fmt.Fprintf(os.Stderr, "\nPrompt: %s\n", meta.Prompt)
-		}
-
-		// Display the issue this piece was created from, if any.
-		if metaErr == nil && meta != nil && !meta.Issue.IsEmpty() {
-			fmt.Fprintf(os.Stderr, "\nIssue: %s\n", meta.Issue.DisplayName())
 		}
 
 		// Display branch information
@@ -438,19 +424,11 @@ func getPieceCreateInput(deps core.Deps, workDir string) (piececmd.NewPieceInput
 	var err error
 
 	// Mode 1: Flags provided
-	if flagIssuePath != "" || flagPieceName != "" || flagPiecePrompt != "" {
+	if flagPieceName != "" || flagPiecePrompt != "" {
 		input = piececmd.NewPieceInput{
 			Name:   flagPieceName,
 			Prompt: flagPiecePrompt,
 			Parent: flagParent,
-		}
-		// Look up issue via provider if --issue flag specified
-		if flagIssuePath != "" {
-			ref, err := resolveIssueRef(deps, workDir, flagIssuePath)
-			if err != nil {
-				return piececmd.NewPieceInput{}, err
-			}
-			input.Issue = ref
 		}
 	} else if cli.HasStdinData() {
 		// Mode 2: Stdin JSON
@@ -493,28 +471,8 @@ func getPieceCreateInput(deps core.Deps, workDir string) (piececmd.NewPieceInput
 }
 
 // runPieceCreateTUI prompts for a free-form description.
-// Issue selection from a picker was removed; pass --issue <id> for issue-driven flows.
 func runPieceCreateTUI(deps core.Deps, workDir string) (piececmd.NewPieceInput, error) {
 	return runPromptInputTUI()
-}
-
-// resolveIssueRef looks up an opaque issue identifier via the configured provider.
-func resolveIssueRef(deps core.Deps, workDir, id string) (piececmd.IssueRef, error) {
-	cfg, err := piececmd.ReadConfig(workDir, deps.FS)
-	if err != nil {
-		return piececmd.IssueRef{}, fmt.Errorf("failed to read config: %w", err)
-	}
-	h := issue.NewHandler(deps, workDir)
-	i, err := h.Get(id)
-	if err != nil {
-		return piececmd.IssueRef{}, fmt.Errorf("failed to resolve issue %q: %w", id, err)
-	}
-	return piececmd.IssueRef{
-		Provider: cfg.Issues.Provider,
-		ID:       i.ID,
-		Number:   i.Number,
-		Title:    i.Title,
-	}, nil
 }
 
 func runPromptInputTUI() (piececmd.NewPieceInput, error) {

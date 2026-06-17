@@ -58,7 +58,7 @@ func (h *Handler) CreateSkill(workDir string) (Result, error) {
 // skillContent is the embedded SKILL.md content
 const skillContent = `---
 name: managing-monkeypuzzle
-description: Drives the mp CLI — worktree-per-piece git-flow with issue-aware hooks. Use when working in a .monkeypuzzle project: create pieces, switch between them, open draft PRs/MRs, flip them ready, merge and clean up.
+description: Drives the mp CLI — worktree-per-piece git-flow with lifecycle hooks. Use when working in a .monkeypuzzle project: create pieces, switch between them, open draft PRs/MRs, flip them ready, merge and clean up.
 ---
 
 # mp CLI
@@ -72,9 +72,10 @@ Use ` + "`mp <cmd> --schema`" + ` to see the expected input shape.
 # Show current piece status (no piece = main repo)
 mp status
 
-# Create a new piece, optionally linked to a tracker issue
-mp create --issue <id-or-path> --skip-switch
+# Create a new piece
+mp create --name my-feature --skip-switch
 echo '{"name":"my-feature","skip_switch":true}' | mp create
+echo '{"prompt":"add dark mode"}' | mp create
 
 # Tree or flat list of pieces (--all = across registered projects)
 mp list
@@ -130,18 +131,7 @@ mp pr ready
 
 Draft creation fires ` + "`before-pr-create.sh`" + ` / ` + "`after-pr-create.sh`" + `.
 Ready-flip fires ` + "`before-pr-ready.sh`" + ` / ` + "`after-pr-ready.sh`" + `.
-Both pass ` + "`MP_PR_NUMBER`" + `, ` + "`MP_PR_URL`" + `, ` + "`MP_PR_BASE_BRANCH`" + ` and (if linked) ` + "`MP_ISSUE_ID`" + `, ` + "`MP_ISSUE_NUMBER`" + ` in env.
-
-## Issues — resolution only
-
-mp does not list / search / create issues — the tracker's own CLI (` + "`glab issue`" + `, ` + "`linear`" + `, ` + "`plane`" + `, your editor) does that. mp only resolves an opaque id when you pass ` + "`--issue <id>`" + ` to ` + "`mp create`" + `.
-
-| Provider | What ` + "`--issue`" + ` accepts |
-| --- | --- |
-| markdown | path to the file (e.g. ` + "`issues/feat.md`" + `) |
-| linear | identifier (e.g. ` + "`ABC-123`" + `) or UUID |
-| plane | UUID |
-| gitlab | iid (e.g. ` + "`1845`" + `) |
+Both pass ` + "`MP_PR_NUMBER`" + `, ` + "`MP_PR_URL`" + `, ` + "`MP_PR_BASE_BRANCH`" + ` in env.
 
 ## Hooks
 
@@ -149,10 +139,10 @@ Drop executable scripts in ` + "`.monkeypuzzle/hooks/`" + `:
 
 | Hook | Fires | Env beyond piece basics |
 | --- | --- | --- |
-| ` + "`on-piece-create.sh`" + ` | after worktree+session ready | ` + "`MP_ISSUE_ID`" + `, ` + "`MP_ISSUE_NUMBER`" + `, ` + "`MP_SESSION_NAME`" + ` |
+| ` + "`on-piece-create.sh`" + ` | after worktree+session ready | ` + "`MP_SESSION_NAME`" + ` |
 | ` + "`before-piece-update.sh`" + ` / ` + "`after-piece-update.sh`" + ` | around ` + "`mp update`" + ` | ` + "`MP_MAIN_BRANCH`" + ` |
 | ` + "`before-piece-merge.sh`" + ` / ` + "`after-piece-merge.sh`" + ` | around ` + "`mp merge`" + ` | ` + "`MP_MAIN_BRANCH`" + ` |
-| ` + "`before-pr-create.sh`" + ` / ` + "`after-pr-create.sh`" + ` | around ` + "`mp pr create`" + ` | ` + "`MP_PR_NUMBER`" + `, ` + "`MP_PR_URL`" + `, ` + "`MP_PR_BASE_BRANCH`" + `, ` + "`MP_ISSUE_ID`" + `, ` + "`MP_ISSUE_NUMBER`" + ` |
+| ` + "`before-pr-create.sh`" + ` / ` + "`after-pr-create.sh`" + ` | around ` + "`mp pr create`" + ` | ` + "`MP_PR_NUMBER`" + `, ` + "`MP_PR_URL`" + `, ` + "`MP_PR_BASE_BRANCH`" + ` |
 | ` + "`before-pr-ready.sh`" + ` / ` + "`after-pr-ready.sh`" + ` | around ` + "`mp pr ready`" + ` | same as PR create |
 | ` + "`is-piece-done.sh`" + ` | consulted first by ` + "`IsBranchMerged`" + ` | exit 0 = merged |
 
@@ -164,9 +154,8 @@ Non-zero exit aborts the calling operation, except for ` + "`after-*`" + ` hooks
 
 ` + "```bash" + `
 # One-time per repo
-echo '{"name":"project","issue_provider":"markdown","pr_provider":"github"}' | mp init
+echo '{"name":"project","pr_provider":"github"}' | mp init
 # pr_provider: github | gitlab
-# issue_provider: markdown | linear | plane | gitlab
 
 # User-level multiplexer choice (uses args, not stdin)
 mp config get multiplexer
@@ -179,7 +168,7 @@ mp move .monkeypuzzle                # move back to the default
 
 ## Typical flow
 
-1. ` + "`mp create --issue <id>`" + ` — worktree + session + on-piece-create hook
+1. ` + "`mp create`" + ` — worktree + session + on-piece-create hook
 2. Work in the worktree, commit normally
 3. ` + "`mp pr create --draft`" + ` — push, open draft PR/MR, fires pr-create hooks
 4. Human reviews

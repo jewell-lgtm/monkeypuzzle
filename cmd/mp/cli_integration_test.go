@@ -134,23 +134,10 @@ func (e *testEnv) runInDirWithStdin(dir, stdin string, args ...string) (string, 
 // initProject initializes monkeypuzzle in the temp directory
 func (e *testEnv) initProject(name string) {
 	e.t.Helper()
-	input := `{"name":"` + name + `","issue_provider":"markdown","pr_provider":"github"}`
+	input := `{"name":"` + name + `","pr_provider":"github"}`
 	stdout, stderr, err := e.runWithStdin(input, "init")
 	if err != nil {
 		e.t.Fatalf("init failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
-	}
-}
-
-// createIssue creates an issue file directly
-func (e *testEnv) createIssue(filename, title, status string) {
-	e.t.Helper()
-	issuesDir := filepath.Join(e.tmpDir, "issues")
-	if err := os.MkdirAll(issuesDir, 0755); err != nil {
-		e.t.Fatalf("failed to create issues dir: %v", err)
-	}
-	content := "---\ntitle: " + title + "\nstatus: " + status + "\n---\n\n# " + title + "\n"
-	if err := os.WriteFile(filepath.Join(issuesDir, filename), []byte(content), 0644); err != nil {
-		e.t.Fatalf("failed to write issue: %v", err)
 	}
 }
 
@@ -160,7 +147,7 @@ func TestCLI_Init(t *testing.T) {
 	defer env.cleanup()
 
 	// Test init with JSON stdin
-	input := `{"name":"testproject","issue_provider":"markdown","pr_provider":"github"}`
+	input := `{"name":"testproject","pr_provider":"github"}`
 	stdout, _, err := env.runWithStdin(input, "init")
 	if err != nil {
 		t.Fatalf("init failed: %v", err)
@@ -207,12 +194,7 @@ func TestCLI_Init_Schema(t *testing.T) {
 	if _, ok := schema["name"]; !ok {
 		t.Error("schema missing 'name' field")
 	}
-	if _, ok := schema["issue_provider"]; !ok {
-		t.Error("schema missing 'issue_provider' field")
-	}
 }
-
-// TestCLI_IssueList tests mp issue list command
 
 // initGitRepo initializes a git repo in the temp directory
 func (e *testEnv) initGitRepo() {
@@ -258,29 +240,6 @@ func (e *testEnv) initGitRepo() {
 	cmd.Dir = e.tmpDir
 	if output, err := cmd.CombinedOutput(); err != nil {
 		e.t.Fatalf("git branch -M main failed: %v\n%s", err, output)
-	}
-}
-
-// TestCLI_PieceCreate tests mp create outputs valid JSON
-func TestCLI_PieceCreate(t *testing.T) {
-	env := setupTestEnv(t)
-	defer env.cleanup()
-
-	env.initGitRepo()
-	env.initProject("test")
-	env.createIssue("add-feature.md", "Add Feature", "todo")
-
-	stdout, stderr, err := env.run("create", "--issue", "issues/add-feature.md", "--skip-switch")
-	if err != nil {
-		t.Fatalf("piece create failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
-	}
-
-	var result map[string]any
-	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
-		t.Fatalf("invalid JSON output: %v\noutput: %s", err, stdout)
-	}
-	if name, _ := result["name"].(string); name != "add-feature" {
-		t.Errorf("expected piece name 'add-feature', got %v", result["name"])
 	}
 }
 
@@ -388,7 +347,7 @@ func TestCLI_Init_CreatesSkill(t *testing.T) {
 	env := setupTestEnv(t)
 	defer env.cleanup()
 
-	input := `{"name":"test","issue_provider":"markdown","pr_provider":"github","create_skill":true}`
+	input := `{"name":"test","pr_provider":"github","create_skill":true}`
 	stdout, stderr, err := env.runWithStdin(input, "init")
 	if err != nil {
 		t.Fatalf("init failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
@@ -406,7 +365,7 @@ func TestCLI_Init_SkipsSkill(t *testing.T) {
 	env := setupTestEnv(t)
 	defer env.cleanup()
 
-	input := `{"name":"test","issue_provider":"markdown","pr_provider":"github","create_skill":false}`
+	input := `{"name":"test","pr_provider":"github","create_skill":false}`
 	stdout, stderr, err := env.runWithStdin(input, "init")
 	if err != nil {
 		t.Fatalf("init failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
@@ -652,7 +611,6 @@ func TestCLI_Flatten_DryRun(t *testing.T) {
 	}
 }
 
-// TestCLI_IssueSearch tests mp issue search command with query
 // runWithEnv executes mp command with custom environment variables
 func (e *testEnv) runWithEnv(env map[string]string, args ...string) (string, string, error) {
 	cmd := exec.Command(e.binPath, args...)
@@ -757,18 +715,6 @@ func TestCLI_ConfigSet_InvalidValue(t *testing.T) {
 		t.Error("expected error for invalid multiplexer value, got nil")
 	}
 }
-
-// initLinearProject writes a config whose import source is linear (with creds),
-// proving the local store still works under a tracker config.
-func (e *testEnv) initLinearProject(name string) {
-	e.t.Helper()
-	input := `{"name":"` + name + `","issue_provider":"linear","issue_config":{"team":"ENG","api_key":"k"},"pr_provider":"github"}`
-	stdout, stderr, err := e.runWithStdin(input, "init")
-	if err != nil {
-		e.t.Fatalf("init (linear) failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
-	}
-}
-
 
 // TestCLI_Version ensures `mp --version` reports a non-empty version so beta
 // users can verify installs and report versions in bugs.

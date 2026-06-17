@@ -1,6 +1,6 @@
 ---
 name: work-on-issue
-description: Complete workflow for working on an issue from start to PR. Use when starting work on an issue, implementing features, or fixing bugs. Follows outside-in testing methodology.
+description: Obsolete — issue-driven workflows were removed from mp. Use `mp create` / `mp create --prompt` to start a piece instead.
 triggers:
   - "work on issue"
   - "start issue"
@@ -8,194 +8,19 @@ triggers:
   - "pick up issue"
 ---
 
-# Work on Issue
+# Work on Issue (removed)
 
-Complete workflow for implementing an issue from start to PR.
+The issue-driven workflow this skill described no longer exists. mp has no issue
+concept: there are no issue providers, no `issues/` directory, and no
+`mp create --issue` / `mp switch --issue`.
 
-## Workflow Steps
-
-### 1. Select and Start Issue
-
-```bash
-# Pick an issue file (issues are plain markdown in issues/; author them directly)
-ls issues/
-
-# Create piece from issue (get worktree path)
-mp create --issue issues/<file>.md --skip-switch
-
-# Navigate to worktree
-cd <worktree-path>
-```
-
-mp does not track issue status; hooks handle any tracker transitions.
-
-### 2. Read and Understand Issue
+Start a piece directly instead:
 
 ```bash
-# Read the issue file
-cat <issue-path>
+mp create --name <name>          # named piece
+mp create --prompt "<text>"      # name auto-generated from a free-form prompt
 ```
 
-Before coding:
-- Identify acceptance criteria
-- Note any dependencies
-- Clarify ambiguous requirements (ask user if needed)
-
-### 3. Outside-In Development
-
-**Start with integration test for happy path:**
-
-```bash
-# Create failing integration test first
-# Test should cover the main use case end-to-end
-```
-
-**Then implement to make it pass:**
-- Write minimal code to pass the test
-- Keep implementation simple
-
-**Add unit tests for edge cases:**
-- Error handling
-- Boundary conditions
-- Invalid inputs
-
-**Run tests frequently:**
-```bash
-go test ./...
-go vet ./...
-```
-
-### 4. Update Issue Progress
-
-Keep the issue file updated as work progresses:
-
-```markdown
-## Progress
-
-- [x] Integration test for happy path
-- [x] Core implementation
-- [ ] Unit tests for edge cases
-- [ ] Code review
-```
-
-### 5. Self Code Review
-
-Before creating PR, review your changes:
-
-```bash
-# See all changes
-git diff
-
-# Check for common issues:
-# - Unused imports/variables
-# - Missing error handling
-# - Hardcoded values that should be configurable
-# - Missing tests for new code paths
-# - Security issues (injection, secrets, etc.)
-```
-
-**Review checklist:**
-- [ ] Tests pass
-- [ ] No lint errors
-- [ ] Error cases handled
-- [ ] No secrets/credentials committed
-- [ ] Code is readable and minimal
-
-### 6. Commit Changes
-
-```bash
-# Stage and commit with descriptive message
-git add -A
-git commit -m "feat: <description>
-
-- <bullet points of changes>
-
-Closes #<issue-number>"
-```
-
-### 7. Create Pull Request
-
-```bash
-# From the piece worktree
-mp pr create --title "<PR title>" --body "<description>"
-```
-
-**PR body should include:**
-- Summary of changes
-- Test plan
-- Link to issue
-
-### 8. After PR Merge
-
-```bash
-# Cleanup merged pieces
-mp cleanup --force
-```
-
-Issue status automatically updates to `done`.
-
-## Quick Reference
-
-```bash
-# Full workflow
-ls issues/                                            # Find issue (plain markdown files)
-mp create --issue issues/foo.md --skip-switch      # Start work
-cd $(cat /dev/stdin | jq -r .worktree_path)           # Enter worktree
-
-# ... do work with outside-in testing ...
-
-git add -A && git commit -m "feat: implement foo"     # Commit
-mp pr create --title "Implement foo"            # Create PR
-
-# After merge
-mp cleanup --force                              # Cleanup
-```
-
-## Outside-In Testing Pattern
-
-```
-1. Write integration test (fails)
-   └── Test the feature end-to-end
-
-2. Write minimal implementation (test passes)
-   └── Just enough to make it work
-
-3. Write unit tests for edge cases
-   └── Error handling, boundaries, invalid input
-
-4. Refactor if needed (tests still pass)
-   └── Clean up, extract functions, improve naming
-```
-
-## Issue File Format
-
-Issues should have YAML frontmatter:
-
-```markdown
----
-title: Feature title
-status: todo|in-progress|done
----
-
-# Feature title
-
-## Description
-What needs to be done.
-
-## Acceptance Criteria
-- [ ] Criterion 1
-- [ ] Criterion 2
-
-## Progress
-- [ ] Task 1
-- [ ] Task 2
-```
-
-## When to Ask User
-
-Stop and ask if:
-- Requirements are ambiguous
-- Multiple valid approaches exist
-- Breaking changes are needed
-- Security concerns arise
-- Scope seems larger than expected
+Then follow the normal outside-in flow (integration test for the happy path
+first, then unit tests for edge cases), commit, and open a PR with
+`mp pr create`. See the workflow guide for the full lifecycle.

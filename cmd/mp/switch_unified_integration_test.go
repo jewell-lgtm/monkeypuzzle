@@ -11,71 +11,6 @@ import (
 	"testing"
 )
 
-// TestSwitchUnified_FromIssue_CreatesPieceAndAttaches exercises the happy path
-// for the unified picker's non-interactive form when given an issue: it should
-// create a piece from the issue and print the new worktree path (since the test
-// env has multiplexer=none).
-func TestSwitchUnified_FromIssue_CreatesPieceAndAttaches(t *testing.T) {
-	e := setupTestEnv(t)
-	defer e.cleanup()
-
-	dataDir := filepath.Join(e.tmpDir, "data")
-	repo := projectTestRepo(t, e, dataDir, filepath.Join(e.tmpDir, "repos"), "alpha")
-	// `mp init` leaves a `.claude/` directory the test helper doesn't commit.
-	// Commit it so the main worktree starts clean and deterministic.
-	gitCmd(t, repo, "add", ".claude")
-	gitCmd(t, repo, "commit", "-m", "chore: claude")
-
-	// Seed an issue in alpha.
-	writeIssueFile(t, repo, "wire-the-picker.md", "Wire the picker")
-
-	// Switch by issue path (markdown provider).
-	cmd := exec.Command(e.binPath,
-		"switch", "--project", "alpha", "--issue", "issues/wire-the-picker.md",
-	)
-	cmd.Dir = e.tmpDir
-	cmd.Env = append(os.Environ(), "MP_DATA_DIR="+dataDir, "MP_CONFIG_DIR="+e.configDir)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("mp switch --issue: %v\n%s", err, out)
-	}
-
-	// With multiplexer=none, attach prints the worktree path. The piece name is
-	// derived from the issue title via SanitizePieceName.
-	got := string(out)
-	if !strings.Contains(got, "wire-the-picker") {
-		t.Errorf("expected switch output to mention 'wire-the-picker', got: %q", got)
-	}
-
-	// The piece must now show up in `piece list --all`.
-	listOut, _ := mpJSON(t, e, e.tmpDir, dataDir, "list", "--all")
-	var listed struct {
-		Projects []struct {
-			Name   string `json:"name"`
-			Pieces []struct {
-				Name string `json:"name"`
-			} `json:"pieces"`
-		} `json:"projects"`
-	}
-	if err := json.Unmarshal(listOut, &listed); err != nil {
-		t.Fatalf("unmarshal piece list: %v\n%s", err, listOut)
-	}
-	found := false
-	for _, p := range listed.Projects {
-		if p.Name != "alpha" {
-			continue
-		}
-		for _, pc := range p.Pieces {
-			if strings.Contains(pc.Name, "wire-the-picker") {
-				found = true
-			}
-		}
-	}
-	if !found {
-		t.Errorf("expected a piece derived from 'wire-the-picker' in piece list --all, got: %s", listOut)
-	}
-}
-
 // TestSwitchUnified_FromBranch_AdoptsAndAttaches exercises the unified picker
 // when given a pre-existing local branch: switch should adopt the branch as a
 // piece and print its worktree path.
@@ -138,10 +73,9 @@ func TestSwitchUnified_FromBranch_AdoptsAndAttaches(t *testing.T) {
 	}
 }
 
-// TestSwitchUnified_DashJSON_IncludesIssuesAndBranches verifies the
-// non-interactive JSON shape grows new arrays for issues and branches that the
-// picker would surface.
-func TestSwitchUnified_DashJSON_IncludesIssuesAndBranches(t *testing.T) {
+// TestSwitchUnified_DashJSON_IncludesBranches verifies the non-interactive JSON
+// shape exposes the branches array that the picker would surface.
+func TestSwitchUnified_DashJSON_IncludesBranches(t *testing.T) {
 	e := setupTestEnv(t)
 	defer e.cleanup()
 
@@ -152,17 +86,12 @@ func TestSwitchUnified_DashJSON_IncludesIssuesAndBranches(t *testing.T) {
 	gitCmd(t, repo, "add", ".claude")
 	gitCmd(t, repo, "commit", "-m", "chore: claude")
 
-	writeIssueFile(t, repo, "open-issue-one.md", "Open issue one")
 	gitCmd(t, repo, "branch", "spike-branch", "main")
 
 	out, _ := mpJSON(t, e, e.tmpDir, dataDir, "go", "--json")
 	var dash struct {
 		Projects []struct {
-			Name   string `json:"name"`
-			Issues []struct {
-				Title string `json:"title"`
-				Path  string `json:"path"`
-			} `json:"issues"`
+			Name     string `json:"name"`
 			Branches []struct {
 				Name string `json:"name"`
 			} `json:"branches"`
@@ -178,16 +107,6 @@ func TestSwitchUnified_DashJSON_IncludesIssuesAndBranches(t *testing.T) {
 	p := dash.Projects[0]
 	if p.Name != "alpha" {
 		t.Fatalf("expected project 'alpha', got %q", p.Name)
-	}
-
-	foundIssue := false
-	for _, is := range p.Issues {
-		if is.Title == "Open issue one" {
-			foundIssue = true
-		}
-	}
-	if !foundIssue {
-		t.Errorf("expected issue 'Open issue one' in dash --json, got: %s", out)
 	}
 
 	foundBranch := false
@@ -304,7 +223,7 @@ func TestDash_RemoteOnlyBranchSurfaces(t *testing.T) {
 	gamma := filepath.Join(repos, "gamma")
 	gitCmd(t, e.tmpDir, "clone", remote, gamma)
 	gitCmd(t, gamma, "checkout", "main")
-	cmd := exec.Command(e.binPath, "init", "--name", "gamma", "--issue-provider", "markdown", "--pr-provider", "github")
+	cmd := exec.Command(e.binPath, "init", "--name", "gamma", "--pr-provider", "github")
 	cmd.Dir = gamma
 	cmd.Env = append(os.Environ(), "MP_DATA_DIR="+dataDir, "MP_CONFIG_DIR="+e.configDir)
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -382,8 +301,8 @@ func dashProjectNames(t *testing.T, e *testEnv, dir, dataDir string, args ...str
 	return names
 }
 
-// TestSwitchUnified_MutuallyExclusiveSelectors verifies that --piece, --issue,
-// and --branch cannot be combined.
+// TestSwitchUnified_MutuallyExclusiveSelectors verifies that --piece and
+// --branch cannot be combined.
 func TestSwitchUnified_MutuallyExclusiveSelectors(t *testing.T) {
 	e := setupTestEnv(t)
 	defer e.cleanup()
@@ -393,30 +312,16 @@ func TestSwitchUnified_MutuallyExclusiveSelectors(t *testing.T) {
 
 	cmd := exec.Command(e.binPath,
 		"switch", "--project", "alpha",
-		"--issue", "issues/x.md",
+		"--piece", "x",
 		"--branch", "y",
 	)
 	cmd.Dir = e.tmpDir
 	cmd.Env = append(os.Environ(), "MP_DATA_DIR="+dataDir, "MP_CONFIG_DIR="+e.configDir)
 	out, err := cmd.CombinedOutput()
 	if err == nil {
-		t.Fatalf("expected error when combining --issue and --branch, got success\n%s", out)
+		t.Fatalf("expected error when combining --piece and --branch, got success\n%s", out)
 	}
 	if !strings.Contains(string(out), "mutually exclusive") {
 		t.Errorf("expected 'mutually exclusive' in error, got: %s", out)
-	}
-}
-
-// writeIssueFile seeds a local markdown issue directly — `mp issue create` no
-// longer exists; issue authoring is the user's job.
-func writeIssueFile(t *testing.T, repo, filename, title string) {
-	t.Helper()
-	issuesDir := filepath.Join(repo, "issues")
-	if err := os.MkdirAll(issuesDir, 0755); err != nil {
-		t.Fatalf("failed to create issues dir: %v", err)
-	}
-	content := "---\ntitle: " + title + "\n---\n\n# " + title + "\n"
-	if err := os.WriteFile(filepath.Join(issuesDir, filename), []byte(content), 0644); err != nil {
-		t.Fatalf("failed to write issue: %v", err)
 	}
 }

@@ -102,15 +102,7 @@ func (h *Handler) CreatePR(ctx context.Context, workDir string, input Input) (*P
 		return nil, fmt.Errorf("failed to get current branch: %w", err)
 	}
 
-	// Try to read the issue ref recorded in piece metadata for title defaults.
-	issueRef := h.readIssueRef(status.WorktreePath)
-
-	// Use issue title if PR title not provided
-	if input.Title == "" && !issueRef.IsEmpty() {
-		input.Title = issueRef.Title
-	}
-
-	// Fallback to piece name if still no title
+	// Default the PR title to the piece name when not provided.
 	if input.Title == "" {
 		input.Title = status.PieceName
 	}
@@ -121,10 +113,6 @@ func (h *Handler) CreatePR(ctx context.Context, workDir string, input Input) (*P
 		WorktreePath: status.WorktreePath,
 		RepoRoot:     status.RepoRoot,
 		PRBaseBranch: input.Base,
-	}
-	if !issueRef.IsEmpty() {
-		hookCtx.IssueID = issueRef.ID
-		hookCtx.IssueNumber = issueRef.Number
 	}
 
 	// before-pr-create hook (e.g. to write a description file)
@@ -167,7 +155,6 @@ func (h *Handler) CreatePR(ctx context.Context, workDir string, input Input) (*P
 		Branch:     branch,
 		BaseBranch: input.Base,
 		CreatedAt:  time.Now(),
-		Issue:      issueRef,
 	}
 
 	if err := piece.WritePRMetadata(status.WorktreePath, metadata, h.deps.FS); err != nil {
@@ -232,8 +219,6 @@ func (h *Handler) MarkReady(ctx context.Context, workDir string) error {
 		PRNumber:     metadata.PRNumber,
 		PRURL:        metadata.PRURL,
 		PRBaseBranch: metadata.BaseBranch,
-		IssueID:      metadata.Issue.ID,
-		IssueNumber:  metadata.Issue.Number,
 	}
 
 	if err := h.hooks.RunHook(ctx, status.RepoRoot, piece.HookBeforePRReady, hookCtx); err != nil {
@@ -262,14 +247,4 @@ func (h *Handler) MarkReady(ctx context.Context, workDir string) error {
 	}
 
 	return nil
-}
-
-// readIssueRef reads the issue ref recorded in the piece's metadata.
-// Returns an empty ref if none is recorded or metadata can't be read.
-func (h *Handler) readIssueRef(worktreePath string) piece.IssueRef {
-	meta, err := piece.ReadPieceMetadata(worktreePath, h.deps.FS)
-	if err != nil || meta == nil {
-		return piece.IssueRef{}
-	}
-	return meta.Issue
 }

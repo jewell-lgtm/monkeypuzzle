@@ -17,9 +17,8 @@ func TestHandler_Run_CreatesConfig(t *testing.T) {
 	handler := initcmd.NewHandler(deps)
 
 	input := initcmd.Input{
-		Name:          "test-project",
-		IssueProvider: "markdown",
-		PRProvider:    "github",
+		Name:       "test-project",
+		PRProvider: "github",
 	}
 
 	_, err := handler.Run(input, "")
@@ -41,45 +40,11 @@ func TestHandler_Run_CreatesConfig(t *testing.T) {
 	if cfg.Project.Name != "test-project" {
 		t.Errorf("expected project name 'test-project', got %q", cfg.Project.Name)
 	}
-	if cfg.Issues.Provider != "markdown" {
-		t.Errorf("expected issue provider 'markdown', got %q", cfg.Issues.Provider)
-	}
 	if cfg.PR.Provider != "github" {
 		t.Errorf("expected pr provider 'github', got %q", cfg.PR.Provider)
 	}
 	if cfg.Version != "1" {
 		t.Errorf("expected version '1', got %q", cfg.Version)
-	}
-}
-
-func TestHandler_Run_CreatesIssuesDirectory(t *testing.T) {
-	fs := adapters.NewMemoryFS()
-	out := adapters.NewBufferOutput()
-	deps := core.Deps{FS: fs, Output: out}
-	handler := initcmd.NewHandler(deps)
-
-	input := initcmd.Input{
-		Name:          "test-project",
-		IssueProvider: "markdown",
-		PRProvider:    "github",
-	}
-
-	_, err := handler.Run(input, "")
-	if err != nil {
-		t.Fatalf("expected no error, got %v", err)
-	}
-
-	// Check issues directory was created
-	dirs := fs.Dirs()
-	hasIssuesDir := false
-	for _, d := range dirs {
-		if d == "issues" {
-			hasIssuesDir = true
-			break
-		}
-	}
-	if !hasIssuesDir {
-		t.Errorf("issues directory not created, dirs: %v", dirs)
 	}
 }
 
@@ -90,9 +55,8 @@ func TestHandler_Run_OutputsSuccessMessage(t *testing.T) {
 	handler := initcmd.NewHandler(deps)
 
 	input := initcmd.Input{
-		Name:          "test-project",
-		IssueProvider: "markdown",
-		PRProvider:    "github",
+		Name:       "test-project",
+		PRProvider: "github",
 	}
 
 	_, err := handler.Run(input, "")
@@ -114,23 +78,15 @@ func TestValidate_InvalidInputs(t *testing.T) {
 	}{
 		{
 			name:  "missing name",
-			input: initcmd.Input{IssueProvider: "markdown", PRProvider: "github"},
-		},
-		{
-			name:  "missing issue provider",
-			input: initcmd.Input{Name: "test", PRProvider: "github"},
+			input: initcmd.Input{PRProvider: "github"},
 		},
 		{
 			name:  "missing pr provider",
-			input: initcmd.Input{Name: "test", IssueProvider: "markdown"},
-		},
-		{
-			name:  "invalid issue provider",
-			input: initcmd.Input{Name: "test", IssueProvider: "jira", PRProvider: "github"},
+			input: initcmd.Input{Name: "test"},
 		},
 		{
 			name:  "invalid pr provider",
-			input: initcmd.Input{Name: "test", IssueProvider: "markdown", PRProvider: "bitbucket"},
+			input: initcmd.Input{Name: "test", PRProvider: "bitbucket"},
 		},
 	}
 
@@ -157,9 +113,8 @@ func TestHandler_ConfigExists(t *testing.T) {
 
 	// Create config
 	input := initcmd.Input{
-		Name:          "test",
-		IssueProvider: "markdown",
-		PRProvider:    "github",
+		Name:       "test",
+		PRProvider: "github",
 	}
 	if _, err := handler.Run(input, ""); err != nil {
 		t.Fatalf("failed to create config: %v", err)
@@ -185,9 +140,6 @@ func TestSchema(t *testing.T) {
 	if data["name"] != "myproject" {
 		t.Errorf("expected name 'myproject', got %q", data["name"])
 	}
-	if data["issue_provider"] != "markdown" {
-		t.Errorf("expected issue_provider 'markdown', got %q", data["issue_provider"])
-	}
 	if data["pr_provider"] != "github" {
 		t.Errorf("expected pr_provider 'github', got %q", data["pr_provider"])
 	}
@@ -197,7 +149,7 @@ func TestSchema(t *testing.T) {
 }
 
 func TestParseJSON(t *testing.T) {
-	jsonData := `{"name":"foo","issue_provider":"markdown","pr_provider":"github"}`
+	jsonData := `{"name":"foo","pr_provider":"github"}`
 
 	input, err := initcmd.ParseJSON([]byte(jsonData))
 	if err != nil {
@@ -207,9 +159,6 @@ func TestParseJSON(t *testing.T) {
 	if input.Name != "foo" {
 		t.Errorf("expected name 'foo', got %q", input.Name)
 	}
-	if input.IssueProvider != "markdown" {
-		t.Errorf("expected issue_provider 'markdown', got %q", input.IssueProvider)
-	}
 	if input.PRProvider != "github" {
 		t.Errorf("expected pr_provider 'github', got %q", input.PRProvider)
 	}
@@ -217,9 +166,8 @@ func TestParseJSON(t *testing.T) {
 
 func TestValidate(t *testing.T) {
 	valid := initcmd.Input{
-		Name:          "test",
-		IssueProvider: "markdown",
-		PRProvider:    "github",
+		Name:       "test",
+		PRProvider: "github",
 	}
 
 	if err := initcmd.Validate(valid); err != nil {
@@ -235,9 +183,8 @@ func TestHandler_Run_CreatesNestedGitignore(t *testing.T) {
 	handler := initcmd.NewHandler(deps)
 
 	input := initcmd.Input{
-		Name:          "test-project",
-		IssueProvider: "markdown",
-		PRProvider:    "github",
+		Name:       "test-project",
+		PRProvider: "github",
 	}
 
 	_, err := handler.Run(input, "")

@@ -23,17 +23,11 @@ const (
 type Config struct {
 	Version string        `json:"version"`
 	Project ProjectConfig `json:"project"`
-	Issues  IssueConfig   `json:"issues"`
 	PR      PRConfig      `json:"pr"`
 }
 
 type ProjectConfig struct {
 	Name string `json:"name"`
-}
-
-type IssueConfig struct {
-	Provider string            `json:"provider"`
-	Config   map[string]string `json:"config"`
 }
 
 type PRConfig struct {
@@ -75,37 +69,15 @@ func (h *Handler) Run(input Input, workDir string) (Config, error) {
 		return Config{}, err
 	}
 
-	// The local issue store is always markdown, so the issues directory is
-	// always created regardless of any import source (issue_provider).
-	issuesDir := "issues"
-	if err := h.deps.FS.MkdirAll(issuesDir, DefaultDirPerm); err != nil {
-		return Config{}, err
-	}
-
 	// Build config
 	cfg := Config{
 		Version: "1",
 		Project: ProjectConfig{Name: input.Name},
-		Issues: IssueConfig{
-			Provider: input.IssueProvider,
-			Config:   make(map[string]string),
-		},
 		PR: PRConfig{
 			Provider: input.PRProvider,
 			Config:   make(map[string]string),
 		},
 	}
-
-	// Copy issue config from input
-	if input.IssueConfig != nil {
-		for k, v := range input.IssueConfig {
-			cfg.Issues.Config[k] = v
-		}
-	}
-
-	// Always record the local markdown issues directory; issue_provider only
-	// names an optional import source consumed by `mp issue import`.
-	cfg.Issues.Config["directory"] = issuesDir
 
 	// Write config
 	data, err := json.MarshalIndent(cfg, "", "  ")

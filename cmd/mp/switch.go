@@ -25,36 +25,32 @@ import (
 var (
 	flagSwitchProject   string
 	flagSwitchPiece     string
-	flagSwitchIssue     string
 	flagSwitchBranch    string
 	flagSwitchAllSchema bool
 )
 
 var switchCmd = &cobra.Command{
 	Use:   "switch",
-	Short: "Jump to a project worktree, or create one from an open issue or local branch",
+	Short: "Jump to a project worktree, or create one from a local branch",
 	Long: `Attach the tmux session for a worktree in any registered project. The picker
-unifies three entry points: existing pieces (attach), open todo issues (create
-a piece from the issue, then attach), and local git branches not yet adopted
-(adopt as a piece, then attach).
+unifies two entry points: existing pieces (attach) and local git branches not
+yet adopted (adopt as a piece, then attach).
 
 Modes:
-  Flags:      mp switch --project NAME [--piece NAME | --issue PATH | --branch NAME]
+  Flags:      mp switch --project NAME [--piece NAME | --branch NAME]
   Stdin JSON: echo '{"project":"app","piece":"fix-x"}' | mp switch
-              echo '{"project":"app","issue":"issues/foo.md"}' | mp switch
               echo '{"project":"app","branch":"my-spike"}' | mp switch
   --schema:   Output expected JSON format
   Interactive (default with a terminal): pick from the fuzzy-filtered dashboard
 
---piece, --issue and --branch are mutually exclusive. Omit all three to attach
-the project's main worktree.`,
+--piece and --branch are mutually exclusive. Omit both to attach the project's
+main worktree.`,
 	RunE: runSwitchAll,
 }
 
 func init() {
 	switchCmd.Flags().StringVar(&flagSwitchProject, "project", "", "Project name or path")
 	switchCmd.Flags().StringVar(&flagSwitchPiece, "piece", "", "Existing piece name to attach")
-	switchCmd.Flags().StringVar(&flagSwitchIssue, "issue", "", "Issue id or path; creates a piece, then attaches")
 	switchCmd.Flags().StringVar(&flagSwitchBranch, "branch", "", "Local git branch; adopts as a piece, then attaches")
 	switchCmd.Flags().BoolVar(&flagSwitchAllSchema, "schema", false, "Output JSON schema and exit")
 	rootCmd.AddCommand(switchCmd)
@@ -63,7 +59,6 @@ func init() {
 type switchAllInput struct {
 	Project string `json:"project"`
 	Piece   string `json:"piece"`
-	Issue   string `json:"issue"`
 	Branch  string `json:"branch"`
 }
 
@@ -80,7 +75,7 @@ func runSwitchAll(cmd *cobra.Command, args []string) error {
 
 	if !haveInput {
 		if !cli.IsTerminal() {
-			return fmt.Errorf("no input; use --project plus --piece/--issue/--branch, stdin JSON, or run with a terminal")
+			return fmt.Errorf("no input; use --project plus --piece/--branch, stdin JSON, or run with a terminal")
 		}
 		return runSwitchInteractive(ctx)
 	}
@@ -99,8 +94,6 @@ func runSwitchAll(cmd *cobra.Command, args []string) error {
 	}
 
 	switch {
-	case in.Issue != "":
-		return runSwitchFromIssue(ctx, proj, in.Issue)
 	case in.Branch != "":
 		return runSwitchFromBranch(ctx, proj, in.Branch)
 	case in.Piece != "":
@@ -110,7 +103,7 @@ func runSwitchAll(cmd *cobra.Command, args []string) error {
 	}
 }
 
-// validateSwitchSelectors enforces that at most one of piece/issue/branch is
+// validateSwitchSelectors enforces that at most one of piece/branch is
 // set per invocation. Project must always be present at this point.
 func validateSwitchSelectors(in switchAllInput) error {
 	if in.Project == "" {
@@ -120,14 +113,11 @@ func validateSwitchSelectors(in switchAllInput) error {
 	if in.Piece != "" {
 		picked++
 	}
-	if in.Issue != "" {
-		picked++
-	}
 	if in.Branch != "" {
 		picked++
 	}
 	if picked > 1 {
-		return fmt.Errorf("--piece, --issue and --branch are mutually exclusive")
+		return fmt.Errorf("--piece and --branch are mutually exclusive")
 	}
 	return nil
 }
@@ -143,14 +133,12 @@ func runSwitchInteractive(ctx context.Context) error {
 }
 
 // dispatchPickedRow takes a dashboard.Row chosen by the user and runs the
-// matching workflow: attach an existing piece/project, create a piece from an
-// open issue, adopt an unadopted branch, or kick off the create-piece TUI.
+// matching workflow: attach an existing piece/project, adopt an unadopted
+// branch, or kick off the create-piece TUI.
 func dispatchPickedRow(ctx context.Context, row dashboard.Row) error {
 	switch row.Kind {
 	case dashboard.RowProject, dashboard.RowPiece:
 		return attachSession(ctx, row.SessionName, row.WorktreePath)
-	case dashboard.RowIssue:
-		return runSwitchFromIssue(ctx, projectFromRow(row), row.IssuePath)
 	case dashboard.RowBranch:
 		return runSwitchFromBranch(ctx, projectFromRow(row), row.Branch)
 	case dashboard.RowNewPiece:
@@ -175,33 +163,6 @@ func runSwitchToExistingPiece(ctx context.Context, proj registry.Project, pieceN
 	return attachSession(ctx, session.Name(proj.Name, pieceName), worktreePath)
 }
 
-func runSwitchFromIssue(ctx context.Context, proj registry.Project, issueQuery string) error {
-	deps, handler := pieceHandlerForSwitch()
-	ref, err := resolveIssueRef(deps, proj.Path, issueQuery)
-	if err != nil {
-		return err
-	}
-
-	// CreatePieceFromIssue currently reads cwd to find the repo root; the
-	// simplest correct way to target the right project without refactoring
-	// that path is to chdir for the duration of the call. This is a one-shot
-	// CLI process, so the side effect is contained.
-	restore, err := tempChdir(proj.Path)
-	if err != nil {
-		return err
-	}
-	defer restore()
-
-	info, err := handler.CreatePieceWithInput(ctx, piececmd.NewPieceInput{
-		Issue:      ref,
-		SkipSwitch: true,
-	}, piececmd.CreatePieceOptions{})
-	if err != nil {
-		return err
-	}
-	return attachSession(ctx, info.SessionName, info.WorktreePath)
-}
-
 func runSwitchFromBranch(ctx context.Context, proj registry.Project, branch string) error {
 	_, handler := pieceHandlerForSwitch()
 	info, err := handler.AdoptPiece(ctx, piececmd.AdoptPieceInput{
@@ -214,10 +175,9 @@ func runSwitchFromBranch(ctx context.Context, proj registry.Project, branch stri
 	return attachSession(ctx, info.SessionName, info.WorktreePath)
 }
 
-// runSwitchNewPiece launches the existing piece-create TUI (modepicker →
-// issuepicker or promptinput) targeted at the given project, then attaches.
-// We chdir into proj.Path for the duration because the underlying create flow
-// resolves its repo root from cwd.
+// runSwitchNewPiece launches the existing piece-create TUI (promptinput)
+// targeted at the given project, then attaches. We chdir into proj.Path for the
+// duration because the underlying create flow resolves its repo root from cwd.
 func runSwitchNewPiece(ctx context.Context, proj registry.Project) error {
 	deps, handler := pieceHandlerForSwitch()
 
@@ -278,11 +238,10 @@ func tempChdir(dir string) (func(), error) {
 
 func getSwitchAllInput() (switchAllInput, bool, error) {
 	switch {
-	case flagSwitchProject != "" || flagSwitchPiece != "" || flagSwitchIssue != "" || flagSwitchBranch != "":
+	case flagSwitchProject != "" || flagSwitchPiece != "" || flagSwitchBranch != "":
 		return switchAllInput{
 			Project: flagSwitchProject,
 			Piece:   flagSwitchPiece,
-			Issue:   flagSwitchIssue,
 			Branch:  flagSwitchBranch,
 		}, true, nil
 	case cli.HasStdinData():

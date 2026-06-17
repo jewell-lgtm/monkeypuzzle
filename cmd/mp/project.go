@@ -28,7 +28,7 @@ var projectCmd = &cobra.Command{
 	Long: `Manage the global registry of monkeypuzzle projects.
 
 A "project" is any git repository that has been initialised with 'mp init'.
-Registering projects lets mp list pieces and issues across all of them and jump
+Registering projects lets mp list pieces across all of them and jump
 between their tmux sessions.`,
 }
 
@@ -66,7 +66,7 @@ var projectListCmd = &cobra.Command{
 	Aliases: []string{"ls", "status"},
 	Short:   "List registered projects",
 	Long: `List all registered monkeypuzzle projects with best-effort live state
-(current branch, number of pieces, number of open issues).
+(current branch, number of pieces).
 
 By default a human-readable table is printed; use --json for machine output.
 When stdout is not a terminal, JSON is printed automatically.`,
@@ -210,7 +210,7 @@ func runProjectList(cmd *cobra.Command, args []string) error {
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-	_, _ = fmt.Fprintln(w, "NAME\tBRANCH\tPIECES\tOPEN ISSUES\tPATH")
+	_, _ = fmt.Fprintln(w, "NAME\tBRANCH\tPIECES\tPATH")
 	for _, p := range projects {
 		branch := p.Branch
 		path := p.Path
@@ -222,7 +222,7 @@ func runProjectList(cmd *cobra.Command, args []string) error {
 		case branch == "":
 			branch = "-"
 		}
-		_, _ = fmt.Fprintf(w, "%s\t%s\t%d\t%d\t%s\n", p.Name, branch, p.PieceCount, p.OpenIssues, path)
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%d\t%s\n", p.Name, branch, p.PieceCount, path)
 	}
 	return w.Flush()
 }

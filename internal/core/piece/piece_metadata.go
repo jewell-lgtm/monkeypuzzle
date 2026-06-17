@@ -20,12 +20,8 @@ type PieceMetadata struct {
 	// CreatedFromBranch is the git branch the piece was created from
 	CreatedFromBranch string `json:"created_from_branch"`
 	// Prompt is the free-form description a prompt-created piece was made from.
-	// Empty for pieces created from an issue or a bare name.
+	// Empty for pieces created from a bare name.
 	Prompt string `json:"prompt,omitempty"`
-	// Issue references the issue this piece was created from, if any. Used to
-	// surface the issue in `mp status` and to exclude already-worked issues from
-	// pickers and the dashboard. Empty for prompt- or name-created pieces.
-	Issue IssueRef `json:"issue,omitempty"`
 }
 
 // DefaultPieceMetadata returns metadata with default values (parent=main)

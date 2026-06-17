@@ -53,11 +53,10 @@ type CreatePieceOptions struct {
 	// from inside a worktree (e.g. `mp stack append`) without scoping the pieces
 	// dir to the worktree.
 	RepoRoot string
-	Issue    IssueRef // Optional linked issue, surfaced as MP_ISSUE_ID in hooks
 }
 
 // CreatePieceWithInput creates a piece from validated input.
-// Routes to CreatePieceFromIssue if Issue is set, CreatePieceFromPrompt if Prompt is set, otherwise CreatePiece.
+// Routes to CreatePieceFromPrompt if Prompt is set, otherwise CreatePiece.
 func (h *Handler) CreatePieceWithInput(ctx context.Context, input NewPieceInput, opts CreatePieceOptions) (PieceInfo, error) {
 	// Pass parent from input to options
 	opts.Parent = input.Parent
@@ -65,9 +64,6 @@ func (h *Handler) CreatePieceWithInput(ctx context.Context, input NewPieceInput,
 		opts.Parent = "main"
 	}
 
-	if !input.Issue.IsEmpty() {
-		return h.CreatePieceFromIssue(ctx, input.Issue, opts)
-	}
 	if input.Prompt != "" {
 		return h.CreatePieceFromPrompt(ctx, input.Name, input.Prompt, opts)
 	}
@@ -184,8 +180,6 @@ func (h *Handler) CreatePiece(ctx context.Context, pieceName string, opts Create
 		WorktreePath: worktreePath,
 		RepoRoot:     repoRoot,
 		SessionName:  sessionName,
-		IssueID:      opts.Issue.ID,
-		IssueNumber:  opts.Issue.Number,
 	}
 	if err := h.hooks.RunHookDetached(repoRoot, HookOnPieceCreate, hookCtx); err != nil {
 		// The hook runs fire-and-forget so its setup work (dependency installs,
@@ -431,45 +425,6 @@ func (h *Handler) detectRemoteRef(ctx context.Context, repoRoot, branchRef strin
 		}
 	}
 	return "", ""
-}
-
-// CreatePieceFromIssue creates a new piece linked to an issue.
-// The caller is responsible for looking up the issue via the provider.
-// The issue reference is recorded in the piece's metadata so it can be
-// surfaced later and excluded from pickers (it now has a piece).
-func (h *Handler) CreatePieceFromIssue(ctx context.Context, issueRef IssueRef, opts CreatePieceOptions) (PieceInfo, error) {
-	if issueRef.IsEmpty() {
-		return PieceInfo{}, fmt.Errorf("issue reference is empty")
-	}
-
-	// Sanitize issue title for piece name
-	pieceName := SanitizePieceName(issueRef.Title)
-
-	// Make issue ref available to on-piece-create hook via MP_ISSUE_ID
-	opts.Issue = issueRef
-
-	// Create the piece using the sanitized name
-	info, err := h.CreatePiece(ctx, pieceName, opts)
-	if err != nil {
-		return PieceInfo{}, err
-	}
-
-	// Record the issue in piece metadata so `mp status` can surface it and
-	// pickers/dashboard can exclude it (it now has a piece).
-	metadata, err := ReadPieceMetadata(info.WorktreePath, h.deps.FS)
-	if err != nil {
-		def := DefaultPieceMetadata()
-		metadata = &def
-	}
-	metadata.Issue = issueRef
-	if err := WritePieceMetadata(info.WorktreePath, *metadata, h.deps.FS); err != nil {
-		h.deps.Output.Write(core.Message{
-			Type:    core.MsgWarning,
-			Content: fmt.Sprintf("Failed to record piece issue: %v", err),
-		})
-	}
-
-	return info, nil
 }
 
 // CreatePieceFromPrompt creates a new piece, recording the prompt it was
@@ -1093,9 +1048,8 @@ func (h *Handler) checkCommitMerged(ctx context.Context, repoRoot, branchName, m
 
 // CleanupResult contains information about a cleaned up piece
 type CleanupResult struct {
-	PieceName    string   `json:"piece_name"`
-	WorktreePath string   `json:"worktree_path"`
-	Issue        IssueRef `json:"issue,omitempty"`
+	PieceName    string `json:"piece_name"`
+	WorktreePath string `json:"worktree_path"`
 }
 
 // CleanupOptions configures the cleanup behavior
@@ -1106,7 +1060,7 @@ type CleanupOptions struct {
 }
 
 // CleanupMergedPieces finds and cleans up pieces whose branches have been merged.
-// It removes worktrees, kills tmux sessions, and updates issue status to done.
+// It removes worktrees and kills tmux sessions.
 func (h *Handler) CleanupMergedPieces(ctx context.Context, repoRoot string, opts CleanupOptions) ([]CleanupResult, error) {
 	// Get pieces directory (scoped to this repo)
 	piecesDir, err := getPiecesDir(repoRoot)
@@ -1161,11 +1115,6 @@ func (h *Handler) CleanupMergedPieces(ctx context.Context, repoRoot string, opts
 		result := CleanupResult{
 			PieceName:    pieceName,
 			WorktreePath: worktreePath,
-		}
-
-		// Record the issue this piece came from, if any (from piece metadata).
-		if meta, err := ReadPieceMetadata(worktreePath, h.deps.FS); err == nil && meta != nil && !meta.Issue.IsEmpty() {
-			result.Issue = meta.Issue
 		}
 
 		if opts.DryRun {

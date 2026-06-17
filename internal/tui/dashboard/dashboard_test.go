@@ -13,7 +13,6 @@ func sampleRows() []Row {
 		{Kind: RowProject, Project: "alpha", ProjectPath: "/repos/alpha"},
 		{Kind: RowNewPiece, Project: "alpha", ProjectPath: "/repos/alpha"},
 		{Kind: RowPiece, Project: "alpha", ProjectPath: "/repos/alpha", Piece: "feature-x"},
-		{Kind: RowIssue, Project: "alpha", ProjectPath: "/repos/alpha", IssuePath: "issues/wire-the-picker.md", IssueTitle: "Wire the picker"},
 		{Kind: RowBranch, Project: "alpha", ProjectPath: "/repos/alpha", Branch: "stray-spike"},
 		{Kind: RowProject, Project: "bravo", ProjectPath: "/repos/bravo"},
 		{Kind: RowNewPiece, Project: "bravo", ProjectPath: "/repos/bravo"},
@@ -46,9 +45,9 @@ func TestCollapse_MultiProjectStartsCollapsed(t *testing.T) {
 func TestCollapse_RightExpandsSelectedProject(t *testing.T) {
 	m := New(sampleRows())
 	m = updateKey(m, tea.KeyRight) // expand alpha (the selected first row)
-	// alpha's 5 rows + bravo header.
-	if got := len(m.Filtered); got != 6 {
-		t.Fatalf("after expanding alpha: len(Filtered)=%d, want 6", got)
+	// alpha's 4 rows + bravo header.
+	if got := len(m.Filtered); got != 5 {
+		t.Fatalf("after expanding alpha: len(Filtered)=%d, want 5", got)
 	}
 	if r, ok := m.SelectedRow(); !ok || r.Kind != RowProject || r.Project != "alpha" {
 		t.Errorf("selection should stay on alpha header, got %+v ok=%v", r, ok)
@@ -69,11 +68,11 @@ func TestCollapse_LeftCollapsesAndReselectsHeader(t *testing.T) {
 }
 
 func TestCollapse_QueryRevealsCollapsedChildren(t *testing.T) {
-	m := New(sampleRows()) // collapsed: alpha's issue is hidden
-	m = sendKey(m, "wire") // a query overrides collapse
+	m := New(sampleRows())    // collapsed: alpha's piece is hidden
+	m = sendKey(m, "feature") // a query overrides collapse
 	row, ok := m.SelectedRow()
-	if !ok || row.Kind != RowIssue {
-		t.Fatalf("query should surface the collapsed child issue, got %+v ok=%v", row, ok)
+	if !ok || row.Kind != RowPiece {
+		t.Fatalf("query should surface the collapsed child piece, got %+v ok=%v", row, ok)
 	}
 }
 
@@ -114,16 +113,16 @@ func TestFuzzy_NewPieceFiltersByProject(t *testing.T) {
 
 func TestFuzzy_FiltersAcrossRowKinds(t *testing.T) {
 	m := New(sampleRows())
-	m = sendKey(m, "wire")
+	m = sendKey(m, "feature")
 	if got := len(m.Filtered); got != 1 {
-		t.Fatalf("after 'wire' query: len(Filtered)=%d, want 1; rows=%v", got, m.Filtered)
+		t.Fatalf("after 'feature' query: len(Filtered)=%d, want 1; rows=%v", got, m.Filtered)
 	}
 	row, ok := m.SelectedRow()
 	if !ok {
 		t.Fatal("expected a selected row")
 	}
-	if row.Kind != RowIssue {
-		t.Errorf("matched row kind = %v, want RowIssue", row.Kind)
+	if row.Kind != RowPiece {
+		t.Errorf("matched row kind = %v, want RowPiece", row.Kind)
 	}
 }
 
@@ -156,7 +155,7 @@ func TestFuzzy_NoMatch_RendersFallback(t *testing.T) {
 func TestScroll_ShowsHiddenBelowCount(t *testing.T) {
 	rows := make([]Row, 0, MaxVisibleRows+5)
 	for i := 0; i < cap(rows); i++ {
-		rows = append(rows, Row{Kind: RowIssue, Project: "alpha", IssueTitle: "issue", IssuePath: "issues/i.md"})
+		rows = append(rows, Row{Kind: RowPiece, Project: "alpha", Piece: "piece"})
 	}
 	m := New(rows)
 	view := m.View()
@@ -171,7 +170,7 @@ func TestScroll_ShowsHiddenBelowCount(t *testing.T) {
 func TestScroll_FollowsSelectionPastWindow(t *testing.T) {
 	rows := make([]Row, 0, MaxVisibleRows+10)
 	for i := 0; i < cap(rows); i++ {
-		rows = append(rows, Row{Kind: RowIssue, Project: "alpha", IssueTitle: "x", IssuePath: "p"})
+		rows = append(rows, Row{Kind: RowPiece, Project: "alpha", Piece: "p"})
 	}
 	m := New(rows)
 	const downs = MaxVisibleRows + 4
@@ -196,7 +195,7 @@ func TestScroll_FollowsSelectionPastWindow(t *testing.T) {
 func TestScroll_DownStopsAtLastRow(t *testing.T) {
 	rows := make([]Row, 0, MaxVisibleRows+10)
 	for i := 0; i < cap(rows); i++ {
-		rows = append(rows, Row{Kind: RowIssue, Project: "alpha", IssueTitle: "x", IssuePath: "p"})
+		rows = append(rows, Row{Kind: RowPiece, Project: "alpha", Piece: "p"})
 	}
 	m := New(rows)
 	for i := 0; i < len(rows)*2; i++ {

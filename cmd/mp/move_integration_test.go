@@ -57,7 +57,7 @@ func TestMoveRelocatesMonkeypuzzleDir(t *testing.T) {
 	git("commit", "--allow-empty", "-m", "init")
 	git("branch", "-M", "main")
 
-	mp(repo, "init", "--name", "demo", "--issue-provider", "markdown", "--pr-provider", "github")
+	mp(repo, "init", "--name", "demo", "--pr-provider", "github")
 	mp(repo, "create", "--name", "feat", "--skip-switch")
 
 	mustDir := func(p string) {

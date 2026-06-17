@@ -39,9 +39,8 @@ mp init
 
 This launches an interactive wizard:
 1. Enter project name (defaults to directory name)
-2. Choose issue provider (`markdown`, `linear`, or `plane`)
-3. Choose PR provider (`github`)
-4. Confirm configuration
+2. Choose PR provider (`github` or `gitlab`)
+3. Confirm configuration
 
 Creates `.monkeypuzzle/` directory with configuration.
 
@@ -51,10 +50,10 @@ For scripts or CI:
 
 ```bash
 # Via flags
-mp init --name myproject --issue-provider markdown --pr-provider github
+mp init --name myproject --pr-provider github
 
 # Via JSON stdin
-echo '{"name":"myproject","issue_provider":"markdown","pr_provider":"github"}' | mp init
+echo '{"name":"myproject","pr_provider":"github"}' | mp init
 
 # Get schema with defaults, modify, pipe back
 mp init --schema | jq '.name = "custom-name"' | mp init

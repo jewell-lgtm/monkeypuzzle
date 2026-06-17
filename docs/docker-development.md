@@ -115,7 +115,7 @@ docker run -it --rm \
 mp init --schema
 
 # Test with JSON input
-echo '{"name":"test","issue_provider":"markdown","pr_provider":"github"}' | mp init
+echo '{"name":"test","pr_provider":"github"}' | mp init
 ```
 
 ### Developing with Live Reload
@@ -149,7 +149,7 @@ docker run -it --rm \
   monkeypuzzle-dev
 
 # Initialize a project
-mp init --name myproject --issue-provider markdown --pr-provider github
+mp init --name myproject --pr-provider github
 
 # Create a new piece
 mp create
@@ -229,7 +229,7 @@ If possible, create a minimal test case that reproduces the issue:
 cat > test-reproduce.sh << 'EOF'
 #!/bin/bash
 set -e
-mp init --name test --issue-provider markdown --pr-provider github
+mp init --name test --pr-provider github
 # ... more commands that reproduce the issue
 EOF
 

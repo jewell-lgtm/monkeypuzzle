@@ -1,8 +1,8 @@
 # monkeypuzzle
 
-**Worktree-per-piece git-flow with issue-aware hooks at every transition.**
+**Worktree-per-piece git-flow with lifecycle hooks at every transition.**
 
-Monkeypuzzle (`mp`) gives every in-flight piece of work its own git worktree and tmux session, then fires shell hooks — pre-populated with `MP_ISSUE_ID`, `MP_PR_URL`, and friends — at every lifecycle moment. Bring whatever label state machines, reviewer policies, and notifications your workflow needs; mp stays out of the way and does the boring orchestration.
+Monkeypuzzle (`mp`) gives every in-flight piece of work its own git worktree and tmux session, then fires shell hooks — pre-populated with `MP_PIECE_NAME`, `MP_PR_URL`, and friends — at every lifecycle moment. Bring whatever label state machines, reviewer policies, and notifications your workflow needs; mp stays out of the way and does the boring orchestration.
 
 ## Why?
 
@@ -23,35 +23,35 @@ go install github.com/jewell-lgtm/monkeypuzzle@latest
 mp config set multiplexer tmux
 
 cd path/to/your/repo
-mp init                    # configure issue + pr provider (markdown/linear/plane/gitlab + github/gitlab)
+mp init                    # configure project name + pr provider (github/gitlab)
 
-mp create --issue 1845         # spawn worktree + tmux session + on-piece-create hook fires
+mp create --name add-login     # spawn worktree + tmux session + on-piece-create hook fires
 # ... do the thing ...
 mp pr create --draft           # push, open draft PR/MR, fires before/after-pr-create hooks
 # ... self-review ...
 mp pr ready                    # flip to ready, fires before/after-pr-ready hooks
 ```
 
-Each `mp` step fires a shell hook in `.monkeypuzzle/hooks/` with the piece + PR + issue context in env. The hook decides what label state machine, reviewer policy, or downstream system to touch.
+Each `mp` step fires a shell hook in `.monkeypuzzle/hooks/` with the piece + PR context in env. The hook decides what label state machine, reviewer policy, or downstream system to touch.
 
-## A worked example — GitLab MR with two label flips
+## A worked example — GitLab MR with a label flip + reviewer
 
-`.monkeypuzzle/hooks/on-piece-create.sh` — flip ticket from Dev-Backlog to Doing on pickup:
+`.monkeypuzzle/hooks/after-pr-create.sh` — flip the MR from Draft to Doing on open:
 
 ```bash
 #!/bin/bash
-[ -z "$MP_ISSUE_NUMBER" ] && exit 0
-glab issue update "$MP_ISSUE_NUMBER" --label Doing --unlabel Dev-Backlog
+[ -z "$MP_PR_NUMBER" ] && exit 0
+glab mr update "$MP_PR_NUMBER" --label Doing
 ```
 
-`.monkeypuzzle/hooks/after-pr-ready.sh` — flip ticket to Code-Review-ausstehend + assign reviewer when the user calls `mp pr ready`:
+`.monkeypuzzle/hooks/after-pr-ready.sh` — flip the MR to Code-Review-ausstehend + assign reviewer when the user calls `mp pr ready`:
 
 ```bash
 #!/bin/bash
-[ -z "$MP_ISSUE_NUMBER" ] && exit 0
-glab issue update "$MP_ISSUE_NUMBER" \
+[ -z "$MP_PR_NUMBER" ] && exit 0
+glab mr update "$MP_PR_NUMBER" \
   --label "Code Review ausstehend" --unlabel Doing \
-  --assignee my-reviewer
+  --reviewer my-reviewer
 ```
 
 That's the whole integration. No `--reviewer` baked in, no opinion about labels — mp just hands the hook everything it needs and gets out of the way.
@@ -60,10 +60,10 @@ That's the whole integration. No `--reviewer` baked in, no opinion about labels 
 
 | Hook | Fires when | Extra env on top of piece basics |
 | --- | --- | --- |
-| `on-piece-create.sh` | `mp create` finishes the worktree (runs detached/fire-and-forget; output → `.monkeypuzzle/logs/`) | `MP_ISSUE_ID`, `MP_ISSUE_NUMBER`, `MP_SESSION_NAME` |
+| `on-piece-create.sh` | `mp create` finishes the worktree (runs detached/fire-and-forget; output → `.monkeypuzzle/logs/`) | `MP_SESSION_NAME` |
 | `before-piece-update.sh` / `after-piece-update.sh` | around `mp update` | `MP_MAIN_BRANCH` |
 | `before-piece-merge.sh` / `after-piece-merge.sh` | around `mp merge` | `MP_MAIN_BRANCH` |
-| `before-pr-create.sh` / `after-pr-create.sh` | around `mp pr create` | `MP_PR_NUMBER`, `MP_PR_URL`, `MP_PR_BASE_BRANCH`, `MP_ISSUE_ID`, `MP_ISSUE_NUMBER` |
+| `before-pr-create.sh` / `after-pr-create.sh` | around `mp pr create` | `MP_PR_NUMBER`, `MP_PR_URL`, `MP_PR_BASE_BRANCH` |
 | `before-pr-ready.sh` / `after-pr-ready.sh` | around `mp pr ready` | same as PR create |
 | `is-piece-done.sh` | consulted by `IsBranchMerged` / `mp cleanup` | exit 0 = merged (use to recognise squash-merges) |
 
@@ -87,9 +87,9 @@ The key rule: **non-interactive invocations (flags or JSON) fail loudly on genui
 
 | Command | What it does |
 | --- | --- |
-| `mp init` / `mp reinit` | Configure providers (first run) or refresh `.gitignore` + Claude skill (re-run) |
+| `mp init` / `mp reinit` | Configure project name + PR provider (first run) or refresh `.gitignore` + Claude skill (re-run) |
 | `mp` / `mp dash` | Cross-project dashboard |
-| `mp create` | Spawn worktree + tmux session (+ `--issue <id>` to link) |
+| `mp create` | Spawn worktree + tmux session (`--name` or `--prompt`) |
 | `mp adopt <branch>` | Bring an existing branch into mp |
 | `mp list` | Show pieces (`--all` for cross-project) |
 | `mp switch` | Jump to a piece (tmux switch-client when in tmux) |

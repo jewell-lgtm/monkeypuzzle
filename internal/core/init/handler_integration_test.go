@@ -38,9 +38,8 @@ func TestIntegration_Init_CreatesFullStructure(t *testing.T) {
 	handler := initcmd.NewHandler(deps)
 
 	input := initcmd.Input{
-		Name:          "test-project",
-		IssueProvider: "markdown",
-		PRProvider:    "github",
+		Name:       "test-project",
+		PRProvider: "github",
 	}
 
 	if _, err := handler.Run(input, tmpDir); err != nil {
@@ -70,26 +69,11 @@ func TestIntegration_Init_CreatesFullStructure(t *testing.T) {
 	if cfg.Project.Name != "test-project" {
 		t.Errorf("project name = %q, want 'test-project'", cfg.Project.Name)
 	}
-	if cfg.Issues.Provider != "markdown" {
-		t.Errorf("issue provider = %q, want 'markdown'", cfg.Issues.Provider)
-	}
-	if cfg.Issues.Config["directory"] != "issues" {
-		t.Errorf("issues directory = %q, want 'issues'", cfg.Issues.Config["directory"])
-	}
 	if cfg.PR.Provider != "github" {
 		t.Errorf("pr provider = %q, want 'github'", cfg.PR.Provider)
 	}
 	if cfg.Version != "1" {
 		t.Errorf("version = %q, want '1'", cfg.Version)
-	}
-
-	// Verify issues directory
-	info, err = os.Stat("issues")
-	if err != nil {
-		t.Fatalf("issues directory not created: %v", err)
-	}
-	if !info.IsDir() {
-		t.Error("issues is not a directory")
 	}
 
 	// Verify .monkeypuzzle/.gitignore contains piece-specific entries
@@ -167,9 +151,8 @@ func TestIntegration_Init_ConfigExists(t *testing.T) {
 
 	// Create config
 	input := initcmd.Input{
-		Name:          "test",
-		IssueProvider: "markdown",
-		PRProvider:    "github",
+		Name:       "test",
+		PRProvider: "github",
 	}
 	if _, err := handler.Run(input, tmpDir); err != nil {
 		t.Fatalf("init failed: %v", err)
@@ -201,9 +184,8 @@ func TestIntegration_Init_DirectoryPermissions(t *testing.T) {
 	handler := initcmd.NewHandler(deps)
 
 	input := initcmd.Input{
-		Name:          "test",
-		IssueProvider: "markdown",
-		PRProvider:    "github",
+		Name:       "test",
+		PRProvider: "github",
 	}
 	if _, err := handler.Run(input, tmpDir); err != nil {
 		t.Fatalf("init failed: %v", err)
@@ -214,12 +196,6 @@ func TestIntegration_Init_DirectoryPermissions(t *testing.T) {
 	perm := info.Mode().Perm()
 	if perm != 0755 {
 		t.Errorf(".monkeypuzzle permissions = %o, want 0755", perm)
-	}
-
-	info, _ = os.Stat("issues")
-	perm = info.Mode().Perm()
-	if perm != 0755 {
-		t.Errorf("issues permissions = %o, want 0755", perm)
 	}
 
 	// Verify file permissions (0644)

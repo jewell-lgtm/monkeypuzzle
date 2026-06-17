@@ -13,7 +13,7 @@ var fields = []input.Field{
 	{
 		Name:        "title",
 		Description: "PR title",
-		Required:    false, // Can be derived from issue title
+		Required:    false, // Defaults to the piece name
 	},
 	{
 		Name:        "body",
@@ -81,7 +81,7 @@ const MaxTitleLength = 256
 // Disallows: spaces, ~, ^, :, \, ?, *, [, .., @{, leading/trailing dots or slashes
 var branchNameRegex = regexp.MustCompile(`^[a-zA-Z0-9][-a-zA-Z0-9._/]*[a-zA-Z0-9]$|^[a-zA-Z0-9]$`)
 
-// Validate validates the input (title is optional, derived from issue if not provided)
+// Validate validates the input (title is optional, defaults to the piece name if not provided)
 func Validate(in Input) error {
 	if in.Title != "" && len(in.Title) > MaxTitleLength {
 		return fmt.Errorf("title too long (max %d chars, got %d)", MaxTitleLength, len(in.Title))

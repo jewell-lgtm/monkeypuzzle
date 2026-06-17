@@ -26,7 +26,7 @@ var prCreateCmd = &cobra.Command{
 	Long: `Create a GitHub pull request for the current piece worktree.
 Pushes the branch to origin and creates a PR using the gh CLI.
 
-If the piece was created from an issue, the issue title is used as the default PR title.`,
+When no title is provided, the piece name is used as the default PR title.`,
 	RunE: runPRCreate,
 }
 
@@ -48,7 +48,7 @@ var (
 )
 
 func init() {
-	prCreateCmd.Flags().StringVar(&flagPRTitle, "title", "", "PR title (default: issue title or piece name)")
+	prCreateCmd.Flags().StringVar(&flagPRTitle, "title", "", "PR title (default: piece name)")
 	prCreateCmd.Flags().StringVar(&flagPRBody, "body", "", "PR description")
 	prCreateCmd.Flags().StringVar(&flagPRBase, "base", "", "Base branch to merge into (default: auto-detect from parent)")
 	prCreateCmd.Flags().BoolVar(&flagPRDraft, "draft", false, "Open the PR/MR as a draft")

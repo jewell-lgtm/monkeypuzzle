@@ -23,11 +23,6 @@ func TestWriteAndReadPRMetadata(t *testing.T) {
 		Branch:     "feature-branch",
 		BaseBranch: "main",
 		CreatedAt:  time.Date(2025, 1, 27, 10, 0, 0, 0, time.UTC),
-		Issue: piece.IssueRef{
-			Provider: "markdown",
-			ID:       "issues/my-issue.md",
-			Title:    "My Issue",
-		},
 	}
 
 	// Write metadata
@@ -53,9 +48,6 @@ func TestWriteAndReadPRMetadata(t *testing.T) {
 	}
 	if readMetadata.BaseBranch != "main" {
 		t.Errorf("expected BaseBranch 'main', got %q", readMetadata.BaseBranch)
-	}
-	if readMetadata.Issue.ID != "issues/my-issue.md" {
-		t.Errorf("expected Issue.ID 'issues/my-issue.md', got %q", readMetadata.Issue.ID)
 	}
 }
 
@@ -117,32 +109,5 @@ func TestWritePRMetadata_CreatesDirIfMissing(t *testing.T) {
 
 	if readMetadata.PRNumber != 456 {
 		t.Errorf("expected PRNumber 456, got %d", readMetadata.PRNumber)
-	}
-}
-
-func TestPRMetadata_WithoutIssue(t *testing.T) {
-	fs := adapters.NewMemoryFS()
-	worktreePath := "/workdir"
-
-	metadata := piece.PRMetadata{
-		PRNumber:   789,
-		PRURL:      "https://github.com/owner/repo/pull/789",
-		Branch:     "standalone-branch",
-		BaseBranch: "develop",
-		CreatedAt:  time.Now(),
-		// Issue intentionally omitted
-	}
-
-	if err := piece.WritePRMetadata(worktreePath, metadata, fs); err != nil {
-		t.Fatalf("WritePRMetadata failed: %v", err)
-	}
-
-	readMetadata, err := piece.ReadPRMetadata(worktreePath, fs)
-	if err != nil {
-		t.Fatalf("ReadPRMetadata failed: %v", err)
-	}
-
-	if !readMetadata.Issue.IsEmpty() {
-		t.Errorf("expected empty Issue, got %+v", readMetadata.Issue)
 	}
 }

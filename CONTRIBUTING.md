@@ -183,21 +183,21 @@ Include the Docker commands and output in your bug report.
 
 ## Adding Providers
 
-To add a new issue or PR provider:
+To add a new PR provider:
 
 1. Add to valid values in `internal/core/init/input.go`:
 
 ```go
 {
-    Name:        "issue_provider",
-    ValidValues: []string{"markdown", "your-provider"},
+    Name:        "pr_provider",
+    ValidValues: []string{"github", "your-provider"},
 }
 ```
 
 2. Handle the provider in `internal/core/init/handler.go`:
 
 ```go
-if input.IssueProvider == "your-provider" {
+if input.PRProvider == "your-provider" {
     // Provider-specific setup
 }
 ```

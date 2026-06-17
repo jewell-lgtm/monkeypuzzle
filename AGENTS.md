@@ -9,10 +9,10 @@ go vet ./...          # Lint
 ```
 
 ## Workflow
-Dogfood the mp tool whenever possible during its development. Always use outside-in testing, where a single integration test of the happy path exists before starting any feature work, and then edge cases and other situations are covered in unit tests. When performing feature work, always keep the issue markdown file up to date .
+Dogfood the mp tool whenever possible during its development. Always use outside-in testing, where a single integration test of the happy path exists before starting any feature work, and then edge cases and other situations are covered in unit tests.
 
 ## Pieces
-Issues are (in this repo) plain markdown files in `issues/` (authored directly; mp only resolves them via `mp create --issue <path>`), and development work consists of `pieces` (also managed with the mp command) which may be stacked on each other (`mp stack` operates over a whole stack: `status`, `sync`, `append`, `prepend`, `set-parent`, `continue`, `undo`). Most pieces of work are complete when there is a PR with a good description, and all tests and code quality checks pass
+Development work consists of `pieces` (managed with the mp command), each created from a name or a free-form prompt (`mp create --name <name>` / `mp create --prompt "..."`). Pieces may be stacked on each other (`mp stack` operates over a whole stack: `status`, `sync`, `append`, `prepend`, `set-parent`, `continue`, `undo`). Most pieces of work are complete when there is a PR with a good description, and all tests and code quality checks pass
 
 ## CLI Interaction Model
 

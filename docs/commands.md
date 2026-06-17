@@ -72,9 +72,7 @@ mp completion powershell | Out-String | Invoke-Expression
 | Flag                            | Completes To            |
 | ------------------------------- | ----------------------- |
 | `mp abandon --name`       | Available piece names   |
-| `mp create --issue`          | Files (for issue paths) |
-| `mp init --issue-provider`      | `markdown`, `linear`, `plane` |
-| `mp init --pr-provider`         | `github`                |
+| `mp init --pr-provider`         | `github`, `gitlab`      |
 | `mp update --main-branch` | Git branch names        |
 | `mp merge --main-branch`  | Git branch names        |
 
@@ -98,18 +96,11 @@ mp init --schema               # Output schema
 | Flag                 | Description                                                       | Default        |
 | -------------------- | ----------------------------------------------------------------- | -------------- |
 | `--name`             | Project name                                                      | Directory name |
-| `--issue-provider`   | Issue provider (`markdown`, `linear`, `plane`)                    | `markdown`     |
-| `--pr-provider`      | PR provider (`github`)                                            | `github`       |
+| `--pr-provider`      | PR provider (`github`, `gitlab`)                                  | `github`       |
 | `--dir`              | Directory (relative to repo root) for monkeypuzzle state          | `.monkeypuzzle`|
 | `--gitignore`        | Regenerate `<dir>/.gitignore` only (no other changes)             | `false`        |
 | `--schema`           | Output JSON schema and exit                                       | -              |
 | `-y, --yes`          | Overwrite existing config                                         | `false`        |
-| `--linear-api-key`   | Linear API key (or `LINEAR_API_KEY` env var)                      | -              |
-| `--linear-team`      | Linear team key (required for `linear` provider)                  | -              |
-| `--plane-api-key`    | Plane API key (or `PLANE_API_KEY` env var)                        | -              |
-| `--plane-workspace`  | Plane workspace slug (required for `plane` provider)              | -              |
-| `--plane-project`    | Plane project ID (required for `plane` provider)                  | -              |
-| `--plane-base-url`   | Plane API base URL (set for self-hosted)                          | `https://api.plane.so` |
 
 `--dir` lets you keep all monkeypuzzle state somewhere already ignored by git,
 e.g. `mp init --dir .DONOTCOMMIT/monkeypuzzle`. The repo→directory mapping is
@@ -122,7 +113,6 @@ an existing project later, use [`mp move`](#mp-move).
 ```json
 {
   "name": "project-name",
-  "issue_provider": "markdown",
   "pr_provider": "github",
   "dir": ".monkeypuzzle"
 }
@@ -135,88 +125,21 @@ Creates the monkeypuzzle directory (default `.monkeypuzzle/`):
 ```
 .monkeypuzzle/
 ├── monkeypuzzle.json    # Configuration
-├── .gitignore           # Ignores pieces/ and per-piece metadata
-└── issues/              # Markdown issues (if markdown provider)
+└── .gitignore           # Ignores pieces/ and per-piece metadata
 ```
 
 ### Providers
 
-**Issue Providers:**
-
-- `markdown` - Issues as markdown files in `issues/`
-- `linear` - Issues from a Linear team (needs `--linear-team` and `--linear-api-key` / `LINEAR_API_KEY`)
-- `plane` - Issues from a Plane project (needs `--plane-workspace`, `--plane-project`, and `--plane-api-key` / `PLANE_API_KEY`; `--plane-base-url` for self-hosted)
-
 **PR Providers:**
 
 - `github` - PR management via `gh` CLI
-
----
-
-## mp issue
-
-Create, list, and search issues. With the `markdown` provider, issues are markdown files in `issues/`; with `linear`/`plane` they are backed by the remote tracker.
-
-### mp issue list
-
-```bash
-mp issue list                          # all issues (current project)
-mp issue list --status todo
-mp issue list --status todo,in-progress
-mp issue list --all                    # across all registered projects
-echo '{"status":["todo"]}' | mp issue list
-mp issue list --schema
-```
-
-| Flag       | Description                                  | Default |
-| ---------- | -------------------------------------------- | ------- |
-| `--status` | Filter by status (`todo`, `in-progress`, `done`) | -   |
-| `--all`    | List issues across all registered projects   | `false` |
-
-Returns a JSON array to stdout:
-
-```json
-[
-  { "path": "issues/add-login.md", "title": "Add login", "status": "todo" },
-  { "path": "issues/fix-bug.md", "title": "Fix bug", "status": "in-progress" }
-]
-```
-
-### mp issue create
-
-```bash
-mp issue create --title "Add feature" --description "Details"
-echo '{"title":"Add feature","description":"Details"}' | mp issue create
-mp issue create --schema
-```
-
-| Flag            | Description       |
-| --------------- | ----------------- |
-| `--title`       | Issue title       |
-| `--description` | Issue description |
-
-Returns the created issue as JSON (e.g. `{"path":"issues/add-feature.md","title":"Add feature","filename":"add-feature.md"}`).
-
-### mp issue search
-
-Fuzzy-match issues by query. Interactive picker with a TTY; JSON-friendly otherwise.
-
-```bash
-echo '{"query":"auth","status":["todo"]}' | mp issue search
-mp issue search --query auth --status todo
-mp issue search --schema
-```
-
-| Flag       | Description                                  |
-| ---------- | -------------------------------------------- |
-| `--query`  | Search query (fuzzy match)                   |
-| `--status` | Filter by status (`todo`, `in-progress`, `done`) |
+- `gitlab` - MR management via `glab` CLI
 
 ---
 
 ## mp switch
 
-Cross-project picker. Attach an existing piece (or main worktree), or create a piece on the fly by selecting an open todo issue or a stray local branch.
+Cross-project picker. Attach an existing piece (or main worktree), or create a piece on the fly by adopting a stray local branch.
 
 ### Usage
 
@@ -224,9 +147,8 @@ Cross-project picker. Attach an existing piece (or main worktree), or create a p
 mp switch                                          # Interactive: fuzzy-filter all rows
 mp switch --project app                            # Attach app's main worktree
 mp switch --project app --piece fix-x              # Attach an existing piece
-mp switch --project app --issue issues/auth.md     # Create piece from issue, then attach
 mp switch --project app --branch spike-token-rotate  # Adopt branch as piece, then attach
-echo '{"project":"app","issue":"issues/auth.md"}' | mp switch
+echo '{"project":"app","piece":"fix-x"}' | mp switch
 mp switch --schema
 ```
 
@@ -236,18 +158,16 @@ mp switch --schema
 | ----------- | ---------------------------------------------------------------------- |
 | `--project` | Project name or path (required for non-interactive modes)              |
 | `--piece`   | Existing piece to attach                                               |
-| `--issue`   | Issue path (e.g. `issues/foo.md`) or title query; creates a piece     |
 | `--branch`  | Local git branch to adopt as a piece                                   |
 | `--schema`  | Print the JSON-stdin schema and exit                                   |
 
-`--piece`, `--issue` and `--branch` are mutually exclusive. Omit all three to attach the project's main worktree.
+`--piece` and `--branch` are mutually exclusive. Omit both to attach the project's main worktree.
 
 ### Interactive picker
 
 With a terminal, opens a fuzzy-filtered list of rows across every registered project:
 
 - **Pieces** — existing worktrees, with a `[tmux]` indicator if a session is live.
-- **Issues** — open `todo` issues that don't yet have a piece. Selecting one runs `mp create --issue`.
 - **Branches** — local git branches not currently checked out anywhere (excludes main/master and any branch already adopted as a piece). Selecting one runs `mp adopt`.
 
 Type to filter, ↑/↓ to move, `enter` to select, `esc` to cancel. The picker caps the visible rows at 20; narrow the query to surface anything below the cut.
@@ -257,7 +177,6 @@ Type to filter, ↑/↓ to move, `enter` to select, `esc` to cancel. The picker 
 1. Resolves the project from the registry.
 2. Based on the chosen selector:
    - **piece** — locates the worktree and attaches its tmux session
-   - **issue** — runs `CreatePieceFromIssue`, then attaches the new piece's session
    - **branch** — runs `AdoptPiece` with `repo_root` set to the project path, then attaches
 3. Attaching only happens when run **interactively from inside tmux** (real TTY
    on stdin *and* `$TMUX` set). When no multiplexer is configured, or when called
@@ -266,7 +185,7 @@ Type to filter, ↑/↓ to move, `enter` to select, `esc` to cancel. The picker 
 
 ### Non-interactive shape
 
-`mp go --json` (and the JSON form of `mp switch` when stdout isn't a TTY) now includes per-project `issues` and `branches` arrays so callers can build their own pickers.
+`mp go --json` (and the JSON form of `mp switch` when stdout isn't a TTY) includes per-project `pieces` and `branches` arrays so callers can build their own pickers.
 
 ---
 
@@ -396,7 +315,6 @@ Create a new piece (git worktree + tmux session).
 ```bash
 mp create
 mp create --name my-feature
-mp create --issue issues/my-feature.md
 mp create --prompt "add dark mode"        # name auto-generated from the prompt
 mp create --parent parent-piece           # stack on another piece
 mp create --skip-switch  # Don't auto-switch to new piece
@@ -407,7 +325,6 @@ mp create --skip-switch  # Don't auto-switch to new piece
 | Flag                  | Description                                       | Default        |
 | --------------------- | ------------------------------------------------- | -------------- |
 | `--name`              | Custom piece name                                 | Auto-generated |
-| `--issue`             | Create from issue file (sets name from title)     | -              |
 | `--prompt`            | Create from a prompt (name auto-generated)        | -              |
 | `-p, --parent`        | Parent piece name to branch from (stacks the piece) | `main`       |
 | `--skip-switch`       | Don't switch to the new piece after creation      | `false`        |
@@ -595,7 +512,7 @@ mp cleanup --force      # Skip confirmation
 
 1. Scans pieces directory for worktrees
 2. Checks if each piece's branch is merged (via git branch, PR, or remote)
-3. For merged pieces: removes worktree, kills tmux session, updates issue status
+3. For merged pieces: removes worktree, kills tmux session
 4. Reports what was cleaned
 
 ---
@@ -648,7 +565,7 @@ Create a GitHub pull request for the current piece. Pushes the branch to origin 
 ### Usage
 
 ```bash
-mp pr create                                  # title/body from issue or piece name
+mp pr create                                  # title/body from piece name
 mp pr create --title "Add login" --body "..."
 mp pr create --base develop                   # override the base branch
 echo '{"title":"Add login","body":"..."}' | mp pr create
@@ -659,7 +576,7 @@ mp pr create --schema
 
 | Flag      | Description                                              | Default                         |
 | --------- | ------------------------------------------------------- | ------------------------------- |
-| `--title` | PR title                                                | Issue title or piece name       |
+| `--title` | PR title                                                | Piece name                      |
 | `--body`  | PR description                                           | -                               |
 | `--base`  | Base branch to merge into                               | Auto-detect from parent piece   |
 
@@ -785,7 +702,7 @@ mp stack prepend --name base-feat
 
 ## mp project
 
-Manage the global registry of monkeypuzzle projects. A "project" is any git repo initialised with `mp init` (which registers it automatically). Registering projects lets `mp` list pieces and issues across all of them and jump between their tmux sessions. Aliases: `projects`, `proj`.
+Manage the global registry of monkeypuzzle projects. A "project" is any git repo initialised with `mp init` (which registers it automatically). Registering projects lets `mp` list pieces across all of them and jump between their tmux sessions. Aliases: `projects`, `proj`.
 
 ### Usage
 
@@ -801,17 +718,17 @@ mp project remove my-project         # unregister (alias: rm); repo on disk unto
 mp project remove --target /path/to/repo
 ```
 
-`mp project list` shows best-effort live state per project (current branch, number of pieces, number of open issues).
+`mp project list` shows best-effort live state per project (current branch, number of pieces).
 
 ---
 
 ## mp go
 
-A **repo switcher**: jump to any registered project's worktree from anywhere. With a terminal it opens an interactive fuzzy picker where each repo starts **collapsed** (one row per repo). Press `→` to expand a repo and reveal its pieces, issues, and branches; `←` collapses it again. Pressing `Enter` on a collapsed repo jumps straight to its **main worktree**. Typing filters across everything (collapsed or not), and the list scrolls (`↑/↓`, `PgUp/PgDn`), sizing its window to the terminal height. A single registered repo starts expanded.
+A **repo switcher**: jump to any registered project's worktree from anywhere. With a terminal it opens an interactive fuzzy picker where each repo starts **collapsed** (one row per repo). Press `→` to expand a repo and reveal its pieces and branches; `←` collapses it again. Pressing `Enter` on a collapsed repo jumps straight to its **main worktree**. Typing filters across everything (collapsed or not), and the list scrolls (`↑/↓`, `PgUp/PgDn`), sizing its window to the terminal height. A single registered repo starts expanded.
 
-With `--json` (or no TTY) it prints the **full per-project detail** (`pieces`, `issues`, `branches`) so automation can build its own pickers.
+With `--json` (or no TTY) it prints the **full per-project detail** (`pieces`, `branches`) so automation can build its own pickers.
 
-Bare `mp` opens a fuzzy picker **scoped to the current project** (repo-local) — it shows the pieces, issues, and branches of the project you're standing in. When run **outside** a monkeypuzzle project, bare `mp` does *not* fall back to the cross-project view; instead it prints context-aware guidance:
+Bare `mp` opens a fuzzy picker **scoped to the current project** (repo-local) — it shows the pieces and branches of the project you're standing in. When run **outside** a monkeypuzzle project, bare `mp` does *not* fall back to the cross-project view; instead it prints context-aware guidance:
 
 - Inside a git repo that hasn't been initialised → suggests `mp init`.
 - Outside any git repo → suggests cd-ing into a repo and running `mp init`.
@@ -828,7 +745,7 @@ mp go --json     # force JSON output
 mp --json        # JSON for the current project
 ```
 
-The JSON form includes per-project `pieces`, `issues`, and `branches` arrays so callers can build their own pickers (see [`mp switch`](#mp-switch)). The `branches` array includes both local branches and remote-only refs (e.g. `origin/foo`, marked `"remote": true`) that have no local branch yet — selecting one fetches the remote and adopts it as a piece.
+The JSON form includes per-project `pieces` and `branches` arrays so callers can build their own pickers (see [`mp switch`](#mp-switch)). The `branches` array includes both local branches and remote-only refs (e.g. `origin/foo`, marked `"remote": true`) that have no local branch yet — selecting one fetches the remote and adopts it as a piece.
 
 ---
 
