@@ -187,14 +187,14 @@ func (h *Handler) CreatePiece(ctx context.Context, pieceName string, opts Create
 		IssueID:      opts.Issue.ID,
 		IssueNumber:  opts.Issue.Number,
 	}
-	if err := h.hooks.RunHook(ctx, repoRoot, HookOnPieceCreate, hookCtx); err != nil {
-		// A failing on-piece-create hook is non-fatal: keep the worktree and
-		// continue. Setup steps (dependency installs, submodule init) can fail
-		// for transient reasons, and discarding the worktree is worse than a
-		// warning the user can act on.
+	if err := h.hooks.RunHookDetached(repoRoot, HookOnPieceCreate, hookCtx); err != nil {
+		// The hook runs fire-and-forget so its setup work (dependency installs,
+		// submodule init) never blocks piece creation. Only a failure to *start*
+		// it lands here, and it's non-fatal: keep the worktree and warn. The
+		// hook's own output is in its log file.
 		h.deps.Output.Write(core.Message{
 			Type:    core.MsgWarning,
-			Content: fmt.Sprintf("on-piece-create hook failed (piece kept): %v", err),
+			Content: fmt.Sprintf("on-piece-create hook failed to start (piece kept): %v", err),
 		})
 	}
 
@@ -271,18 +271,11 @@ func (h *Handler) AdoptPiece(ctx context.Context, input AdoptPieceInput) (PieceI
 		return PieceInfo{}, fmt.Errorf("cannot adopt main or master branch as a piece")
 	}
 
-	// Only enforce a clean working directory when running from the main repo,
-	// since the adopt path used to checkout there. From a worktree we don't
-	// touch wd at all.
-	if !inWorktree {
-		clean, err := h.git.IsClean(ctx, wd)
-		if err != nil {
-			return PieceInfo{}, fmt.Errorf("failed to check working directory status: %w", err)
-		}
-		if !clean {
-			return PieceInfo{}, fmt.Errorf("working directory has uncommitted changes, please commit or stash first")
-		}
-	}
+	// No clean-working-directory check: adopt always creates a *separate*
+	// worktree via `git worktree add`, which neither requires a clean tree nor
+	// touches the current checkout's files. The only case that would relocate the
+	// current checkout — adopting the branch already checked out here — is blocked
+	// up front by ensureBranchAdoptable, so uncommitted changes in wd are safe.
 
 	// Determine piece name (use input.Name or branch name).
 	pieceName := input.Name
@@ -334,15 +327,43 @@ func (h *Handler) AdoptPiece(ctx context.Context, input AdoptPieceInput) (PieceI
 		branchToAdopt = remoteBranch
 	} else {
 		// Local branch path. Git refuses to create a worktree for a branch that is
-		// already checked out in another worktree, failing with a bare "exit status
-		// 128". The common case is adopting a branch you've been working on directly
-		// in the main repo. Rather than silently moving that checkout, detect the
-		// situation up front and explain how to resolve it.
-		if err := h.ensureBranchAdoptable(ctx, repoRoot, branchToAdopt); err != nil {
+		// already checked out elsewhere. The common case is adopting a branch you've
+		// been working on directly in the main repo: free it by returning the main
+		// worktree to its main branch (carrying any work-in-progress into the new
+		// piece), then adopt. A branch checked out in some *other* piece worktree
+		// can't be relocated safely, so that still errors.
+		resetMain, err := h.mainWorktreeHoldsBranch(ctx, repoRoot, branchToAdopt)
+		if err != nil {
 			return PieceInfo{}, err
+		}
+		movedWIP := false
+		if resetMain {
+			stashed, err := h.git.StashPush(ctx, repoRoot)
+			if err != nil {
+				return PieceInfo{}, fmt.Errorf("failed to stash main worktree changes before adopting %s: %w", branchToAdopt, err)
+			}
+			mainBranch := h.repoMainBranch(ctx, repoRoot)
+			if err := h.git.Checkout(ctx, repoRoot, mainBranch); err != nil {
+				if stashed {
+					_ = h.git.StashPop(ctx, repoRoot) // best-effort restore
+				}
+				return PieceInfo{}, fmt.Errorf("failed to reset main worktree to %s before adopting %s: %w", mainBranch, branchToAdopt, err)
+			}
+			movedWIP = stashed
 		}
 		if err := h.git.WorktreeAddExisting(ctx, repoRoot, worktreePath, branchToAdopt); err != nil {
 			return PieceInfo{}, fmt.Errorf("failed to create worktree for branch %s: %w", branchToAdopt, err)
+		}
+		if movedWIP {
+			// The WIP was stashed from the main worktree; restore it into the new
+			// piece so the branch's in-flight work travels with it. Git's stash is
+			// shared across worktrees, so this pops the same entry here.
+			if err := h.git.StashPop(ctx, worktreePath); err != nil {
+				h.deps.Output.Write(core.Message{
+					Type:    core.MsgWarning,
+					Content: fmt.Sprintf("Carried-over changes left stashed (could not pop into %s: %v); run `git stash pop` there to restore them", pieceName, err),
+				})
+			}
 		}
 	}
 
@@ -372,11 +393,12 @@ func (h *Handler) AdoptPiece(ctx context.Context, input AdoptPieceInput) (PieceI
 		RepoRoot:     repoRoot,
 		SessionName:  sessionName,
 	}
-	if err := h.hooks.RunHook(ctx, repoRoot, HookOnPieceCreate, hookCtx); err != nil {
-		// Non-fatal: keep the adopted worktree and warn. See CreatePiece.
+	if err := h.hooks.RunHookDetached(repoRoot, HookOnPieceCreate, hookCtx); err != nil {
+		// Fire-and-forget; only a failure to start lands here. Non-fatal: keep
+		// the adopted worktree and warn. See CreatePiece.
 		h.deps.Output.Write(core.Message{
 			Type:    core.MsgWarning,
-			Content: fmt.Sprintf("on-piece-create hook failed (piece kept): %v", err),
+			Content: fmt.Sprintf("on-piece-create hook failed to start (piece kept): %v", err),
 		})
 	}
 
@@ -1658,26 +1680,40 @@ func (h *Handler) RebaseSubtree(ctx context.Context, repoRoot, piecesDir, childN
 // placed in a new worktree because it is already checked out elsewhere in the
 // repo. Git would otherwise fail with a bare "exit status 128". A nil return
 // means the branch is free to adopt.
-func (h *Handler) ensureBranchAdoptable(ctx context.Context, repoRoot, branchToAdopt string) error {
+// mainWorktreeHoldsBranch reports whether branchToAdopt is currently checked out
+// in the main repo worktree (repoRoot). When it is, adopt can free the branch by
+// resetting the main worktree to its main branch. A branch checked out in some
+// other piece worktree cannot be relocated safely, so that returns an error.
+func (h *Handler) mainWorktreeHoldsBranch(ctx context.Context, repoRoot, branchToAdopt string) (bool, error) {
 	checkedOut, err := h.git.CheckedOutBranches(ctx, repoRoot)
 	if err != nil {
 		// If we can't inspect worktrees, let the worktree-add attempt surface the
 		// underlying error rather than blocking on a probe failure.
-		return nil
+		return false, nil
 	}
 	if !checkedOut[branchToAdopt] {
-		return nil
+		return false, nil
 	}
-	// Distinguish the common "checked out in the main repo" case so we can give a
-	// concrete next step.
 	if mainBranch, err := h.git.CurrentBranch(ctx, repoRoot); err == nil && mainBranch == branchToAdopt {
-		return fmt.Errorf(
-			"branch %q is currently checked out in the main repo at %s; switch that checkout to another branch first (e.g. `git -C %s checkout main`), then re-run adopt",
-			branchToAdopt, repoRoot, repoRoot)
+		return true, nil
 	}
-	return fmt.Errorf(
+	return false, fmt.Errorf(
 		"branch %q is already checked out in another worktree of this repo; a branch can only be checked out in one worktree at a time, so check it out elsewhere first or adopt a different branch",
 		branchToAdopt)
+}
+
+// repoMainBranch returns the branch the main worktree should return to when a
+// piece branch is graduated out of it: "main" when that branch exists, otherwise
+// "master", falling back to "main". Mirrors the main/master convention used
+// elsewhere in the handler.
+func (h *Handler) repoMainBranch(ctx context.Context, repoRoot string) string {
+	if h.git.LocalBranchExists(ctx, repoRoot, "main") {
+		return "main"
+	}
+	if h.git.LocalBranchExists(ctx, repoRoot, "master") {
+		return "master"
+	}
+	return "main"
 }
 
 func (h *Handler) projectName(repoRoot string) string {

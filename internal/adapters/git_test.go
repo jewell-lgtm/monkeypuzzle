@@ -356,6 +356,16 @@ func TestGit_WorktreeRemove_SubmoduleFallback(t *testing.T) {
 			wantPrune:   true,
 		},
 		{
+			// A submodule whose checkout differs from the recorded gitlink is
+			// reported as modified by plain `git status`, but `--ignore-submodules=all`
+			// filters it out, so a superproject-clean tree still falls back.
+			name:        "submodule-only modification still falls back",
+			statusOut:   []byte(""),
+			wantErr:     false,
+			wantRemoved: true,
+			wantPrune:   true,
+		},
+		{
 			name:        "dirty tree refuses removal",
 			statusOut:   []byte(" M file.go"),
 			wantErr:     true,
@@ -370,7 +380,7 @@ func TestGit_WorktreeRemove_SubmoduleFallback(t *testing.T) {
 			exec := NewMockExec()
 			exec.AddResponse("git", []string{"worktree", "remove", worktreePath},
 				[]byte(submoduleRemoveErr), MockError("exit status 128"))
-			exec.AddResponse("git", []string{"status", "--porcelain"}, tt.statusOut, nil)
+			exec.AddResponse("git", []string{"status", "--porcelain", "--ignore-submodules=all"}, tt.statusOut, nil)
 			exec.AddResponse("git", []string{"worktree", "prune"}, []byte(""), nil)
 
 			git := NewGit(exec)

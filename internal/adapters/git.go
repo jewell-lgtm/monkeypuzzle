@@ -167,9 +167,15 @@ func (g *Git) WorktreeRemove(ctx context.Context, repoRoot, worktreePath string)
 	}
 	// git refuses to remove worktrees containing submodules even when the tree
 	// is clean. Fall back to manual removal, but preserve non-force semantics by
-	// only doing so when there are no uncommitted changes.
+	// only doing so when there are no uncommitted changes. We ignore submodule
+	// state here: git already singled out submodules as the blocker, and a
+	// submodule reads as "modified" in plain `git status` whenever its checkout
+	// points at a different commit, which would otherwise wedge non-force
+	// abandon for every project that uses submodules. The gate's job is to guard
+	// the superproject's own tracked files; `--force` remains the escape hatch
+	// for discarding submodule-internal changes.
 	if isSubmoduleWorktreeError(output) {
-		if clean, cerr := g.IsClean(ctx, worktreePath); cerr == nil && clean {
+		if clean, cerr := g.isCleanIgnoringSubmodules(ctx, worktreePath); cerr == nil && clean {
 			return g.removeWorktreeManually(ctx, repoRoot, worktreePath)
 		}
 	}
@@ -469,6 +475,19 @@ func (g *Git) IsCommitInBranch(ctx context.Context, workDir, commit, branch stri
 // IsClean checks if the working directory has no uncommitted changes.
 func (g *Git) IsClean(ctx context.Context, workDir string) (bool, error) {
 	output, err := g.exec.RunWithDir(ctx, workDir, "git", "status", "--porcelain")
+	if err != nil {
+		return false, fmt.Errorf("failed to check git status: %w", err)
+	}
+	return strings.TrimSpace(string(output)) == "", nil
+}
+
+// isCleanIgnoringSubmodules reports whether workDir's own tracked files are
+// clean, disregarding submodule state. Used when deciding whether a
+// submodule-containing worktree is safe to remove manually: a submodule whose
+// checkout differs from the recorded gitlink shows as modified in plain
+// `git status`, which is not uncommitted work in the superproject.
+func (g *Git) isCleanIgnoringSubmodules(ctx context.Context, workDir string) (bool, error) {
+	output, err := g.exec.RunWithDir(ctx, workDir, "git", "status", "--porcelain", "--ignore-submodules=all")
 	if err != nil {
 		return false, fmt.Errorf("failed to check git status: %w", err)
 	}

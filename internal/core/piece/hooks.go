@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/projectdir"
@@ -58,31 +59,40 @@ func NewHookRunner(deps core.Deps) *HookRunner {
 	}
 }
 
-// RunHook executes a hook script if it exists and is executable.
-// Returns nil if the hook doesn't exist or the hooks directory doesn't exist.
-// Returns an error if the hook exists but fails to execute (non-zero exit code).
-func (h *HookRunner) RunHook(ctx context.Context, repoRoot, hookName string, hookCtx HookContext) error {
-	hookPath := filepath.Join(projectdir.HooksDir(repoRoot), hookName)
+// resolveExecutableHook returns the path to hookName if it exists and is
+// executable. ok is false (with a nil error) when the hook is absent or not
+// executable — both are no-ops for the caller. A non-existent-file stat is the
+// common "no hook configured" case; any other stat error is returned.
+func (h *HookRunner) resolveExecutableHook(repoRoot, hookName string) (hookPath string, ok bool, err error) {
+	hookPath = filepath.Join(projectdir.HooksDir(repoRoot), hookName)
 
-	// Check if the hook file exists
 	info, err := h.fs.Stat(hookPath)
 	if err != nil {
-		// Hook doesn't exist, that's fine
 		if os.IsNotExist(err) {
-			return nil
+			return "", false, nil
 		}
-		// Other stat error
-		return fmt.Errorf("failed to stat hook %s: %w", hookName, err)
+		return "", false, fmt.Errorf("failed to stat hook %s: %w", hookName, err)
 	}
 
-	// Check if the file is executable
 	if info.Mode()&0111 == 0 {
-		// Not executable, skip
 		h.output.Write(core.Message{
 			Type:    core.MsgWarning,
 			Content: fmt.Sprintf("Hook %s is not executable, skipping", hookName),
 		})
-		return nil
+		return "", false, nil
+	}
+
+	return hookPath, true, nil
+}
+
+// RunHook executes a hook script if it exists and is executable, blocking until
+// it completes.
+// Returns nil if the hook doesn't exist or the hooks directory doesn't exist.
+// Returns an error if the hook exists but fails to execute (non-zero exit code).
+func (h *HookRunner) RunHook(ctx context.Context, repoRoot, hookName string, hookCtx HookContext) error {
+	hookPath, ok, err := h.resolveExecutableHook(repoRoot, hookName)
+	if err != nil || !ok {
+		return err
 	}
 
 	// Build environment variables
@@ -115,6 +125,45 @@ func (h *HookRunner) RunHook(ctx context.Context, repoRoot, hookName string, hoo
 	}
 
 	return nil
+}
+
+// RunHookDetached starts a hook script in the background (fire-and-forget) and
+// returns immediately, without waiting for it to finish. The hook's combined
+// output is redirected to a log file under the repo's monkeypuzzle logs
+// directory, and the user is told where to find it.
+//
+// Like RunHook, a missing or non-executable hook is a no-op. Unlike RunHook,
+// the hook's exit status is never observed: only a failure to *start* the
+// process is returned as an error. This suits setup hooks (dependency installs,
+// submodule init) whose work shouldn't block the command that triggered them.
+func (h *HookRunner) RunHookDetached(repoRoot, hookName string, hookCtx HookContext) error {
+	hookPath, ok, err := h.resolveExecutableHook(repoRoot, hookName)
+	if err != nil || !ok {
+		return err
+	}
+
+	env := h.buildEnv(hookCtx)
+	logPath := hookLogPath(repoRoot, hookName, hookCtx.PieceName)
+
+	if err := h.exec.StartDetached(repoRoot, env, logPath, "bash", hookPath); err != nil {
+		return fmt.Errorf("hook %s failed to start: %w", hookName, err)
+	}
+
+	h.output.Write(core.Message{
+		Type:    core.MsgInfo,
+		Content: fmt.Sprintf("Running hook %s in background; output: %s", hookName, logPath),
+	})
+	return nil
+}
+
+// hookLogPath returns the log file a detached hook writes to. Including the
+// piece name keeps concurrent piece creations from clobbering each other's logs.
+func hookLogPath(repoRoot, hookName, pieceName string) string {
+	base := strings.TrimSuffix(hookName, ".sh")
+	if pieceName != "" {
+		base = base + "-" + pieceName
+	}
+	return filepath.Join(projectdir.LogsDir(repoRoot), base+".log")
 }
 
 // buildEnv creates environment variable strings for the hook.

@@ -22,7 +22,7 @@ func TestSwitchUnified_FromIssue_CreatesPieceAndAttaches(t *testing.T) {
 	dataDir := filepath.Join(e.tmpDir, "data")
 	repo := projectTestRepo(t, e, dataDir, filepath.Join(e.tmpDir, "repos"), "alpha")
 	// `mp init` leaves a `.claude/` directory the test helper doesn't commit.
-	// AdoptPiece refuses a dirty working tree, so stash it here.
+	// Commit it so the main worktree starts clean and deterministic.
 	gitCmd(t, repo, "add", ".claude")
 	gitCmd(t, repo, "commit", "-m", "chore: claude")
 
@@ -86,7 +86,7 @@ func TestSwitchUnified_FromBranch_AdoptsAndAttaches(t *testing.T) {
 	dataDir := filepath.Join(e.tmpDir, "data")
 	repo := projectTestRepo(t, e, dataDir, filepath.Join(e.tmpDir, "repos"), "alpha")
 	// `mp init` leaves a `.claude/` directory the test helper doesn't commit.
-	// AdoptPiece refuses a dirty working tree, so stash it here.
+	// Commit it so the main worktree starts clean and deterministic.
 	gitCmd(t, repo, "add", ".claude")
 	gitCmd(t, repo, "commit", "-m", "chore: claude")
 
@@ -148,7 +148,7 @@ func TestSwitchUnified_DashJSON_IncludesIssuesAndBranches(t *testing.T) {
 	dataDir := filepath.Join(e.tmpDir, "data")
 	repo := projectTestRepo(t, e, dataDir, filepath.Join(e.tmpDir, "repos"), "alpha")
 	// `mp init` leaves a `.claude/` directory the test helper doesn't commit.
-	// AdoptPiece refuses a dirty working tree, so stash it here.
+	// Commit it so the main worktree starts clean and deterministic.
 	gitCmd(t, repo, "add", ".claude")
 	gitCmd(t, repo, "commit", "-m", "chore: claude")
 

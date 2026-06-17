@@ -60,7 +60,7 @@ That's the whole integration. No `--reviewer` baked in, no opinion about labels 
 
 | Hook | Fires when | Extra env on top of piece basics |
 | --- | --- | --- |
-| `on-piece-create.sh` | `mp create` finishes the worktree | `MP_ISSUE_ID`, `MP_ISSUE_NUMBER`, `MP_SESSION_NAME` |
+| `on-piece-create.sh` | `mp create` finishes the worktree (runs detached/fire-and-forget; output → `.monkeypuzzle/logs/`) | `MP_ISSUE_ID`, `MP_ISSUE_NUMBER`, `MP_SESSION_NAME` |
 | `before-piece-update.sh` / `after-piece-update.sh` | around `mp update` | `MP_MAIN_BRANCH` |
 | `before-piece-merge.sh` / `after-piece-merge.sh` | around `mp merge` | `MP_MAIN_BRANCH` |
 | `before-pr-create.sh` / `after-pr-create.sh` | around `mp pr create` | `MP_PR_NUMBER`, `MP_PR_URL`, `MP_PR_BASE_BRANCH`, `MP_ISSUE_ID`, `MP_ISSUE_NUMBER` |

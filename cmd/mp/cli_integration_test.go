@@ -510,6 +510,26 @@ func TestCLI_PieceAbandon_CurrentPiece(t *testing.T) {
 	}
 }
 
+// TestCLI_PieceAbandon_NotInPiece verifies abandon fails loudly (rather than
+// prompting or guessing) when run with no --name outside any piece. Abandon only
+// ever targets the current piece, so there is nothing to detect here.
+func TestCLI_PieceAbandon_NotInPiece(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	env.initGitRepo()
+	env.initProject("test")
+
+	// Run from the main repo root (not inside any piece), no --name.
+	stdout, stderr, err := env.run("abandon")
+	if err == nil {
+		t.Fatalf("expected abandon to fail when not in a piece\nstdout: %s\nstderr: %s", stdout, stderr)
+	}
+	if !strings.Contains(stderr, "not inside a piece") {
+		t.Errorf("expected 'not inside a piece' error, got stderr: %s", stderr)
+	}
+}
+
 // TestCLI_Flatten_RemovesAllPieces tests that mp flatten removes every piece
 // worktree, returning the repo to a flat main-only state.
 func TestCLI_Flatten_RemovesAllPieces(t *testing.T) {

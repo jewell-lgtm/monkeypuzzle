@@ -331,3 +331,10 @@ func (h *hybridExec) RunWithEnv(ctx context.Context, dir string, env []string, n
 	}
 	return h.real.RunWithEnv(ctx, dir, env, name, args...)
 }
+
+func (h *hybridExec) StartDetached(dir string, env []string, logPath, name string, args ...string) error {
+	if h.shouldMock(name, args) {
+		return h.mock.StartDetached(dir, env, logPath, name, args...)
+	}
+	return h.real.StartDetached(dir, env, logPath, name, args...)
+}

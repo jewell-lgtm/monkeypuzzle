@@ -16,10 +16,18 @@ import (
 	"github.com/jewell-lgtm/monkeypuzzle/pkg/styles"
 )
 
-// MaxVisibleRows caps how many rows the picker shows after fuzzy filtering.
-// Anything past this prints as "… N more" so the picker stays scannable on
-// dense setups.
+// MaxVisibleRows is the fallback height of the scrolling window used before the
+// terminal size is known. Once a WindowSizeMsg arrives the window grows or
+// shrinks to fit the screen (see Model.windowSize).
 const MaxVisibleRows = 20
+
+// dashboardChrome is the number of non-row lines the view reserves (banner,
+// blank lines, the scroll hints, the filter input, and the help line) when
+// sizing the scrolling window to the terminal height.
+const dashboardChrome = 7
+
+// minVisibleRows keeps at least a few rows visible on very short terminals.
+const minVisibleRows = 3
 
 // RowKind distinguishes a project's main worktree row from a piece row.
 type RowKind int
@@ -88,6 +96,18 @@ type Model struct {
 	Selected int   // index into Filtered
 	Input    textinput.Model
 
+	// Scrolling. offset is the index of the first visible filtered row; height
+	// is the last known terminal height (0 until the first WindowSizeMsg).
+	offset int
+	height int
+
+	// Expand/collapse. collapsed[projectKey] hides a project's child rows
+	// (pieces/issues/branches/new-piece) until expanded; hasChild marks which
+	// projects have any children to expand. A non-empty filter query overrides
+	// collapse so search can reveal children anywhere.
+	collapsed map[string]bool
+	hasChild  map[string]bool
+
 	// Loading state. When Loading is true the picker shows a spinner until a
 	// RowsMsg arrives; loadCmd is the command that produces it. Err captures a
 	// collection failure for the caller to return after the program exits.
@@ -97,6 +117,112 @@ type Model struct {
 	Err     error
 
 	Cancelled bool
+}
+
+// windowSize returns how many rows fit on screen: the terminal height minus the
+// fixed chrome, falling back to MaxVisibleRows before the size is known.
+func (m Model) windowSize() int {
+	if m.height <= 0 {
+		return MaxVisibleRows
+	}
+	n := m.height - dashboardChrome
+	if n < minVisibleRows {
+		return minVisibleRows
+	}
+	return n
+}
+
+// clampScroll keeps Selected in range and slides the visible window so the
+// selection stays on screen.
+func (m *Model) clampScroll() {
+	if len(m.Filtered) == 0 {
+		m.Selected, m.offset = 0, 0
+		return
+	}
+	if m.Selected < 0 {
+		m.Selected = 0
+	}
+	if m.Selected > len(m.Filtered)-1 {
+		m.Selected = len(m.Filtered) - 1
+	}
+	win := m.windowSize()
+	if m.Selected < m.offset {
+		m.offset = m.Selected
+	}
+	if m.Selected >= m.offset+win {
+		m.offset = m.Selected - win + 1
+	}
+	if maxOffset := len(m.Filtered) - win; m.offset > maxOffset {
+		m.offset = maxOffset
+	}
+	if m.offset < 0 {
+		m.offset = 0
+	}
+}
+
+// projectKey identifies the project a row belongs to (ProjectPath when set, else
+// the project name). All rows of a project share the same key.
+func projectKey(r Row) string {
+	if r.ProjectPath != "" {
+		return r.ProjectPath
+	}
+	return r.Project
+}
+
+// initCollapse derives the default expand state from the current rows: with more
+// than one project everything starts collapsed (a clean one-row-per-repo
+// switcher); a single project stays expanded so bare `mp` shows its detail.
+func (m *Model) initCollapse() {
+	m.collapsed = map[string]bool{}
+	m.hasChild = map[string]bool{}
+	projects := make(map[string]bool)
+	for _, r := range m.Rows {
+		key := projectKey(r)
+		if r.Kind == RowProject {
+			projects[key] = true
+		} else {
+			m.hasChild[key] = true
+		}
+	}
+	if len(projects) > 1 {
+		for key := range projects {
+			m.collapsed[key] = true
+		}
+	}
+}
+
+// rowVisible reports whether a row passes the collapse filter. Project rows are
+// always visible; a child is hidden only when its project is collapsed.
+func (m Model) rowVisible(r Row) bool {
+	if r.Kind == RowProject {
+		return true
+	}
+	return !m.collapsed[projectKey(r)]
+}
+
+// setCollapsed expands/collapses the project owning the currently selected row.
+// On collapse the selection snaps back to that project's header so it stays on
+// screen.
+func (m *Model) setCollapsed(collapse bool) {
+	r, ok := m.SelectedRow()
+	if !ok {
+		return
+	}
+	key := projectKey(r)
+	if collapse && !m.hasChild[key] {
+		return
+	}
+	m.collapsed[key] = collapse
+	m.refilter()
+	if collapse {
+		for fi, ri := range m.Filtered {
+			if pr := m.Rows[ri]; pr.Kind == RowProject && projectKey(pr) == key {
+				m.Selected = fi
+				break
+			}
+		}
+		m.clampScroll()
+	}
 }
 
 func newFilterInput() textinput.Model {
@@ -109,6 +235,7 @@ func newFilterInput() textinput.Model {
 // New builds a dashboard over already-collected rows.
 func New(rows []Row) Model {
 	m := Model{Rows: rows, Input: newFilterInput()}
+	m.initCollapse()
 	m.refilter()
 	return m
 }
@@ -132,13 +259,20 @@ func (m *Model) refilter() {
 	q := strings.TrimSpace(m.Input.Value())
 	m.Filtered = m.Filtered[:0]
 	for i, r := range m.Rows {
-		if matchesQuery(r, q) {
-			m.Filtered = append(m.Filtered, i)
+		if !matchesQuery(r, q) {
+			continue
 		}
+		// With no query, collapsed projects hide their children. A query
+		// overrides collapse so matches surface wherever they live.
+		if q == "" && !m.rowVisible(r) {
+			continue
+		}
+		m.Filtered = append(m.Filtered, i)
 	}
 	if m.Selected >= len(m.Filtered) {
 		m.Selected = 0
 	}
+	m.clampScroll()
 }
 
 // matchesQuery returns true if the row should be visible under the given fuzzy
@@ -172,6 +306,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 		m.Rows = msg.Rows
+		m.initCollapse()
 		m.refilter()
 		return m, nil
 	case spinnerTickMsg:
@@ -180,6 +315,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.frame++
 		return m, spinnerTick()
+	case tea.WindowSizeMsg:
+		m.height = msg.Height
+		m.clampScroll()
+		return m, nil
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c", "esc":
@@ -194,18 +333,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, tea.Quit
 		case "up", "ctrl+p":
-			if m.Selected > 0 {
-				m.Selected--
-			}
+			m.Selected--
+			m.clampScroll()
 			return m, nil
 		case "down", "ctrl+n":
-			limit := len(m.Filtered)
-			if limit > MaxVisibleRows {
-				limit = MaxVisibleRows
-			}
-			if m.Selected < limit-1 {
-				m.Selected++
-			}
+			m.Selected++
+			m.clampScroll()
+			return m, nil
+		case "pgup":
+			m.Selected -= m.windowSize()
+			m.clampScroll()
+			return m, nil
+		case "pgdown":
+			m.Selected += m.windowSize()
+			m.clampScroll()
+			return m, nil
+		case "right", "tab":
+			m.setCollapsed(false)
+			return m, nil
+		case "left", "shift+tab":
+			m.setCollapsed(true)
 			return m, nil
 		}
 	}
@@ -240,26 +387,39 @@ func (m Model) View() string {
 		b.WriteString(styles.Subtle.Render("No matches."))
 		b.WriteString("\n")
 	default:
-		visible := len(m.Filtered)
-		truncated := 0
-		if visible > MaxVisibleRows {
-			truncated = visible - MaxVisibleRows
-			visible = MaxVisibleRows
+		start := m.offset
+		end := start + m.windowSize()
+		if end > len(m.Filtered) {
+			end = len(m.Filtered)
 		}
 
-		for vi := 0; vi < visible; vi++ {
-			r := m.Rows[m.Filtered[vi]]
+		// Expand markers only make sense for the collapsed tree; a search query
+		// flattens results, so suppress them then.
+		showMarkers := strings.TrimSpace(m.Input.Value()) == ""
+
+		if start > 0 {
+			b.WriteString(styles.Subtle.Render(fmt.Sprintf("  ↑ %d more", start)))
+			b.WriteString("\n")
+		}
+		for i := start; i < end; i++ {
+			r := m.Rows[m.Filtered[i]]
 			cursor := "  "
-			if vi == m.Selected {
+			if i == m.Selected {
 				cursor = styles.Cursor.Render("→ ")
 			}
 			b.WriteString(cursor)
-			b.WriteString(renderRow(r, vi == m.Selected))
+			if showMarkers && r.Kind == RowProject && m.hasChild[projectKey(r)] {
+				if m.collapsed[projectKey(r)] {
+					b.WriteString(styles.Subtle.Render("▸ "))
+				} else {
+					b.WriteString(styles.Subtle.Render("▾ "))
+				}
+			}
+			b.WriteString(renderRow(r, i == m.Selected))
 			b.WriteString("\n")
 		}
-
-		if truncated > 0 {
-			b.WriteString(styles.Subtle.Render(fmt.Sprintf("… %d more (narrow your query)", truncated)))
+		if end < len(m.Filtered) {
+			b.WriteString(styles.Subtle.Render(fmt.Sprintf("  ↓ %d more", len(m.Filtered)-end)))
 			b.WriteString("\n")
 		}
 	}
@@ -268,7 +428,7 @@ func (m Model) View() string {
 	b.WriteString("\n")
 	b.WriteString(m.Input.View())
 	b.WriteString("\n")
-	b.WriteString(styles.Subtle.Render("type to filter • ↑/↓ move • enter select • esc cancel"))
+	b.WriteString(styles.Subtle.Render("type to filter • ↑/↓ move • →/← expand • enter select • esc cancel"))
 	return b.String()
 }
 

@@ -199,6 +199,9 @@ pr-metadata.json
 
 # Piece worktrees
 pieces/
+
+# Hook logs (fire-and-forget hook output)
+logs/
 `
 	return h.deps.FS.WriteFile(gitignorePath, []byte(content), DefaultFilePerm)
 }

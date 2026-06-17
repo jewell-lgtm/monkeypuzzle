@@ -119,6 +119,11 @@ func HooksDir(repoRoot string) string {
 	return filepath.Join(Dir(repoRoot), "hooks")
 }
 
+// LogsDir returns the directory holding hook (and other) logs for repoRoot.
+func LogsDir(repoRoot string) string {
+	return filepath.Join(Dir(repoRoot), "logs")
+}
+
 // ConfigFilePath returns the path to repoRoot's monkeypuzzle.json.
 func ConfigFilePath(repoRoot string) string {
 	return filepath.Join(Dir(repoRoot), "monkeypuzzle.json")

@@ -27,6 +27,8 @@ Every `mp` command follows one consistent interaction contract. The modes, in pr
 
 Output convention: human-readable text goes to stderr; stdout is reserved for machine-readable JSON.
 
+**No tmux sessions for agents.** Terminal-multiplexer management (creating, `switch-client`, attaching a piece session) happens **only** when mp is driven interactively — a real TTY on stdin (isatty, not merely a character device) **and** `$TMUX` set. Agents and scripts work through the stateless API (flags / stdin JSON, output captured), which has no controlling terminal, so mp never opens or switches a session for them: `create`/`switch`/`go` return the worktree path (in the result JSON, or on stdout for `cd $(mp switch …)`) and leave tmux untouched. `$TMUX` alone is not trusted — it is inherited by child processes, so an agent spawned from inside a human's tmux still has it set; the TTY check is what excludes those callers and stops an agent's `switch-client` from hijacking the human's terminal. The gate lives in `interactiveSessionContext()` (cmd/mp); session-creating commands route through it via `chooseMultiplexer` and `attachSession`.
+
 ## Code Style
 
 - Keep functions small

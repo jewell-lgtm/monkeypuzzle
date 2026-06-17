@@ -7,13 +7,15 @@ import (
 )
 
 func sampleRows() []Row {
+	// Every row of a project carries the same ProjectPath, mirroring what
+	// dashboardRows produces — the collapse key is derived from it.
 	return []Row{
-		{Kind: RowProject, Project: "alpha"},
+		{Kind: RowProject, Project: "alpha", ProjectPath: "/repos/alpha"},
 		{Kind: RowNewPiece, Project: "alpha", ProjectPath: "/repos/alpha"},
-		{Kind: RowPiece, Project: "alpha", Piece: "feature-x"},
-		{Kind: RowIssue, Project: "alpha", IssuePath: "issues/wire-the-picker.md", IssueTitle: "Wire the picker"},
-		{Kind: RowBranch, Project: "alpha", Branch: "stray-spike"},
-		{Kind: RowProject, Project: "bravo"},
+		{Kind: RowPiece, Project: "alpha", ProjectPath: "/repos/alpha", Piece: "feature-x"},
+		{Kind: RowIssue, Project: "alpha", ProjectPath: "/repos/alpha", IssuePath: "issues/wire-the-picker.md", IssueTitle: "Wire the picker"},
+		{Kind: RowBranch, Project: "alpha", ProjectPath: "/repos/alpha", Branch: "stray-spike"},
+		{Kind: RowProject, Project: "bravo", ProjectPath: "/repos/bravo"},
 		{Kind: RowNewPiece, Project: "bravo", ProjectPath: "/repos/bravo"},
 	}
 }
@@ -23,10 +25,66 @@ func sendKey(m Model, s string) Model {
 	return updated.(Model)
 }
 
-func TestNew_EmptyQuery_ShowsAllRows(t *testing.T) {
+func updateKey(m Model, kt tea.KeyType) Model {
+	updated, _ := m.Update(tea.KeyMsg{Type: kt})
+	return updated.(Model)
+}
+
+func TestCollapse_MultiProjectStartsCollapsed(t *testing.T) {
 	m := New(sampleRows())
-	if got := len(m.Filtered); got != 7 {
-		t.Fatalf("len(Filtered) = %d, want 7", got)
+	// alpha + bravo headers only — one row per repo.
+	if got := len(m.Filtered); got != 2 {
+		t.Fatalf("collapsed multi-project: len(Filtered)=%d, want 2", got)
+	}
+	for _, idx := range m.Filtered {
+		if m.Rows[idx].Kind != RowProject {
+			t.Errorf("expected only project rows when collapsed, got %v", m.Rows[idx].Kind)
+		}
+	}
+}
+
+func TestCollapse_RightExpandsSelectedProject(t *testing.T) {
+	m := New(sampleRows())
+	m = updateKey(m, tea.KeyRight) // expand alpha (the selected first row)
+	// alpha's 5 rows + bravo header.
+	if got := len(m.Filtered); got != 6 {
+		t.Fatalf("after expanding alpha: len(Filtered)=%d, want 6", got)
+	}
+	if r, ok := m.SelectedRow(); !ok || r.Kind != RowProject || r.Project != "alpha" {
+		t.Errorf("selection should stay on alpha header, got %+v ok=%v", r, ok)
+	}
+}
+
+func TestCollapse_LeftCollapsesAndReselectsHeader(t *testing.T) {
+	m := New(sampleRows())
+	m = updateKey(m, tea.KeyRight) // expand alpha
+	m = updateKey(m, tea.KeyDown)  // move into an alpha child
+	m = updateKey(m, tea.KeyLeft)  // collapse alpha
+	if got := len(m.Filtered); got != 2 {
+		t.Fatalf("after collapsing alpha: len(Filtered)=%d, want 2", got)
+	}
+	if r, ok := m.SelectedRow(); !ok || r.Kind != RowProject || r.Project != "alpha" {
+		t.Errorf("selection should snap back to alpha header, got %+v ok=%v", r, ok)
+	}
+}
+
+func TestCollapse_QueryRevealsCollapsedChildren(t *testing.T) {
+	m := New(sampleRows()) // collapsed: alpha's issue is hidden
+	m = sendKey(m, "wire") // a query overrides collapse
+	row, ok := m.SelectedRow()
+	if !ok || row.Kind != RowIssue {
+		t.Fatalf("query should surface the collapsed child issue, got %+v ok=%v", row, ok)
+	}
+}
+
+func TestCollapse_SingleProjectStartsExpanded(t *testing.T) {
+	rows := []Row{
+		{Kind: RowProject, Project: "solo", ProjectPath: "/repos/solo"},
+		{Kind: RowPiece, Project: "solo", ProjectPath: "/repos/solo", Piece: "feat"},
+	}
+	m := New(rows)
+	if got := len(m.Filtered); got != 2 {
+		t.Fatalf("single project should start expanded: len(Filtered)=%d, want 2", got)
 	}
 }
 
@@ -95,31 +153,58 @@ func TestFuzzy_NoMatch_RendersFallback(t *testing.T) {
 	}
 }
 
-func TestMaxVisibleRows_TruncatesFilteredList(t *testing.T) {
+func TestScroll_ShowsHiddenBelowCount(t *testing.T) {
 	rows := make([]Row, 0, MaxVisibleRows+5)
 	for i := 0; i < cap(rows); i++ {
 		rows = append(rows, Row{Kind: RowIssue, Project: "alpha", IssueTitle: "issue", IssuePath: "issues/i.md"})
 	}
 	m := New(rows)
 	view := m.View()
-	want := "… 5 more"
+	// With no terminal size yet the window is MaxVisibleRows; the 5 extra rows
+	// are below the fold and advertised as scrollable rather than truncated.
+	want := "↓ 5 more"
 	if !contains(view, want) {
 		t.Errorf("expected view to contain %q, view:\n%s", want, view)
 	}
 }
 
-func TestSelection_BoundedToVisibleSlice(t *testing.T) {
+func TestScroll_FollowsSelectionPastWindow(t *testing.T) {
 	rows := make([]Row, 0, MaxVisibleRows+10)
 	for i := 0; i < cap(rows); i++ {
 		rows = append(rows, Row{Kind: RowIssue, Project: "alpha", IssueTitle: "x", IssuePath: "p"})
 	}
 	m := New(rows)
-	for i := 0; i < MaxVisibleRows*2; i++ {
+	const downs = MaxVisibleRows + 4
+	for i := 0; i < downs; i++ {
 		updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
 		m = updated.(Model)
 	}
-	if m.Selected >= MaxVisibleRows {
-		t.Errorf("Selected = %d, want < MaxVisibleRows (%d)", m.Selected, MaxVisibleRows)
+	// Selection now moves past the old visible cap...
+	if m.Selected != downs {
+		t.Fatalf("Selected = %d, want %d", m.Selected, downs)
+	}
+	// ...and the window slides so it stays on screen...
+	if m.Selected < m.offset || m.Selected >= m.offset+m.windowSize() {
+		t.Errorf("Selected %d not within window [%d,%d)", m.Selected, m.offset, m.offset+m.windowSize())
+	}
+	// ...exposing an up-scroll hint for the rows now above the fold.
+	if !contains(m.View(), "↑") {
+		t.Errorf("expected an up-scroll hint after scrolling, view:\n%s", m.View())
+	}
+}
+
+func TestScroll_DownStopsAtLastRow(t *testing.T) {
+	rows := make([]Row, 0, MaxVisibleRows+10)
+	for i := 0; i < cap(rows); i++ {
+		rows = append(rows, Row{Kind: RowIssue, Project: "alpha", IssueTitle: "x", IssuePath: "p"})
+	}
+	m := New(rows)
+	for i := 0; i < len(rows)*2; i++ {
+		updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+		m = updated.(Model)
+	}
+	if m.Selected != len(rows)-1 {
+		t.Errorf("Selected = %d, want last row %d", m.Selected, len(rows)-1)
 	}
 }
 

@@ -32,15 +32,17 @@ const (
 
 var goCmd = &cobra.Command{
 	Use:   "go",
-	Short: "Jump to any registered project, piece, or issue (cross-project)",
-	Long: `Show all registered monkeypuzzle projects and their piece worktrees, and jump
-into any worktree's session — from anywhere, regardless of the current repo.
+	Short: "Switch between registered repos (and drill into their worktrees)",
+	Long: `Pick a registered monkeypuzzle project and jump to its worktree session — from
+anywhere, regardless of the current repo.
 
-With a terminal, opens an interactive fuzzy picker. Otherwise (or with --json)
-prints the same data as JSON.
+With a terminal, opens an interactive fuzzy picker. Each repo starts collapsed
+(one row per repo); press → to expand it and reveal its pieces, issues, and
+branches, or just press Enter on a collapsed repo to jump to its main worktree.
+Typing filters across everything (expanded or not); ↑/↓ and PgUp/PgDn scroll.
 
-Bare 'mp' shows a fuzzy picker scoped to the current repo; 'mp go' always spans
-every registered project so you can switch repos from anywhere.`,
+With --json (or no TTY) it prints the full per-project detail so automation can
+build its own pickers.`,
 	RunE: runGo,
 }
 
@@ -367,8 +369,11 @@ func runRoot(cmd *cobra.Command, args []string) error {
 	return renderDashboard(ctx, []projectcmd.Info{projectcmd.Describe(root)})
 }
 
-// runGo handles `mp go`: the explicit cross-project picker over every registered
-// project, regardless of where it's run from.
+// runGo handles `mp go`: a repo switcher across every registered project. The
+// interactive picker shows each repo collapsed (one row per repo) and lets you
+// expand a repo to reveal its pieces/issues/branches; Enter on a collapsed repo
+// jumps straight to its main worktree. With --json (or no TTY) it prints the
+// full per-project detail.
 func runGo(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	infos, err := projectcmd.List()
@@ -473,9 +478,16 @@ func runDashboardTUI(ctx context.Context, loadCmd tea.Cmd) error {
 }
 
 // attachSession switches to (creating if needed) the given tmux session, using
-// the user's configured multiplexer. If no multiplexer is configured it prints
-// the worktree path so callers can `cd` into it.
+// the user's configured multiplexer. If no multiplexer is configured, or mp is
+// not in an interactive session context (agents/scripts, or a terminal outside
+// tmux — see interactiveSessionContext), it prints the worktree path so callers
+// can `cd` into it instead. This keeps `mp switch` / `mp go` from creating or
+// hijacking a tmux session when driven through the stateless API.
 func attachSession(ctx context.Context, sessionName, workDir string) error {
+	if !interactiveSessionContext() {
+		fmt.Println(workDir)
+		return nil
+	}
 	userCfg, err := config.LoadUserConfig()
 	if err != nil {
 		return err

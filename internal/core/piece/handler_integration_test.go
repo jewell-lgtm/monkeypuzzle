@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/adapters"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
@@ -90,6 +91,59 @@ echo "Session: $MP_SESSION_NAME" >> "` + outputFile + `"
 	}
 	if !strings.Contains(output, "Session: mp/proj/test") {
 		t.Errorf("expected MP_SESSION_NAME in output, got: %s", output)
+	}
+}
+
+func TestIntegration_HookRunner_RunHookDetached_WritesLog(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "mp-hook-test-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	hooksDir := filepath.Join(tmpDir, ".monkeypuzzle", "hooks")
+	if err := os.MkdirAll(hooksDir, 0755); err != nil {
+		t.Fatalf("failed to create hooks dir: %v", err)
+	}
+
+	// A hook that takes a moment, then writes a marker. If RunHookDetached
+	// blocked, the call below would take ~0.3s; either way the log must appear.
+	hookScript := `#!/bin/bash
+sleep 0.2
+echo "piece=$MP_PIECE_NAME"
+`
+	hookPath := filepath.Join(hooksDir, piece.HookOnPieceCreate)
+	if err := os.WriteFile(hookPath, []byte(hookScript), 0755); err != nil {
+		t.Fatalf("failed to write hook script: %v", err)
+	}
+
+	deps := core.Deps{
+		FS:     adapters.NewOSFS(""),
+		Output: adapters.NewBufferOutput(),
+		Exec:   adapters.NewOSExec(),
+	}
+	runner := piece.NewHookRunner(deps)
+
+	if err := runner.RunHookDetached(tmpDir, piece.HookOnPieceCreate, piece.HookContext{
+		PieceName: "test-piece",
+	}); err != nil {
+		t.Fatalf("RunHookDetached failed: %v", err)
+	}
+
+	logPath := filepath.Join(tmpDir, ".monkeypuzzle", "logs", "on-piece-create-test-piece.log")
+
+	// The hook runs in the background, so poll for its output to land.
+	var content []byte
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		content, err = os.ReadFile(logPath)
+		if err == nil && strings.Contains(string(content), "piece=test-piece") {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if !strings.Contains(string(content), "piece=test-piece") {
+		t.Fatalf("expected hook log %q to contain hook output, got: %q (err: %v)", logPath, content, err)
 	}
 }
 
@@ -742,6 +796,16 @@ Content here.
 }
 
 // Helper functions for integration tests
+
+// runGit runs a git command in dir, failing the test on error.
+func runGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v failed: %v\n%s", args, err, out)
+	}
+}
 
 func setupGitRepo(t *testing.T, tmpDir string) {
 	// Initialize a git repo
@@ -1489,11 +1553,85 @@ func TestIntegration_AdoptPiece_HappyPath(t *testing.T) {
 	}
 }
 
+// TestIntegration_AdoptPiece_DirtyMainRepo verifies that adopting a branch other
+// than the one checked out in the main repo succeeds even when the main working
+// tree has uncommitted changes. Adopt creates a separate worktree via
+// `git worktree add`, so the main checkout's dirty files are untouched and safe.
+func TestIntegration_AdoptPiece_DirtyMainRepo(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	tmpDataHome, err := os.MkdirTemp("", "mp-data-*")
+	if err != nil {
+		t.Fatalf("failed to create temp data dir: %v", err)
+	}
+	t.Cleanup(func() {
+		os.RemoveAll(tmpDataHome)
+		paths.ResetDataDir()
+	})
+	paths.SetDataDir(tmpDataHome)
+
+	tmpDir, err := os.MkdirTemp("", "mp-integration-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	setupGitRepo(t, tmpDir)
+	setupMonkeypuzzleConfig(t, tmpDir)
+
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get working directory: %v", err)
+	}
+	defer func() { _ = os.Chdir(oldWd) }()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("failed to change directory: %v", err)
+	}
+
+	// Create a feature branch with a commit, then return to main.
+	runGit(t, tmpDir, "checkout", "-b", "my-feature-branch")
+	if err := os.WriteFile(filepath.Join(tmpDir, "feature.txt"), []byte("feature content"), 0644); err != nil {
+		t.Fatalf("failed to write feature file: %v", err)
+	}
+	runGit(t, tmpDir, "add", ".")
+	runGit(t, tmpDir, "commit", "-m", "feature commit")
+	runGit(t, tmpDir, "checkout", "main")
+
+	// Dirty the main working tree — adopt must not require this to be clean.
+	dirtyFile := filepath.Join(tmpDir, "scratch.txt")
+	if err := os.WriteFile(dirtyFile, []byte("work in progress"), 0644); err != nil {
+		t.Fatalf("failed to write dirty file: %v", err)
+	}
+
+	deps := core.Deps{
+		FS:     adapters.NewOSFS(""),
+		Output: adapters.NewBufferOutput(),
+		Exec:   adapters.NewOSExec(),
+	}
+	handler := piece.NewHandler(deps)
+
+	info, err := handler.AdoptPiece(context.Background(), piece.AdoptPieceInput{Branch: "my-feature-branch"})
+	if err != nil {
+		t.Fatalf("AdoptPiece failed with dirty main repo: %v", err)
+	}
+	if _, err := os.Stat(info.WorktreePath); err != nil {
+		t.Errorf("worktree not created at %s: %v", info.WorktreePath, err)
+	}
+
+	// The main checkout's uncommitted change must be preserved, untouched.
+	if data, err := os.ReadFile(dirtyFile); err != nil {
+		t.Errorf("dirty main file was removed by adopt: %v", err)
+	} else if string(data) != "work in progress" {
+		t.Errorf("dirty main file content changed by adopt: got %q", string(data))
+	}
+}
+
 // TestIntegration_AdoptPiece_BranchCheckedOutInMainRepo covers the natural flow
 // where the user has been working on a branch directly in the main repo and then
-// tries to adopt it. Git refuses a second worktree for an already-checked-out
-// branch, so AdoptPiece must fail with a clear, actionable message — and must not
-// silently move the main repo's checkout or leave a stray worktree behind.
+// adopts it. AdoptPiece frees the branch by resetting the main worktree back to
+// its main branch, carrying any uncommitted work into the new piece worktree.
 func TestIntegration_AdoptPiece_BranchCheckedOutInMainRepo(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
@@ -1548,6 +1686,13 @@ func TestIntegration_AdoptPiece_BranchCheckedOutInMainRepo(t *testing.T) {
 		t.Fatalf("git commit failed: %v\n%s", err, out)
 	}
 
+	// Leave uncommitted work-in-progress on the branch in the main worktree; it
+	// should travel into the adopted piece, not block the adopt.
+	wipFile := filepath.Join(tmpDir, "wip.txt")
+	if err := os.WriteFile(wipFile, []byte("in flight"), 0644); err != nil {
+		t.Fatalf("failed to write wip file: %v", err)
+	}
+
 	// Adopt while my-feature-branch is still HEAD of the main repo.
 	deps := core.Deps{
 		FS:     adapters.NewOSFS(""),
@@ -1556,38 +1701,35 @@ func TestIntegration_AdoptPiece_BranchCheckedOutInMainRepo(t *testing.T) {
 	}
 	handler := piece.NewHandler(deps)
 
-	_, err = handler.AdoptPiece(context.Background(), piece.AdoptPieceInput{Branch: "my-feature-branch"})
-	if err == nil {
-		t.Fatal("expected AdoptPiece to fail when the branch is checked out in the main repo")
-	}
-
-	// The error should name the branch and the main repo, and not be the bare
-	// git "exit status 128".
-	msg := err.Error()
-	if strings.Contains(msg, "exit status 128") {
-		t.Errorf("expected a friendly message, got raw git error: %v", err)
-	}
-	for _, want := range []string{"my-feature-branch", "checked out", tmpDir} {
-		if !strings.Contains(msg, want) {
-			t.Errorf("error message missing %q: %v", want, err)
-		}
+	info, err := handler.AdoptPiece(context.Background(), piece.AdoptPieceInput{Branch: "my-feature-branch"})
+	if err != nil {
+		t.Fatalf("AdoptPiece failed for a branch checked out in the main repo: %v", err)
 	}
 
 	git := adapters.NewGit(adapters.NewOSExec())
 
-	// The main repo must be left untouched on the feature branch (no silent switch).
+	// The main worktree must have been reset back to main, freeing the branch.
 	mainBranch, err := git.CurrentBranch(context.Background(), tmpDir)
 	if err != nil {
 		t.Fatalf("failed to get main repo branch: %v", err)
 	}
-	if mainBranch != "my-feature-branch" {
-		t.Errorf("expected main repo left on 'my-feature-branch', got %q", mainBranch)
+	if mainBranch != "main" {
+		t.Errorf("expected main worktree reset to 'main', got %q", mainBranch)
 	}
 
-	// No stray worktree should have been created for the failed adopt.
-	piecePath := filepath.Join(tmpDir, ".monkeypuzzle", "pieces", "my-feature-branch")
-	if _, err := os.Stat(piecePath); !os.IsNotExist(err) {
-		t.Errorf("expected no worktree at %s, stat err = %v", piecePath, err)
+	// The branch must now live in its own piece worktree.
+	if _, err := os.Stat(info.WorktreePath); err != nil {
+		t.Errorf("worktree not created at %s: %v", info.WorktreePath, err)
+	}
+
+	// The WIP must have followed the branch into the piece, and be gone from main.
+	if _, err := os.Stat(filepath.Join(tmpDir, "wip.txt")); !os.IsNotExist(err) {
+		t.Errorf("WIP file should no longer be in the main worktree, stat err = %v", err)
+	}
+	if data, err := os.ReadFile(filepath.Join(info.WorktreePath, "wip.txt")); err != nil {
+		t.Errorf("WIP file did not travel into the piece worktree: %v", err)
+	} else if string(data) != "in flight" {
+		t.Errorf("WIP file content changed: got %q", string(data))
 	}
 }
 

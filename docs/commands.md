@@ -25,6 +25,15 @@ ambiguous.)
 
 Output goes to stderr (human-readable) while stdout is reserved for JSON (machine-readable).
 
+**Session management is interactive-only.** mp creates, switches, or attaches a
+tmux session **only** when driven interactively — a real terminal on stdin
+(isatty) **and** `$TMUX` set. Agents and scripts (flags / stdin JSON, output
+captured) have no controlling terminal, so `create`/`switch`/`go` skip tmux and
+return the worktree path instead (in JSON, or on stdout for `cd $(mp switch …)`).
+`$TMUX` is inherited by child processes, so it is not sufficient on its own — the
+TTY check is what keeps an agent from creating a stray session or hijacking the
+human's terminal via `switch-client`.
+
 ---
 
 ## Shell Completion
@@ -250,7 +259,10 @@ Type to filter, ↑/↓ to move, `enter` to select, `esc` to cancel. The picker 
    - **piece** — locates the worktree and attaches its tmux session
    - **issue** — runs `CreatePieceFromIssue`, then attaches the new piece's session
    - **branch** — runs `AdoptPiece` with `repo_root` set to the project path, then attaches
-3. When no multiplexer is configured, prints the worktree path so `cd $(mp switch ...)` works.
+3. Attaching only happens when run **interactively from inside tmux** (real TTY
+   on stdin *and* `$TMUX` set). When no multiplexer is configured, or when called
+   by an agent/script or from a terminal outside tmux, it prints the worktree
+   path instead so `cd $(mp switch ...)` works.
 
 ### Non-interactive shape
 
@@ -404,17 +416,25 @@ mp create --skip-switch  # Don't auto-switch to new piece
 ### What it does
 
 1. Detects current git repository root
-2. **Creates main repo tmux session** `mp-<repo-name>` if it doesn't exist
-3. Generates piece name: `piece-YYYYMMDD-HHMMSS` (or uses `--name`)
-4. Creates git worktree at `~/.local/share/monkeypuzzle/pieces/<piece-name>`
-5. Creates tmux session `mp-piece-<piece-name>` (if tmux available)
-6. Runs `on-piece-create.sh` hook (if exists)
-7. **Switches to the new piece** (unless `--skip-switch` is set)
+2. Generates piece name: `piece-YYYYMMDD-HHMMSS` (or uses `--name`)
+3. Creates git worktree at `~/.local/share/monkeypuzzle/pieces/<piece-name>`
+4. Fires the `on-piece-create.sh` hook (if exists) in the background — see below
+5. **Switches to the new piece** (unless `--skip-switch` is set) — but only when
+   run interactively (see below); otherwise prints the worktree path
 
-If the `on-piece-create.sh` hook fails, the worktree is kept and a warning is
-printed — setup steps (dependency installs, submodule init) often fail for
-transient reasons, so re-run the failed step manually inside the worktree.
-The auto-switch uses tmux attach/switch-client if available, otherwise prints the path.
+The `on-piece-create.sh` hook is **fire-and-forget**: it runs detached in the
+background so its setup work (dependency installs, submodule init) never blocks
+piece creation, and `mp create` returns immediately. The hook's combined output
+is redirected to `.monkeypuzzle/logs/on-piece-create-<piece-name>.log`, and the
+path is printed when the hook starts. Only a failure to *start* the hook
+produces a warning; its exit status is not observed (check the log instead). The
+worktree is always kept regardless of how the hook fares.
+
+The auto-switch only manages a tmux session when run **interactively from inside
+tmux** (a real TTY on stdin *and* `$TMUX` set): it `switch-client`s your existing
+tmux client to the piece's session. Run by an agent or script, or from a terminal
+outside tmux, it creates no session and prints the worktree path instead — so
+`--skip-switch` is only needed to suppress switching in an interactive session.
 
 ### Output
 
@@ -676,6 +696,10 @@ mp done --main-branch develop
 
 Convert an existing git branch into a piece worktree. Accepts a local branch name or a remote ref like `origin/foo` (remote refs are fetched and a tracking branch is created). Run from the main repo with no branch to adopt the current branch; from inside a piece worktree `--branch` is required.
 
+Adopt does not require a clean working directory: it always creates a *separate* worktree, so uncommitted changes in the main checkout are left untouched. When the branch being adopted is the one currently checked out in the main worktree, adopt frees it by resetting the main worktree back to its main branch (`main`, or `master`), carrying any uncommitted work-in-progress along into the new piece worktree.
+
+When run interactively from inside a tmux session, adopt creates and switches to the new piece's session (like `mp switch`). For agents/automation it leaves tmux untouched and reports the worktree path in the result JSON.
+
 ### Usage
 
 ```bash
@@ -783,9 +807,11 @@ mp project remove --target /path/to/repo
 
 ## mp go
 
-Cross-project picker of every registered project and its piece worktrees — jump to any repo from anywhere. With a terminal it opens an interactive fuzzy picker; otherwise (or with `--json`) it prints the same data as JSON.
+A **repo switcher**: jump to any registered project's worktree from anywhere. With a terminal it opens an interactive fuzzy picker where each repo starts **collapsed** (one row per repo). Press `→` to expand a repo and reveal its pieces, issues, and branches; `←` collapses it again. Pressing `Enter` on a collapsed repo jumps straight to its **main worktree**. Typing filters across everything (collapsed or not), and the list scrolls (`↑/↓`, `PgUp/PgDn`), sizing its window to the terminal height. A single registered repo starts expanded.
 
-Bare `mp` opens the **same picker scoped to the current project** (repo-local) — it shows only the pieces, issues, and branches of the project you're standing in. When run **outside** a monkeypuzzle project, bare `mp` does *not* fall back to the cross-project view; instead it prints context-aware guidance:
+With `--json` (or no TTY) it prints the **full per-project detail** (`pieces`, `issues`, `branches`) so automation can build its own pickers.
+
+Bare `mp` opens a fuzzy picker **scoped to the current project** (repo-local) — it shows the pieces, issues, and branches of the project you're standing in. When run **outside** a monkeypuzzle project, bare `mp` does *not* fall back to the cross-project view; instead it prints context-aware guidance:
 
 - Inside a git repo that hasn't been initialised → suggests `mp init`.
 - Outside any git repo → suggests cd-ing into a repo and running `mp init`.
@@ -797,7 +823,7 @@ Use `mp go` for the explicit all-projects view from anywhere.
 
 ```bash
 mp               # picker scoped to the current project (guidance if outside one)
-mp go            # every registered project (or JSON when not a TTY)
+mp go            # repo switcher: collapsed repos, → to expand (full JSON when not a TTY)
 mp go --json     # force JSON output
 mp --json        # JSON for the current project
 ```
@@ -831,13 +857,13 @@ Hooks are executable shell scripts in `.monkeypuzzle/hooks/` that run at key poi
 
 ### Available Hooks
 
-| Hook                     | Trigger                  |
-| ------------------------ | ------------------------ |
-| `on-piece-create.sh`     | After piece creation     |
-| `before-piece-update.sh` | Before `mp update` |
-| `after-piece-update.sh`  | After successful update  |
-| `before-piece-merge.sh`  | Before `mp merge`  |
-| `after-piece-merge.sh`   | After successful merge   |
+| Hook                     | Trigger                  | Execution                        |
+| ------------------------ | ------------------------ | -------------------------------- |
+| `on-piece-create.sh`     | After piece creation     | Detached (fire-and-forget); output logged to `.monkeypuzzle/logs/` |
+| `before-piece-update.sh` | Before `mp update` | Blocking |
+| `after-piece-update.sh`  | After successful update  | Blocking |
+| `before-piece-merge.sh`  | Before `mp merge`  | Blocking (non-zero exit aborts the merge) |
+| `after-piece-merge.sh`   | After successful merge   | Blocking |
 
 ### Environment Variables
 

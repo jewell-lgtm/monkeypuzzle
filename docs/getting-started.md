@@ -4,7 +4,7 @@
 
 - **Go 1.24+** - Required for building
 - **Git** - Required for version control operations
-- **tmux** (optional) - For automatic session management with `mp create`
+- **tmux** (optional) - For automatic session management when you run `mp create`/`mp switch` interactively from inside tmux. Without it (or when driven by an agent/script), mp prints the worktree path instead of opening a session.
 
 ## Installation
 

@@ -10,7 +10,7 @@ A **piece** is an isolated git worktree for a single change. Each piece:
 
 - Lives in its own directory under `~/.local/share/monkeypuzzle/pieces/{repo-hash}/` (Linux) or `~/Library/Application Support/monkeypuzzle/pieces/{repo-hash}/` (macOS)
 - Has its own branch
-- Has its own tmux session (`mp/<project>/<piece>`)
+- Has its own tmux session (`mp/<project>/<piece>`) **when you work interactively from inside tmux** — agents and scripts driving mp through its stateless API get the worktree path instead of a session (see [Sessions are interactive-only](#sessions-are-interactive-only))
 - Can optionally be linked to a tracker issue, surfaced to hooks as `MP_ISSUE_ID` / `MP_ISSUE_NUMBER`
 
 ### Why worktrees?
@@ -29,7 +29,8 @@ Workflows differ. PHProcess flips GitLab labels on draft→ready; another team a
 ```
 mp create [--issue <id>]
         │
-        ▼  on-piece-create.sh                (env: MP_ISSUE_ID, MP_ISSUE_NUMBER, MP_SESSION_NAME)
+        ▼  on-piece-create.sh   (detached, fire-and-forget; logs to .monkeypuzzle/logs/)
+        │                       (env: MP_ISSUE_ID, MP_ISSUE_NUMBER, MP_SESSION_NAME)
    worktree + tmux session ready
         │
         ▼  (work, commit)
@@ -116,6 +117,12 @@ cd "$MP_WORKTREE_PATH"
 go mod download
 ```
 
+`on-piece-create.sh` runs **detached** — `mp create` doesn't wait for it, so a
+slow `go mod download` (or `npm install`, submodule init, etc.) never holds up
+the worktree being ready. Its output goes to
+`.monkeypuzzle/logs/on-piece-create-<piece-name>.log`; tail that file if a piece
+seems to be missing its dependencies.
+
 ### Post-merge promote
 
 Cherry-pick onto a staging branch after merge — mp's `piece merge` only knows about one downstream, so multi-stage deploys live in this hook:
@@ -188,6 +195,22 @@ tmux attach -t mp/<project>/<piece>         # raw tmux attach
 ```
 
 When you're already inside tmux, `mp switch` calls `switch-client` so you stay attached.
+
+### Sessions are interactive-only
+
+mp manages a tmux session **only** when you drive it interactively from inside
+tmux — a real terminal on stdin (isatty) **and** `$TMUX` set. In that context
+`create`/`switch`/`go` create the session and `switch-client` your existing
+client to it.
+
+Driven any other way — by an agent or script through the stateless API
+(flags / stdin JSON, output captured), or from a terminal that isn't inside
+tmux — mp creates **no** session and instead returns the worktree path (in the
+result JSON, or on stdout so `cd $(mp switch …)` works). `$TMUX` alone doesn't
+count: it is inherited by child processes, so an agent launched from inside your
+tmux still has it set; the TTY check is what excludes those callers, so an agent
+can never spawn a stray session or `switch-client` your terminal out from under
+you.
 
 ### Tmux 101
 

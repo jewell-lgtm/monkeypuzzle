@@ -46,6 +46,12 @@ type Exec interface {
 	Run(ctx context.Context, name string, args ...string) ([]byte, error)
 	RunWithDir(ctx context.Context, dir, name string, args ...string) ([]byte, error)
 	RunWithEnv(ctx context.Context, dir string, env []string, name string, args ...string) ([]byte, error)
+	// StartDetached launches a command in its own process group, redirects its
+	// combined stdout/stderr to logPath, and returns once the process has
+	// started without waiting for it to finish. The process is deliberately not
+	// tied to a context: it is fire-and-forget and survives the caller exiting.
+	// An error is returned only if the process fails to start.
+	StartDetached(dir string, env []string, logPath, name string, args ...string) error
 }
 
 // HTTPClient abstracts HTTP requests for testability

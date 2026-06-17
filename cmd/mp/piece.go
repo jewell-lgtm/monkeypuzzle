@@ -20,7 +20,6 @@ import (
 	piececmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/piece"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/registry"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/tui/chooser"
-	"github.com/jewell-lgtm/monkeypuzzle/internal/tui/pieceswitch"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/tui/promptinput"
 	"github.com/jewell-lgtm/monkeypuzzle/pkg/cli"
 )
@@ -175,23 +174,52 @@ func init() {
 	_ = pieceCleanupCmd.RegisterFlagCompletionFunc("main-branch", completeGitBranches)
 }
 
-// newPieceHandler creates a piece handler with multiplexer based on user config.
-// Config problems degrade to the noop multiplexer with a warning on stderr —
-// piece commands must keep working even with a broken user config.
+// interactiveSessionContext reports whether mp is being driven by a human in an
+// interactive terminal inside tmux -- the only context in which mp should manage
+// terminal-multiplexer sessions (create / switch-client / attach). BOTH must hold:
+//
+//   - stdin is a TTY (cli.IsTerminal). Agents and scripts drive mp through its
+//     stateless API (flags / stdin JSON, output captured), which is never a TTY.
+//   - $TMUX is set, so `tmux switch-client` can move the user's existing client.
+//
+// $TMUX alone is NOT trusted: it is inherited by child processes, so an agent
+// spawned from inside the user's tmux still has it set. The TTY check is what
+// excludes those callers -- without it, an agent's switch-client would hijack the
+// human's terminal and new-session would litter detached sessions. Outside this
+// context, commands surface the worktree path (JSON or stdout) to cd into.
+func interactiveSessionContext() bool {
+	return cli.IsTerminal() && os.Getenv("TMUX") != ""
+}
+
+// newPieceHandler creates a piece handler, choosing the multiplexer from the
+// live interactivity context.
 func newPieceHandler(deps core.Deps) *piececmd.Handler {
+	return piececmd.NewHandlerWithMultiplexer(deps, chooseMultiplexer(deps, interactiveSessionContext()))
+}
+
+// chooseMultiplexer picks the multiplexer for a piece handler. When mp is not in
+// an interactive session context (see interactiveSessionContext) it returns the
+// no-op multiplexer, so agents and scripts never get a tmux session and just
+// read the worktree path from the result JSON. Config problems also degrade to
+// no-op with a warning so piece commands keep working with a broken user config.
+func chooseMultiplexer(deps core.Deps, interactive bool) core.Multiplexer {
+	if !interactive {
+		return adapters.NewNoopMultiplexer()
+	}
+
 	userCfg, err := config.LoadUserConfig()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "warning: ignoring user config: %v\n", err)
-		return piececmd.NewHandlerWithMultiplexer(deps, adapters.NewNoopMultiplexer())
+		return adapters.NewNoopMultiplexer()
 	}
 
 	mux, err := adapters.NewMultiplexer(userCfg.Multiplexer, deps.Exec)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "warning: %v; session management disabled\n", err)
-		return piececmd.NewHandlerWithMultiplexer(deps, adapters.NewNoopMultiplexer())
+		return adapters.NewNoopMultiplexer()
 	}
 
-	return piececmd.NewHandlerWithMultiplexer(deps, mux)
+	return mux
 }
 
 func completePieceNames(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
@@ -796,9 +824,6 @@ func runPieceAbandon(cmd *cobra.Command, args []string) error {
 	// Get validated input
 	input, err := getAbandonInput(ctx, handler)
 	if err != nil {
-		if err.Error() == "cancelled" || err.Error() == "no pieces" {
-			return nil
-		}
 		return err
 	}
 
@@ -936,6 +961,14 @@ func runPieceAdopt(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Println(string(jsonData))
 
+	// Switch to the adopted piece. In an interactive session this creates and
+	// attaches the piece's tmux session; for agents/automation the multiplexer is
+	// the no-op (see chooseMultiplexer), so this does nothing and the caller reads
+	// the worktree path from the JSON above.
+	if _, err := handler.SwitchPiece(ctx, info.Name); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to switch to piece: %v\n", err)
+	}
+
 	return nil
 }
 
@@ -969,7 +1002,6 @@ func getAdoptInput() (piececmd.AdoptPieceInput, error) {
 
 func getAbandonInput(ctx context.Context, handler *piececmd.Handler) (piececmd.AbandonInput, error) {
 	var input piececmd.AbandonInput
-	var err error
 
 	if flagAbandonName != "" {
 		input = piececmd.AbandonInput{Name: flagAbandonName}
@@ -982,14 +1014,9 @@ func getAbandonInput(ctx context.Context, handler *piececmd.Handler) (piececmd.A
 		if err != nil {
 			return piececmd.AbandonInput{}, err
 		}
-	} else if cli.IsTerminal() {
-		input, err = runAbandonTUI(ctx, handler)
-		if err != nil {
-			return piececmd.AbandonInput{}, err
-		}
 	}
 
-	// Flags override stdin/TUI options
+	// Flags override stdin options
 	if flagForce {
 		input.Force = true
 	}
@@ -997,7 +1024,9 @@ func getAbandonInput(ctx context.Context, handler *piececmd.Handler) (piececmd.A
 		input.DeleteBranch = true
 	}
 
-	// If name is still empty, try to detect from current piece
+	// Abandon only ever targets the current piece. When no name was supplied
+	// (the common interactive case: `mp abandon` run from inside a piece), detect
+	// it from the working directory rather than prompting which piece to abandon.
 	if input.Name == "" {
 		wd, err := os.Getwd()
 		if err != nil {
@@ -1009,6 +1038,8 @@ func getAbandonInput(ctx context.Context, handler *piececmd.Handler) (piececmd.A
 		}
 		if status.InPiece {
 			input.Name = status.PieceName
+		} else {
+			return piececmd.AbandonInput{}, fmt.Errorf("not inside a piece: run 'mp abandon' from within the piece to abandon, or pass --name")
 		}
 	}
 
@@ -1018,45 +1049,6 @@ func getAbandonInput(ctx context.Context, handler *piececmd.Handler) (piececmd.A
 	}
 
 	return input, nil
-}
-
-func runAbandonTUI(ctx context.Context, handler *piececmd.Handler) (piececmd.AbandonInput, error) {
-	// Get repo root from current directory (use GetMainRepoRoot for worktree support)
-	repoRoot := ""
-	wd, err := os.Getwd()
-	if err == nil {
-		git := adapters.NewGit(adapters.NewOSExec())
-		detectedRoot, err := git.GetMainRepoRoot(ctx, wd)
-		if err != nil {
-			detectedRoot, err = git.RepoRoot(ctx, wd)
-		}
-		if err == nil {
-			repoRoot = detectedRoot
-		}
-	}
-
-	pieces, err := handler.ListPieces(ctx, repoRoot)
-	if err != nil {
-		return piececmd.AbandonInput{}, err
-	}
-
-	if len(pieces) == 0 {
-		fmt.Fprintln(os.Stderr, "No pieces to abandon.")
-		return piececmd.AbandonInput{}, fmt.Errorf("no pieces")
-	}
-
-	p := tea.NewProgram(pieceswitch.New(pieces))
-	m, err := p.Run()
-	if err != nil {
-		return piececmd.AbandonInput{}, fmt.Errorf("TUI error: %w", err)
-	}
-
-	finalModel := m.(pieceswitch.Model)
-	if finalModel.Cancelled {
-		return piececmd.AbandonInput{}, fmt.Errorf("cancelled")
-	}
-
-	return piececmd.AbandonInput{Name: pieces[finalModel.Selected].Name}, nil
 }
 
 func runPieceList(cmd *cobra.Command, args []string) error {
@@ -1212,4 +1204,3 @@ func formatTimeAgo(t time.Time) string {
 		return fmt.Sprintf("%dd ago", days)
 	}
 }
-

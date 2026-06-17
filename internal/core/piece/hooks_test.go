@@ -148,6 +148,86 @@ func TestHookRunner_RunHook_Success(t *testing.T) {
 	}
 }
 
+func TestHookRunner_RunHookDetached_StartsHookWithLogPath(t *testing.T) {
+	fs := adapters.NewMemoryFS()
+	out := adapters.NewBufferOutput()
+	mockExec := adapters.NewMockExec()
+	deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
+	runner := piece.NewHookRunner(deps)
+
+	hooksDir := "repo/.monkeypuzzle/hooks"
+	hookPath := filepath.Join(hooksDir, piece.HookOnPieceCreate)
+	_ = fs.MkdirAll(hooksDir, 0755)
+	_ = fs.WriteFile(hookPath, []byte("#!/bin/bash\nsleep 60"), 0755)
+
+	err := runner.RunHookDetached("/repo", piece.HookOnPieceCreate, piece.HookContext{
+		PieceName:    "my-piece",
+		WorktreePath: "/pieces/my-piece",
+		RepoRoot:     "/repo",
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	// The hook must be launched detached, not via the blocking exec path.
+	if len(mockExec.GetCalls()) != 0 {
+		t.Errorf("expected no blocking exec calls, got: %+v", mockExec.GetCalls())
+	}
+	detached := mockExec.GetDetachedCalls()
+	if len(detached) != 1 {
+		t.Fatalf("expected one detached call, got %d", len(detached))
+	}
+	fullHookPath := filepath.Join("/repo", ".monkeypuzzle/hooks", piece.HookOnPieceCreate)
+	if detached[0].Name != "bash" || len(detached[0].Args) != 1 || detached[0].Args[0] != fullHookPath {
+		t.Errorf("expected bash %s, got %s %v", fullHookPath, detached[0].Name, detached[0].Args)
+	}
+	wantLog := filepath.Join("/repo", ".monkeypuzzle", "logs", "on-piece-create-my-piece.log")
+	if detached[0].LogPath != wantLog {
+		t.Errorf("expected log path %q, got %q", wantLog, detached[0].LogPath)
+	}
+	if !envContains(detached[0].Env, "MP_PIECE_NAME", "my-piece") {
+		t.Errorf("expected MP_PIECE_NAME=my-piece in env, got: %v", detached[0].Env)
+	}
+}
+
+func TestHookRunner_RunHookDetached_MissingHookIsNoOp(t *testing.T) {
+	fs := adapters.NewMemoryFS()
+	out := adapters.NewBufferOutput()
+	mockExec := adapters.NewMockExec()
+	deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
+	runner := piece.NewHookRunner(deps)
+
+	err := runner.RunHookDetached("/repo", piece.HookOnPieceCreate, piece.HookContext{PieceName: "p"})
+	if err != nil {
+		t.Errorf("expected no error for missing hook, got: %v", err)
+	}
+	if len(mockExec.GetDetachedCalls()) != 0 {
+		t.Error("expected no detached launch when hook is absent")
+	}
+}
+
+func TestHookRunner_RunHookDetached_StartFailureReturnsError(t *testing.T) {
+	fs := adapters.NewMemoryFS()
+	out := adapters.NewBufferOutput()
+	mockExec := adapters.NewMockExec()
+	mockExec.SetDetachedErr(errors.New("fork/exec failed"))
+	deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
+	runner := piece.NewHookRunner(deps)
+
+	hooksDir := "repo/.monkeypuzzle/hooks"
+	hookPath := filepath.Join(hooksDir, piece.HookOnPieceCreate)
+	_ = fs.MkdirAll(hooksDir, 0755)
+	_ = fs.WriteFile(hookPath, []byte("#!/bin/bash\nsleep 60"), 0755)
+
+	err := runner.RunHookDetached("/repo", piece.HookOnPieceCreate, piece.HookContext{PieceName: "p"})
+	if err == nil {
+		t.Fatal("expected an error when the hook fails to start")
+	}
+	if !strings.Contains(err.Error(), "failed to start") {
+		t.Errorf("expected a 'failed to start' error, got: %v", err)
+	}
+}
+
 func TestHookRunner_RunHook_PassesEnvironmentVariables(t *testing.T) {
 	fs := adapters.NewMemoryFS()
 	out := adapters.NewBufferOutput()
