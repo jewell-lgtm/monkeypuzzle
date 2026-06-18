@@ -17,6 +17,7 @@ import (
 	"github.com/jewell-lgtm/monkeypuzzle/internal/config"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
 	piececmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/piece"
+	projectcmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/project"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/registry"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/tui/chooser"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/tui/promptinput"
@@ -54,10 +55,15 @@ var pieceMergeCmd = &cobra.Command{
 }
 
 var pieceCleanupCmd = &cobra.Command{
-	Use:   "cleanup",
-	Short: "Cleanup merged pieces",
-	Long:  `Finds and removes pieces whose branches have been merged. Removes worktrees and kills tmux sessions.`,
-	RunE:  runPieceCleanup,
+	Use:     "cleanup",
+	Aliases: []string{"repair"},
+	Short:   "Cleanup merged pieces and prune deleted projects",
+	Long: `Repairs local state. Finds and removes pieces whose branches have been
+merged (removing worktrees and killing tmux sessions), and prunes registry
+entries for projects whose repository directory no longer exists on disk.
+
+Use --dry-run to report what would be removed without changing anything.`,
+	RunE: runPieceCleanup,
 }
 
 var pieceAbandonCmd = &cobra.Command{
@@ -724,14 +730,43 @@ func runPieceCleanup(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Output JSON to stdout
-	jsonData, err := json.MarshalIndent(results, "", "  ")
+	// Prune registry entries for projects whose directory no longer exists.
+	removedProjects, err := projectcmd.PruneStale(input.DryRun)
+	if err != nil {
+		return fmt.Errorf("failed to prune deleted projects: %w", err)
+	}
+	for _, p := range removedProjects {
+		verb := "Pruned deleted project"
+		if input.DryRun {
+			verb = "[dry-run] Would prune deleted project"
+		}
+		fmt.Fprintf(os.Stderr, "%s: %s (%s)\n", verb, p.Name, p.Path)
+	}
+
+	// Output combined JSON to stdout.
+	output := cleanupOutput{
+		CleanedPieces:   results,
+		RemovedProjects: removedProjects,
+	}
+	if output.CleanedPieces == nil {
+		output.CleanedPieces = []piececmd.CleanupResult{}
+	}
+	if output.RemovedProjects == nil {
+		output.RemovedProjects = []registry.Project{}
+	}
+	jsonData, err := json.MarshalIndent(output, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal results: %w", err)
 	}
 	fmt.Println(string(jsonData))
 
 	return nil
+}
+
+// cleanupOutput is the stdout JSON shape for `mp cleanup` / `mp repair`.
+type cleanupOutput struct {
+	CleanedPieces   []piececmd.CleanupResult `json:"cleaned_pieces"`
+	RemovedProjects []registry.Project       `json:"removed_projects"`
 }
 
 func getCleanupInput() (piececmd.CleanupInput, error) {

@@ -62,6 +62,48 @@ func Remove(nameOrPath string) (registry.Project, error) {
 	return p, nil
 }
 
+// PruneStale removes registry entries whose repository directory no longer
+// exists on disk (a "deleted project"). It returns the entries that were
+// removed. In dryRun mode the registry is left untouched and the stale entries
+// are reported without being removed. Entries whose path cannot be stat'd for
+// reasons other than non-existence (e.g. permissions) are kept, to avoid
+// pruning a project that is merely temporarily unreachable.
+func PruneStale(dryRun bool) ([]registry.Project, error) {
+	reg, err := registry.Load()
+	if err != nil {
+		return nil, err
+	}
+	var removed, kept []registry.Project
+	for _, p := range reg.Projects {
+		if pathMissing(p.Path) {
+			removed = append(removed, p)
+			continue
+		}
+		kept = append(kept, p)
+	}
+	if len(removed) == 0 {
+		return nil, nil
+	}
+	if !dryRun {
+		reg.Projects = kept
+		if err := reg.Save(); err != nil {
+			return nil, err
+		}
+	}
+	return removed, nil
+}
+
+// pathMissing reports whether path is a deleted project root: it does not exist,
+// or exists but is no longer a directory. Other stat errors return false so the
+// entry is preserved.
+func pathMissing(path string) bool {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return os.IsNotExist(err)
+	}
+	return !fi.IsDir()
+}
+
 // List returns all registered projects with best-effort enrichment.
 func List() ([]Info, error) {
 	reg, err := registry.Load()
