@@ -22,12 +22,12 @@ session-create itself (see the "No tmux sessions for agents" note in the repo
 
 ### With [TPM](https://github.com/tmux-plugins/tpm)
 
-The plugin lives in the `contrib/tmux` subdirectory of the monkeypuzzle repo, so
+The plugin lives in the `apps/tmux` subdirectory of the monkeypuzzle repo, so
 point TPM at that subpath:
 
 ```tmux
 set -g @plugin 'jewell-lgtm/monkeypuzzle'
-set -g @monkeypuzzle-subdir 'contrib/tmux'   # if your TPM supports subdirectories
+set -g @monkeypuzzle-subdir 'apps/tmux'   # if your TPM supports subdirectories
 ```
 
 If your TPM build cannot load a plugin from a subdirectory, use the manual
@@ -39,7 +39,7 @@ Clone the repo (or use your existing checkout) and source the entry script from
 `~/.tmux.conf`:
 
 ```tmux
-run-shell ~/path/to/monkeypuzzle/contrib/tmux/monkeypuzzle.tmux
+run-shell ~/path/to/monkeypuzzle/apps/tmux/monkeypuzzle.tmux
 ```
 
 Reload tmux (`tmux source-file ~/.tmux.conf`) and the key-bindings are live.

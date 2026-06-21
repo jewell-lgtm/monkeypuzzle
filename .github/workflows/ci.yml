@@ -17,10 +17,12 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.24"
+          go-version: "1.25.5"
 
       - name: Build
-        run: go build -o mp .
+        run: |
+          go build -o bin/mp ./apps/mp
+          go build -o bin/mp-mcp ./apps/mp-mcp
 
       - name: Test
         run: go test -race ./...
@@ -43,7 +45,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.24"
+          go-version: "1.25.5"
 
       - uses: golangci/golangci-lint-action@v8
         with:

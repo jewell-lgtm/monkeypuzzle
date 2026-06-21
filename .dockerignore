@@ -19,7 +19,10 @@ docs/
 .DS_Store
 
 # Build artifacts
+bin/
 mp
+mp-mcp
+mp-server
 *.exe
 *.test
 *.out

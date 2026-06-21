@@ -109,7 +109,7 @@ See [docs/commands.md](docs/commands.md) for full reference.
 - [Commands reference](docs/commands.md) — flags, JSON schemas
 - [Architecture](docs/architecture.md) — how it's built
 - [Contributing](docs/contributing.md) — dev setup, testing philosophy
-- [tmux plugin](contrib/tmux/README.md) — fzf popup to switch/create pieces in tmux
+- [tmux plugin](apps/tmux/README.md) — fzf popup to switch/create pieces in tmux
 
 ## License
 

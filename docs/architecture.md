@@ -6,7 +6,7 @@ Monkeypuzzle uses clean architecture with dependency injection for testability.
 
 ```
 monkeypuzzle/
-├── cmd/mp/              # CLI wiring (Cobra commands)
+├── apps/mp/              # CLI wiring (Cobra commands)
 │   ├── root.go          # Root command
 │   ├── init.go          # mp init command
 │   └── piece.go         # piece commands (create, status, list, merge, …)
@@ -207,7 +207,7 @@ func WithDefaults(input Input, workDir string) Input { ... }
 
 ## Multi-Modal Input
 
-CLI layer (`cmd/mp/init.go`) handles mode detection:
+CLI layer (`apps/mp/init.go`) handles mode detection:
 
 ```go
 func getInput() (Input, error) {
@@ -229,7 +229,7 @@ func getInput() (Input, error) {
 ```
 User Input (flags/JSON/TUI)
          ↓
-    cmd/mp/*.go (mode detection, adapter creation)
+    apps/mp/*.go (mode detection, adapter creation)
          ↓
     core.Deps{FS, Output, Exec}
          ↓

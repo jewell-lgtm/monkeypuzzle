@@ -195,7 +195,7 @@ When you're already inside tmux, `mp switch` calls `switch-client` so you stay a
 ### tmux plugin
 
 For an in-tmux UI that doesn't take over your current pane, the companion plugin
-in [`contrib/tmux`](../contrib/tmux/README.md) binds keys to a fuzzy `fzf` popup
+in [`apps/tmux`](../apps/tmux/README.md) binds keys to a fuzzy `fzf` popup
 for switching between pieces (`prefix + p`) and creating a new one
 (`prefix + P`). It reads state with `mp go --json` and delegates the actual
 session work back to `mp`.

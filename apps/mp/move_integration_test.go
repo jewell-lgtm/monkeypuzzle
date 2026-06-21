@@ -1,6 +1,6 @@
 //go:build integration
 
-package mp_test
+package main_test
 
 import (
 	"encoding/json"

@@ -1,8 +1,8 @@
-package mp
+package main
 
 import "runtime/debug"
 
-// version is injected at build time via -ldflags "-X ...cmd/mp.version=v1.2.3".
+// version is injected at build time via -ldflags "-X main.version=v1.2.3".
 // `go install module@version` builds fall back to the module version recorded
 // in build info; bare `go build` reports "dev".
 var version = ""

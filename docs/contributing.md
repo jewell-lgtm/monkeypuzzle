@@ -80,7 +80,7 @@ START HERE
 
 ### Example: Adding a New Command
 
-**Step 1: Integration test first** (`cmd/mp/cli_integration_test.go`)
+**Step 1: Integration test first** (`apps/mp/cli_integration_test.go`)
 
 ```go
 //go:build integration
@@ -218,7 +218,7 @@ func TestValidate(t *testing.T) {
 
 ### 1. Write integration test first
 
-`cmd/mp/cli_integration_test.go`:
+`apps/mp/cli_integration_test.go`:
 
 ```go
 //go:build integration
@@ -304,7 +304,7 @@ func TestHandler_EmptyName(t *testing.T) {
 
 ### 5. Wire CLI command
 
-`cmd/mp/newcmd.go`:
+`apps/mp/newcmd.go`:
 
 ```go
 package main

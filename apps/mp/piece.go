@@ -1,4 +1,4 @@
-package mp
+package main
 
 import (
 	"context"
@@ -191,7 +191,7 @@ func init() {
 // context, commands surface the worktree path (JSON or stdout) to cd into.
 //
 // MP_TMUX_PLUGIN=1 is an explicit opt-in that substitutes for the TTY check: the
-// companion tmux plugin (contrib/tmux) drives mp through the stateless API (no
+// companion tmux plugin (apps/tmux) drives mp through the stateless API (no
 // controlling TTY) but still wants mp to perform the switch-client/session-create.
 // It is safe against the inherited-$TMUX problem above because only the plugin
 // sets it, per invocation -- an agent never does. $TMUX is still required either

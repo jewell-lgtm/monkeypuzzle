@@ -60,7 +60,7 @@ go build -o mp .
 ```
 monkeypuzzle/
 ├── main.go                    # Entry point
-├── cmd/mp/                    # CLI commands (Cobra)
+├── apps/mp/                    # CLI commands (Cobra)
 │   ├── root.go
 │   └── init.go
 ├── internal/
@@ -87,7 +87,7 @@ monkeypuzzle/
    - `input.go` - Input struct, validation, schema
    - `handler.go` - Business logic
 
-2. Create CLI wrapper in `cmd/mp/<command>.go`
+2. Create CLI wrapper in `apps/mp/<command>.go`
 
    - Wire up Cobra command
    - Handle input modes (flags, stdin, interactive)

@@ -1,12 +1,13 @@
 //go:build integration
 
-package mp_test
+package main_test
 
 import (
 	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -40,10 +41,13 @@ func setupTestEnv(t *testing.T) *testEnv {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
 
-	// Build binary to temp location
+	// Build binary to temp location. Build the package that contains this test
+	// file (apps/mp = package main) rather than relying on cwd/$PWD, which is
+	// brittle under `go test`.
 	binPath := filepath.Join(tmpDir, "mp")
+	_, thisFile, _, _ := runtime.Caller(0)
 	cmd := exec.Command("go", "build", "-o", binPath, ".")
-	cmd.Dir = filepath.Join(os.Getenv("PWD"), "../../")
+	cmd.Dir = filepath.Dir(thisFile)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		os.RemoveAll(tmpDir)
 		t.Fatalf("failed to build binary: %v\n%s", err, output)
