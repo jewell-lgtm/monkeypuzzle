@@ -3,6 +3,8 @@
 /mp
 /monkeypuzzle
 *.exe
+# GoReleaser build output
+/dist/
 *.exe~
 *.dll
 *.so
@@ -34,6 +36,9 @@ go.work.sum
 # OS
 .DS_Store
 Thumbs.db
+
+# Playwright MCP scratch output
+.playwright-mcp/
 
 # Local development
 .env
