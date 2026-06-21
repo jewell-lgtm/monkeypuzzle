@@ -71,6 +71,7 @@ a { color: inherit; text-decoration: none; }
   border-radius: var(--mp-radius-md); padding: 11px 14px;
 }
 .install .p { color: var(--mp-text-muted); }
+.install .cmd { min-width: 0; overflow-wrap: anywhere; } /* let the long tap command wrap on narrow screens */
 .install .cmd .k { color: var(--mp-primary); }
 .install button {
   background: none; border: none; color: var(--mp-text-muted); cursor: pointer; display: flex; padding: 2px;
