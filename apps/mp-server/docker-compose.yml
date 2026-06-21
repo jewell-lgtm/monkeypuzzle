@@ -1,0 +1,58 @@
+# Brings up the full mp-server stack: Postgres (app cache) + a Temporal dev
+# server + the web/MCP server + the sync worker.
+#
+#   cp .env.example .env   # fill in WorkOS creds + secrets
+#   docker compose up --build
+#
+# Web UI:       http://localhost:8080
+# Temporal UI:  http://localhost:8233
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: mp
+      POSTGRES_PASSWORD: mp
+      POSTGRES_DB: mp
+    ports: ["5432:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mp"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+
+  temporal:
+    # Lightweight in-memory dev server (frontend 7233, web UI 8233).
+    image: temporalio/temporal:latest
+    command: ["server", "start-dev", "--ip", "0.0.0.0", "--log-level", "warn"]
+    ports: ["7233:7233", "8233:8233"]
+
+  mp-server:
+    build:
+      context: ../..
+      dockerfile: apps/mp-server/Dockerfile
+    command: ["serve"]
+    env_file: [.env]
+    environment:
+      DATABASE_URL: postgres://mp:mp@postgres:5432/mp?sslmode=disable
+      TEMPORAL_HOSTPORT: temporal:7233
+    ports: ["8080:8080"]
+    depends_on:
+      postgres: {condition: service_healthy}
+      temporal: {condition: service_started}
+
+  mp-worker:
+    build:
+      context: ../..
+      dockerfile: apps/mp-server/Dockerfile
+    command: ["worker"]
+    env_file: [.env]
+    environment:
+      DATABASE_URL: postgres://mp:mp@postgres:5432/mp?sslmode=disable
+      TEMPORAL_HOSTPORT: temporal:7233
+    depends_on:
+      postgres: {condition: service_healthy}
+      temporal: {condition: service_started}
+
+volumes:
+  pgdata:

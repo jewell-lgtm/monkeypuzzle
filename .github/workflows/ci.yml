@@ -23,6 +23,7 @@ jobs:
         run: |
           go build -o bin/mp ./apps/mp
           go build -o bin/mp-mcp ./apps/mp-mcp
+          go build -o bin/mp-server ./apps/mp-server
 
       - name: Test
         run: go test -race ./...
