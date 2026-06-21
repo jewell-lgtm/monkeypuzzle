@@ -192,6 +192,14 @@ tmux attach -t mp/<project>/<piece>         # raw tmux attach
 
 When you're already inside tmux, `mp switch` calls `switch-client` so you stay attached.
 
+### tmux plugin
+
+For an in-tmux UI that doesn't take over your current pane, the companion plugin
+in [`contrib/tmux`](../contrib/tmux/README.md) binds keys to a fuzzy `fzf` popup
+for switching between pieces (`prefix + p`) and creating a new one
+(`prefix + P`). It reads state with `mp go --json` and delegates the actual
+session work back to `mp`.
+
 ### Sessions are interactive-only
 
 mp manages a tmux session **only** when you drive it interactively from inside

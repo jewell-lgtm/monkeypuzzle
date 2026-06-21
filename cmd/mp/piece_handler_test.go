@@ -34,6 +34,30 @@ func TestInteractiveSessionContext_FalseWithoutTmux(t *testing.T) {
 	}
 }
 
+// MP_TMUX_PLUGIN=1 substitutes for the stdin-TTY requirement: the tmux plugin
+// drives mp through the stateless API (no controlling TTY) but still wants mp to
+// manage the session. $TMUX remains mandatory in every case, and the override
+// must never resurrect session management when $TMUX is unset.
+func TestInteractiveSessionContext_PluginOverride(t *testing.T) {
+	cases := []struct {
+		name string
+		tmux string
+		want bool
+	}{
+		{"with tmux", "/tmp/tmux-1000/default,1,0", true},
+		{"without tmux", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("TMUX", tc.tmux)
+			t.Setenv("MP_TMUX_PLUGIN", "1")
+			if got := interactiveSessionContext(); got != tc.want {
+				t.Fatalf("interactiveSessionContext() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 // A non-interactive context (agents, scripts) must always get the no-op
 // multiplexer, regardless of a valid tmux user config.
 func TestChooseMultiplexer_NonInteractiveIsNoop(t *testing.T) {

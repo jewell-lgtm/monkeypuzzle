@@ -189,8 +189,18 @@ func init() {
 // excludes those callers -- without it, an agent's switch-client would hijack the
 // human's terminal and new-session would litter detached sessions. Outside this
 // context, commands surface the worktree path (JSON or stdout) to cd into.
+//
+// MP_TMUX_PLUGIN=1 is an explicit opt-in that substitutes for the TTY check: the
+// companion tmux plugin (contrib/tmux) drives mp through the stateless API (no
+// controlling TTY) but still wants mp to perform the switch-client/session-create.
+// It is safe against the inherited-$TMUX problem above because only the plugin
+// sets it, per invocation -- an agent never does. $TMUX is still required either
+// way, since switch-client needs a running tmux server to talk to.
 func interactiveSessionContext() bool {
-	return cli.IsTerminal() && os.Getenv("TMUX") != ""
+	if os.Getenv("TMUX") == "" {
+		return false
+	}
+	return cli.IsTerminal() || os.Getenv("MP_TMUX_PLUGIN") == "1"
 }
 
 // newPieceHandler creates a piece handler, choosing the multiplexer from the

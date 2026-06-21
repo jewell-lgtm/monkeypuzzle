@@ -1,4 +1,4 @@
-.PHONY: build install test vet lint clean all
+.PHONY: build install test test-tmux vet lint clean all
 
 BINARY := mp
 INSTALL_PATH := $(HOME)/.local/bin
@@ -16,6 +16,11 @@ install: build
 
 test:
 	go test ./...
+
+# Tests for the companion tmux plugin (contrib/tmux). Pure bash + jq + fzf;
+# integration cases skip cleanly when a dependency is missing.
+test-tmux:
+	bash contrib/tmux/test/run.sh
 
 vet:
 	go vet ./...
