@@ -1,0 +1,26 @@
+apiVersion: v2
+name: monkeypuzzle
+description: |
+  The Monkeypuzzle server — a web dashboard + MCP endpoint that syncs your
+  GitHub repos into Postgres and draws each stacked-PR tree as a live forest.
+  Bundles Postgres and a Temporal dev server so a single `helm install` brings
+  up the whole stack; point at external instances for production.
+type: application
+
+# Chart version — bump on chart changes.
+version: 0.1.0
+
+# Default container image tag (overridable via image.tag). Tracks the server release.
+appVersion: "0.1.0"
+
+home: https://monkeypuzzle.dev
+sources:
+  - https://github.com/jewell-lgtm/monkeypuzzle
+keywords:
+  - monkeypuzzle
+  - stacked-prs
+  - mcp
+  - developer-tools
+maintainers:
+  - name: Matt Jewell
+    url: https://github.com/jewell-lgtm

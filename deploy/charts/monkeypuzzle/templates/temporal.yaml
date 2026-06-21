@@ -1,0 +1,62 @@
+{{- if .Values.temporal.enabled }}
+{{- $name := printf "%s-temporal" (include "monkeypuzzle.fullname" .) }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "monkeypuzzle.labels" . | nindent 4 }}
+    app.kubernetes.io/component: temporal
+spec:
+  selector:
+    {{- include "monkeypuzzle.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: temporal
+  ports:
+    - name: grpc
+      port: 7233
+      targetPort: grpc
+    {{- if .Values.temporal.ui.enabled }}
+    - name: web
+      port: 8233
+      targetPort: web
+    {{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "monkeypuzzle.labels" . | nindent 4 }}
+    app.kubernetes.io/component: temporal
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "monkeypuzzle.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: temporal
+  template:
+    metadata:
+      labels:
+        {{- include "monkeypuzzle.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: temporal
+    spec:
+      containers:
+        - name: temporal
+          image: {{ .Values.temporal.image | quote }}
+          # Lightweight in-memory dev server: gRPC frontend 7233, Web UI 8233.
+          args: ["server", "start-dev", "--ip", "0.0.0.0", "--log-level", "warn"]
+          ports:
+            - name: grpc
+              containerPort: 7233
+            - name: web
+              containerPort: 8233
+          readinessProbe:
+            tcpSocket:
+              port: grpc
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          {{- with .Values.temporal.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+{{- end }}

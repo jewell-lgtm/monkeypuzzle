@@ -1,0 +1,134 @@
+# Default values for the monkeypuzzle chart.
+# Override with `-f my-values.yaml` or `--set key=value`.
+
+# -- The mp-server container image. Both the web/MCP server and the sync worker
+# run the same image with different commands (`serve` / `worker`).
+image:
+  repository: ghcr.io/jewell-lgtm/monkeypuzzle/mp-server
+  # tag defaults to the chart's appVersion when empty.
+  tag: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+# -- Public, externally reachable base URL of the server. Used as the OAuth
+# redirect base and the MCP Resource Indicator, so it MUST match what browsers
+# and MCP clients hit. Required, and MUST be https:// when secureCookies=true.
+# e.g. https://mp.example.com
+publicBaseURL: ""
+
+# -- Send cookies only over HTTPS. Set true for any real (TLS) deployment.
+# The chart fails the install if this is true but publicBaseURL is not https://.
+secureCookies: true
+
+# WorkOS / AuthKit credentials (https://dashboard.workos.com). Required.
+#   - AuthKit with a GitHub OAuth connection, "Return GitHub OAuth tokens" ON.
+#   - A Resource Indicator matching publicBaseURL; Dynamic Client Registration on.
+workos:
+  apiKey: ""
+  clientId: ""
+  authkitDomain: ""        # e.g. https://your-app.authkit.app
+  # Optional. Defaults to https://api.workos.com/sso/jwks/<clientId>.
+  jwksURL: ""
+
+# Server-side secrets. Generate each with: openssl rand -base64 32
+#   sessionSecret      — base64 of >= 16 random bytes (cookie signing)
+#   tokenEncryptionKey — base64 of exactly 32 random bytes (AES-256-GCM)
+secrets:
+  sessionSecret: ""
+  tokenEncryptionKey: ""
+
+# -- Use a pre-created Secret instead of templating one from the values above.
+# When set, that Secret must carry every key the chart would otherwise create:
+# DATABASE_URL, WORKOS_API_KEY, WORKOS_CLIENT_ID, AUTHKIT_DOMAIN, SESSION_SECRET,
+# TOKEN_ENCRYPTION_KEY, and (if postgres.enabled) POSTGRES_USER/POSTGRES_PASSWORD/
+# POSTGRES_DB. See templates/secret.yaml for the exact key names.
+existingSecret: ""
+
+# -- Pod- and container-level security context applied to the server and worker
+# (not Postgres/Temporal, whose images manage their own users). The mp-server
+# image is distroless; 65532 is its built-in nonroot uid/gid.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+# The web/MCP server (`mp-server serve`).
+server:
+  replicas: 1
+  resources: {}
+  # First start runs DB migrations + dials Temporal before binding :8080, so a
+  # startupProbe gives it room before liveness applies.
+  startupProbe:
+    enabled: true
+    failureThreshold: 30
+    periodSeconds: 5
+  service:
+    type: ClusterIP
+    port: 80
+  podAnnotations: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# The Temporal sync worker (`mp-server worker`).
+worker:
+  replicas: 1
+  resources: {}
+  podAnnotations: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# Ingress for the server's HTTP port. Host should equal publicBaseURL's host.
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  host: ""
+  path: /
+  pathType: Prefix
+  tls: []   # e.g. [{secretName: mp-tls, hosts: [mp.example.com]}]
+
+# Bundled Postgres (app cache + token store). Disable to use externalDatabase.
+postgres:
+  enabled: true
+  image: postgres:16.6
+  auth:
+    username: mp
+    # Leave empty to auto-generate a strong password on first install (persisted
+    # across upgrades via a Secret lookup). Set explicitly to manage it yourself.
+    password: ""
+    database: mp
+  persistence:
+    enabled: true
+    size: 8Gi
+    storageClass: ""
+  resources: {}
+
+# Used when postgres.enabled is false. Full DSN, e.g.
+# postgres://user:pass@host:5432/mp?sslmode=require
+externalDatabase:
+  url: ""
+
+# Bundled Temporal dev server (`temporal server start-dev`). Single-replica,
+# IN-MEMORY (state is lost on restart) — fine for self-host, since sync workflows
+# are idempotent re-syncs. Disable and set externalTemporal.hostPort for a
+# production-grade, durable Temporal (e.g. Temporal Cloud or a temporal release).
+temporal:
+  enabled: true
+  # Pin to a specific tag for reproducibility (avoid :latest).
+  image: temporalio/temporal:1.27.2
+  # Expose the Temporal Web UI (port 8233) via a Service. Off by default.
+  ui:
+    enabled: false
+  resources: {}
+
+externalTemporal:
+  hostPort: ""   # e.g. temporal-frontend.temporal.svc.cluster.local:7233

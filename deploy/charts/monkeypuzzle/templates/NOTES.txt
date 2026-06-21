@@ -1,0 +1,26 @@
+Monkeypuzzle is installed as release {{ .Release.Name }} in namespace {{ .Release.Namespace }}.
+
+Server (web UI + MCP endpoint):
+  http://{{ include "monkeypuzzle.fullname" . }}-server.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.server.service.port }}
+{{ if .Values.ingress.enabled }}
+Public URL:
+  {{ .Values.publicBaseURL }}
+{{- else }}
+Ingress is disabled. Port-forward to reach the UI:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "monkeypuzzle.fullname" . }}-server 8080:{{ .Values.server.service.port }}
+  open http://localhost:8080
+{{- end }}
+
+Check rollout:
+  kubectl -n {{ .Release.Namespace }} rollout status deploy/{{ include "monkeypuzzle.fullname" . }}-server
+  kubectl -n {{ .Release.Namespace }} get pods -l app.kubernetes.io/instance={{ .Release.Name }}
+
+{{ if .Values.temporal.enabled -}}
+A bundled Temporal dev server is running (single replica, in-memory — state is
+lost on restart). For production, set temporal.enabled=false and
+externalTemporal.hostPort to a durable Temporal.
+{{- end }}
+{{ if .Values.postgres.enabled -}}
+A bundled Postgres is running. For production, set postgres.enabled=false and
+externalDatabase.url to a managed Postgres.
+{{- end }}

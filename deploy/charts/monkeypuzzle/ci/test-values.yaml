@@ -1,0 +1,15 @@
+# Dummy values so `helm lint`/`helm template` can render the required fields.
+# Not real credentials.
+publicBaseURL: https://mp.example.com
+secureCookies: true
+workos:
+  apiKey: sk_test_xxx
+  clientId: client_test_xxx
+  authkitDomain: https://example.authkit.app
+secrets:
+  sessionSecret: YWFhYWFhYWFhYWFhYWFhYQ==
+  tokenEncryptionKey: YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE=
+ingress:
+  enabled: true
+  className: traefik
+  host: mp.example.com
