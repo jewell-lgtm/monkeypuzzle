@@ -1,0 +1,90 @@
+/* Monkeypuzzle — Color tokens
+   Dark-first, terminal-forward. Warm green-tinted inks (the forest floor),
+   an araucaria-green hero, resin amber + a cute coral pop, sky for info. */
+
+:root {
+  /* ── Ink scale: warm, green-tinted near-blacks → high-contrast foliage white ── */
+  --mp-ink-950: #0a0f0c;
+  --mp-ink-900: #0e1611; /* app background */
+  --mp-ink-850: #121c16;
+  --mp-ink-800: #16241c; /* surface */
+  --mp-ink-700: #1e3026; /* raised surface / card */
+  --mp-ink-600: #294036; /* border */
+  --mp-ink-500: #3a564a; /* strong border / divider */
+  --mp-ink-400: #5c7468; /* muted text, icons */
+  --mp-ink-300: #87a094; /* secondary text */
+  --mp-ink-200: #b6cabe; /* body text on dark */
+  --mp-ink-100: #e3efe7; /* high-emphasis text */
+  --mp-ink-050: #f3faf5;
+
+  /* ── Araucaria green: the signature. Phosphor-bright but evergreen-deep ── */
+  --mp-green-100: #c8f5d3;
+  --mp-green-300: #84e3a0;
+  --mp-green-500: #46c474; /* PRIMARY brand green */
+  --mp-green-600: #34a661;
+  --mp-green-700: #218049;
+  --mp-green-900: #123f27;
+
+  /* ── Resin amber: the warm secondary (bark, sap, golden hour) ── */
+  --mp-amber-300: #ffd884;
+  --mp-amber-500: #f0b02e;
+  --mp-amber-700: #b87d12;
+
+  /* ── Coral: the cute pop (use sparingly — highlights, the monkey) ── */
+  --mp-coral-300: #ffb6aa;
+  --mp-coral-500: #ff7a6b;
+  --mp-coral-700: #d6533f;
+
+  /* ── Sky: information & links ── */
+  --mp-sky-300: #9fdcf0;
+  --mp-sky-500: #56c2e6;
+  --mp-sky-700: #2f87a8;
+
+  /* ── Paper: warm cream light surfaces (docs, quotes, light slides) ── */
+  --mp-paper: #f5f1e6;
+  --mp-paper-2: #ece4d2;
+  --mp-paper-line: #ddd2b9;
+  --mp-paper-ink: #1c241e;
+
+  /* ───────────────────────── Semantic aliases ───────────────────────── */
+  --mp-bg: var(--mp-ink-900);
+  --mp-bg-sunken: var(--mp-ink-950);
+  --mp-surface: var(--mp-ink-800);
+  --mp-surface-raised: var(--mp-ink-700);
+  --mp-surface-overlay: #20342a;
+
+  --mp-border: var(--mp-ink-600);
+  --mp-border-strong: var(--mp-ink-500);
+  --mp-border-faint: #1a271f;
+
+  --mp-text: var(--mp-ink-100);
+  --mp-text-secondary: var(--mp-ink-300);
+  --mp-text-muted: var(--mp-ink-400);
+  --mp-text-inverse: var(--mp-paper-ink);
+
+  --mp-primary: var(--mp-green-500);
+  --mp-primary-hover: var(--mp-green-300);
+  --mp-primary-press: var(--mp-green-600);
+  --mp-on-primary: #06150c;
+
+  --mp-accent: var(--mp-amber-500);
+  --mp-on-accent: #2a1c00;
+  --mp-pop: var(--mp-coral-500);
+  --mp-on-pop: #2a0c06;
+
+  --mp-success: var(--mp-green-300);
+  --mp-warning: var(--mp-amber-500);
+  --mp-danger: var(--mp-coral-500);
+  --mp-info: var(--mp-sky-500);
+  --mp-link: var(--mp-sky-300);
+
+  --mp-focus-ring: rgba(70, 196, 116, 0.45);
+  --mp-selection: rgba(70, 196, 116, 0.30);
+
+  /* Status tints (branch / PR states) — translucent fills over dark */
+  --mp-tint-green: rgba(70, 196, 116, 0.16);
+  --mp-tint-amber: rgba(240, 176, 46, 0.16);
+  --mp-tint-coral: rgba(255, 122, 107, 0.16);
+  --mp-tint-sky: rgba(86, 194, 230, 0.16);
+  --mp-tint-neutral: rgba(135, 160, 148, 0.12);
+}

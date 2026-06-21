@@ -1,0 +1,356 @@
+---
+import Layout from '../layouts/Layout.astro';
+import Nav from '../components/Nav.astro';
+import Footer from '../components/Footer.astro';
+import Scene from '../components/Scene.astro';
+import WorkflowTerminal from '../components/WorkflowTerminal.astro';
+import TerminalBlock from '../components/TerminalBlock.astro';
+import PieceStack from '../components/PieceStack.astro';
+import Card from '../components/Card.astro';
+import Kbd from '../components/Kbd.astro';
+import Badge from '../components/Badge.astro';
+import Button from '../components/Button.astro';
+import Icon from '../components/Icon.astro';
+import { LOGIN_URL, GITHUB_URL } from '../config';
+import '../styles/workflow.css';
+
+const switchPopup = [
+  { text: '❯ acme/feat-auth-ui        ◆ draft', tone: 'ok' },
+  { text: '  acme/feat-auth-api       ◆ in review', tone: 'info' },
+  { text: '  acme/feat-auth-schema    ● merged ✓', tone: 'muted' },
+  { text: '  web/main                 trunk', tone: 'muted' },
+  { text: '' },
+  { text: '  4/4  ·  ↵ switch  ·  ⌃P new piece', tone: 'muted' },
+] as const;
+---
+
+<Layout
+  title="How Monkeypuzzle works"
+  description="The whole Monkeypuzzle loop, scene by scene — cut a piece, stack it, restack, submit, see it on the dashboard, and merge. The same workflow for humans and AI agents."
+>
+  <script is:inline>document.documentElement.classList.add('js');</script>
+  <a class="skip-link" href="#wf">Skip to content</a>
+  <header>
+    <Nav />
+  </header>
+
+  <main id="wf">
+    <!-- Intro -->
+    <section class="wf-intro">
+      <div class="wf-intro__inner wf-fade" data-reveal>
+        <div class="section__eyebrow">the workflow</div>
+        <h1>From one idea to a <span class="g">merged stack.</span></h1>
+        <p>
+          People keep asking what Monkeypuzzle actually <em>does</em>. So here's the
+          whole loop — the same one whether you're a human in a terminal or an agent
+          driving the API. Scroll, and watch it play out.
+        </p>
+        <div class="wf-scrollcue">follow along</div>
+      </div>
+    </section>
+
+    <!-- 1 · Cut a piece -->
+    <Scene n="1" eyebrow="cut a piece" title="Start one small idea." id="cut">
+      <p>
+        Every unit of work is a <strong>piece</strong> — a branch in its own git
+        worktree. Cut one and Monkeypuzzle spins up the worktree, an optional tmux
+        session, and fires your on-create hooks.
+      </p>
+      <ul class="wf-points">
+        <li><code>mp create --name auth-schema</code> — or just <code>mp new</code>.</li>
+        <li><code>mp create --prompt "…"</code> hands the brief to an agent to scaffold.</li>
+        <li>Your other work never moves — no stashing, no dirty tree.</li>
+      </ul>
+      <WorkflowTerminal
+        slot="visual"
+        title="acme — zsh"
+        prompt="~/acme"
+        lines={[
+          { cmd: 'create --name auth-schema' },
+          { out: '  ◆ cut piece feat/auth-schema', tone: 'ok' },
+          { out: '  ✓ worktree   ~/acme/.mp/auth-schema', tone: 'muted' },
+          { out: '  ✓ tmux       acme/auth-schema', tone: 'muted' },
+          { out: '  ✓ hook       on-piece-create', tone: 'muted' },
+        ]}
+      />
+    </Scene>
+
+    <!-- 2 · Stack -->
+    <Scene n="2" eyebrow="stack it" title="Build features in layers." flip>
+      <p>
+        Real features are more than one idea. Stack the next piece <strong>on top of</strong>
+        the last with <code>mp stack append</code> — schema, then API, then UI — each a
+        clean, reviewable layer rebased on the one below.
+      </p>
+      <p><code>mp stack status</code> draws the whole tree, so you always know what sits on what.</p>
+      <Card slot="visual" pad class="wf-stack-anim">
+        <PieceStack
+          base="main"
+          pieces={[
+            { name: 'feat/auth-ui', meta: '+62 −4', status: 'draft', current: true },
+            { name: 'feat/auth-api', meta: '+210 −18', status: 'draft' },
+            { name: 'feat/auth-schema', meta: '+88 −2', status: 'draft' },
+          ]}
+        />
+      </Card>
+    </Scene>
+
+    <!-- 3 · Switch (tmux) -->
+    <Scene n="3" eyebrow="tmux plugin" title="Switch without losing your place." id="switch">
+      <p>
+        Jump between pieces without breaking flow. The tmux plugin pops a fuzzy picker
+        over your current layout — pick a piece, land in its worktree and session.
+      </p>
+      <div class="tmux__keys">
+        <div class="tmux__key">
+          <Kbd keys={['prefix', 'p']} />
+          <span>Switch to any piece across every project — each row previews its git status.</span>
+        </div>
+        <div class="tmux__key">
+          <Kbd keys={['prefix', 'P']} />
+          <span>Create a piece — pick a project, name or describe it, and you're in the worktree.</span>
+        </div>
+      </div>
+      <TerminalBlock slot="visual" title="switch piece" lines={switchPopup} />
+    </Scene>
+
+    <!-- 4 · Restack -->
+    <Scene n="4" eyebrow="restack" title="Change one piece, fix the whole tree." flip>
+      <p>
+        Edit a piece low in the stack and everything above it is now stale.
+        <code>mp stack sync</code> rebases the tree onto the new base — in order — and
+        <strong>stops cleanly</strong> the moment a conflict needs you.
+      </p>
+      <ul class="wf-points">
+        <li>Conflicts are surfaced, never silently dropped — fix, then <code>mp stack continue</code>.</li>
+        <li><code>mp stack undo</code> restores every branch to the pre-sync snapshot.</li>
+        <li>Pieces that didn't change are left untouched.</li>
+      </ul>
+      <WorkflowTerminal
+        slot="visual"
+        title="acme/auth-schema"
+        prompt="~/acme"
+        lines={[
+          { cmd: 'stack sync' },
+          { out: '  ● feat/auth-schema   updated', tone: 'ok' },
+          { out: '  ◆ feat/auth-api      restacked', tone: 'ok' },
+          { out: '  ◆ feat/auth-ui       conflict in src/login.ts', tone: 'err' },
+          { out: '  → fix it, then: mp stack continue', tone: 'warn' },
+        ]}
+      />
+    </Scene>
+
+    <!-- 5 · Submit -->
+    <Scene n="5" eyebrow="submit" title="One idea per pull request." id="submit">
+      <p>
+        Ship the stack. <code>mp pr create</code> pushes the piece and opens a PR
+        <strong>based on the piece below it</strong> — so each PR is a single idea, and
+        reviewers never wade through the whole feature at once.
+      </p>
+      <ul class="wf-points">
+        <li>Stacked bases wired parent-to-parent; the stack is drawn into every description.</li>
+        <li><code>mp pr ready</code> flips a draft when it's time for eyes.</li>
+        <li><code>mp pr create --stack</code> submits every piece in one go.</li>
+      </ul>
+      <WorkflowTerminal
+        slot="visual"
+        title="acme/auth-ui"
+        prompt="~/acme"
+        lines={[
+          { cmd: 'pr create' },
+          { out: '  ✓ pushed feat/auth-ui → origin', tone: 'ok' },
+          { out: '  ✓ opened #483  feat/auth-ui → feat/auth-api', tone: 'ok' },
+          { out: '  ◆ stack drawn into the description', tone: 'muted' },
+        ]}
+      />
+    </Scene>
+
+    <!-- 6 · Dashboard -->
+    <section class="wf-dash-scene" id="dashboard" data-reveal>
+      <div class="section__eyebrow">on the server</div>
+      <h2 class="section__title">See every stack, live.</h2>
+      <p class="section__lede">
+        The server syncs your GitHub PRs and draws each stack as a living tree — across
+        repos and teammates. Review state, CI, and "needs restack" flow in on their own.
+      </p>
+      <div class="wf-dash">
+        <div class="wf-dash__bar">
+          <span class="wf-dash__dots">
+            <i style="background:var(--mp-coral-500)"></i>
+            <i style="background:var(--mp-amber-500)"></i>
+            <i style="background:var(--mp-green-500)"></i>
+          </span>
+          <span class="wf-dash__url">monkeypuzzle.dev / acme</span>
+        </div>
+        <div class="wf-dash__grid">
+          <aside class="wf-dash__side">
+            <div class="wf-dash__side-h">repos</div>
+            <a class="wf-dash__repo is-active">acme/web <span>3</span></a>
+            <a class="wf-dash__repo">acme/api <span>2</span></a>
+            <a class="wf-dash__repo">acme/infra <span>1</span></a>
+          </aside>
+          <div class="wf-dash__main">
+            <div class="wf-dash__head">
+              <span class="wf-dash__title">feat/auth · 3 pieces</span>
+              <span class="wf-dash__synced"><Icon name="RefreshCw" size={13} /> synced just now</span>
+            </div>
+            <div class="wf-stack-anim">
+              <PieceStack
+                base="main"
+                pieces={[
+                  { name: 'feat/auth-ui', meta: '#483 · @sam reviewing', status: 'review' },
+                  { name: 'feat/auth-api', meta: '#482 · CI passing', status: 'restack', statusLabel: 'needs restack' },
+                  { name: 'feat/auth-schema', meta: '#481', status: 'merged' },
+                ]}
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="band__actions" style="margin-top:30px; justify-content:center;">
+        <Button size="lg" variant="accent" href={LOGIN_URL} iconTrailing="ArrowRight">Open the dashboard</Button>
+        <Button size="lg" variant="secondary" icon="Github" href={`${GITHUB_URL}/tree/main/apps/mp-server`}>Self-host it</Button>
+      </div>
+    </section>
+
+    <!-- 7 · Merge -->
+    <Scene n="6" eyebrow="merge down" title="Land it, clean up after." flip>
+      <p>
+        When the bottom piece is approved, <code>mp merge</code> lands it on the trunk —
+        <strong>fast-forward only</strong> — then restacks the rest. <code>mp done</code>
+        wraps a finished piece: merge, delete the branch, tear down the worktree and session.
+      </p>
+      <ul class="wf-points">
+        <li>Refuses to merge when main has moved on — sync first, no surprise overwrites.</li>
+        <li>Worktrees and tmux sessions are cleaned up for you.</li>
+      </ul>
+      <WorkflowTerminal
+        slot="visual"
+        title="acme/auth-schema"
+        prompt="~/acme"
+        lines={[
+          { cmd: 'done' },
+          { out: '  ● merged feat/auth-schema → main  (fast-forward)', tone: 'ok' },
+          { out: '  ↻ restacked 2 pieces onto main', tone: 'ok' },
+          { out: '  ✓ removed worktree + tmux session', tone: 'muted' },
+        ]}
+      />
+    </Scene>
+
+    <!-- 8 · Humans & agents -->
+    <Scene n="7" eyebrow="humans + agents" title="The same workflow, for your agents." id="agents">
+      <p>
+        Here's the part that surprises people: there's <strong>no separate agent mode</strong>.
+        Every command takes flags, or JSON on stdin, and prints JSON on stdout.
+        <code>--schema</code> documents the shape of each one.
+      </p>
+      <p>
+        So an AI agent cuts pieces, restacks, and opens PRs through the exact same
+        <code>mp</code> — and the bundled MCP server hands that whole workflow to
+        assistants like Claude, with the same safety rails you get.
+      </p>
+      <WorkflowTerminal
+        slot="visual"
+        title="agent · ci"
+        prompt="~/acme"
+        lines={[
+          { cmd: 'create --prompt "rate-limit login" --json' },
+          { out: '  {', tone: 'muted' },
+          { out: '    "piece": "feat/rate-limit-login",', tone: 'info' },
+          { out: '    "worktree": "~/acme/.mp/rate-limit-login",', tone: 'muted' },
+          { out: '    "status": "draft"', tone: 'muted' },
+          { out: '  }', tone: 'muted' },
+        ]}
+      />
+    </Scene>
+
+    <!-- Closing -->
+    <section class="section wf-end">
+      <div class="site">
+        <div class="band wf-fade" data-reveal>
+          <Badge tone="green" dot>that's the loop</Badge>
+          <h2 style="margin-top:16px">Cut. Stack. Restack. Submit. Merge.</h2>
+          <p>One workflow for your terminal, your team's dashboard, and your agents.</p>
+          <div class="band__actions">
+            <Button size="lg" variant="accent" href={LOGIN_URL} iconTrailing="ArrowRight">Get started</Button>
+            <Button size="lg" variant="secondary" href="/#editions">See the editions</Button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <Footer />
+</Layout>
+
+<script>
+  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+  function typeInto(el: Element, text: string): Promise<void> {
+    return new Promise((resolve) => {
+      el.textContent = '';
+      let i = 0;
+      const step = () => {
+        el.textContent = text.slice(0, ++i);
+        if (i >= text.length) resolve();
+        else setTimeout(step, 24 + Math.random() * 26);
+      };
+      step();
+    });
+  }
+
+  function fill(term: Element) {
+    term.querySelectorAll('.wf-line').forEach((l) => l.classList.add('show'));
+    term.classList.add('wf-term--done');
+  }
+
+  async function play(term: Element) {
+    const lines = [...term.querySelectorAll<HTMLElement>('.wf-line:not(.wf-rest)')];
+    for (const line of lines) {
+      if (line.dataset.kind === 'cmd') {
+        const target = line.querySelector('.mp-term__cmd');
+        if (target) target.textContent = '';
+        line.classList.add('show', 'wf-line--active');
+        if (target) await typeInto(target, line.dataset.text || '');
+        await sleep(220);
+        line.classList.remove('wf-line--active');
+      } else {
+        line.classList.add('show');
+        await sleep(120);
+      }
+    }
+    term.classList.add('wf-term--done');
+  }
+
+  if (reduce) {
+    document.querySelectorAll('[data-reveal]').forEach((e) => e.classList.add('in-view'));
+    document.querySelectorAll('[data-term-anim]').forEach(fill);
+  } else {
+    const revealIO = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          if (e.isIntersecting) {
+            e.target.classList.add('in-view');
+            revealIO.unobserve(e.target);
+          }
+        }
+      },
+      { threshold: 0.2, rootMargin: '0px 0px -8% 0px' },
+    );
+    document.querySelectorAll('[data-reveal]').forEach((el) => revealIO.observe(el));
+
+    const termIO = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          if (e.isIntersecting) {
+            termIO.unobserve(e.target);
+            play(e.target);
+          }
+        }
+      },
+      { threshold: 0.4 },
+    );
+    document.querySelectorAll('[data-term-anim]').forEach((t) => termIO.observe(t));
+  }
+</script>

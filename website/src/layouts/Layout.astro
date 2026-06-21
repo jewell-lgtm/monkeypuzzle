@@ -1,12 +1,15 @@
 ---
-import '../styles/global.css';
+import '../styles/design-system.css';
 
 interface Props {
-  title: string;
+  title?: string;
   description?: string;
 }
 
-const { title, description = 'One workflow for humans and AI agents' } = Astro.props;
+const {
+  title = 'Monkeypuzzle — stack your branches',
+  description = 'Monkeypuzzle keeps your work in small, stacked pieces — each one a clean review — and restacks, submits, and syncs the whole tree for you.',
+} = Astro.props;
 ---
 
 <!doctype html>
@@ -24,24 +27,11 @@ const { title, description = 'One workflow for humans and AI agents' } = Astro.p
     <meta property="og:description" content={description} />
     <meta property="og:type" content="website" />
 
-    <!-- Fonts -->
+    <!-- Fonts (also @imported by the type tokens; preconnect speeds the fetch) -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500&family=Ubuntu:wght@700&display=swap"
-      rel="stylesheet"
-    />
-
-    <!-- Squircle Paint Worklet -->
-    <script>
-      if ("paintWorklet" in CSS) {
-        CSS.paintWorklet.addModule(
-          "https://www.unpkg.com/css-houdini-squircle@0.3.0/squircle.min.js",
-        );
-      }
-    </script>
   </head>
-  <body class="min-h-screen flex flex-col font-sans antialiased">
+  <body class="mp-canvas">
     <slot />
   </body>
 </html>

@@ -1,0 +1,24 @@
+---
+// Keyboard key cap. The dev-tool signature — every shortcut gets a Kbd.
+// Ported from core/Kbd.jsx. Pass `keys` for a combo, or a single key via slot.
+interface Props {
+  keys?: string[];
+  class?: string;
+}
+const { keys, class: cls = '' } = Astro.props;
+---
+
+{
+  keys && keys.length ? (
+    <span class:list={['mp-kbd-group', cls]}>
+      {keys.map((k, i) => (
+        <Fragment>
+          {i > 0 && <span class="mp-kbd-group__plus">+</span>}
+          <kbd class="mp-kbd">{k}</kbd>
+        </Fragment>
+      ))}
+    </span>
+  ) : (
+    <kbd class:list={['mp-kbd', cls]}><slot /></kbd>
+  )
+}

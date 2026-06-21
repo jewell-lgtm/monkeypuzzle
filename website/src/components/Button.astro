@@ -1,0 +1,42 @@
+---
+// Monkeypuzzle Button. Mono-labelled, chunky, with a quick settle on press.
+// Ported from core/Button.jsx; icons are passed as Lucide icon names.
+import Icon from './Icon.astro';
+
+interface Props {
+  variant?: 'primary' | 'secondary' | 'ghost' | 'danger' | 'accent';
+  size?: 'sm' | 'md' | 'lg';
+  icon?: string;
+  iconTrailing?: string;
+  iconSize?: number;
+  href?: string;
+  block?: boolean;
+  class?: string;
+  [key: string]: unknown;
+}
+
+const {
+  variant = 'primary',
+  size = 'md',
+  icon,
+  iconTrailing,
+  iconSize,
+  href,
+  block = false,
+  class: cls = '',
+  ...rest
+} = Astro.props;
+
+const Tag = href ? 'a' : 'button';
+const isz = iconSize ?? (size === 'lg' ? 17 : size === 'sm' ? 15 : 16);
+---
+
+<Tag
+  class:list={['mp-btn', `mp-btn--${variant}`, `mp-btn--${size}`, block && 'mp-btn--block', cls]}
+  href={href}
+  {...rest}
+>
+  {icon && <Icon name={icon} size={isz} class="mp-btn__ico" />}
+  <slot />
+  {iconTrailing && <Icon name={iconTrailing} size={isz} class="mp-btn__ico" />}
+</Tag>

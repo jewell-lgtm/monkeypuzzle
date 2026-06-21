@@ -9,8 +9,10 @@
     "astro": "astro"
   },
   "dependencies": {
-    "@tailwindcss/vite": "^4.1.18",
     "astro": "^5.16.6",
-    "tailwindcss": "^4.1.18"
+    "lucide-static": "^0.460.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild", "sharp"]
   }
 }

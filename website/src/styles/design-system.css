@@ -1,0 +1,16 @@
+/* ════════════════════════════════════════════════════════════════
+   Monkeypuzzle Design System — global entry point for the website.
+   Imports the vendored design tokens, then the ported component and
+   marketing-layout styles. Mirrors the design system's styles.css.
+   ════════════════════════════════════════════════════════════════ */
+
+@import url("tokens/typography.css"); /* declares @font-face via Google Fonts */
+@import url("tokens/colors.css");
+@import url("tokens/spacing.css");
+@import url("tokens/radii.css");
+@import url("tokens/shadows.css");
+@import url("tokens/motion.css");
+@import url("tokens/base.css");
+
+@import url("components.css");
+@import url("site.css");

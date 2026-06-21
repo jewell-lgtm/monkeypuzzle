@@ -1,0 +1,26 @@
+---
+// Status badge — the branch/PR state pill. Ported from core/Badge.jsx.
+interface Props {
+  tone?: 'neutral' | 'green' | 'amber' | 'coral' | 'sky' | 'solid';
+  dot?: boolean;
+  square?: boolean;
+  outline?: boolean;
+  class?: string;
+}
+
+const { tone = 'neutral', dot = false, square = false, outline = false, class: cls = '' } =
+  Astro.props;
+---
+
+<span
+  class:list={[
+    'mp-badge',
+    `mp-badge--${tone}`,
+    square && 'mp-badge--square',
+    outline && 'mp-badge--outline',
+    cls,
+  ]}
+>
+  {dot && <span class="mp-badge__dot"></span>}
+  <slot />
+</span>

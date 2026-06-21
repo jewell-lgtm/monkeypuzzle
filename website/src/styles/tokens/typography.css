@@ -1,0 +1,39 @@
+/* Monkeypuzzle — Type tokens
+   Mono-led, like the terminal it grew from. Space Grotesk carries the
+   friendly-technical display voice; JetBrains Mono is the code + data voice. */
+
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
+
+:root {
+  --mp-font-display: 'Space Grotesk', 'Segoe UI', system-ui, sans-serif;
+  --mp-font-body: 'Space Grotesk', 'Segoe UI', system-ui, sans-serif;
+  --mp-font-mono: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', 'Menlo', monospace;
+
+  /* Type scale (px) — tight at the bottom for dense dev UI, dramatic at the top */
+  --mp-text-xs: 12px;
+  --mp-text-sm: 13px;
+  --mp-text-base: 15px;
+  --mp-text-md: 17px;
+  --mp-text-lg: 20px;
+  --mp-text-xl: 24px;
+  --mp-text-2xl: 30px;
+  --mp-text-3xl: 38px;
+  --mp-text-4xl: 48px;
+  --mp-text-5xl: 64px;
+  --mp-text-6xl: 84px;
+
+  --mp-weight-regular: 400;
+  --mp-weight-medium: 500;
+  --mp-weight-semibold: 600;
+  --mp-weight-bold: 700;
+
+  --mp-leading-tight: 1.08;
+  --mp-leading-snug: 1.25;
+  --mp-leading-normal: 1.5;
+  --mp-leading-relaxed: 1.65;
+
+  --mp-tracking-tight: -0.02em;
+  --mp-tracking-normal: 0;
+  --mp-tracking-wide: 0.04em;
+  --mp-tracking-caps: 0.12em; /* uppercase mono labels / eyebrows */
+}

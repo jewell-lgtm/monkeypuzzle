@@ -1,0 +1,49 @@
+---
+// Inline Lucide icon. Mirrors the design system's `window.I` helper: the size
+// prop sets the svg's width/height attributes (CSS can still override, as the
+// button/badge rules do). Fails loudly on an unknown icon name.
+import gitBranch from 'lucide-static/icons/git-branch.svg?raw';
+import copy from 'lucide-static/icons/copy.svg?raw';
+import check from 'lucide-static/icons/check.svg?raw';
+import arrowRight from 'lucide-static/icons/arrow-right.svg?raw';
+import layers from 'lucide-static/icons/layers.svg?raw';
+import refreshCw from 'lucide-static/icons/refresh-cw.svg?raw';
+import gitPullRequest from 'lucide-static/icons/git-pull-request.svg?raw';
+import github from 'lucide-static/icons/github.svg?raw';
+import zap from 'lucide-static/icons/zap.svg?raw';
+import eye from 'lucide-static/icons/eye.svg?raw';
+import download from 'lucide-static/icons/download.svg?raw';
+
+const ICONS: Record<string, string> = {
+  GitBranch: gitBranch,
+  Copy: copy,
+  Check: check,
+  ArrowRight: arrowRight,
+  Layers: layers,
+  RefreshCw: refreshCw,
+  GitPullRequest: gitPullRequest,
+  Github: github,
+  Zap: zap,
+  Eye: eye,
+  Download: download,
+};
+
+interface Props {
+  name: string;
+  size?: number;
+  class?: string;
+}
+
+const { name, size = 16, class: cls = '' } = Astro.props;
+const raw = ICONS[name];
+if (!raw) {
+  throw new Error(`Icon: unknown name "${name}" (have: ${Object.keys(ICONS).join(', ')})`);
+}
+const svg = raw
+  .replace(/<!--[\s\S]*?-->/g, '')
+  .replace(/\bwidth="24"/, `width="${size}"`)
+  .replace(/\bheight="24"/, `height="${size}"`)
+  .trim();
+---
+
+<span class:list={['mp-ico', cls]} aria-hidden="true" set:html={svg}></span>

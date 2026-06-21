@@ -1,30 +1,33 @@
 ---
+import Logo from './Logo.astro';
+import { LOGIN_URL, GITHUB_URL, DOCS_URL } from '../config';
 ---
 
-<footer class="border-t border-bg-elevated py-12 px-4">
-  <div class="container mx-auto max-w-5xl">
-    <div class="flex flex-col sm:flex-row items-center justify-between gap-4">
-      <div class="text-muted text-sm">
-        Built with <a href="https://astro.build" class="link-primary" target="_blank" rel="noopener">Astro</a>
+<div class="site">
+  <footer class="footer">
+    <div>
+      <Logo size={20} />
+      <p class="footer__copy">© 2026 Monkeypuzzle · made for people who live in the shell</p>
+    </div>
+    <div class="footer__cols">
+      <div class="footer__col">
+        <h2 class="h">Product</h2>
+        <a href="#features">Features</a>
+        <a href={LOGIN_URL}>Download</a>
+        <a href={`${GITHUB_URL}/releases`}>Changelog</a>
       </div>
-      <div class="flex items-center gap-6">
-        <a
-          href="https://github.com/jewell-lgtm/monkeypuzzle"
-          class="link-hover text-sm"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          GitHub
-        </a>
-        <a
-          href="https://github.com/jewell-lgtm/monkeypuzzle#readme"
-          class="link-hover text-sm"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Docs
-        </a>
+      <div class="footer__col">
+        <h2 class="h">Develop</h2>
+        <a href={DOCS_URL}>Docs</a>
+        <a href={`${GITHUB_URL}/tree/main/docs`}>CLI reference</a>
+        <a href={GITHUB_URL}>GitHub</a>
+      </div>
+      <div class="footer__col">
+        <h2 class="h">Company</h2>
+        <a href={`${GITHUB_URL}/blob/main/README.md`}>About</a>
+        <a href={`${GITHUB_URL}/issues`}>Issues</a>
+        <a href={`${GITHUB_URL}/discussions`}>Contact</a>
       </div>
     </div>
-  </div>
-</footer>
+  </footer>
+</div>

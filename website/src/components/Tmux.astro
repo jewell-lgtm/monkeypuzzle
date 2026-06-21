@@ -1,0 +1,58 @@
+---
+import TerminalBlock from './TerminalBlock.astro';
+import Kbd from './Kbd.astro';
+import Badge from './Badge.astro';
+import Button from './Button.astro';
+import { GITHUB_URL } from '../config';
+
+const TMUX_URL = `${GITHUB_URL}/tree/main/apps/tmux`;
+
+// A mock of the fzf piece-switcher popup.
+const popup = [
+  { text: '❯ acme/feat-auth-ui        ◆ draft', tone: 'ok' },
+  { text: '  acme/feat-auth-api       ◆ in review', tone: 'info' },
+  { text: '  acme/feat-auth-schema    ● merged ✓', tone: 'muted' },
+  { text: '  web/main                 trunk', tone: 'muted' },
+  { text: '' },
+  { text: '  4/4  ·  ↵ switch  ·  ⌃P new piece', tone: 'muted' },
+] as const;
+---
+
+<section class="section" id="tmux" style="padding-top:0">
+  <div class="site">
+    <div class="section__eyebrow">tmux plugin</div>
+    <h2 class="section__title">Pieces, a keystroke away.</h2>
+    <p class="section__lede">
+      A lightweight tmux plugin puts every piece behind a fuzzy popup — switch
+      worktrees or cut a new piece without ever leaving your pane layout.
+    </p>
+
+    <div class="split">
+      <div class="tmux__copy">
+        <div class="tmux__keys">
+          <div class="tmux__key">
+            <Kbd keys={['prefix', 'p']} />
+            <span>Switch to any piece across every project — each row previews its git status.</span>
+          </div>
+          <div class="tmux__key">
+            <Kbd keys={['prefix', 'P']} />
+            <span>Create a piece — pick a project, name it (or describe it), and land in the worktree.</span>
+          </div>
+        </div>
+        <p class="tmux__note">
+          A thin layer over the <code>mp</code> CLI: it reads <code>mp go --json</code>,
+          renders an <code>fzf</code> popup, and lets <code>mp</code> own the tmux
+          session switch. Needs <code>fzf</code> + <code>jq</code>.
+        </p>
+        <div class="tmux__foot">
+          <Badge tone="green">MIT</Badge>
+          <Button variant="secondary" icon="Github" href={TMUX_URL}>Get the plugin</Button>
+        </div>
+      </div>
+
+      <div class="tmux__demo">
+        <TerminalBlock title="switch piece" lines={popup} />
+      </div>
+    </div>
+  </div>
+</section>

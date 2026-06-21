@@ -1,0 +1,19 @@
+---
+import Badge from './Badge.astro';
+import Button from './Button.astro';
+import { LOGIN_URL, GITHUB_URL } from '../config';
+---
+
+<section class="section" style="padding-top:0" id="get-started">
+  <div class="site">
+    <div class="band">
+      <Badge tone="green" dot>the CLI is free &amp; open source</Badge>
+      <h2 style="margin-top:16px">Your branches, finally in order.</h2>
+      <p>Start with the free CLI. Add the dashboard when you want every stack in one place — hosted, or self-host it yourself.</p>
+      <div class="band__actions">
+        <Button size="lg" variant="accent" href={LOGIN_URL} iconTrailing="ArrowRight">Get started</Button>
+        <Button size="lg" variant="secondary" icon="Github" href={GITHUB_URL}>Star on GitHub</Button>
+      </div>
+    </div>
+  </div>
+</section>

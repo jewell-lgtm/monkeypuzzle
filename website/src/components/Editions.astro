@@ -1,0 +1,68 @@
+---
+import Card from './Card.astro';
+import Badge from './Badge.astro';
+import Button from './Button.astro';
+import { LOGIN_URL, GITHUB_URL } from '../config';
+
+// Self-host points at the source-available server package.
+const SELF_HOST_URL = `${GITHUB_URL}/tree/main/apps/mp-server`;
+---
+
+<section class="section" id="editions" style="padding-top:0">
+  <div class="site">
+    <div class="section__eyebrow">CLI + server</div>
+    <h2 class="section__title">A free CLI and an open server.</h2>
+    <p class="section__lede">
+      The <code>mp</code> command does the work in your terminal — free and open
+      source. The server adds a web dashboard that syncs every repo and draws
+      each stack as a live tree. Run ours, or run your own.
+    </p>
+
+    <div class="editions">
+      <Card pad accent="green" class="tier">
+        <div class="tier__head">
+          <h3>The <code class="tier__mono">mp</code> CLI</h3>
+          <Badge tone="green">MIT</Badge>
+        </div>
+        <p>
+          The terminal tool that does the work: cut pieces, restack the tree, and
+          open stacked PRs from your shell. Free and open source, forever.
+        </p>
+        <div class="tier__foot">
+          <Button variant="secondary" icon="Github" href={GITHUB_URL}>Get the CLI</Button>
+          <span class="tier__note">runs locally · no account</span>
+        </div>
+      </Card>
+
+      <Card pad accent="amber" class="tier tier--feature">
+        <div class="tier__head">
+          <h3>Monkeypuzzle Cloud</h3>
+          <Badge tone="amber" dot>Hosted</Badge>
+        </div>
+        <p>
+          Sign in with GitHub and we run the server for you. Every repo's stack,
+          synced and visualized — nothing to deploy, nothing to maintain.
+        </p>
+        <div class="tier__foot">
+          <Button variant="accent" href={LOGIN_URL} iconTrailing="ArrowRight">Get started</Button>
+          <span class="tier__note">sign in with GitHub</span>
+        </div>
+      </Card>
+
+      <Card pad accent="sky" class="tier">
+        <div class="tier__head">
+          <h3>Self-host the server</h3>
+          <Badge tone="sky">FSL-1.1-MIT</Badge>
+        </div>
+        <p>
+          Run the source-available server on your own infra. Self-hosting and
+          internal use are free; each release turns MIT two years after it ships.
+        </p>
+        <div class="tier__foot">
+          <Button variant="secondary" icon="Github" href={SELF_HOST_URL}>Self-hosting guide</Button>
+          <span class="tier__note">your infra · source-available</span>
+        </div>
+      </Card>
+    </div>
+  </div>
+</section>

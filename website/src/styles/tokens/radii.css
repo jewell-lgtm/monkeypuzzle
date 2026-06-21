@@ -1,0 +1,17 @@
+/* Monkeypuzzle — Radii & border tokens.
+   Chunky-but-not-bubbly. Terminal panels want crisp corners; the cute
+   element comes from color, not from huge pills. */
+
+:root {
+  --mp-radius-xs: 3px;
+  --mp-radius-sm: 6px;   /* inputs, badges, kbd */
+  --mp-radius-md: 10px;  /* buttons, small cards */
+  --mp-radius-lg: 14px;  /* cards, panels */
+  --mp-radius-xl: 20px;  /* hero surfaces, modals */
+  --mp-radius-2xl: 28px;
+  --mp-radius-pill: 999px;
+
+  --mp-border-width: 1px;
+  --mp-border-width-strong: 1.5px;
+  --mp-border-width-heavy: 2px;
+}

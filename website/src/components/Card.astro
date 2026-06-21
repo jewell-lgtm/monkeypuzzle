@@ -1,0 +1,35 @@
+---
+// A surface panel. Raised dark card with hairline top-light and soft shadow.
+// `accent` swaps the top-edge rule; `interactive` adds hover lift. From core/Card.jsx.
+interface Props {
+  pad?: boolean;
+  flat?: boolean;
+  interactive?: boolean;
+  accent?: 'green' | 'amber' | 'coral' | 'sky' | string;
+  class?: string;
+}
+
+const { pad = false, flat = false, interactive = false, accent, class: cls = '' } = Astro.props;
+
+const EDGE: Record<string, string> = {
+  green: 'var(--mp-primary)',
+  amber: 'var(--mp-accent)',
+  coral: 'var(--mp-pop)',
+  sky: 'var(--mp-info)',
+};
+const style = accent ? `--_edge:${EDGE[accent] || accent}` : undefined;
+---
+
+<div
+  class:list={[
+    'mp-card',
+    pad && 'mp-card--pad',
+    flat && 'mp-card--flat',
+    interactive && 'mp-card--interactive',
+    accent && 'mp-card--accent',
+    cls,
+  ]}
+  style={style}
+>
+  <slot />
+</div>

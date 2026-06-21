@@ -1,0 +1,26 @@
+/* Monkeypuzzle — Spacing tokens. 4px base grid. */
+
+:root {
+  --mp-space-0: 0;
+  --mp-space-1: 4px;
+  --mp-space-2: 8px;
+  --mp-space-3: 12px;
+  --mp-space-4: 16px;
+  --mp-space-5: 20px;
+  --mp-space-6: 24px;
+  --mp-space-7: 28px;
+  --mp-space-8: 32px;
+  --mp-space-10: 40px;
+  --mp-space-12: 48px;
+  --mp-space-14: 56px;
+  --mp-space-16: 64px;
+  --mp-space-20: 80px;
+  --mp-space-24: 96px;
+  --mp-space-32: 128px;
+
+  /* Common layout measures */
+  --mp-gutter: var(--mp-space-6);
+  --mp-page-pad: var(--mp-space-8);
+  --mp-measure: 68ch;     /* max prose width */
+  --mp-rhythm: var(--mp-space-4);
+}

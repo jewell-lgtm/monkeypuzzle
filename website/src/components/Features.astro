@@ -1,46 +1,58 @@
 ---
-import FeatureCard from './FeatureCard.astro';
+import Card from './Card.astro';
+import Icon from './Icon.astro';
 
 const features = [
   {
-    icon: '🌳',
-    title: 'Worktree Isolation',
-    description: 'Each piece lives in its own git worktree. No stashing, no context switching, no lost work. Work on multiple features in parallel.',
+    icon: 'Layers',
+    title: 'Stacks, not mega-PRs',
+    body: 'Break a feature into a chain of small pieces. Each reviews in minutes; the stack ships as one.',
   },
   {
-    icon: '🤖',
-    title: 'Dual Interface',
-    description: 'Interactive TUI for humans, JSON stdin/stdout for agents. Same commands, same workflow. Build automations or work hands-on.',
+    icon: 'RefreshCw',
+    title: 'Restack on autopilot',
+    body: 'Change a piece low in the stack and Monkeypuzzle rebases everything above it — conflicts surfaced, never silent.',
   },
   {
-    icon: '🛡️',
-    title: 'Safety Built-in',
-    description: 'Prevents merging when main is ahead. Forces sync before merge. Clean, fast-forward merges only. No accidental overwrites.',
+    icon: 'GitPullRequest',
+    title: 'One command to submit',
+    bodyHtml:
+      '<code class="feature__cmd">mp pr create</code> opens or updates a PR per piece, wired parent-to-parent, with the stack drawn in each description.',
   },
   {
-    icon: '🪝',
-    title: 'Extensible Hooks',
-    description: 'Shell scripts that run at key moments. Lint before merge, notify on create, run tests automatically. Your workflow, your rules.',
+    icon: 'Github',
+    title: 'Native to GitHub',
+    body: 'Works with the PRs, checks, and reviews you already have. No new forge, no lock-in.',
+  },
+  {
+    icon: 'Zap',
+    title: 'Built for the terminal',
+    body: 'A fast, friendly CLI first — plus a web dashboard when you want the whole team\'s stacks in one place.',
+  },
+  {
+    icon: 'Eye',
+    title: 'The stack, visualized',
+    body: 'Every piece, its status, and its place in the tree — readable at a glance, in your shell or the dashboard.',
   },
 ];
 ---
 
-<section class="py-24 px-4">
-  <div class="container mx-auto max-w-5xl">
-    <h2 class="text-3xl font-bold text-center mb-4">
-      Why monkeypuzzle?
-    </h2>
-    <p class="text-muted text-center mb-12 max-w-2xl mx-auto">
-      A workflow tool that gets out of your way while keeping you organized
-    </p>
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-      {features.map((feature) => (
-        <FeatureCard
-          icon={feature.icon}
-          title={feature.title}
-          description={feature.description}
-        />
-      ))}
+<section class="section" id="features">
+  <div class="site">
+    <div class="section__eyebrow">Why stacks</div>
+    <h2 class="section__title">Big features, small reviews.</h2>
+    <div class="features">
+      {
+        features.map((f) => (
+          <Card pad interactive>
+            <div class="feature">
+              <div class="feature__ico"><Icon name={f.icon} size={20} /></div>
+              <h3>{f.title}</h3>
+              {f.bodyHtml ? <p set:html={f.bodyHtml} /> : <p>{f.body}</p>}
+            </div>
+          </Card>
+        ))
+      }
     </div>
   </div>
 </section>

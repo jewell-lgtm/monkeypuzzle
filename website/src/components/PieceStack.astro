@@ -1,0 +1,60 @@
+---
+// PieceStack — the signature visual. A vertical stack of pieces (branches)
+// threaded on one spine; trunk anchors the bottom. Ported from brand/PieceStack.jsx
+// (rendered as static divs — no click handler on the marketing site).
+interface Piece {
+  name: string;
+  meta?: string;
+  status?: 'draft' | 'review' | 'restack' | 'conflict' | 'merged';
+  current?: boolean;
+  statusLabel?: string;
+}
+interface Props {
+  pieces?: Piece[];
+  base?: string;
+  showBase?: boolean;
+  class?: string;
+}
+
+const { pieces = [], base = 'main', showBase = true, class: cls = '' } = Astro.props;
+
+const STATUS: Record<string, { cls: string; label: string; fg: string; bg: string; dot: string }> = {
+  draft:    { cls: 'neutral',  label: 'draft',         fg: 'var(--mp-text-secondary)', bg: 'var(--mp-tint-neutral)', dot: 'var(--mp-text-muted)' },
+  review:   { cls: 'review',   label: 'in review',     fg: 'var(--mp-sky-300)',        bg: 'var(--mp-tint-sky)',     dot: 'var(--mp-info)' },
+  restack:  { cls: 'restack',  label: 'needs restack', fg: 'var(--mp-amber-300)',      bg: 'var(--mp-tint-amber)',   dot: 'var(--mp-accent)' },
+  conflict: { cls: 'conflict', label: 'conflict',      fg: 'var(--mp-coral-300)',      bg: 'var(--mp-tint-coral)',   dot: 'var(--mp-pop)' },
+  merged:   { cls: 'merged',   label: 'merged',        fg: 'var(--mp-green-300)',      bg: 'var(--mp-tint-green)',   dot: 'var(--mp-primary)' },
+};
+---
+
+<div class:list={['mp-stack', cls]}>
+  {
+    pieces.map((p) => {
+      const st = STATUS[p.status ?? 'draft'] ?? STATUS.draft;
+      return (
+        <div class:list={['mp-piece', p.current && 'mp-piece--current', `mp-piece--${st.cls}`]}>
+          <span class="mp-piece__rail"><span class="mp-piece__node"></span></span>
+          <span class="mp-piece__body">
+            <span class="mp-piece__name">{p.name}</span>
+            {p.meta && <span class="mp-piece__meta">{p.meta}</span>}
+            <span class="mp-piece__spacer"></span>
+            <span class="mp-piece__badge" style={`color:${st.fg};background:${st.bg}`}>
+              <span class="dot" style={`background:${st.dot}`}></span>{p.statusLabel ?? st.label}
+            </span>
+          </span>
+        </div>
+      );
+    })
+  }
+  {
+    showBase && (
+      <div class="mp-piece mp-piece--base">
+        <span class="mp-piece__rail"><span class="mp-piece__node"></span></span>
+        <span class="mp-piece__body">
+          <span class="mp-piece__name">{base}</span>
+          <span class="mp-piece__meta">trunk</span>
+        </span>
+      </div>
+    )
+  }
+</div>

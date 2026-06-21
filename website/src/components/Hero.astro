@@ -1,68 +1,64 @@
 ---
+import TerminalBlock from './TerminalBlock.astro';
+import Button from './Button.astro';
+import Icon from './Icon.astro';
+
+// Single source of truth for the install command: data-cmd (what the copy
+// button writes) and the displayed text both derive from INSTALL_CMD.
+const INSTALL_CMD = 'brew install monkeypuzzle';
+const [INSTALL_BIN, ...INSTALL_ARGS] = INSTALL_CMD.split(' ');
+const INSTALL_REST = INSTALL_ARGS.join(' ');
+
+// Real `mp` commands (verified against apps/mp): `mp stack status` prints the
+// tree; `mp pr create` pushes the current piece and opens a stacked PR.
+const lines = [
+  { cmd: 'stack status' },
+  { text: '  ◆ feat/auth-ui      draft       +62  −4', tone: 'muted' },
+  { text: '  ◆ feat/auth-api      in review   +210 −18', tone: 'info' },
+  { text: '  ● feat/auth-schema   merged ✓    +88  −2', tone: 'ok' },
+  { text: '  └ main', tone: 'muted' },
+  { text: '' },
+  { cmd: 'pr create' },
+  { text: '  ✓ pushed feat/auth-ui → origin', tone: 'ok' },
+  { text: '  ✓ opened #483  feat/auth-ui → feat/auth-api', tone: 'ok' },
+] as const;
 ---
 
-<section class="min-h-screen flex flex-col items-center justify-center px-4 pt-16 bg-hero-gradient">
-  <div class="text-center max-w-3xl mx-auto">
-    <!-- Logo -->
-    <h1 class="text-5xl sm:text-6xl md:text-7xl font-bold tracking-tight mb-6">
-      <span class="bg-gradient-to-r from-accent-pink via-accent-purple to-accent-teal bg-clip-text text-transparent">
-        monkeypuzzle
-      </span>
-    </h1>
-
-    <!-- Tagline -->
-    <p class="text-xl sm:text-2xl text-muted mb-12">
-      One workflow for humans and AI agents
+<section class="hero">
+  <div class="site">
+    <span class="eyebrow"><Icon name="GitBranch" size={13} /> stacked git, minus the headache</span>
+    <h1>Stack your <span class="g">branches.</span></h1>
+    <p class="lede">
+      Monkeypuzzle keeps your work in small, stacked pieces — each one a clean
+      review — and restacks, submits, and syncs the whole tree for you.
     </p>
-
-    <!-- Install Command -->
-    <div class="mb-12">
-      <div class="squircle inline-block p-1">
-        <code class="block px-4 py-3 text-sm sm:text-base text-foreground font-mono">
-          <span class="text-accent-pink">git clone</span> github.com/jewell-lgtm/monkeypuzzle && <span class="text-accent-pink">make install</span>
-        </code>
+    <div class="cta">
+      <div class="install" id="install" data-cmd={INSTALL_CMD}>
+        <span class="p">$</span>
+        <span class="cmd"><span class="k">{INSTALL_BIN}</span> {INSTALL_REST}</span>
+        <button type="button" aria-label="Copy install command">
+          <Icon name="Copy" size={15} class="install__copy" />
+          <Icon name="Check" size={15} class="install__check" />
+        </button>
       </div>
+      <Button size="lg" href="/workflow" iconTrailing="ArrowRight">See how it works</Button>
     </div>
-
-    <!-- Terminal Preview -->
-    <div class="max-w-2xl mx-auto">
-      <div class="squircle squircle-lg overflow-hidden shadow-2xl">
-        <!-- Terminal Header -->
-        <div class="flex items-center gap-2 px-4 py-3 border-b border-bg-elevated bg-bg-card/50">
-          <div class="w-3 h-3 rounded-full bg-red-500/80"></div>
-          <div class="w-3 h-3 rounded-full bg-yellow-500/80"></div>
-          <div class="w-3 h-3 rounded-full bg-green-500/80"></div>
-          <span class="ml-2 text-xs text-muted font-mono">terminal</span>
-        </div>
-        <!-- Terminal Content -->
-        <div class="p-4 font-mono text-sm text-left space-y-2 bg-bg-card">
-          <div>
-            <span class="text-accent-pink">$</span>
-            <span class="text-foreground"> mp piece create --issue issues/add-auth.md</span>
-          </div>
-          <div class="text-muted">
-            <span class="text-status-green">✓</span> Created piece: add-auth
-          </div>
-          <div class="text-muted">
-            <span class="text-status-green">✓</span> Worktree: ~/.local/share/monkeypuzzle/pieces/add-auth
-          </div>
-          <div class="text-muted">
-            <span class="text-status-green">✓</span> Tmux session: mp-piece-add-auth
-          </div>
-          <div class="mt-4">
-            <span class="text-accent-pink">$</span>
-            <span class="text-foreground"> mp piece pr create</span>
-          </div>
-          <div class="text-muted">
-            <span class="text-status-green">✓</span> Created PR #42
-          </div>
-        </div>
-      </div>
+    <div class="hero__demo">
+      <TerminalBlock prompt="~/acme" cursor lines={lines} />
     </div>
-
-    <!-- Subtitle -->
-    <p class="mt-12 text-muted text-sm">
-      Git worktrees. No stashing. Pure flow.
-    </p>
   </div>
 </section>
+
+<script>
+  const install = document.getElementById('install');
+  const btn = install?.querySelector('button');
+  btn?.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(install?.dataset.cmd ?? '');
+    } catch {
+      // Clipboard may be unavailable (insecure context); still show feedback.
+    }
+    install?.classList.add('copied');
+    setTimeout(() => install?.classList.remove('copied'), 1400);
+  });
+</script>

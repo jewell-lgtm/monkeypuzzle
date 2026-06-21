@@ -3,14 +3,25 @@ import Layout from '../layouts/Layout.astro';
 import Nav from '../components/Nav.astro';
 import Hero from '../components/Hero.astro';
 import Features from '../components/Features.astro';
-import Commands from '../components/Commands.astro';
+import Steps from '../components/Steps.astro';
+import Tmux from '../components/Tmux.astro';
+import Editions from '../components/Editions.astro';
+import CtaBand from '../components/CtaBand.astro';
 import Footer from '../components/Footer.astro';
 ---
 
-<Layout title="monkeypuzzle">
-  <Nav />
-  <Hero />
-  <Features />
-  <Commands />
+<Layout>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header>
+    <Nav />
+  </header>
+  <main id="main">
+    <Hero />
+    <Features />
+    <Steps />
+    <Tmux />
+    <Editions />
+    <CtaBand />
+  </main>
   <Footer />
 </Layout>

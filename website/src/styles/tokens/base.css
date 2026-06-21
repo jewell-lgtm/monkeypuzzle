@@ -1,0 +1,45 @@
+/* Monkeypuzzle — base layer.
+   Opt-in defaults. Consumers link styles.css; these set sane element
+   defaults and brand selection colors without imposing heavy resets. */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+::selection {
+  background: var(--mp-selection);
+  color: var(--mp-ink-050);
+}
+
+/* A reusable "give me the Monkeypuzzle canvas" helper for cards & kits */
+.mp-canvas {
+  background: var(--mp-bg);
+  color: var(--mp-text);
+  font-family: var(--mp-font-body);
+  font-size: var(--mp-text-base);
+  line-height: var(--mp-leading-normal);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* The brand's quiet background texture: a faint dotted forest-floor grid.
+   Apply to large dark surfaces for depth without noise. */
+.mp-canvas--dotted {
+  background-image: radial-gradient(rgba(135, 160, 148, 0.10) 1px, transparent 1px);
+  background-size: 22px 22px;
+  background-position: -1px -1px;
+}
+
+.mp-mono { font-family: var(--mp-font-mono); }
+.mp-display { font-family: var(--mp-font-display); }
+
+/* Uppercase tracked label — the brand's eyebrow / section marker */
+.mp-eyebrow {
+  font-family: var(--mp-font-mono);
+  font-size: var(--mp-text-xs);
+  letter-spacing: var(--mp-tracking-caps);
+  text-transform: uppercase;
+  color: var(--mp-text-muted);
+}

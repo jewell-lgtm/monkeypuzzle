@@ -1,0 +1,48 @@
+---
+// TerminalBlock — a faux terminal panel, the brand's storytelling device.
+// Pass `lines` (each either {cmd} or {text, tone}). Ported from brand/TerminalBlock.jsx.
+interface Line {
+  cmd?: string;
+  text?: string;
+  tone?: 'cmd' | 'muted' | 'ok' | 'warn' | 'err' | 'info';
+}
+interface Props {
+  title?: string;
+  prompt?: string;
+  lines?: Line[];
+  cursor?: boolean;
+  class?: string;
+}
+
+const { title = 'monkeypuzzle', prompt = '~/proj', lines = [], cursor = false, class: cls = '' } =
+  Astro.props;
+
+const TONE: Record<string, string> = {
+  cmd: 'mp-term__cmd',
+  muted: 'mp-term__muted',
+  ok: 'mp-term__ok',
+  warn: 'mp-term__warn',
+  err: 'mp-term__err',
+  info: 'mp-term__info',
+};
+---
+
+<div class:list={['mp-term', cls]}>
+  <div class="mp-term__bar">
+    <span class="mp-term__dots">
+      <i style="background:var(--mp-coral-500)"></i>
+      <i style="background:var(--mp-amber-500)"></i>
+      <i style="background:var(--mp-green-500)"></i>
+    </span>
+    <span class="mp-term__title">{title}</span>
+  </div>
+  <div class="mp-term__body">{
+    lines.map((ln) =>
+      ln.cmd !== undefined ? (
+        <span class="mp-term__line"><span class="mp-term__prompt">{prompt} <b>mp</b> </span><span class="mp-term__cmd">{ln.cmd}</span></span>
+      ) : (
+        <span class:list={['mp-term__line', ln.tone && TONE[ln.tone]]}>{ln.text}</span>
+      )
+    )
+  }{cursor && <span class="mp-term__cursor"></span>}</div>
+</div>

@@ -1,0 +1,41 @@
+---
+const steps = [
+  {
+    n: 1,
+    title: 'Cut a piece',
+    body: 'Start a new piece on top of the stack — one idea at a time.',
+    cmd: 'mp stack append auth-ui',
+  },
+  {
+    n: 2,
+    title: 'Restack',
+    body: 'Edited something below? Rebase the whole tree in one go.',
+    cmd: 'mp stack sync',
+  },
+  {
+    n: 3,
+    title: 'Submit',
+    body: 'Open or update a PR per piece, stacked parent-to-parent.',
+    cmd: 'mp pr create',
+  },
+];
+---
+
+<section class="section" style="padding-top:0">
+  <div class="site">
+    <div class="section__eyebrow">Three moves</div>
+    <h2 class="section__title">Cut a piece. Restack. Submit.</h2>
+    <div class="steps">
+      {
+        steps.map((s) => (
+          <div class="step">
+            <span class="step__n">{s.n}</span>
+            <h3>{s.title}</h3>
+            <p>{s.body}</p>
+            <code>{s.cmd}</code>
+          </div>
+        ))
+      }
+    </div>
+  </div>
+</section>
