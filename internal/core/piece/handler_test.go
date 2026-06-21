@@ -1326,6 +1326,9 @@ func TestHandler_CleanupMergedPieces_DryRun(t *testing.T) {
 
 	// Mock branch check - no PR metadata, use git method
 	mockExec.AddResponse("git", []string{"ls-remote", "--heads", "origin", pieceName}, []byte(""), nil)
+	// Fast-forward-merged piece: level with main (0 ahead, 0 behind), so the
+	// unstarted guard does not trip and the ancestry check applies.
+	mockExec.AddResponse("git", []string{"rev-list", "--left-right", "--count", "main..." + pieceName}, []byte("0\t0\n"), nil)
 	mockExec.AddResponse("git", []string{"branch", "--merged", "main"}, []byte("  main\n  "+pieceName+"\n"), nil)
 
 	opts := piece.CleanupOptions{
@@ -1380,6 +1383,9 @@ func TestHandler_CleanupMergedPieces_SkipsUnmerged(t *testing.T) {
 
 	// Mock branch check - not merged
 	mockExec.AddResponse("git", []string{"ls-remote", "--heads", "origin", pieceName}, []byte("abc123\trefs/heads/"+pieceName+"\n"), nil)
+	// Unmerged piece has its own commits (2 ahead), so the unstarted guard
+	// does not trip and detection falls through to the ancestry checks.
+	mockExec.AddResponse("git", []string{"rev-list", "--left-right", "--count", "main..." + pieceName}, []byte("0\t2\n"), nil)
 	mockExec.AddResponse("git", []string{"branch", "--merged", "main"}, []byte("  main\n"), nil) // piece not in list
 	mockExec.AddResponse("git", []string{"rev-parse", pieceName}, []byte("abc123\n"), nil)
 	mockExec.AddResponse("git", []string{"merge-base", "--is-ancestor", "abc123", "main"}, nil, fmt.Errorf("exit status 1")) // not an ancestor
@@ -1392,6 +1398,51 @@ func TestHandler_CleanupMergedPieces_SkipsUnmerged(t *testing.T) {
 
 	if len(results) != 0 {
 		t.Errorf("expected 0 results for unmerged piece, got %d", len(results))
+	}
+}
+
+// TestHandler_CleanupMergedPieces_SkipsUnstarted guards the footgun: a piece
+// that has made no commits of its own and is strictly behind main (e.g. freshly
+// created, or its work landed on main directly) is graph-indistinguishable from
+// a fast-forward merge. `git branch --merged` would list it, but cleanup must
+// NOT sweep it — that would delete an in-progress piece.
+func TestHandler_CleanupMergedPieces_SkipsUnstarted(t *testing.T) {
+	paths.SetDataDir("/test-data/monkeypuzzle")
+	t.Cleanup(paths.ResetDataDir)
+
+	fs := adapters.NewMemoryFS()
+	out := adapters.NewBufferOutput()
+	mockExec := adapters.NewMockExec()
+	deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
+	handler := piece.NewHandler(deps)
+
+	repoRoot := "/repo"
+	piecesDir := filepath.Join(repoRoot, ".monkeypuzzle", "pieces")
+	pieceName := "unstarted-piece"
+	worktreePath := filepath.Join(piecesDir, pieceName)
+	_ = fs.MkdirAll(worktreePath, 0755)
+
+	mockExec.AddResponse("git", []string{"rev-parse", "--abbrev-ref", "HEAD"}, []byte(pieceName+"\n"), nil)
+	mockExec.AddResponse("git", []string{"ls-remote", "--heads", "origin", pieceName}, []byte(""), nil)
+	// 0 commits of its own, 5 behind main -> unstarted.
+	mockExec.AddResponse("git", []string{"rev-list", "--left-right", "--count", "main..." + pieceName}, []byte("5\t0\n"), nil)
+	// `git branch --merged` WOULD list it, proving the guard (not the ancestry
+	// check) is what protects it. The guard returns before this is consulted.
+	mockExec.AddResponse("git", []string{"branch", "--merged", "main"}, []byte("  main\n  "+pieceName+"\n"), nil)
+
+	opts := piece.CleanupOptions{MainBranch: "main"}
+	results, err := handler.CleanupMergedPieces(context.Background(), repoRoot, opts)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("expected 0 results for unstarted piece, got %d", len(results))
+	}
+	if mockExec.WasCalled("git", "worktree", "remove", worktreePath) {
+		t.Error("worktree remove must NOT be called for an unstarted piece")
+	}
+	if mockExec.WasCalled("git", "branch", "--merged", "main") {
+		t.Error("ancestry check should not be reached; the unstarted guard returns first")
 	}
 }
 

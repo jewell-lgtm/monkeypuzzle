@@ -910,7 +910,9 @@ type MergeStatus struct {
 // IsBranchMerged checks if a piece branch has been merged to main.
 // Detection priority: 0) is-piece-done.sh user hook (opt-in escape hatch),
 // 1) PR metadata, 2) provider PR list by branch, 3) git branch --merged,
-// 4) commit history.
+// 4) commit history. Before the ancestry heuristics (3 & 4) it short-circuits
+// "unstarted" branches (no commits of their own, strictly behind main), which
+// would otherwise be indistinguishable from a fast-forward merge.
 func (h *Handler) IsBranchMerged(ctx context.Context, repoRoot, branchName, mainBranch string) (MergeStatus, error) {
 	status := MergeStatus{}
 
@@ -951,6 +953,26 @@ func (h *Handler) IsBranchMerged(ctx context.Context, repoRoot, branchName, main
 			status.PRNumber = prNumber
 			return status, nil
 		}
+	}
+
+	// Guard: a branch with no commits of its own that is strictly behind main
+	// was never worked on — e.g. freshly created, or its work reached main by
+	// another route (committed straight to main). Such a branch is
+	// graph-indistinguishable from a fast-forward merge, so the ancestry
+	// heuristics below (Methods 3 & 4) would wrongly report it as "merged" and
+	// let cleanup sweep an in-progress piece. Treat it as not merged. Genuine
+	// merges are still caught by the positive PR/hook checks above, and a real
+	// fast-forward merge leaves the branch level with main (0 behind), so it is
+	// not mistaken for unstarted here.
+	ahead, behind, abErr := h.git.CommitsAheadBehind(ctx, repoRoot, mainBranch, branchName)
+	if abErr != nil {
+		h.deps.Output.Write(core.Message{
+			Type:    core.MsgWarning,
+			Content: fmt.Sprintf("Failed to compute ahead/behind for %s: %v", branchName, abErr),
+		})
+	} else if ahead == 0 && behind > 0 {
+		status.Method = "unstarted"
+		return status, nil
 	}
 
 	// Method 3: Check via git branch --merged
