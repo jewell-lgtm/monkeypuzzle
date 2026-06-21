@@ -1,0 +1,149 @@
+workspace:
+  base: /woodpecker
+  path: src
+
+variables:
+  - &golang_image golang:1.26.4
+  - &kaniko_image gcr.io/kaniko-project/executor:v1.23.2-debug
+  # In-cluster registry (insecure, NodePort-backed). Same one ArgoCD pulls from.
+  - &registry registry.registry.svc.cluster.local:5000
+
+steps:
+  # --- Verify: build, vet, test, lint the Go modules -----------------------
+  - name: test
+    image: *golang_image
+    environment:
+      GIT_AUTHOR_NAME: ci
+      GIT_AUTHOR_EMAIL: ci@example.com
+      GIT_COMMITTER_NAME: ci
+      GIT_COMMITTER_EMAIL: ci@example.com
+    commands:
+      - go build -o /dev/null ./apps/mp
+      - go build -o /dev/null ./apps/mp-mcp
+      - go build -o /dev/null ./apps/mp-server
+      - go vet ./...
+      - go test -race ./...
+      - go test -race -tags=integration ./...
+
+  - name: lint
+    image: golangci/golangci-lint:latest
+    commands:
+      - golangci-lint run
+
+  # --- Build + push images to the in-cluster registry (main only) ----------
+  - name: build-server
+    image: *kaniko_image
+    commands:
+      - >
+        SHORT_SHA=$(printf '%s' "$CI_COMMIT_SHA" | cut -c1-8);
+        DESTINATIONS="--destination=$${REGISTRY}/monkeypuzzle-server:$SHORT_SHA";
+        if [ "$CI_COMMIT_BRANCH" = "main" ]; then
+          DESTINATIONS="$DESTINATIONS --destination=$${REGISTRY}/monkeypuzzle-server:latest";
+        fi;
+        /kaniko/executor
+        --context=dir:///woodpecker/src
+        --dockerfile=apps/mp-server/Dockerfile
+        $DESTINATIONS
+        --cache=true
+        --cache-repo=$${REGISTRY}/monkeypuzzle-server-cache
+        --use-new-run
+        --compressed-caching=false
+        --image-download-retry=3
+        --push-retry=3
+        --insecure
+        --insecure-pull
+    environment:
+      REGISTRY: *registry
+    when:
+      branch: main
+      event: push
+
+  - name: build-website
+    image: *kaniko_image
+    environment:
+      REGISTRY: *registry
+      # The server URL the static site links to. Set as a Woodpecker secret so
+      # the deploy host stays out of this (public) file.
+      PUBLIC_SERVER_URL:
+        from_secret: public_server_url
+    commands:
+      - >
+        SHORT_SHA=$(printf '%s' "$CI_COMMIT_SHA" | cut -c1-8);
+        DESTINATIONS="--destination=$${REGISTRY}/monkeypuzzle-website:$SHORT_SHA";
+        if [ "$CI_COMMIT_BRANCH" = "main" ]; then
+          DESTINATIONS="$DESTINATIONS --destination=$${REGISTRY}/monkeypuzzle-website:latest";
+        fi;
+        /kaniko/executor
+        --context=dir:///woodpecker/src/website
+        --dockerfile=Dockerfile
+        $DESTINATIONS
+        --build-arg=PUBLIC_SERVER_URL=$${PUBLIC_SERVER_URL}
+        --cache=true
+        --cache-repo=$${REGISTRY}/monkeypuzzle-website-cache
+        --use-new-run
+        --compressed-caching=false
+        --image-download-retry=3
+        --push-retry=3
+        --insecure
+        --insecure-pull
+    when:
+      branch: main
+      event: push
+
+  - name: verify-images
+    image: alpine:3.20
+    commands:
+      - apk add --no-cache curl jq
+      - SHORT_SHA=$(printf '%s' "$CI_COMMIT_SHA" | cut -c1-8)
+      - SRV_TAGS="$(curl -fsS http://registry.registry.svc.cluster.local:5000/v2/monkeypuzzle-server/tags/list)"
+      - WEB_TAGS="$(curl -fsS http://registry.registry.svc.cluster.local:5000/v2/monkeypuzzle-website/tags/list)"
+      - 'printf "%s" "$SRV_TAGS" | jq -e --arg TAG "$SHORT_SHA" ''.tags | index($TAG)'' >/dev/null && echo "server:$SHORT_SHA pushed"'
+      - 'printf "%s" "$WEB_TAGS" | jq -e --arg TAG "$SHORT_SHA" ''.tags | index($TAG)'' >/dev/null && echo "website:$SHORT_SHA pushed"'
+    when:
+      branch: main
+      event: push
+
+  # --- Wait for ArgoCD + image-updater to roll the new digests live --------
+  - name: wait-for-gitops
+    image: alpine:3.20
+    commands:
+      - apk add --no-cache curl jq kubectl ripgrep
+      - >
+        MANIFEST_ACCEPT='application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json,application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json';
+        SRV_DIGEST=$(curl -fsS -D - -o /dev/null -H "Accept: $MANIFEST_ACCEPT" http://registry.registry.svc.cluster.local:5000/v2/monkeypuzzle-server/manifests/latest | awk -F': ' 'tolower($1)=="docker-content-digest"{gsub("\\r","",$2); print $2}');
+        WEB_DIGEST=$(curl -fsS -D - -o /dev/null -H "Accept: $MANIFEST_ACCEPT" http://registry.registry.svc.cluster.local:5000/v2/monkeypuzzle-website/manifests/latest | awk -F': ' 'tolower($1)=="docker-content-digest"{gsub("\\r","",$2); print $2}');
+        test -n "$SRV_DIGEST"; test -n "$WEB_DIGEST";
+        echo "server digest $SRV_DIGEST"; echo "website digest $WEB_DIGEST"
+      - >
+        for attempt in $(seq 1 30); do
+          WEB_SYNC=$(kubectl -n argocd get application monkeypuzzle-website -o jsonpath='{.status.sync.status}' 2>/dev/null);
+          WEB_HEALTH=$(kubectl -n argocd get application monkeypuzzle-website -o jsonpath='{.status.health.status}' 2>/dev/null);
+          SRV_SYNC=$(kubectl -n argocd get application monkeypuzzle-server -o jsonpath='{.status.sync.status}' 2>/dev/null);
+          SRV_HEALTH=$(kubectl -n argocd get application monkeypuzzle-server -o jsonpath='{.status.health.status}' 2>/dev/null);
+          WEB_IMG=$(kubectl -n monkeypuzzle get deployment monkeypuzzle-website -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null);
+          if [ "$WEB_SYNC" = "Synced" ] && [ "$WEB_HEALTH" = "Healthy" ] && [ "$SRV_SYNC" = "Synced" ] && [ "$SRV_HEALTH" = "Healthy" ] && printf '%s' "$WEB_IMG" | rg -F "$WEB_DIGEST" >/dev/null; then
+            echo "ArgoCD converged to the new digests"; exit 0;
+          fi;
+          if [ "$attempt" -eq 30 ]; then
+            echo "Timed out waiting for ArgoCD convergence" >&2;
+            echo "web_sync=$WEB_SYNC web_health=$WEB_HEALTH srv_sync=$SRV_SYNC srv_health=$SRV_HEALTH" >&2;
+            exit 1;
+          fi;
+          sleep 10;
+        done
+    when:
+      branch: main
+      event: push
+
+  # --- Release: cut binaries + Homebrew formula on a version tag -----------
+  - name: release
+    image: goreleaser/goreleaser:latest
+    environment:
+      GITHUB_TOKEN:
+        from_secret: github_token
+      HOMEBREW_TAP_GITHUB_TOKEN:
+        from_secret: homebrew_tap_github_token
+    commands:
+      - goreleaser release --clean
+    when:
+      event: tag
