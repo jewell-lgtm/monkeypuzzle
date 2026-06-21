@@ -10,12 +10,12 @@ func TestMemoryStore_UserUpsertAndGet(t *testing.T) {
 	ctx := context.Background()
 	s := NewMemoryStore()
 
-	id, err := s.UpsertUser(ctx, User{GitHubUserID: 42, GitHubLogin: "octo", AccessTokenEnc: []byte("enc1")})
+	id, err := s.UpsertUser(ctx, User{ExternalUserID: "wos_1", GitHubUserID: 42, GitHubLogin: "octo", AccessTokenEnc: []byte("enc1")})
 	if err != nil {
 		t.Fatal(err)
 	}
 	// Upsert same github_user_id updates in place (same id, new fields).
-	id2, err := s.UpsertUser(ctx, User{GitHubUserID: 42, GitHubLogin: "octocat", AccessTokenEnc: []byte("enc2")})
+	id2, err := s.UpsertUser(ctx, User{ExternalUserID: "wos_1", GitHubUserID: 42, GitHubLogin: "octocat", AccessTokenEnc: []byte("enc2")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -28,6 +28,15 @@ func TestMemoryStore_UserUpsertAndGet(t *testing.T) {
 	}
 	if u.GitHubLogin != "octocat" || string(u.AccessTokenEnc) != "enc2" {
 		t.Fatalf("update not applied: %+v", u)
+	}
+
+	// Resolve by WorkOS id (the MCP verifier path).
+	byWO, err := s.GetUserByExternalID(ctx, "wos_1")
+	if err != nil || byWO.ID != id {
+		t.Fatalf("GetUserByExternalID: %+v err=%v", byWO, err)
+	}
+	if _, err := s.GetUserByExternalID(ctx, "nope"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("want ErrNotFound for unknown workos id, got %v", err)
 	}
 
 	if _, err := s.GetUserByID(ctx, 999); !errors.Is(err, ErrNotFound) {

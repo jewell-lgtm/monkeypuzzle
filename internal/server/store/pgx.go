@@ -64,26 +64,40 @@ func splitStatements(sql string) []string {
 
 func (s *PgxStore) UpsertUser(ctx context.Context, u User) (int64, error) {
 	const q = `
-INSERT INTO users (github_user_id, github_login, avatar_url, access_token_enc, updated_at)
-VALUES ($1, $2, $3, $4, now())
+INSERT INTO users (external_user_id, github_user_id, github_login, avatar_url, access_token_enc, updated_at)
+VALUES ($1, $2, $3, $4, $5, now())
 ON CONFLICT (github_user_id) DO UPDATE SET
+  external_user_id = EXCLUDED.external_user_id,
   github_login = EXCLUDED.github_login,
   avatar_url = EXCLUDED.avatar_url,
   access_token_enc = EXCLUDED.access_token_enc,
   updated_at = now()
 RETURNING id`
 	var id int64
-	err := s.pool.QueryRow(ctx, q, u.GitHubUserID, u.GitHubLogin, u.AvatarURL, u.AccessTokenEnc).Scan(&id)
+	err := s.pool.QueryRow(ctx, q, u.ExternalUserID, u.GitHubUserID, u.GitHubLogin, u.AvatarURL, u.AccessTokenEnc).Scan(&id)
 	if err != nil {
 		return 0, fmt.Errorf("store: upsert user: %w", err)
 	}
 	return id, nil
 }
 
-func (s *PgxStore) GetUserByID(ctx context.Context, id int64) (User, error) {
-	const q = `SELECT id, github_user_id, github_login, avatar_url, access_token_enc FROM users WHERE id = $1`
+func (s *PgxStore) GetUserByExternalID(ctx context.Context, externalUserID string) (User, error) {
+	const q = `SELECT id, external_user_id, github_user_id, github_login, avatar_url, access_token_enc FROM users WHERE external_user_id = $1`
 	var u User
-	err := s.pool.QueryRow(ctx, q, id).Scan(&u.ID, &u.GitHubUserID, &u.GitHubLogin, &u.AvatarURL, &u.AccessTokenEnc)
+	err := s.pool.QueryRow(ctx, q, externalUserID).Scan(&u.ID, &u.ExternalUserID, &u.GitHubUserID, &u.GitHubLogin, &u.AvatarURL, &u.AccessTokenEnc)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return User{}, ErrNotFound
+	}
+	if err != nil {
+		return User{}, fmt.Errorf("store: get user by workos id: %w", err)
+	}
+	return u, nil
+}
+
+func (s *PgxStore) GetUserByID(ctx context.Context, id int64) (User, error) {
+	const q = `SELECT id, external_user_id, github_user_id, github_login, avatar_url, access_token_enc FROM users WHERE id = $1`
+	var u User
+	err := s.pool.QueryRow(ctx, q, id).Scan(&u.ID, &u.ExternalUserID, &u.GitHubUserID, &u.GitHubLogin, &u.AvatarURL, &u.AccessTokenEnc)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return User{}, ErrNotFound
 	}

@@ -4,6 +4,7 @@
 
 CREATE TABLE IF NOT EXISTS users (
     id               BIGSERIAL PRIMARY KEY,
+    external_user_id   TEXT        NOT NULL UNIQUE,
     github_user_id   BIGINT      NOT NULL UNIQUE,
     github_login     TEXT        NOT NULL,
     avatar_url       TEXT        NOT NULL DEFAULT '',

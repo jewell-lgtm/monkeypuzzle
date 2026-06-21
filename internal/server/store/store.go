@@ -24,11 +24,14 @@ const (
 	SyncFailed  = "failed"
 )
 
-// User is a GitHub-authenticated account. AccessTokenEnc holds the user's
-// GitHub OAuth token encrypted at rest; the store treats it as opaque bytes
-// (callers encrypt/decrypt). It is only ever decrypted in the worker.
+// User is an authenticated account. Identity comes from WorkOS (ExternalUserID is
+// the WorkOS `sub`, shared by the human session and the agent's MCP token); the
+// GitHub fields are derived from the GitHub token WorkOS passes through.
+// AccessTokenEnc holds that GitHub token encrypted at rest; the store treats it
+// as opaque bytes (callers encrypt/decrypt) and it is only decrypted in the worker.
 type User struct {
 	ID             int64
+	ExternalUserID string
 	GitHubUserID   int64
 	GitHubLogin    string
 	AvatarURL      string
@@ -80,6 +83,9 @@ type Store interface {
 	UpsertUser(ctx context.Context, u User) (int64, error)
 	// GetUserByID returns the user (including AccessTokenEnc) or ErrNotFound.
 	GetUserByID(ctx context.Context, id int64) (User, error)
+	// GetUserByExternalID resolves a WorkOS `sub` to a user, or ErrNotFound. Used
+	// by the MCP resource server to map a validated token to a local user.
+	GetUserByExternalID(ctx context.Context, externalUserID string) (User, error)
 
 	// UpsertRepo inserts or updates a repo keyed by GitHubRepoID and returns its id.
 	UpsertRepo(ctx context.Context, r Repo) (int64, error)

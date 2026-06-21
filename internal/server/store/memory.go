@@ -10,29 +10,31 @@ import (
 // adapters.MemoryFS: a concurrency-safe map-backed fake with the same contract
 // as the real implementation.
 type MemoryStore struct {
-	mu        sync.RWMutex
-	nextUser  int64
-	nextRepo  int64
-	nextPR    int64
-	users     map[int64]User           // id -> user
-	usersByGH map[int64]int64          // github_user_id -> id
-	repos     map[int64]Repo           // id -> repo
-	reposByGH map[int64]int64          // github_repo_id -> id
-	userRepos map[int64]map[int64]bool // user id -> set of repo ids
-	prs       map[int64][]PullRequest  // repo id -> PRs
-	sync      map[int64]SyncStatus     // user id -> status
+	mu         sync.RWMutex
+	nextUser   int64
+	nextRepo   int64
+	nextPR     int64
+	users      map[int64]User           // id -> user
+	usersByGH  map[int64]int64          // github_user_id -> id
+	usersByExt map[string]int64         // external_user_id -> id
+	repos      map[int64]Repo           // id -> repo
+	reposByGH  map[int64]int64          // github_repo_id -> id
+	userRepos  map[int64]map[int64]bool // user id -> set of repo ids
+	prs        map[int64][]PullRequest  // repo id -> PRs
+	sync       map[int64]SyncStatus     // user id -> status
 }
 
 // NewMemoryStore returns an empty in-memory store.
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
-		users:     map[int64]User{},
-		usersByGH: map[int64]int64{},
-		repos:     map[int64]Repo{},
-		reposByGH: map[int64]int64{},
-		userRepos: map[int64]map[int64]bool{},
-		prs:       map[int64][]PullRequest{},
-		sync:      map[int64]SyncStatus{},
+		users:      map[int64]User{},
+		usersByGH:  map[int64]int64{},
+		usersByExt: map[string]int64{},
+		repos:      map[int64]Repo{},
+		reposByGH:  map[int64]int64{},
+		userRepos:  map[int64]map[int64]bool{},
+		prs:        map[int64][]PullRequest{},
+		sync:       map[int64]SyncStatus{},
 	}
 }
 
@@ -45,12 +47,14 @@ func (m *MemoryStore) UpsertUser(_ context.Context, u User) (int64, error) {
 	if id, ok := m.usersByGH[u.GitHubUserID]; ok {
 		u.ID = id
 		m.users[id] = u
+		m.usersByExt[u.ExternalUserID] = id
 		return id, nil
 	}
 	m.nextUser++
 	u.ID = m.nextUser
 	m.users[u.ID] = u
 	m.usersByGH[u.GitHubUserID] = u.ID
+	m.usersByExt[u.ExternalUserID] = u.ID
 	return u.ID, nil
 }
 
@@ -62,6 +66,16 @@ func (m *MemoryStore) GetUserByID(_ context.Context, id int64) (User, error) {
 		return User{}, ErrNotFound
 	}
 	return u, nil
+}
+
+func (m *MemoryStore) GetUserByExternalID(_ context.Context, externalUserID string) (User, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	id, ok := m.usersByExt[externalUserID]
+	if !ok {
+		return User{}, ErrNotFound
+	}
+	return m.users[id], nil
 }
 
 func (m *MemoryStore) UpsertRepo(_ context.Context, r Repo) (int64, error) {
