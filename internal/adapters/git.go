@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
@@ -318,6 +319,32 @@ func (g *Git) IsMainAhead(ctx context.Context, workDir, mainBranch, pieceBranch 
 	count := strings.TrimSpace(string(output))
 	// If count > 0, main is ahead
 	return count != "0", nil
+}
+
+// CommitsAheadBehind reports how many commits branchName has that mainBranch
+// does not (ahead) and how many mainBranch has that branchName does not
+// (behind). It runs a single `git rev-list --left-right --count` over the
+// symmetric difference mainBranch...branchName.
+func (g *Git) CommitsAheadBehind(ctx context.Context, workDir, mainBranch, branchName string) (ahead, behind int, err error) {
+	output, err := g.exec.RunWithDir(ctx, workDir, "git", "rev-list", "--left-right", "--count", mainBranch+"..."+branchName)
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to count commits between %s and %s: %w", mainBranch, branchName, err)
+	}
+	// Output is "<left>\t<right>": left = commits in mainBranch only (behind),
+	// right = commits in branchName only (ahead).
+	fields := strings.Fields(string(output))
+	if len(fields) != 2 {
+		return 0, 0, fmt.Errorf("unexpected rev-list output %q", string(output))
+	}
+	behind, err = strconv.Atoi(fields[0])
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to parse behind count %q: %w", fields[0], err)
+	}
+	ahead, err = strconv.Atoi(fields[1])
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to parse ahead count %q: %w", fields[1], err)
+	}
+	return ahead, behind, nil
 }
 
 // GetMainRepoRoot gets the main repository root from a worktree.
