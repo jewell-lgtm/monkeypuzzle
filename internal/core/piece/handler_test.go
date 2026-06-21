@@ -412,7 +412,7 @@ func TestHandler_CreatePiece_SanitizesName(t *testing.T) {
 	// Mock the worktree creation with the sanitized name
 	piecesDir := filepath.Join(repoRoot, ".monkeypuzzle", "pieces")
 	worktreePath := filepath.Join(piecesDir, expectedSanitized)
-	mockExec.AddResponse("git", []string{"worktree", "add", worktreePath}, nil, nil)
+	mockExec.AddResponse("git", []string{"worktree", "add", "-b", expectedSanitized, worktreePath, "main"}, nil, nil)
 	mockExec.AddResponse("tmux", []string{"new-session", "-d", "-s", "mp/repo/" + expectedSanitized, "-c", worktreePath}, nil, nil)
 
 	info, err := handler.CreatePiece(context.Background(), inputName, piece.CreatePieceOptions{})
@@ -902,7 +902,7 @@ func TestHandler_CreatePiece_OnPieceCreateHook_FiresDetached(t *testing.T) {
 	worktreePath := filepath.Join(repoRoot, ".monkeypuzzle", "pieces", pieceName)
 
 	mockExec.AddResponse("git", []string{"rev-parse", "--show-toplevel"}, []byte(repoRoot+"\n"), nil)
-	mockExec.AddResponse("git", []string{"worktree", "add", worktreePath}, nil, nil)
+	mockExec.AddResponse("git", []string{"worktree", "add", "-b", pieceName, worktreePath, "main"}, nil, nil)
 
 	// Create an executable hook file so it's resolved.
 	hookPath := "repo/.monkeypuzzle/hooks/" + piece.HookOnPieceCreate
@@ -951,7 +951,7 @@ func TestHandler_CreatePiece_OnPieceCreateHookFailsToStart_KeepsPiece(t *testing
 	worktreePath := filepath.Join(repoRoot, ".monkeypuzzle", "pieces", pieceName)
 
 	mockExec.AddResponse("git", []string{"rev-parse", "--show-toplevel"}, []byte(repoRoot+"\n"), nil)
-	mockExec.AddResponse("git", []string{"worktree", "add", worktreePath}, nil, nil)
+	mockExec.AddResponse("git", []string{"worktree", "add", "-b", pieceName, worktreePath, "main"}, nil, nil)
 
 	hookPath := "repo/.monkeypuzzle/hooks/" + piece.HookOnPieceCreate
 	_ = fs.MkdirAll("repo/.monkeypuzzle/hooks", 0755)
@@ -1137,6 +1137,9 @@ func TestHandler_IsBranchMerged_ViaCommit(t *testing.T) {
 	// Mock git branch --merged - branch not in list
 	mockExec.AddResponse("git", []string{"branch", "--merged", "main"}, []byte("  main\n"), nil)
 
+	// Mock git cherry - branch has unique commits (not squash-merged)
+	mockExec.AddResponse("git", []string{"cherry", "main", branchName}, []byte("+ abc123\n"), nil)
+
 	// Mock commit check - get branch commit
 	mockExec.AddResponse("git", []string{"rev-parse", branchName}, []byte("abc123\n"), nil)
 
@@ -1177,6 +1180,9 @@ func TestHandler_IsBranchMerged_NotMerged(t *testing.T) {
 	// Mock git branch --merged - branch not in list
 	mockExec.AddResponse("git", []string{"branch", "--merged", "main"}, []byte("  main\n"), nil)
 
+	// Mock git cherry - branch has unique commits (not squash-merged)
+	mockExec.AddResponse("git", []string{"cherry", "main", branchName}, []byte("+ abc123\n"), nil)
+
 	// Mock commit check
 	mockExec.AddResponse("git", []string{"rev-parse", branchName}, []byte("abc123\n"), nil)
 
@@ -1196,6 +1202,48 @@ func TestHandler_IsBranchMerged_NotMerged(t *testing.T) {
 	}
 	if !status.ExistsOnRemote {
 		t.Error("expected ExistsOnRemote to be true")
+	}
+}
+
+// TestHandler_IsBranchMerged_ViaSquash covers mp's own `mp merge` squash:
+// the piece commits land on main under a new SHA, so the branch is neither
+// listed by `git branch --merged` nor an ancestor of main, but `git cherry`
+// reports every commit as already applied ('-'). Without the patch-id check
+// this returned IsMerged=false, leaving squash-merged worktrees lingering.
+func TestHandler_IsBranchMerged_ViaSquash(t *testing.T) {
+	fs := adapters.NewMemoryFS()
+	out := adapters.NewBufferOutput()
+	mockExec := adapters.NewMockExec()
+	deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
+	handler := piece.NewHandler(deps)
+
+	repoRoot := "/repo"
+	branchName := "feature-branch"
+
+	// No PR metadata - skip PR metadata check
+
+	// Mock remote branch check - branch doesn't exist on remote
+	mockExec.AddResponse("git", []string{"ls-remote", "--heads", "origin", branchName}, []byte(""), nil)
+
+	// Mock gh pr list - no merged PR found
+	mockExec.AddResponse("gh", []string{"pr", "list", "--head", branchName, "--state", "merged", "--json", "number", "--limit", "1"}, []byte(`[]`), nil)
+
+	// Mock git branch --merged - branch NOT listed (squash makes it a non-ancestor)
+	mockExec.AddResponse("git", []string{"branch", "--merged", "main"}, []byte("  main\n"), nil)
+
+	// Mock git cherry - all commits already applied by patch-id ('-' lines only)
+	mockExec.AddResponse("git", []string{"cherry", "main", branchName}, []byte("- abc123\n- def456\n"), nil)
+
+	status, err := handler.IsBranchMerged(context.Background(), repoRoot, branchName, "main")
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	if !status.IsMerged {
+		t.Error("expected IsMerged to be true for squash-merged branch")
+	}
+	if status.Method != "squash" {
+		t.Errorf("expected method 'squash', got %q", status.Method)
 	}
 }
 
@@ -1685,7 +1733,7 @@ func TestHandler_CreatePiece_WritesPieceMetadata(t *testing.T) {
 	// Mock getting current branch for metadata
 	mockExec.AddResponse("git", []string{"rev-parse", "--abbrev-ref", "HEAD"}, []byte("main\n"), nil)
 	// Mock worktree creation
-	mockExec.AddResponse("git", []string{"worktree", "add", worktreePath}, nil, nil)
+	mockExec.AddResponse("git", []string{"worktree", "add", "-b", pieceName, worktreePath, "main"}, nil, nil)
 	// Mock main repo session check - already exists
 	mockExec.AddResponse("tmux", []string{"has-session", "-t", "=mp-myrepo"}, nil, nil)
 	// Mock piece session creation
@@ -1737,7 +1785,7 @@ func TestHandler_CreatePiece_WritesPieceMetadata_FromFeatureBranch(t *testing.T)
 	// Mock getting current branch for metadata - we're on a feature branch
 	mockExec.AddResponse("git", []string{"rev-parse", "--abbrev-ref", "HEAD"}, []byte("parent-feature\n"), nil)
 	// Mock worktree creation
-	mockExec.AddResponse("git", []string{"worktree", "add", worktreePath}, nil, nil)
+	mockExec.AddResponse("git", []string{"worktree", "add", "-b", pieceName, worktreePath, "main"}, nil, nil)
 	// Mock main repo session check - already exists
 	mockExec.AddResponse("tmux", []string{"has-session", "-t", "=mp-myrepo"}, nil, nil)
 	// Mock piece session creation
@@ -1783,7 +1831,7 @@ func TestHandler_CreatePieceFromPrompt(t *testing.T) {
 
 	mockExec.AddResponse("git", []string{"rev-parse", "--show-toplevel"}, []byte(repoRoot+"\n"), nil)
 	mockExec.AddResponse("git", []string{"rev-parse", "--abbrev-ref", "HEAD"}, []byte("main\n"), nil)
-	mockExec.AddResponse("git", []string{"worktree", "add", worktreePath}, []byte(""), nil)
+	mockExec.AddResponse("git", []string{"worktree", "add", "-b", "add-dark-mode", worktreePath, "main"}, []byte(""), nil)
 
 	info, err := handler.CreatePieceFromPrompt(
 		context.Background(),

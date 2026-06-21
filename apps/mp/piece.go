@@ -142,7 +142,7 @@ func init() {
 	pieceMergeCmd.Flags().BoolVar(&flagForce, "force", false, "Force merge even if piece has child pieces (children are NOT re-homed)")
 	pieceMergeCmd.Flags().BoolVar(&flagPieceMergeReparent, "reparent-children", false, "Merge a piece that has child pieces: re-home them onto the merge target")
 	pieceMergeCmd.Flags().StringVar(&flagPieceMergeReparentStrategy, "reparent-strategy", "", "How to re-home children: 'rebase' (default, rewrites history) or 'merge' (no force-push)")
-	pieceCleanupCmd.Flags().StringVar(&flagMainBranch, "main-branch", "main", "Main branch name to check for merged status (default: main)")
+	pieceCleanupCmd.Flags().StringVar(&flagMainBranch, "main-branch", "", "Main branch name to check for merged status (default: main)")
 	pieceCleanupCmd.Flags().BoolVar(&flagDryRun, "dry-run", false, "Show what would be cleaned without making changes")
 	pieceCleanupCmd.Flags().BoolVar(&flagForce, "force", false, "Skip confirmation prompts")
 	pieceCleanupCmd.Flags().BoolVar(&flagPieceCleanupSchema, "schema", false, "Output JSON schema and exit")
@@ -782,14 +782,7 @@ type cleanupOutput struct {
 func getCleanupInput() (piececmd.CleanupInput, error) {
 	var input piececmd.CleanupInput
 
-	// Flags take priority
-	if flagMainBranch != "" || flagDryRun || flagForce {
-		input = piececmd.CleanupInput{
-			MainBranch: flagMainBranch,
-			DryRun:     flagDryRun,
-			Force:      flagForce,
-		}
-	} else if cli.HasStdinData() {
+	if cli.HasStdinData() {
 		data, err := io.ReadAll(os.Stdin)
 		if err != nil {
 			return piececmd.CleanupInput{}, fmt.Errorf("failed to read stdin: %w", err)
@@ -798,6 +791,17 @@ func getCleanupInput() (piececmd.CleanupInput, error) {
 		if err != nil {
 			return piececmd.CleanupInput{}, err
 		}
+	}
+
+	// Flags override stdin.
+	if flagMainBranch != "" {
+		input.MainBranch = flagMainBranch
+	}
+	if flagDryRun {
+		input.DryRun = true
+	}
+	if flagForce {
+		input.Force = true
 	}
 
 	return piececmd.WithCleanupDefaults(input), nil

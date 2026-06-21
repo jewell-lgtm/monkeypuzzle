@@ -207,6 +207,53 @@ func TestGit_IsBranchMerged(t *testing.T) {
 	}
 }
 
+func TestGit_IsBranchSquashMerged(t *testing.T) {
+	tests := []struct {
+		name       string
+		mockOutput []byte
+		want       bool
+	}{
+		{
+			name:       "all commits applied by patch-id (squash-merged)",
+			mockOutput: []byte("- abc123\n- def456\n"),
+			want:       true,
+		},
+		{
+			name:       "no unique commits (empty piece)",
+			mockOutput: []byte(""),
+			want:       true,
+		},
+		{
+			name:       "has unique commit (not merged)",
+			mockOutput: []byte("+ abc123\n"),
+			want:       false,
+		},
+		{
+			name:       "mix of applied and unique commits (not fully merged)",
+			mockOutput: []byte("- abc123\n+ def456\n"),
+			want:       false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			exec := NewMockExec()
+			exec.AddResponse("git", []string{"cherry", "main", "feature"}, tt.mockOutput, nil)
+
+			git := NewGit(exec)
+			got, err := git.IsBranchSquashMerged(context.Background(), "/repo", "main", "feature")
+
+			if err != nil {
+				t.Errorf("IsBranchSquashMerged() error = %v", err)
+				return
+			}
+			if got != tt.want {
+				t.Errorf("IsBranchSquashMerged() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestGit_GetCommitMessages(t *testing.T) {
 	tests := []struct {
 		name       string

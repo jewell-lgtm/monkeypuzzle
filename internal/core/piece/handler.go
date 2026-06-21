@@ -149,8 +149,20 @@ func (h *Handler) CreatePiece(ctx context.Context, pieceName string, opts Create
 			return PieceInfo{}, fmt.Errorf("failed to create worktree from parent %s: %w", parent, err)
 		}
 	} else {
-		if err := h.git.WorktreeAdd(ctx, repoRoot, worktreePath); err != nil {
-			return PieceInfo{}, fmt.Errorf("failed to create worktree at %s: %w", worktreePath, err)
+		// Top-level piece: branch off the trunk's *remote* tip (origin/main) so a
+		// new piece never inherits commits from whatever branch happens to be
+		// checked out in the repo root. Fetch first to refresh the remote ref.
+		// With no remote (local-only repo), fall back to the local trunk.
+		trunk := h.repoMainBranch(ctx, repoRoot)
+		startPoint := trunk
+		if remote := h.trunkRemote(ctx, repoRoot); remote != "" {
+			if err := h.git.Fetch(ctx, repoRoot, remote, trunk); err != nil {
+				return PieceInfo{}, fmt.Errorf("failed to fetch %s/%s: %w", remote, trunk, err)
+			}
+			startPoint = remote + "/" + trunk
+		}
+		if err := h.git.WorktreeAddFrom(ctx, repoRoot, worktreePath, pieceName, startPoint); err != nil {
+			return PieceInfo{}, fmt.Errorf("failed to create worktree at %s from %s: %w", worktreePath, startPoint, err)
 		}
 	}
 
@@ -910,7 +922,7 @@ type MergeStatus struct {
 // IsBranchMerged checks if a piece branch has been merged to main.
 // Detection priority: 0) is-piece-done.sh user hook (opt-in escape hatch),
 // 1) PR metadata, 2) provider PR list by branch, 3) git branch --merged,
-// 4) commit history.
+// 3.5) git cherry patch-id equivalence (squash-merge), 4) commit history.
 func (h *Handler) IsBranchMerged(ctx context.Context, repoRoot, branchName, mainBranch string) (MergeStatus, error) {
 	status := MergeStatus{}
 
@@ -964,6 +976,23 @@ func (h *Handler) IsBranchMerged(ctx context.Context, repoRoot, branchName, main
 	} else if merged {
 		status.IsMerged = true
 		status.Method = "git"
+		return status, nil
+	}
+
+	// Method 3.5: Check via patch-id equivalence (git cherry). This catches
+	// squash-merges — including mp's own `mp merge` — where the piece commits
+	// land on main under a new SHA, so the branch is neither an ancestor nor
+	// listed by `git branch --merged`.
+	merged, err = h.git.IsBranchSquashMerged(ctx, repoRoot, mainBranch, branchName)
+	if err != nil {
+		// Log warning but continue to fallback
+		h.deps.Output.Write(core.Message{
+			Type:    core.MsgWarning,
+			Content: fmt.Sprintf("git cherry squash-merge check failed: %v", err),
+		})
+	} else if merged {
+		status.IsMerged = true
+		status.Method = "squash"
 		return status, nil
 	}
 
@@ -1663,6 +1692,21 @@ func (h *Handler) repoMainBranch(ctx context.Context, repoRoot string) string {
 		return "master"
 	}
 	return "main"
+}
+
+// trunkRemote picks the remote to base a top-level piece on: "origin" when it
+// exists, otherwise the first configured remote, or "" for a local-only repo.
+func (h *Handler) trunkRemote(ctx context.Context, repoRoot string) string {
+	remotes, err := h.git.Remotes(ctx, repoRoot)
+	if err != nil || len(remotes) == 0 {
+		return ""
+	}
+	for _, r := range remotes {
+		if r == "origin" {
+			return r
+		}
+	}
+	return remotes[0]
 }
 
 func (h *Handler) projectName(repoRoot string) string {

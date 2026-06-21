@@ -266,6 +266,106 @@ func TestCLI_PieceCreate_WithName(t *testing.T) {
 	}
 }
 
+// gitInDir runs a git command in dir, failing the test on error.
+func (e *testEnv) gitInDir(dir string, args ...string) string {
+	e.t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		e.t.Fatalf("git %s failed: %v\n%s", strings.Join(args, " "), err, output)
+	}
+	return strings.TrimSpace(string(output))
+}
+
+// addBareOrigin creates a bare repo, wires it as "origin", and pushes main to it
+// so origin/main exists. Returns the bare repo path.
+func (e *testEnv) addBareOrigin() string {
+	e.t.Helper()
+	bare := filepath.Join(e.tmpDir, "origin.git")
+	cmd := exec.Command("git", "init", "--bare", bare)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		e.t.Fatalf("git init --bare failed: %v\n%s", err, output)
+	}
+	e.gitInDir(e.tmpDir, "remote", "add", "origin", bare)
+	e.gitInDir(e.tmpDir, "push", "origin", "main")
+	return bare
+}
+
+// branchContainsCommit reports whether the branch checked out in worktreeDir
+// contains commitSHA in its history.
+func (e *testEnv) branchContainsCommit(worktreeDir, commitSHA string) bool {
+	e.t.Helper()
+	cmd := exec.Command("git", "merge-base", "--is-ancestor", commitSHA, "HEAD")
+	cmd.Dir = worktreeDir
+	return cmd.Run() == nil
+}
+
+// TestCLI_PieceCreate_BranchesOffOriginMain verifies that a top-level piece is
+// based on the trunk's remote tip (origin/main) — not whatever branch is
+// checked out in the repo root — and falls back to the local trunk with no
+// remote. Regression test for create branching off current HEAD.
+func TestCLI_PieceCreate_BranchesOffOriginMain(t *testing.T) {
+	tests := []struct {
+		name      string
+		useRemote bool
+	}{
+		{name: "with origin remote", useRemote: true},
+		{name: "local-only fallback", useRemote: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env := setupTestEnv(t)
+			defer env.cleanup()
+
+			env.initGitRepo()
+			env.initProject("test")
+
+			if tt.useRemote {
+				env.addBareOrigin()
+			}
+
+			// main's tip after init/push.
+			mainTip := env.gitInDir(env.tmpDir, "rev-parse", "HEAD")
+
+			// Create and check out a divergent non-main branch with its own commit.
+			env.gitInDir(env.tmpDir, "checkout", "-b", "homebrew")
+			if err := os.WriteFile(filepath.Join(env.tmpDir, "brew.txt"), []byte("brew\n"), 0o644); err != nil {
+				t.Fatalf("write brew.txt: %v", err)
+			}
+			env.gitInDir(env.tmpDir, "add", "brew.txt")
+			env.gitInDir(env.tmpDir, "commit", "-m", "homebrew commit")
+			homebrewTip := env.gitInDir(env.tmpDir, "rev-parse", "HEAD")
+
+			// Create a top-level piece while homebrew is checked out.
+			stdout, stderr, err := env.run("create", "--name", "my-piece", "--skip-switch")
+			if err != nil {
+				t.Fatalf("create failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+			}
+
+			var result struct {
+				WorktreePath string `json:"worktree_path"`
+			}
+			if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+				t.Fatalf("invalid JSON output: %v\noutput: %s", err, stdout)
+			}
+			if result.WorktreePath == "" {
+				t.Fatalf("no worktree_path in output: %s", stdout)
+			}
+
+			// The new piece must NOT contain homebrew's commit...
+			if env.branchContainsCommit(result.WorktreePath, homebrewTip) {
+				t.Errorf("piece branch incorrectly contains homebrew commit %s (branched off current HEAD)", homebrewTip)
+			}
+			// ...and MUST contain main's tip.
+			if !env.branchContainsCommit(result.WorktreePath, mainTip) {
+				t.Errorf("piece branch missing main tip %s", mainTip)
+			}
+		})
+	}
+}
+
 // TestCLI_PieceCreate_Schema tests mp create --schema outputs valid JSON
 func TestCLI_PieceCreate_Schema(t *testing.T) {
 	env := setupTestEnv(t)
@@ -610,6 +710,69 @@ func TestCLI_Flatten_DryRun(t *testing.T) {
 	}
 
 	// The worktree must still exist.
+	if _, err := os.Stat(worktree); err != nil {
+		t.Errorf("worktree should still exist after dry-run: %v", err)
+	}
+}
+
+// TestCLI_Cleanup_StdinDryRun is a regression test for a bug where
+// `echo '{"dry_run":true}' | mp cleanup` ignored the stdin dry_run and
+// destructively removed merged pieces. A dry-run must never mutate.
+func TestCLI_Cleanup_StdinDryRun(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	env.initGitRepo()
+	env.initProject("test")
+
+	// Create a piece.
+	stdout, stderr, err := env.run("create", "--name", "merged-piece", "--skip-switch")
+	if err != nil {
+		t.Fatalf("piece create failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+	var created map[string]any
+	if err := json.Unmarshal([]byte(stdout), &created); err != nil {
+		t.Fatalf("invalid JSON from piece create: %v", err)
+	}
+	worktree := created["worktree_path"].(string)
+
+	// Simulate merge: merge the piece branch into main so cleanup detects it.
+	cmd := exec.Command("git", "merge", "merged-piece", "--no-edit")
+	cmd.Dir = env.tmpDir
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git merge failed: %v\n%s", err, output)
+	}
+
+	// Dry-run via stdin must only preview, never delete.
+	stdout, stderr, err = env.runWithStdin(`{"dry_run":true}`, "cleanup")
+	if err != nil {
+		t.Fatalf("cleanup dry-run failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+
+	var result struct {
+		CleanedPieces []struct {
+			PieceName string `json:"piece_name"`
+		} `json:"cleaned_pieces"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("invalid JSON output: %v\noutput: %s", err, stdout)
+	}
+
+	// The merged piece should be reported as a dry-run preview...
+	found := false
+	for _, p := range result.CleanedPieces {
+		if p.PieceName == "merged-piece" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected merged-piece in dry-run preview, got %+v", result.CleanedPieces)
+	}
+	if !strings.Contains(stderr, "[dry-run]") {
+		t.Errorf("expected [dry-run] notice on stderr, got: %s", stderr)
+	}
+
+	// ...but the worktree must still exist.
 	if _, err := os.Stat(worktree); err != nil {
 		t.Errorf("worktree should still exist after dry-run: %v", err)
 	}

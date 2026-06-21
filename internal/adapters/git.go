@@ -431,6 +431,27 @@ func (g *Git) IsBranchMerged(ctx context.Context, workDir, mainBranch, branchNam
 	return false, nil
 }
 
+// IsBranchSquashMerged reports whether every commit unique to branchName is
+// already present in mainBranch by patch-id (i.e. squash-merged). It runs
+// `git cherry <mainBranch> <branchName>`, which prefixes commits absent from
+// main with '+' and commits already applied (matched by patch-id) with '-'.
+// Returns true when there are no '+' lines: empty output (no unique commits)
+// or all '-' lines. A non-zero exit is treated as "no opinion" (false, err) so
+// callers fall through, mirroring IsBranchMerged's warn-and-continue.
+func (g *Git) IsBranchSquashMerged(ctx context.Context, workDir, mainBranch, branchName string) (bool, error) {
+	output, err := g.exec.RunWithDir(ctx, workDir, "git", "cherry", mainBranch, branchName)
+	if err != nil {
+		return false, fmt.Errorf("failed to run git cherry: %w", err)
+	}
+
+	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+		if strings.HasPrefix(line, "+") {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
 // BranchExistsOnRemote checks if a branch exists on the remote.
 func (g *Git) BranchExistsOnRemote(ctx context.Context, workDir, branchName string) (bool, error) {
 	output, err := g.exec.RunWithDir(ctx, workDir, "git", "ls-remote", "--heads", "origin", branchName)
