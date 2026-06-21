@@ -113,4 +113,9 @@ See [docs/commands.md](docs/commands.md) for full reference.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+Per-component — see [LICENSING.md](LICENSING.md).
+
+- CLI, MCP server, and tmux plugin: MIT ([LICENSE](LICENSE))
+- Server (`apps/mp-server`, `internal/server`): source-available under FSL-1.1-MIT
+
+The "Monkey Puzzle" name and logos are trademarks — see [TRADEMARK.md](TRADEMARK.md).
