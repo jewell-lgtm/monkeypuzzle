@@ -5,6 +5,7 @@ package piece_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1734,5 +1735,100 @@ func TestIntegration_AbandonPiece_DoesNotSwitchWhenNotInSession(t *testing.T) {
 
 	if len(mux.switchTos) != 0 {
 		t.Errorf("expected no SwitchTo calls when InSession() is false, got %#v", mux.switchTos)
+	}
+}
+
+// TestIntegration_MergePiece_RecordsMergedMarker_MultiCommit proves the fix
+// end-to-end with real git: a MULTI-commit piece squash-merged by MergePiece
+// must (a) persist the durable Merged marker in piece metadata, and (b) be
+// reported merged via method "recorded" by IsBranchMerged. git-cherry /
+// branch --merged cannot detect such a squash, so the recorded marker is the
+// only signal cleanup/done can rely on.
+func TestIntegration_MergePiece_RecordsMergedMarker_MultiCommit(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	tmpDataHome, err := os.MkdirTemp("", "mp-data-*")
+	if err != nil {
+		t.Fatalf("failed to create temp data dir: %v", err)
+	}
+	t.Cleanup(func() {
+		os.RemoveAll(tmpDataHome)
+		paths.ResetDataDir()
+	})
+	paths.SetDataDir(tmpDataHome)
+
+	tmpDir, err := os.MkdirTemp("", "mp-integration-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	setupGitRepo(t, tmpDir)
+	setupMonkeypuzzleConfig(t, tmpDir)
+
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get working directory: %v", err)
+	}
+	defer func() { _ = os.Chdir(oldWd) }()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("failed to change directory: %v", err)
+	}
+
+	deps := core.Deps{
+		FS:     adapters.NewOSFS(""),
+		Output: adapters.NewBufferOutput(),
+		Exec:   adapters.NewOSExec(),
+	}
+	handler := piece.NewHandler(deps)
+	ctx := context.Background()
+
+	info, err := handler.CreatePiece(ctx, "multi-commit-piece", piece.CreatePieceOptions{})
+	if err != nil {
+		t.Fatalf("CreatePiece failed: %v", err)
+	}
+	worktree := info.WorktreePath
+
+	// Make THREE distinct commits in the piece worktree so the squash collapses
+	// them into one combined commit whose patch-id matches none of them.
+	for i := 1; i <= 3; i++ {
+		fname := filepath.Join(worktree, fmt.Sprintf("file%d.txt", i))
+		if err := os.WriteFile(fname, []byte(fmt.Sprintf("content %d", i)), 0644); err != nil {
+			t.Fatalf("write file%d: %v", i, err)
+		}
+		runGit(t, worktree, "add", ".")
+		runGit(t, worktree, "commit", "-m", fmt.Sprintf("commit %d", i))
+	}
+
+	// Merge the piece (squash) from inside its worktree.
+	res, err := handler.MergePiece(ctx, worktree, piece.MergeInput{MainBranch: "main"})
+	if err != nil {
+		t.Fatalf("MergePiece failed: %v", err)
+	}
+	if res.Status != "merged" {
+		t.Fatalf("expected status merged, got %q", res.Status)
+	}
+
+	// (a) The durable marker is persisted in piece metadata.
+	meta, err := piece.ReadPieceMetadata(worktree, deps.FS)
+	if err != nil {
+		t.Fatalf("ReadPieceMetadata: %v", err)
+	}
+	if !meta.Merged {
+		t.Fatalf("expected piece metadata Merged=true after MergePiece, got false")
+	}
+
+	// (b) IsBranchMerged reports merged via the recorded marker.
+	status, err := handler.IsBranchMerged(ctx, worktree, res.PieceBranch, "main")
+	if err != nil {
+		t.Fatalf("IsBranchMerged: %v", err)
+	}
+	if !status.IsMerged {
+		t.Fatalf("expected IsMerged=true, got false (method %q)", status.Method)
+	}
+	if status.Method != "recorded" {
+		t.Errorf("expected method %q, got %q", "recorded", status.Method)
 	}
 }

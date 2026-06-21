@@ -22,6 +22,28 @@ type PieceMetadata struct {
 	// Prompt is the free-form description a prompt-created piece was made from.
 	// Empty for pieces created from a bare name.
 	Prompt string `json:"prompt,omitempty"`
+	// Merged records that `mp merge` squash-merged this piece's branch into its
+	// target. It is the authoritative, durable signal cleanup/done consult first:
+	// a multi-commit squash collapses into one commit on the target whose
+	// patch-id matches none of the piece's individual commits, so git-based
+	// heuristics (branch --merged, git cherry) cannot detect it. Recording at
+	// merge time sidesteps that entirely.
+	Merged bool `json:"merged,omitempty"`
+}
+
+// MarkPieceMerged sets the durable merged marker on a piece's metadata so that
+// cleanup/done recognise it as merged regardless of squash topology. Reads,
+// flips the flag, and writes back, preserving all other fields.
+func MarkPieceMerged(worktreePath string, fs core.FS) error {
+	metadata, err := ReadPieceMetadata(worktreePath, fs)
+	if err != nil {
+		return err
+	}
+	if metadata.Merged {
+		return nil
+	}
+	metadata.Merged = true
+	return WritePieceMetadata(worktreePath, *metadata, fs)
 }
 
 // DefaultPieceMetadata returns metadata with default values (parent=main)

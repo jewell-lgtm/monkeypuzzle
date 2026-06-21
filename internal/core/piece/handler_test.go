@@ -93,6 +93,77 @@ func TestHandler_Status_InMainRepo(t *testing.T) {
 	}
 }
 
+// TestHandler_IsBranchMerged_RecordedMarker proves the highest-priority
+// detection: when `mp merge` has recorded the durable Merged marker in piece
+// metadata, IsBranchMerged short-circuits to merged via method "recorded" —
+// regardless of git topology. This is what makes a MULTI-commit squash merge
+// (which no git-cherry / branch --merged heuristic can detect) recognisable by
+// cleanup/done.
+func TestHandler_IsBranchMerged_RecordedMarker(t *testing.T) {
+	const (
+		branch = "feature-branch"
+		mainBr = "main"
+	)
+
+	tests := []struct {
+		name       string
+		recorded   bool
+		wantMerged bool
+		wantMethod string
+	}{
+		{
+			name:       "recorded marker short-circuits to merged",
+			recorded:   true,
+			wantMerged: true,
+			wantMethod: "recorded",
+		},
+		{
+			name:       "no marker falls through to git heuristics (not merged)",
+			recorded:   false,
+			wantMerged: false,
+			wantMethod: "none",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fs := adapters.NewMemoryFS()
+			out := adapters.NewBufferOutput()
+			mockExec := adapters.NewMockExec()
+			deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
+			handler := piece.NewHandler(deps)
+
+			// Use a non-git temp path so projectdir.WorktreeDir deterministically
+			// resolves to <repoRoot>/.monkeypuzzle (its real-git lookup falls back).
+			repoRoot := t.TempDir()
+
+			// Seed piece metadata via the real writer so the read path matches.
+			meta := piece.PieceMetadata{Parent: "main", Merged: tt.recorded}
+			if err := piece.WritePieceMetadata(repoRoot, meta, fs); err != nil {
+				t.Fatalf("WritePieceMetadata: %v", err)
+			}
+
+			// Mock the git fallbacks so the no-marker case cleanly reports
+			// "not merged" (method "none") instead of erroring out.
+			mockExec.AddResponse("git", []string{"ls-remote", "--heads", "origin", branch}, []byte(""), nil)
+			mockExec.AddResponse("git", []string{"branch", "--merged", mainBr}, []byte("* main\n"), nil)
+			mockExec.AddResponse("git", []string{"rev-parse", branch}, []byte("deadbeef\n"), nil)
+			mockExec.AddResponse("git", []string{"merge-base", "--is-ancestor", "deadbeef", mainBr}, nil, fmt.Errorf("exit status 1"))
+
+			status, err := handler.IsBranchMerged(context.Background(), repoRoot, branch, mainBr)
+			if err != nil {
+				t.Fatalf("IsBranchMerged: %v", err)
+			}
+			if status.IsMerged != tt.wantMerged {
+				t.Errorf("IsMerged = %v, want %v", status.IsMerged, tt.wantMerged)
+			}
+			if status.Method != tt.wantMethod {
+				t.Errorf("Method = %q, want %q", status.Method, tt.wantMethod)
+			}
+		})
+	}
+}
+
 func TestHandler_Status_InWorktree(t *testing.T) {
 	fs := adapters.NewMemoryFS()
 	out := adapters.NewBufferOutput()

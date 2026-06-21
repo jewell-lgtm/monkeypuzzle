@@ -818,6 +818,15 @@ func (h *Handler) MergePiece(ctx context.Context, workDir string, input MergeInp
 		return MergeResult{}, fmt.Errorf("failed to commit squashed changes: %w", err)
 	}
 
+	// Record the durable merged marker now that the squash + commit succeeded.
+	// This is the authoritative signal cleanup/done consult first: a multi-commit
+	// squash leaves a single commit on the target whose patch-id matches none of
+	// the piece's commits, so git heuristics never detect it. Recording here makes
+	// both single- and multi-commit `mp merge` squashes detectable.
+	if err := MarkPieceMerged(status.WorktreePath, h.deps.FS); err != nil {
+		return MergeResult{}, fmt.Errorf("piece merged into %s, but failed to record merged marker: %w", targetBranch, err)
+	}
+
 	// Run after-piece-merge hook
 	if err := h.hooks.RunHook(ctx, mainRepoRoot, HookAfterPieceMerge, hookCtx); err != nil {
 		return MergeResult{}, fmt.Errorf("after-piece-merge hook failed: %w", err)
@@ -911,7 +920,8 @@ func getPiecesDir(repoRoot string) (string, error) {
 type MergeStatus struct {
 	// IsMerged is true if the branch has been merged to main
 	IsMerged bool `json:"is_merged"`
-	// Method indicates how the merge was detected: "pr", "git", or "commit"
+	// Method indicates how the merge was detected: "recorded", "pr", "git",
+	// "squash", or "commit"
 	Method string `json:"method,omitempty"`
 	// PRNumber is set if merge was detected via PR status
 	PRNumber int `json:"pr_number,omitempty"`
@@ -920,9 +930,11 @@ type MergeStatus struct {
 }
 
 // IsBranchMerged checks if a piece branch has been merged to main.
-// Detection priority: 0) is-piece-done.sh user hook (opt-in escape hatch),
-// 1) PR metadata, 2) provider PR list by branch, 3) git branch --merged,
-// 3.5) git cherry patch-id equivalence (squash-merge), 4) commit history.
+// Detection priority: -1) recorded merged marker (set by `mp merge`; the only
+// signal that survives a multi-commit squash), 0) is-piece-done.sh user hook
+// (opt-in escape hatch), 1) PR metadata, 2) provider PR list by branch,
+// 3) git branch --merged, 3.5) git cherry patch-id equivalence (squash-merge),
+// 4) commit history.
 func (h *Handler) IsBranchMerged(ctx context.Context, repoRoot, branchName, mainBranch string) (MergeStatus, error) {
 	status := MergeStatus{}
 
@@ -936,6 +948,18 @@ func (h *Handler) IsBranchMerged(ctx context.Context, repoRoot, branchName, main
 		})
 	}
 	status.ExistsOnRemote = existsOnRemote
+
+	// Method "recorded" (highest priority): consult the durable marker `mp merge`
+	// persists in piece metadata. This is the only signal that survives a
+	// multi-commit squash-merge — git heuristics see a single combined commit
+	// whose patch-id matches none of the piece's commits. repoRoot here is the
+	// piece worktree path (cleanup/done pass it before removal), so the metadata
+	// is still readable. A missing/unreadable marker just falls through.
+	if metadata, err := ReadPieceMetadata(repoRoot, h.deps.FS); err == nil && metadata.Merged {
+		status.IsMerged = true
+		status.Method = "recorded"
+		return status, nil
+	}
 
 	// Method 0: Defer to is-piece-done.sh if the user provided one. Exit 0 means
 	// merged. Anything else means "no opinion" and we fall through to built-ins.
