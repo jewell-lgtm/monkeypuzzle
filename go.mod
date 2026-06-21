@@ -20,6 +20,7 @@ require (
 	github.com/workos/workos-go/v4 v4.46.1
 	go.temporal.io/api v1.62.12
 	go.temporal.io/sdk v1.45.0
+	maragu.dev/gomponents v1.3.0
 )
 
 require (

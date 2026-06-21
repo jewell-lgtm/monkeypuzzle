@@ -1,0 +1,31 @@
+:root { --fg: #1b1b2b; --muted: #6a6a85; --line: #e3e3ef; --accent: #6c4ad6; --bg: #faf9ff; }
+* { box-sizing: border-box; }
+body { margin: 0; font: 15px/1.5 -apple-system, system-ui, sans-serif; color: var(--fg); background: var(--bg); }
+.nav { display: flex; justify-content: space-between; align-items: center; padding: 12px 24px; border-bottom: 1px solid var(--line); background: #fff; }
+.brand { font-weight: 700; text-decoration: none; color: var(--fg); }
+main { max-width: 880px; margin: 0 auto; padding: 24px; }
+.bar { display: flex; justify-content: space-between; align-items: center; }
+h1 { font-size: 22px; }
+button { font: inherit; cursor: pointer; border: 1px solid var(--accent); background: var(--accent); color: #fff; border-radius: 8px; padding: 7px 14px; }
+button:disabled { opacity: .6; cursor: default; }
+button.link { border: none; background: none; color: var(--accent); padding: 0; }
+a { color: var(--accent); }
+.muted { color: var(--muted); }
+.tag { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; background: var(--line); color: var(--muted); border-radius: 4px; padding: 1px 6px; margin-left: 6px; }
+.branch { color: var(--muted); font-size: 13px; margin-left: 8px; }
+ul.repos { list-style: none; padding: 0; }
+ul.repos li { padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; margin-bottom: 8px; background: #fff; }
+.skeleton-row { height: 40px; border-radius: 8px; margin-bottom: 8px; background: linear-gradient(90deg, #eee, #f6f6fb, #eee); background-size: 200% 100%; animation: pulse 1.2s infinite; }
+@keyframes pulse { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+.stack { border: 1px solid var(--line); border-radius: 10px; padding: 8px 14px; margin-bottom: 14px; background: #fff; }
+.stack-tree, .stack-tree ol { list-style: none; padding-left: 18px; }
+.stack-tree > li { padding-left: 0; }
+.pr { display: flex; align-items: center; gap: 8px; padding: 5px 0; }
+.toggle { border: none; background: none; color: var(--muted); padding: 0; width: 16px; }
+.toggle-spacer { display: inline-block; width: 16px; }
+.pr-num { font-weight: 600; text-decoration: none; }
+.pr-title { flex: 1; }
+.state { font-size: 11px; border-radius: 4px; padding: 1px 6px; }
+.state-OPEN { background: #e6f6ec; color: #1a7f43; }
+.state-MERGED { background: #efe7fb; color: #6c4ad6; }
+.state-CLOSED { background: #fbe7e7; color: #b23b3b; }
