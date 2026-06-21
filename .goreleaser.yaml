@@ -1,0 +1,92 @@
+# GoReleaser — builds the open-source CLI (mp) + its MCP bridge (mp-mcp), cuts a
+# GitHub release, and publishes a Homebrew formula to jewell-lgtm/homebrew-tap.
+#
+# Only the MIT-licensed binaries are released here (apps/mp, apps/mp-mcp). The
+# FSL-1.1-MIT server (apps/mp-server) is intentionally NOT distributed via brew.
+#
+# Release:  git tag v1.2.3 && git push origin v1.2.3   (CI does the rest)
+# Validate: goreleaser check   ·   Dry run: goreleaser release --snapshot --clean
+version: 2
+
+project_name: monkeypuzzle
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: mp
+    main: ./apps/mp
+    binary: mp
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+    goos: [darwin, linux]
+    goarch: [amd64, arm64]
+
+  - id: mp-mcp
+    main: ./apps/mp-mcp
+    binary: mp-mcp
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    goos: [darwin, linux]
+    goarch: [amd64, arm64]
+
+archives:
+  - id: monkeypuzzle
+    # Both binaries ship in one archive so the formula installs mp + mp-mcp
+    # side by side (mp-mcp resolves mp as a sibling on PATH).
+    ids: [mp, mp-mcp]
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    files:
+      - LICENSE
+      - LICENSING.md
+      - README.md
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-dev"
+
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "Merge branch"
+
+homebrew_casks:
+  - name: monkeypuzzle
+    # Both binaries are symlinked into the Homebrew prefix; mp-mcp resolves mp
+    # as a sibling on PATH.
+    binaries:
+      - mp
+      - mp-mcp
+    repository:
+      owner: jewell-lgtm
+      name: homebrew-tap
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    directory: Casks
+    homepage: "https://github.com/jewell-lgtm/monkeypuzzle"
+    description: "Stack your branches — a CLI for stacked-PR git workflows (pieces)."
+    license: MIT
+    commit_author:
+      name: monkeypuzzle-bot
+      email: 41898282+github-actions[bot]@users.noreply.github.com
+    # Binaries aren't code-signed, so strip the Gatekeeper quarantine flag on
+    # install — otherwise macOS blocks the first run of an unsigned binary.
+    hooks:
+      post:
+        install: |
+          system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/mp", "#{staged_path}/mp-mcp"]

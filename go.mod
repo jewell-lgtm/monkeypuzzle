@@ -1,8 +1,8 @@
 module github.com/jewell-lgtm/monkeypuzzle
 
-go 1.25.0
+go 1.26.0
 
-toolchain go1.25.5
+toolchain go1.26.4
 
 require (
 	github.com/MicahParks/keyfunc/v3 v3.8.0

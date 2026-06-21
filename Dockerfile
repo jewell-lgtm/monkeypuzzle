@@ -35,9 +35,9 @@ RUN apt-get update && apt-get install -y \
     # Cleanup
     && rm -rf /var/lib/apt/lists/*
 
-# Install Go 1.24.11 (matching go.mod toolchain)
+# Install Go (matching go.mod toolchain)
 # Using the official Go binary distribution
-ENV GO_VERSION=1.25.5
+ENV GO_VERSION=1.26.4
 RUN ARCH=$(dpkg --print-architecture) && \
     if [ "$ARCH" = "arm64" ]; then GO_ARCH="arm64"; else GO_ARCH="amd64"; fi && \
     wget -q https://go.dev/dl/go${GO_VERSION}.linux-${GO_ARCH}.tar.gz && \

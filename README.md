@@ -19,7 +19,7 @@ git-town manages **stacked branches** in a single working directory. mp manages 
 
 ```bash
 # 1. Install and point mp at tmux (once)
-go install github.com/jewell-lgtm/monkeypuzzle@latest
+brew install jewell-lgtm/tap/monkeypuzzle   # or: go install github.com/jewell-lgtm/monkeypuzzle/apps/mp@latest
 mp config set multiplexer tmux
 
 cd path/to/your/repo
