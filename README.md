@@ -108,6 +108,7 @@ See [docs/commands.md](docs/commands.md) for full reference.
 - [Workflow guide](docs/workflow.md) — lifecycle, hook patterns
 - [Commands reference](docs/commands.md) — flags, JSON schemas
 - [Architecture](docs/architecture.md) — how it's built
+- [Self-hosting](docs/self-hosting.md) — run the server on your own infra via Helm
 - [Contributing](docs/contributing.md) — dev setup, testing philosophy
 - [tmux plugin](apps/tmux/README.md) — fzf popup to switch/create pieces in tmux
 

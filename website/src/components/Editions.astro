@@ -2,10 +2,10 @@
 import Card from './Card.astro';
 import Badge from './Badge.astro';
 import Button from './Button.astro';
-import { LOGIN_URL, GITHUB_URL } from '../config';
+import { GITHUB_URL } from '../config';
 
-// Self-host points at the source-available server package.
-const SELF_HOST_URL = `${GITHUB_URL}/tree/main/apps/mp-server`;
+// Self-host points at the Helm-based self-hosting guide.
+const SELF_HOST_URL = `${GITHUB_URL}/blob/main/docs/self-hosting.md`;
 ---
 
 <section class="section" id="editions" style="padding-top:0">
@@ -37,15 +37,15 @@ const SELF_HOST_URL = `${GITHUB_URL}/tree/main/apps/mp-server`;
       <Card pad accent="amber" class="tier tier--feature">
         <div class="tier__head">
           <h3>Monkeypuzzle Cloud</h3>
-          <Badge tone="amber" dot>Hosted</Badge>
+          <Badge tone="amber" dot>Coming soon</Badge>
         </div>
         <p>
-          Sign in with GitHub and we run the server for you. Every repo's stack,
+          Sign in with GitHub and we'll run the server for you. Every repo's stack,
           synced and visualized — nothing to deploy, nothing to maintain.
         </p>
         <div class="tier__foot">
-          <Button variant="accent" href={LOGIN_URL} iconTrailing="ArrowRight">Get started</Button>
-          <span class="tier__note">sign in with GitHub</span>
+          <Button variant="accent" iconTrailing="Clock" disabled>Coming soon</Button>
+          <span class="tier__note">hosted PaaS · in the works</span>
         </div>
       </Card>
 
