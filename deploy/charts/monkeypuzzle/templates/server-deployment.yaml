@@ -30,6 +30,7 @@ spec:
       {{- end }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- include "monkeypuzzle.waitForDeps" . | nindent 6 }}
       containers:
         - name: server
           image: {{ include "monkeypuzzle.image" . | quote }}

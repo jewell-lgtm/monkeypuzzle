@@ -109,6 +109,31 @@ it embeds the Postgres password.
 {{- end }}
 {{- end -}}
 
+{{/*
+initContainers that block until the bundled Postgres/Temporal accept TCP, so the
+server/worker (which fail-fast on a failed DB migrate or Temporal dial at boot)
+start cleanly instead of crash-looping. No-op when both deps are external.
+*/}}
+{{- define "monkeypuzzle.waitForDeps" -}}
+{{- if or .Values.postgres.enabled .Values.temporal.enabled }}
+initContainers:
+  - name: wait-for-deps
+    image: busybox:1.37
+    securityContext:
+      {{- toYaml .Values.containerSecurityContext | nindent 6 }}
+    command: ["sh", "-c"]
+    args:
+      - |
+        {{- if .Values.postgres.enabled }}
+        until nc -z {{ include "monkeypuzzle.postgresHost" . }} 5432; do echo "waiting for postgres..."; sleep 2; done
+        {{- end }}
+        {{- if .Values.temporal.enabled }}
+        until nc -z {{ include "monkeypuzzle.fullname" . }}-temporal 7233; do echo "waiting for temporal..."; sleep 2; done
+        {{- end }}
+        echo "dependencies ready"
+{{- end }}
+{{- end -}}
+
 {{/* Resolved image reference. */}}
 {{- define "monkeypuzzle.image" -}}
 {{- printf "%s:%s" .Values.image.repository (default .Chart.AppVersion .Values.image.tag) -}}

@@ -123,8 +123,10 @@ externalDatabase:
 # production-grade, durable Temporal (e.g. Temporal Cloud or a temporal release).
 temporal:
   enabled: true
-  # Pin to a specific tag for reproducibility (avoid :latest).
-  image: temporalio/temporal:1.27.2
+  # Pin to a specific tag for reproducibility (avoid :latest). This is the
+  # temporal CLI image (bundles the dev server); it versions separately from
+  # the Temporal server it ships (1.7.2 -> server 1.31).
+  image: temporalio/temporal:1.7.2
   # Expose the Temporal Web UI (port 8233) via a Service. Off by default.
   ui:
     enabled: false
