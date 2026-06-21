@@ -2,7 +2,9 @@
 # syntax=docker/dockerfile:1
 FROM node:22-alpine AS build
 WORKDIR /app
-RUN corepack enable
+# Pin pnpm: corepack defaults to latest (pnpm 11), which makes the
+# ignored-build-scripts notice fatal (ERR_PNPM_IGNORED_BUILDS) on install.
+RUN corepack enable && corepack prepare pnpm@9.15.9 --activate
 COPY package.json pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile
 COPY . .
