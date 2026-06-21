@@ -65,7 +65,7 @@ func runServe() error {
 	// MCP resource server: validate WorkOS tokens against AuthKit's JWKS, bind
 	// to the resource (this server's public URL).
 	resourceURL := cfg.PublicBaseURL
-	verifier, err := workos.NewTokenVerifier(cfg.AuthKitDomain+"/oauth2/jwks", cfg.AuthKitDomain, resourceURL, st)
+	verifier, err := workos.NewTokenVerifier(cfg.WorkOSJWKSURL, cfg.AuthKitDomain, resourceURL, st)
 	if err != nil {
 		return fmt.Errorf("mcp token verifier: %w", err)
 	}

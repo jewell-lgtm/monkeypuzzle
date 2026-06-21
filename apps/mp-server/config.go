@@ -15,7 +15,8 @@ type Config struct {
 	TemporalHostPort   string
 	WorkOSAPIKey       string
 	WorkOSClientID     string
-	AuthKitDomain      string // e.g. https://your-app.authkit.app (JWKS, issuer, AS metadata)
+	AuthKitDomain      string // e.g. https://your-app.authkit.app (token issuer + AS metadata)
+	WorkOSJWKSURL      string // where the MCP verifier fetches signing keys
 	SessionSecret      []byte
 	TokenEncryptionKey []byte // exactly 32 bytes (AES-256-GCM)
 	SecureCookies      bool
@@ -63,6 +64,10 @@ func LoadConfig() (Config, error) {
 		return Config{}, fmt.Errorf("TOKEN_ENCRYPTION_KEY must be base64 of exactly 32 bytes")
 	}
 	cfg.TokenEncryptionKey = key
+
+	// Default the MCP verifier's JWKS to WorkOS's API endpoint, which is always
+	// reachable (independent of whether a custom AuthKit domain is deployed).
+	cfg.WorkOSJWKSURL = envOr("WORKOS_JWKS_URL", "https://api.workos.com/sso/jwks/"+cfg.WorkOSClientID)
 
 	return cfg, nil
 }
