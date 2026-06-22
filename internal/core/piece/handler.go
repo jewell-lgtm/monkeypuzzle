@@ -286,7 +286,7 @@ func (h *Handler) AdoptPiece(ctx context.Context, input AdoptPieceInput) (PieceI
 	// Determine piece name (use input.Name or branch name).
 	pieceName := input.Name
 	if pieceName == "" {
-		pieceName = SanitizePieceName(plainBranch)
+		pieceName = SanitizePieceName(StripBranchPrefix(plainBranch))
 	} else {
 		pieceName = SanitizePieceName(pieceName)
 	}
