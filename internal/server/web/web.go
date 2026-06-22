@@ -1,7 +1,8 @@
 // Package web is the human-facing HTML/AlpineJS presentation adapter over
 // internal/server/service. It renders server-side templates and hydrates the
 // repo list from a fragment endpoint (skeleton-first for fast TTFB), and owns
-// the WorkOS login flow + session middleware.
+// the per-provider OAuth login flow (GitHub via WorkOS, GitLab direct) +
+// session middleware.
 package web
 
 import (
@@ -26,8 +27,8 @@ var staticFS embed.FS
 type Deps struct {
 	Service       *service.Service
 	Store         store.Store
-	Login         identity.Provider // pluggable login: authorization URL + code exchange
-	GitHub        forge.Factory     // derive the forge profile from the passed-through token
+	Logins        map[string]identity.Provider // pluggable login per provider (?provider=)
+	Forge         forge.Registry               // derive the forge profile from the token
 	Session       session.Codec
 	Cipher        crypto.TokenCipher
 	SecureCookies bool // set the Secure flag on cookies (true behind HTTPS)

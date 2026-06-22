@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/server/auth/crypto"
+	"github.com/jewell-lgtm/monkeypuzzle/internal/server/auth/identity"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/server/auth/session"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/server/auth/workos"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/server/forge"
@@ -42,8 +43,8 @@ func TestWeb_Smoke(t *testing.T) {
 	h := NewHandler(Deps{
 		Service: service.New(mem, noopTrigger{}),
 		Store:   mem,
-		Login:   workos.NewStubClient("ext1", "ghtok"),
-		GitHub:  forge.NewStubFactory(),
+		Logins:  map[string]identity.Provider{"github": workos.NewStubClient("ext1", "ghtok")},
+		Forge:   forge.Registry{"github": forge.NewStubFactory()},
 		Session: codec,
 		Cipher:  cipher,
 	})
@@ -74,6 +75,55 @@ func TestWeb_Smoke(t *testing.T) {
 	}
 	if body := getBody(t, authed, ts.URL+"/partials/repos"); !strings.Contains(body, "o/r") {
 		t.Fatalf("repos fragment missing repo: %s", body)
+	}
+}
+
+// TestWeb_LoginProviderSelection covers the provider chooser and per-provider
+// flow: bare /login renders a chooser with both providers; /login?provider=github
+// starts the (stub) GitHub flow; an unknown provider is a 400.
+func TestWeb_LoginProviderSelection(t *testing.T) {
+	mem := store.NewMemoryStore()
+	key := make([]byte, crypto.KeySize)
+	cipher, _ := crypto.NewAESGCMCipher(key)
+	codec := session.NewSecureCookieCodec([]byte("smoke-secret-smoke-secret-smoke-1"))
+
+	h := NewHandler(Deps{
+		Service: service.New(mem, noopTrigger{}),
+		Store:   mem,
+		Logins:  map[string]identity.Provider{"github": workos.NewStubClient("ext1", "ghtok")},
+		Forge:   forge.Registry{"github": forge.NewStubFactory()},
+		Session: codec,
+		Cipher:  cipher,
+	})
+	mux := http.NewServeMux()
+	h.Routes(mux)
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	noRedirect := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+
+	// Bare /login renders the chooser with both providers.
+	body := getBody(t, &http.Client{}, ts.URL+"/login")
+	if !strings.Contains(body, "/login?provider=github") || !strings.Contains(body, "/login?provider=gitlab") {
+		t.Fatalf("login chooser missing provider links: %s", body)
+	}
+
+	// /login?provider=github redirects to the stub authorization URL.
+	resp, err := noRedirect.Get(ts.URL + "/login?provider=github")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusFound || !strings.Contains(resp.Header.Get("Location"), "authkit.test") {
+		t.Fatalf("github login: status %d location %q", resp.StatusCode, resp.Header.Get("Location"))
+	}
+
+	// Unknown provider is a 400.
+	resp, err = noRedirect.Get(ts.URL + "/login?provider=bogus")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("unknown provider: want 400, got %d", resp.StatusCode)
 	}
 }
 
