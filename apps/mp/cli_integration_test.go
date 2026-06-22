@@ -1023,6 +1023,63 @@ func TestCLI_Cleanup_Apply(t *testing.T) {
 	}
 }
 
+// TestCLI_Cleanup_AppliesViaForceAndStdin covers the two non-flag mutation entry
+// points the dry-run-by-default redesign must keep working: the `--force`
+// back-compat alias, and the agent-facing `{"apply":true}` over stdin. Both must
+// actually remove the merged worktree, not just preview.
+func TestCLI_Cleanup_AppliesViaForceAndStdin(t *testing.T) {
+	cases := []struct {
+		name  string
+		stdin string
+		args  []string
+	}{
+		{name: "force flag alias", args: []string{"cleanup", "--force"}},
+		{name: "apply over stdin", stdin: `{"apply":true}`, args: []string{"cleanup"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			env := setupTestEnv(t)
+			defer env.cleanup()
+
+			env.initGitRepo()
+			env.initProject("test")
+			worktree := setupMergedPiece(t, env, "merged-piece")
+
+			var stdout, stderr string
+			var err error
+			if tc.stdin != "" {
+				stdout, stderr, err = env.runWithStdin(tc.stdin, tc.args...)
+			} else {
+				stdout, stderr, err = env.run(tc.args...)
+			}
+			if err != nil {
+				t.Fatalf("cleanup failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+			}
+
+			var result struct {
+				CleanedPieces []struct {
+					PieceName string `json:"piece_name"`
+				} `json:"cleaned_pieces"`
+			}
+			if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+				t.Fatalf("invalid JSON output: %v\noutput: %s", err, stdout)
+			}
+			found := false
+			for _, p := range result.CleanedPieces {
+				if p.PieceName == "merged-piece" {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("expected merged-piece in cleaned list, got %+v", result.CleanedPieces)
+			}
+			if _, err := os.Stat(worktree); !os.IsNotExist(err) {
+				t.Errorf("worktree should be removed, stat err: %v", err)
+			}
+		})
+	}
+}
+
 // runWithEnv executes mp command with custom environment variables
 func (e *testEnv) runWithEnv(env map[string]string, args ...string) (string, string, error) {
 	cmd := exec.Command(e.binPath, args...)

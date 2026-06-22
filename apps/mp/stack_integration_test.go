@@ -208,6 +208,43 @@ func TestCLI_StackSync_FromCustomRef(t *testing.T) {
 	}
 }
 
+// TestCLI_StackSync_FromUnconfiguredRemoteWarns verifies that an explicit --from
+// pointing at a remote that isn't configured does not silently no-op: it warns,
+// still completes (syncing onto the local main as-is), and never fetches.
+func TestCLI_StackSync_FromUnconfiguredRemoteWarns(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	env.initGitRepo()
+	env.initProject("test")
+
+	createPiece(t, env, "a", "main")
+	mainBefore := env.gitInDir(env.tmpDir, "rev-parse", "HEAD")
+
+	// 'nope' is not a configured remote; sync must warn rather than fetch.
+	stdout, stderr, err := env.run("stack", "sync", "--from", "nope/main", "--apply")
+	if err != nil {
+		t.Fatalf("stack sync failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+
+	var result struct {
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("invalid JSON output: %v\noutput: %s", err, stdout)
+	}
+	if result.Status != "synced" {
+		t.Errorf("expected status=synced, got %q", result.Status)
+	}
+	if !strings.Contains(stderr, "nope") || !strings.Contains(strings.ToLower(stderr), "configured") {
+		t.Errorf("expected a warning naming the unconfigured remote, got stderr: %s", stderr)
+	}
+	// Local main untouched (nothing fetched).
+	if got := env.gitInDir(env.tmpDir, "rev-parse", "HEAD"); got != mainBefore {
+		t.Errorf("local main moved despite unconfigured remote: got %s want %s", got, mainBefore)
+	}
+}
+
 // createPiece creates a piece with the given name and parent, returning its worktree path.
 func createPiece(t *testing.T, env *testEnv, name, parent string) string {
 	t.Helper()

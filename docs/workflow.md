@@ -255,8 +255,9 @@ ls .monkeypuzzle/pieces/                 # raw filesystem (from the repo root)
 ### Cleaning up
 
 ```bash
-mp cleanup                               # remove all merged pieces
-mp cleanup --dry-run                     # preview
+mp cleanup                               # preview merged pieces (dry-run by default)
+mp cleanup --apply                       # remove all merged pieces
+mp cleanup --dry-run                     # explicit preview (never prompts)
 
 mp abandon --name foo                    # discard unmerged piece
 mp abandon --name foo --force            # also discard uncommitted changes

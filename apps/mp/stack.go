@@ -290,9 +290,11 @@ func runStackSync(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Ask a human where to sync main from when they didn't say. Non-interactive
-	// callers fall through and the handler defaults to origin/<main>.
-	if input.From == "" && cli.IsTerminal() && !cli.HasStdinData() {
+	// Ask a human where to sync main from when they didn't say. Skipped for an
+	// explicit --dry-run (a read-only preview, where the source only affects a
+	// cosmetic line); non-interactive callers fall through and the handler
+	// defaults to origin/<main>.
+	if input.From == "" && !input.DryRun && cli.IsTerminal() && !cli.HasStdinData() {
 		mainName := input.MainBranch
 		if mainName == "" {
 			mainName = "main"

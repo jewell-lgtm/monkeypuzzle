@@ -214,7 +214,7 @@ func (h *Handler) Sync(ctx context.Context, workDir string, in SyncInput) (SyncR
 // and reports which pieces would be updated, without fetching, snapshotting, or
 // touching any branch. It is the read-only half of Sync used for dry-runs.
 func (h *Handler) previewSync(ctx context.Context, workDir string, in SyncInput) (SyncResult, error) {
-	_, piecesDir, err := h.resolveRepo(ctx, workDir)
+	mainRepoRoot, piecesDir, err := h.resolveRepo(ctx, workDir)
 	if err != nil {
 		return SyncResult{}, err
 	}
@@ -226,7 +226,18 @@ func (h *Handler) previewSync(ctx context.Context, workDir string, in SyncInput)
 		return SyncResult{}, err
 	}
 
-	h.emit(core.MsgInfo, fmt.Sprintf("[dry-run] Would update %q from %q (fetch + fast-forward)", in.MainBranch, in.From))
+	// Mirror updateMain's real behavior so the preview doesn't promise a fetch
+	// that apply will silently skip when the source's remote isn't configured.
+	remote, _ := splitRemoteRef(in.From)
+	configured, err := h.remoteConfigured(ctx, mainRepoRoot, remote)
+	if err != nil {
+		return SyncResult{}, err
+	}
+	if configured {
+		h.emit(core.MsgInfo, fmt.Sprintf("[dry-run] Would update %q from %q (fetch + fast-forward)", in.MainBranch, in.From))
+	} else {
+		h.emit(core.MsgInfo, fmt.Sprintf("[dry-run] %q has no configured remote; %q would not be updated (local %s is the source of truth)", in.From, in.MainBranch, in.MainBranch))
+	}
 
 	roots, err := piece.GetPieceChildren("main", piecesDir, h.deps.FS)
 	if err != nil {
@@ -234,6 +245,25 @@ func (h *Handler) previewSync(ctx context.Context, workDir string, in SyncInput)
 	}
 	sort.Strings(roots)
 
+	if in.Strategy == StrategyRebase {
+		// Rebase migrates each in-scope root's ENTIRE subtree (see syncRebase),
+		// so per-node scoping would mislabel an out-of-scope descendant as
+		// Skipped when apply would actually rebase (and force-push) it. Preview
+		// per root subtree to match.
+		for _, r := range roots {
+			members := h.subtreeMembers(r, piecesDir)
+			if inScope(scope, r) {
+				result.Updated = append(result.Updated, members...)
+				h.emit(core.MsgInfo, fmt.Sprintf("[dry-run] Would rebase %q subtree onto %q (%d piece(s): %s)", r, in.MainBranch, len(members), strings.Join(members, ", ")))
+			} else {
+				result.Skipped = append(result.Skipped, members...)
+			}
+		}
+		h.emit(core.MsgInfo, fmt.Sprintf("[dry-run] %d piece(s) would be synced; pass --apply to sync", len(result.Updated)))
+		return result, nil
+	}
+
+	// Merge propagates parent-into-child per node, honoring scope per node.
 	type node struct{ name, parent string }
 	queue := make([]node, 0, len(roots))
 	for _, r := range roots {
@@ -433,21 +463,22 @@ func (h *Handler) syncRebase(ctx context.Context, mainRepoRoot, piecesDir string
 // branch to it. `from` is a ref like "origin/main"; its remote part is fetched
 // and the branch part is the ref fetched. No-op when that remote isn't
 // configured (e.g. a local-only repo, where local main is the source of truth).
+// When the user explicitly asked for a non-default source whose remote is
+// missing, that no-op is surfaced as a warning rather than swallowed silently.
 func (h *Handler) updateMain(ctx context.Context, mainRepoRoot, mainBranch, from string) error {
 	remote, ref := splitRemoteRef(from)
 
-	remotes, err := h.git.Remotes(ctx, mainRepoRoot)
+	configured, err := h.remoteConfigured(ctx, mainRepoRoot, remote)
 	if err != nil {
-		return fmt.Errorf("failed to list remotes: %w", err)
-	}
-	configured := false
-	for _, r := range remotes {
-		if r == remote {
-			configured = true
-			break
-		}
+		return err
 	}
 	if !configured {
+		// Stay silent for the default origin/<main> in a remote-less repo (the
+		// documented local-only case); warn when the user pointed --from at a
+		// source whose remote doesn't exist, so a typo isn't a silent no-op.
+		if from != "origin/"+mainBranch {
+			h.emit(core.MsgWarning, sourceRemoteUnconfiguredMsg(from, remote, mainBranch))
+		}
 		return nil
 	}
 	if err := h.git.Fetch(ctx, mainRepoRoot, remote, ref); err != nil {
@@ -461,6 +492,25 @@ func (h *Handler) updateMain(ctx context.Context, mainRepoRoot, mainBranch, from
 		return fmt.Errorf("local %s diverged from %s", mainBranch, from)
 	}
 	return nil
+}
+
+// remoteConfigured reports whether `remote` is among the repo's configured git
+// remotes. An empty remote (a sync source with no "remote/" prefix) is never
+// configured.
+func (h *Handler) remoteConfigured(ctx context.Context, mainRepoRoot, remote string) (bool, error) {
+	if remote == "" {
+		return false, nil
+	}
+	remotes, err := h.git.Remotes(ctx, mainRepoRoot)
+	if err != nil {
+		return false, fmt.Errorf("failed to list remotes: %w", err)
+	}
+	for _, r := range remotes {
+		if r == remote {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // splitRemoteRef splits a sync-from ref like "origin/main" into its remote
@@ -716,6 +766,13 @@ func rebaseConflictMsg(piece, parentBranch, path string) string {
 
 func rebaseInProgressMsg(path string) string {
 	return fmt.Sprintf("Stack sync aborted: a rebase is already in progress in %s. Finish it (git rebase --continue) or abort it (git rebase --abort) before syncing.", path)
+}
+
+func sourceRemoteUnconfiguredMsg(from, remote, mainBranch string) string {
+	if remote == "" {
+		return fmt.Sprintf("Sync source %q has no remote part (expected e.g. %q); skipped updating %s from a remote and synced onto the local %s as-is.", from, "origin/"+mainBranch, mainBranch, mainBranch)
+	}
+	return fmt.Sprintf("Sync source %q references remote %q, which isn't configured; skipped fetching %s and synced onto the local %s as-is.", from, remote, mainBranch, mainBranch)
 }
 
 func mainDivergedMsg(mainBranch, from, repoRoot string) string {

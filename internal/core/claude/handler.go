@@ -174,7 +174,7 @@ mp move .monkeypuzzle                # move back to the default
 3. ` + "`mp pr create --draft`" + ` — push, open draft PR/MR, fires pr-create hooks
 4. Human reviews
 5. ` + "`mp pr ready`" + ` — flip to ready (separate command, never auto), fires pr-ready hooks
-6. After merge: ` + "`mp done`" + ` or ` + "`mp cleanup`" + `
+6. After merge: ` + "`mp done`" + ` or ` + "`mp cleanup --apply`" + ` (bare ` + "`mp cleanup`" + ` only previews)
 
 Draft → ready is always a manual step. Don't call ` + "`mp pr ready`" + ` unless the human has approved the flip.
 `
