@@ -2,6 +2,7 @@ package pr
 
 import (
 	"context"
+	"errors"
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/adapters"
 )
@@ -47,4 +48,19 @@ func (p *GitLabProvider) IsMerged(ctx context.Context, workDir string, number in
 
 func (p *GitLabProvider) FindMergedByBranch(ctx context.Context, workDir, branchName string) (bool, int, error) {
 	return p.gl.FindMergedPRByBranch(ctx, workDir, branchName)
+}
+
+func (p *GitLabProvider) ListPRs(ctx context.Context, workDir string) ([]PRInfo, error) {
+	rows, err := p.gl.ListPRs(ctx, workDir)
+	if errors.Is(err, adapters.ErrGlabUnavailable) {
+		return nil, ErrProviderUnavailable
+	}
+	if err != nil {
+		return nil, err
+	}
+	return toPRInfos(rows), nil
+}
+
+func (p *GitLabProvider) SetPRBase(ctx context.Context, workDir string, number int, base string) error {
+	return p.gl.SetPRBase(ctx, workDir, number, base)
 }
