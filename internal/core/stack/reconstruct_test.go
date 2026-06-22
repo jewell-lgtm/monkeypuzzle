@@ -4,12 +4,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jewell-lgtm/monkeypuzzle/internal/adapters"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core/piece"
+	"github.com/jewell-lgtm/monkeypuzzle/internal/core/pr"
 )
 
-func prMap(prs ...adapters.PRInfo) map[string]adapters.PRInfo {
-	m := make(map[string]adapters.PRInfo, len(prs))
+func prMap(prs ...pr.PRInfo) map[string]pr.PRInfo {
+	m := make(map[string]pr.PRInfo, len(prs))
 	for _, p := range prs {
 		m[p.HeadRefName] = p
 	}
@@ -22,8 +22,8 @@ func TestReconstructParents_RebuildsFromPRBase(t *testing.T) {
 		{Name: "b", Parent: "main"}, // local lineage lost; PR says it sits on a
 	}
 	prs := prMap(
-		adapters.PRInfo{Number: 1, HeadRefName: "a", BaseRefName: "main", State: "OPEN"},
-		adapters.PRInfo{Number: 2, HeadRefName: "b", BaseRefName: "a", State: "OPEN"},
+		pr.PRInfo{Number: 1, HeadRefName: "a", BaseRefName: "main", State: "OPEN"},
+		pr.PRInfo{Number: 2, HeadRefName: "b", BaseRefName: "a", State: "OPEN"},
 	)
 
 	rewrites := reconstructParents(items, prs, "main")
@@ -38,7 +38,7 @@ func TestReconstructParents_RebuildsFromPRBase(t *testing.T) {
 func TestReconstructParents_SkipsPhantomParent(t *testing.T) {
 	items := []piece.PieceListItem{{Name: "b", Parent: "main"}}
 	// PR base points at a branch that has no local piece.
-	prs := prMap(adapters.PRInfo{Number: 2, HeadRefName: "b", BaseRefName: "ghost", State: "OPEN"})
+	prs := prMap(pr.PRInfo{Number: 2, HeadRefName: "b", BaseRefName: "ghost", State: "OPEN"})
 
 	if rewrites := reconstructParents(items, prs, "main"); len(rewrites) != 0 {
 		t.Errorf("expected no rewrites for phantom parent, got %+v", rewrites)
@@ -47,7 +47,7 @@ func TestReconstructParents_SkipsPhantomParent(t *testing.T) {
 
 func TestReconstructParents_IgnoresClosedAndMerged(t *testing.T) {
 	items := []piece.PieceListItem{{Name: "b", Parent: "main"}}
-	prs := prMap(adapters.PRInfo{Number: 2, HeadRefName: "b", BaseRefName: "a", State: "MERGED"})
+	prs := prMap(pr.PRInfo{Number: 2, HeadRefName: "b", BaseRefName: "a", State: "MERGED"})
 	if rewrites := reconstructParents(items, prs, "main"); len(rewrites) != 0 {
 		t.Errorf("expected no rewrites for non-open PR, got %+v", rewrites)
 	}
@@ -55,7 +55,7 @@ func TestReconstructParents_IgnoresClosedAndMerged(t *testing.T) {
 
 func TestBuildStackTree_FlagsBaseDrift(t *testing.T) {
 	items := []piece.PieceListItem{{Name: "b", Parent: "main"}}
-	prs := prMap(adapters.PRInfo{Number: 7, HeadRefName: "b", BaseRefName: "a", State: "OPEN", URL: "http://x/7"})
+	prs := prMap(pr.PRInfo{Number: 7, HeadRefName: "b", BaseRefName: "a", State: "OPEN", URL: "http://x/7"})
 
 	_, drift := buildStackTree(items, prs, "main")
 	if len(drift) != 1 {
@@ -72,8 +72,8 @@ func TestBuildStackTree_NoDriftWhenAligned(t *testing.T) {
 		{Name: "b", Parent: "a"},
 	}
 	prs := prMap(
-		adapters.PRInfo{Number: 1, HeadRefName: "a", BaseRefName: "main", State: "OPEN"},
-		adapters.PRInfo{Number: 2, HeadRefName: "b", BaseRefName: "a", State: "OPEN"},
+		pr.PRInfo{Number: 1, HeadRefName: "a", BaseRefName: "main", State: "OPEN"},
+		pr.PRInfo{Number: 2, HeadRefName: "b", BaseRefName: "a", State: "OPEN"},
 	)
 	tree, drift := buildStackTree(items, prs, "main")
 	if len(drift) != 0 {
@@ -90,7 +90,7 @@ func TestBuildStackTree_NoDriftWhenAligned(t *testing.T) {
 
 func TestBuildStackTree_MergedPRNote(t *testing.T) {
 	items := []piece.PieceListItem{{Name: "a", Parent: "main"}}
-	prs := prMap(adapters.PRInfo{Number: 9, HeadRefName: "a", BaseRefName: "main", State: "MERGED"})
+	prs := prMap(pr.PRInfo{Number: 9, HeadRefName: "a", BaseRefName: "main", State: "MERGED"})
 	_, drift := buildStackTree(items, prs, "main")
 	if len(drift) != 1 || !strings.Contains(drift[0], "merged") {
 		t.Errorf("expected merged note, got %v", drift)
@@ -111,7 +111,7 @@ func TestBuildStackTree_OrphanParent(t *testing.T) {
 
 func TestComputeBaseFixes_FindsMismatch(t *testing.T) {
 	items := []piece.PieceListItem{{Name: "b", Parent: "a"}}
-	prs := prMap(adapters.PRInfo{Number: 5, HeadRefName: "b", BaseRefName: "main", State: "OPEN"})
+	prs := prMap(pr.PRInfo{Number: 5, HeadRefName: "b", BaseRefName: "main", State: "OPEN"})
 
 	fixes := computeBaseFixes(items, prs, "main")
 	if len(fixes) != 1 || fixes[0].PRNumber != 5 || fixes[0].Base != "a" {
@@ -121,7 +121,7 @@ func TestComputeBaseFixes_FindsMismatch(t *testing.T) {
 
 func TestComputeBaseFixes_NoneWhenAligned(t *testing.T) {
 	items := []piece.PieceListItem{{Name: "a", Parent: "main"}}
-	prs := prMap(adapters.PRInfo{Number: 1, HeadRefName: "a", BaseRefName: "main", State: "OPEN"})
+	prs := prMap(pr.PRInfo{Number: 1, HeadRefName: "a", BaseRefName: "main", State: "OPEN"})
 	if fixes := computeBaseFixes(items, prs, "main"); len(fixes) != 0 {
 		t.Errorf("expected no fixes, got %+v", fixes)
 	}
