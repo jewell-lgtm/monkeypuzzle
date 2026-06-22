@@ -71,9 +71,9 @@ func (h *Handler) resolveRepo(ctx context.Context, workDir string) (mainRepoRoot
 
 // ---- Status ----------------------------------------------------------------
 
-// Status reports the stack tree, PR state per piece, and drift between local
-// lineage and GitHub PR bases. With FromGitHub it rebuilds local lineage from PR
-// bases; with ApplyBases it edits PR bases to match local lineage.
+// Status reports the stack tree, PR/MR state per piece, and drift between local
+// lineage and the forge's PR/MR bases. With FromRemote it rebuilds local lineage
+// from PR/MR bases; with ApplyBases it edits PR/MR bases to match local lineage.
 func (h *Handler) Status(ctx context.Context, workDir string, in StatusInput) (StackStatusResult, error) {
 	in = WithStatusDefaults(in)
 
@@ -102,14 +102,15 @@ func (h *Handler) Status(ctx context.Context, workDir string, in StatusInput) (S
 		return StackStatusResult{}, listErr
 	}
 	result.GitHubChecked = forgeAvailable
+	result.ForgeChecked = forgeAvailable
 
 	prByHead := make(map[string]pr.PRInfo, len(prs))
 	for _, p := range prs {
 		prByHead[p.HeadRefName] = p
 	}
 
-	// Reconstruct local lineage from PR bases (machine-#2 rebuild). Metadata-only.
-	if in.FromGitHub && forgeAvailable {
+	// Reconstruct local lineage from PR/MR bases (machine-#2 rebuild). Metadata-only.
+	if in.fromRemote() && forgeAvailable {
 		for _, rw := range reconstructParents(items, prByHead, in.MainBranch) {
 			wt := filepath.Join(piecesDir, rw.Piece)
 			meta, err := piece.ReadPieceMetadata(wt, h.deps.FS)

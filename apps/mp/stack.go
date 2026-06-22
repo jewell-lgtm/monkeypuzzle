@@ -20,16 +20,16 @@ var stackCmd = &cobra.Command{
 	Use:   "stack",
 	Short: "Manage stacks of pieces (git-town-style)",
 	Long: `Whole-stack operations over pieces: sync a stack against main and itself,
-inspect the tree against the GitHub PR list, and append/prepend pieces.
+inspect the tree against the forge's PR/MR list, and append/prepend pieces.
 
 Anything risky aborts cleanly and prints plain-English next steps (e.g. which
-PR base to change on GitHub). 'sync' is dry-run by default and asks to confirm
-in an interactive terminal; everything else runs straight through.`,
+PR/MR base to change on the forge). 'sync' is dry-run by default and asks to
+confirm in an interactive terminal; everything else runs straight through.`,
 }
 
 var stackStatusCmd = &cobra.Command{
 	Use:   "status",
-	Short: "Show the stack tree, PR state, and drift vs the GitHub PR list",
+	Short: "Show the stack tree, PR/MR state, and drift vs the forge's PR/MR list",
 	RunE:  runStackStatus,
 }
 
@@ -100,6 +100,7 @@ both call the shared stackgraph builder.`,
 
 var (
 	flagStackMain         string
+	flagStackFromRemote   bool
 	flagStackFromGitHub   bool
 	flagStackApplyBases   bool
 	flagStackStatusSchema bool
@@ -132,8 +133,11 @@ var (
 
 func init() {
 	stackStatusCmd.Flags().StringVar(&flagStackMain, "main", "main", "Main branch name")
-	stackStatusCmd.Flags().BoolVar(&flagStackFromGitHub, "from-github", false, "Rebuild local lineage from open PR bases")
-	stackStatusCmd.Flags().BoolVar(&flagStackApplyBases, "apply-bases", false, "Edit PR bases on GitHub to match local lineage")
+	stackStatusCmd.Flags().BoolVar(&flagStackFromRemote, "from-remote", false, "Rebuild local lineage from open PR/MR bases")
+	stackStatusCmd.Flags().BoolVar(&flagStackFromGitHub, "from-github", false, "Deprecated: use --from-remote")
+	_ = stackStatusCmd.Flags().MarkDeprecated("from-github", "use --from-remote")
+	_ = stackStatusCmd.Flags().MarkHidden("from-github")
+	stackStatusCmd.Flags().BoolVar(&flagStackApplyBases, "apply-bases", false, "Edit PR/MR bases on the forge to match local lineage")
 	stackStatusCmd.Flags().BoolVar(&flagStackStatusSchema, "schema", false, "Output JSON schema and exit")
 
 	stackSyncCmd.Flags().StringVar(&flagStackMain, "main", "main", "Main branch name")
@@ -203,8 +207,8 @@ func runStackStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	var input stackcmd.StatusInput
-	if cmd.Flags().Changed("main") || flagStackFromGitHub || flagStackApplyBases {
-		input = stackcmd.StatusInput{MainBranch: flagStackMain, FromGitHub: flagStackFromGitHub, ApplyBases: flagStackApplyBases}
+	if cmd.Flags().Changed("main") || flagStackFromRemote || flagStackFromGitHub || flagStackApplyBases {
+		input = stackcmd.StatusInput{MainBranch: flagStackMain, FromRemote: flagStackFromRemote, FromGitHub: flagStackFromGitHub, ApplyBases: flagStackApplyBases}
 	} else if cli.HasStdinData() {
 		data, err := io.ReadAll(os.Stdin)
 		if err != nil {

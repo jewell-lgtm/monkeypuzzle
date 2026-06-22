@@ -8,12 +8,12 @@ import (
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core/pr"
 )
 
-// StackNodePR is the GitHub PR associated with a piece, if any.
+// StackNodePR is the PR/MR associated with a piece, if any.
 type StackNodePR struct {
 	Number int    `json:"number"`
 	State  string `json:"state"` // OPEN, MERGED, CLOSED
 	URL    string `json:"url"`
-	Base   string `json:"base"` // PR base branch as seen on GitHub
+	Base   string `json:"base"` // PR/MR base branch as seen on the forge
 }
 
 // StackNode is one piece in the rendered stack tree.
@@ -27,12 +27,15 @@ type StackNode struct {
 
 // StackStatusResult is the output of `mp stack status`.
 type StackStatusResult struct {
-	MainBranch    string     `json:"main_branch"`
-	Tree          *StackNode `json:"tree"`
-	GitHubChecked bool       `json:"github_checked"`
-	Reconstructed []string   `json:"reconstructed,omitempty"` // pieces whose parent was rewritten by --from-github
-	Applied       []string   `json:"applied,omitempty"`       // PRs whose base was edited by --apply-bases
-	Drift         []string   `json:"drift,omitempty"`         // flat list of all drift messages
+	MainBranch string     `json:"main_branch"`
+	Tree       *StackNode `json:"tree"`
+	// ForgeChecked reports whether the PR/MR provider was reachable. GitHubChecked
+	// is the deprecated alias, populated identically for back-compat.
+	ForgeChecked  bool     `json:"forge_checked"`
+	GitHubChecked bool     `json:"github_checked"`
+	Reconstructed []string `json:"reconstructed,omitempty"` // pieces whose parent was rewritten by --from-remote
+	Applied       []string `json:"applied,omitempty"`       // PRs/MRs whose base was edited by --apply-bases
+	Drift         []string `json:"drift,omitempty"`         // flat list of all drift messages
 }
 
 // SyncResult is the output of `mp stack sync`.
@@ -54,23 +57,23 @@ func localParentBranch(parent, mainBranch string) string {
 	return parent
 }
 
-// driftBaseMessage is fallback #6: a PR base on GitHub disagrees with local lineage.
-func driftBaseMessage(prNumber int, prURL, ghBase, localParent string) string {
+// driftBaseMessage is fallback #6: a PR/MR base on the forge disagrees with local lineage.
+func driftBaseMessage(prNumber int, prURL, forgeBase, localParent string) string {
 	return fmt.Sprintf(
-		"PR #%d base on GitHub is %q but this piece's local parent is %q. "+
-			"Fix on GitHub: open %s, click Edit by the title, set base to %q — "+
-			"or run 'mp stack status --apply-bases'. To accept GitHub's lineage locally instead, run 'mp stack status --from-github'.",
-		prNumber, ghBase, localParent, prURL, localParent)
+		"PR/MR #%d base on the forge is %q but this piece's local parent is %q. "+
+			"Fix on the forge: open %s and set the base/target branch to %q — "+
+			"or run 'mp stack status --apply-bases'. To accept the forge's lineage locally instead, run 'mp stack status --from-remote'.",
+		prNumber, forgeBase, localParent, prURL, localParent)
 }
 
-// driftMergedMessage notes a merged PR whose piece still exists locally.
+// driftMergedMessage notes a merged PR/MR whose piece still exists locally.
 func driftMergedMessage(prNumber int, pieceName string) string {
-	return fmt.Sprintf("PR #%d is merged — run 'mp done' to clean up %q.", prNumber, pieceName)
+	return fmt.Sprintf("PR/MR #%d is merged — run 'mp done' to clean up %q.", prNumber, pieceName)
 }
 
 // driftOrphanMessage notes a piece whose parent doesn't exist locally.
 func driftOrphanMessage(parent string) string {
-	return fmt.Sprintf("parent piece %q not found locally (run 'mp stack status --from-github' if it lives on GitHub)", parent)
+	return fmt.Sprintf("parent piece %q not found locally (run 'mp stack status --from-remote' if it lives on the forge)", parent)
 }
 
 // buildStackTree builds the rendered tree from local pieces, attaching PR info and
