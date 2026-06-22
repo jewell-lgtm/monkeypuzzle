@@ -14,7 +14,7 @@ import (
 	"github.com/jewell-lgtm/monkeypuzzle/internal/server/auth/crypto"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/server/auth/identity"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/server/auth/session"
-	"github.com/jewell-lgtm/monkeypuzzle/internal/server/githubapi"
+	"github.com/jewell-lgtm/monkeypuzzle/internal/server/forge"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/server/service"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/server/store"
 )
@@ -27,7 +27,7 @@ type Deps struct {
 	Service       *service.Service
 	Store         store.Store
 	Login         identity.Provider // pluggable login: authorization URL + code exchange
-	GitHub        githubapi.Factory // derive the GitHub profile from the passed-through token
+	GitHub        forge.Factory     // derive the forge profile from the passed-through token
 	Session       session.Codec
 	Cipher        crypto.TokenCipher
 	SecureCookies bool // set the Secure flag on cookies (true behind HTTPS)

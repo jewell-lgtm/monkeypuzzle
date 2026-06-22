@@ -13,7 +13,7 @@ import (
 	"github.com/jewell-lgtm/monkeypuzzle/internal/server/auth/crypto"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/server/auth/session"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/server/auth/workos"
-	"github.com/jewell-lgtm/monkeypuzzle/internal/server/githubapi"
+	"github.com/jewell-lgtm/monkeypuzzle/internal/server/forge"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/server/service"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/server/store"
 )
@@ -43,7 +43,7 @@ func TestWeb_Smoke(t *testing.T) {
 		Service: service.New(mem, noopTrigger{}),
 		Store:   mem,
 		Login:   workos.NewStubClient("ext1", "ghtok"),
-		GitHub:  githubapi.NewStubFactory(),
+		GitHub:  forge.NewStubFactory(),
 		Session: codec,
 		Cipher:  cipher,
 	})

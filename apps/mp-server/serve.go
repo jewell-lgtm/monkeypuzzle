@@ -11,7 +11,7 @@ import (
 	"github.com/jewell-lgtm/monkeypuzzle/internal/server/auth/crypto"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/server/auth/session"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/server/auth/workos"
-	"github.com/jewell-lgtm/monkeypuzzle/internal/server/githubapi"
+	forgegithub "github.com/jewell-lgtm/monkeypuzzle/internal/server/forge/github"
 	mcppkg "github.com/jewell-lgtm/monkeypuzzle/internal/server/mcp"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/server/service"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/server/store"
@@ -48,7 +48,7 @@ func runServe() error {
 	}
 	defer tc.Close()
 
-	ghFactory := githubapi.NewFactory()
+	ghFactory := forgegithub.NewFactory()
 	svc := service.New(st, syncpkg.NewTemporalTrigger(tc, st))
 
 	login := workos.NewAPIClient(cfg.WorkOSAPIKey, cfg.WorkOSClientID, cfg.PublicBaseURL+"/auth/callback")

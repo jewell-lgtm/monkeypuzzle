@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/server/auth/crypto"
-	"github.com/jewell-lgtm/monkeypuzzle/internal/server/githubapi"
+	"github.com/jewell-lgtm/monkeypuzzle/internal/server/forge"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/server/store"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/stackgraph"
 )
@@ -14,14 +14,14 @@ import (
 // on the worker; the workflow references its methods by value.
 type Activities struct {
 	Store   store.Store
-	Factory githubapi.Factory
+	Factory forge.Factory
 	Cipher  crypto.TokenCipher
 }
 
-// clientFor loads the user, decrypts their GitHub token, and returns a
-// token-scoped GitHub client. Each GitHub-calling activity re-derives the token
+// clientFor loads the user, decrypts their forge token, and returns a
+// token-scoped forge client. Each forge-calling activity re-derives the token
 // from the store so the plaintext token never enters workflow history.
-func (a *Activities) clientFor(ctx context.Context, userID int64) (githubapi.GitHubClient, error) {
+func (a *Activities) clientFor(ctx context.Context, userID int64) (forge.Client, error) {
 	u, err := a.Store.GetUserByID(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("sync: load user %d: %w", userID, err)
@@ -33,20 +33,20 @@ func (a *Activities) clientFor(ctx context.Context, userID int64) (githubapi.Git
 	return a.Factory.ForToken(string(token)), nil
 }
 
-// FetchRepos lists every repo the user can access from GitHub.
+// FetchRepos lists every repo the user can access from the forge.
 func (a *Activities) FetchRepos(ctx context.Context, userID int64) ([]repoDTO, error) {
-	gh, err := a.clientFor(ctx, userID)
+	client, err := a.clientFor(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
-	repos, err := gh.ListAccessibleRepos(ctx)
+	repos, err := client.ListAccessibleRepos(ctx)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]repoDTO, len(repos))
 	for i, r := range repos {
 		out[i] = repoDTO{
-			GitHubRepoID:  r.GitHubRepoID,
+			GitHubRepoID:  r.ForgeRepoID,
 			Owner:         r.Owner,
 			Name:          r.Name,
 			DefaultBranch: r.DefaultBranch,
@@ -77,13 +77,13 @@ func (a *Activities) PersistRepos(ctx context.Context, in PersistReposInput) err
 	return a.Store.SetUserRepos(ctx, in.UserID, ids)
 }
 
-// FetchPullRequests lists all PRs (state=all) for a repo from GitHub.
+// FetchPullRequests lists all PRs/MRs (state=all) for a repo from the forge.
 func (a *Activities) FetchPullRequests(ctx context.Context, in FetchPRInput) ([]stackgraph.PRRef, error) {
-	gh, err := a.clientFor(ctx, in.UserID)
+	client, err := a.clientFor(ctx, in.UserID)
 	if err != nil {
 		return nil, err
 	}
-	return gh.ListPullRequests(ctx, in.Owner, in.Name)
+	return client.ListPullRequests(ctx, in.Owner, in.Name)
 }
 
 // PersistPullRequests replaces a repo's PR set in the store.

@@ -46,7 +46,7 @@ type MarkSyncInput struct {
 }
 
 // repoDTO is the serializable repo shape passed through workflow history. It
-// mirrors githubapi.Repo without importing it into the workflow's data plane.
+// mirrors forge.Repo without importing it into the workflow's data plane.
 type repoDTO struct {
 	GitHubRepoID  int64
 	Owner         string
