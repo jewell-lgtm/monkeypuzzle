@@ -64,11 +64,11 @@ func TestMemoryStore_ReposAndVisibility(t *testing.T) {
 		t.Fatalf("unexpected repos: %+v", repos)
 	}
 
-	got, err := s.GetRepoByOwnerName(ctx, "o", "alpha")
+	got, err := s.GetRepoByProviderOwnerName(ctx, "github", "o", "alpha")
 	if err != nil || got.ForgeRepoID != 11 {
 		t.Fatalf("get repo: %+v err=%v", got, err)
 	}
-	if _, err := s.GetRepoByOwnerName(ctx, "o", "missing"); !errors.Is(err, ErrNotFound) {
+	if _, err := s.GetRepoByProviderOwnerName(ctx, "github", "o", "missing"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("want ErrNotFound, got %v", err)
 	}
 

@@ -1,8 +1,9 @@
-// Package sync keeps the Postgres cache fresh from GitHub via Temporal. The
+// Package sync keeps the Postgres cache fresh from the forge via Temporal. The
 // SyncUserDataWorkflow fans out activities that fetch a user's repos and PRs
-// from the GitHub API and persist them to the store; the web process triggers
-// it (on login and on demand) and the worker executes it. This is also the
-// durable substrate the future write path (rebase/retarget a stack) will use.
+// from the forge API (GitHub or GitLab, per the user's provider) and persist
+// them to the store; the web process triggers it (on login and on demand) and
+// the worker executes it. This is also the durable substrate the future write
+// path (rebase/retarget a stack) will use.
 package sync
 
 import (
@@ -26,16 +27,18 @@ type PersistReposInput struct {
 
 // FetchPRInput identifies a repo whose PRs to fetch (UserID supplies the token).
 type FetchPRInput struct {
-	UserID int64
-	Owner  string
-	Name   string
+	UserID   int64
+	Provider string
+	Owner    string
+	Name     string
 }
 
 // PersistPRInput carries fetched PRs to the persist activity.
 type PersistPRInput struct {
-	Owner string
-	Name  string
-	PRs   []stackgraph.PRRef
+	Provider string
+	Owner    string
+	Name     string
+	PRs      []stackgraph.PRRef
 }
 
 // MarkSyncInput sets the terminal sync_state for a user.
@@ -48,7 +51,8 @@ type MarkSyncInput struct {
 // repoDTO is the serializable repo shape passed through workflow history. It
 // mirrors forge.Repo without importing it into the workflow's data plane.
 type repoDTO struct {
-	GitHubRepoID  int64
+	Provider      string
+	ForgeRepoID   int64
 	Owner         string
 	Name          string
 	DefaultBranch string

@@ -44,7 +44,7 @@ func TestSyncUserDataWorkflow_HappyPath(t *testing.T) {
 		stackgraph.PRRef{Number: 3, HeadRef: "feat-c", BaseRef: "feat-b", State: stackgraph.StateOpen},
 	)
 
-	a := &Activities{Store: mem, Factory: stub, Cipher: cipher}
+	a := &Activities{Store: mem, Forge: forge.Registry{"github": stub}, Cipher: cipher}
 
 	var ts testsuite.WorkflowTestSuite
 	env := ts.NewTestWorkflowEnvironment()

@@ -131,11 +131,11 @@ func (m *MemoryStore) ListReposForUser(_ context.Context, userID int64) ([]Repo,
 	return out, nil
 }
 
-func (m *MemoryStore) GetRepoByOwnerName(_ context.Context, owner, name string) (Repo, error) {
+func (m *MemoryStore) GetRepoByProviderOwnerName(_ context.Context, provider, owner, name string) (Repo, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	for _, r := range m.repos {
-		if r.Owner == owner && r.Name == name {
+		if r.Provider == provider && r.Owner == owner && r.Name == name {
 			return r, nil
 		}
 	}

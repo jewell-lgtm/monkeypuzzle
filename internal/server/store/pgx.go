@@ -168,10 +168,10 @@ ORDER BY r.owner, r.name`
 	return out, rows.Err()
 }
 
-func (s *PgxStore) GetRepoByOwnerName(ctx context.Context, owner, name string) (Repo, error) {
-	const q = `SELECT id, provider, github_repo_id, owner, name, default_branch, private, html_url FROM repos WHERE owner = $1 AND name = $2`
+func (s *PgxStore) GetRepoByProviderOwnerName(ctx context.Context, provider, owner, name string) (Repo, error) {
+	const q = `SELECT id, provider, github_repo_id, owner, name, default_branch, private, html_url FROM repos WHERE provider = $1 AND owner = $2 AND name = $3`
 	var r Repo
-	err := s.pool.QueryRow(ctx, q, owner, name).Scan(&r.ID, &r.Provider, &r.ForgeRepoID, &r.Owner, &r.Name, &r.DefaultBranch, &r.Private, &r.HTMLURL)
+	err := s.pool.QueryRow(ctx, q, provider, owner, name).Scan(&r.ID, &r.Provider, &r.ForgeRepoID, &r.Owner, &r.Name, &r.DefaultBranch, &r.Private, &r.HTMLURL)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Repo{}, ErrNotFound
 	}

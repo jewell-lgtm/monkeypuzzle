@@ -81,7 +81,7 @@ func TestMCP_HappyPath_SyncThenListStacks(t *testing.T) {
 	// --- run the real sync workflow (Temporal test env) to populate the store ---
 	var ts testsuite.WorkflowTestSuite
 	env := ts.NewTestWorkflowEnvironment()
-	env.RegisterActivity(&mpsync.Activities{Store: mem, Factory: stub, Cipher: cipher})
+	env.RegisterActivity(&mpsync.Activities{Store: mem, Forge: forge.Registry{"github": stub}, Cipher: cipher})
 	env.ExecuteWorkflow(mpsync.SyncUserDataWorkflow, mpsync.SyncInput{UserID: uid})
 	if !env.IsWorkflowCompleted() || env.GetWorkflowError() != nil {
 		t.Fatalf("sync workflow failed: completed=%v err=%v", env.IsWorkflowCompleted(), env.GetWorkflowError())

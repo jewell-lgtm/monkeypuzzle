@@ -100,8 +100,10 @@ type Store interface {
 	SetUserRepos(ctx context.Context, userID int64, repoIDs []int64) error
 	// ListReposForUser returns the user's repos ordered by owner/name.
 	ListReposForUser(ctx context.Context, userID int64) ([]Repo, error)
-	// GetRepoByOwnerName returns a repo or ErrNotFound.
-	GetRepoByOwnerName(ctx context.Context, owner, name string) (Repo, error)
+	// GetRepoByProviderOwnerName returns a repo scoped to a provider, or
+	// ErrNotFound. Scoping by provider closes a cross-provider owner/name
+	// collision (e.g. github.com/o/r vs gitlab.com/o/r).
+	GetRepoByProviderOwnerName(ctx context.Context, provider, owner, name string) (Repo, error)
 
 	// ReplacePullRequests atomically replaces all PRs of a repo with prs.
 	ReplacePullRequests(ctx context.Context, repoID int64, prs []PullRequest) error
