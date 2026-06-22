@@ -3,17 +3,39 @@ package adapters
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
 )
 
+// ErrGlabUnavailable indicates the glab CLI is missing or unauthenticated, so
+// GitLab state can't be read. Callers should degrade to local-only behavior.
+// Mirrors ErrGHUnavailable.
+var ErrGlabUnavailable = errors.New("glab CLI unavailable or unauthenticated")
+
 // GitLab provides GitLab MR operations via the glab CLI.
 // Mirrors the GitHub adapter; results are normalised to the same shapes
 // (MR is exposed as "PR" in the public types for parity).
 type GitLab struct {
 	exec core.Exec
+}
+
+// glabStateToCanonical maps GitLab MR states (opened/closed/merged/locked) onto
+// the GitHub-style vocabulary (OPEN/MERGED/CLOSED) that the stack code and the
+// rest of mp switch on. "locked" is treated as CLOSED (not open for drift).
+func glabStateToCanonical(state string) string {
+	switch strings.ToLower(state) {
+	case "opened":
+		return "OPEN"
+	case "merged":
+		return "MERGED"
+	case "closed", "locked":
+		return "CLOSED"
+	default:
+		return strings.ToUpper(state)
+	}
 }
 
 // NewGitLab creates a GitLab adapter with the provided Exec interface.
@@ -95,7 +117,7 @@ func (g *GitLab) GetPRStatus(ctx context.Context, workDir string, mrNumber int) 
 	if err := json.Unmarshal(output, &result); err != nil {
 		return "", fmt.Errorf("failed to parse MR view: %w", err)
 	}
-	return strings.ToUpper(result.State), nil
+	return glabStateToCanonical(result.State), nil
 }
 
 // IsPRMerged reports whether the MR has been merged.
@@ -139,6 +161,56 @@ func (g *GitLab) FindMergedPRByBranch(ctx context.Context, workDir, branchName s
 		return false, 0, nil
 	}
 	return true, results[0].IID, nil
+}
+
+// ListPRs returns all MRs (opened, merged, closed) for the repo, normalised to
+// the same PRInfo shape as the GitHub adapter. This is the source of truth for
+// stack lineage across machines. Returns ErrGlabUnavailable (with an empty
+// slice) when glab is missing or unauthenticated so callers can degrade to
+// local lineage rather than failing. --per-page 100 (GitLab's max) avoids
+// silently truncating large stacks (default page size is 30).
+func (g *GitLab) ListPRs(ctx context.Context, workDir string) ([]PRInfo, error) {
+	output, err := g.exec.RunWithDir(ctx, workDir, "glab", "mr", "list",
+		"--all",
+		"--per-page", "100",
+		"-F", "json",
+	)
+	if err != nil {
+		return []PRInfo{}, ErrGlabUnavailable
+	}
+
+	var rows []struct {
+		IID          int    `json:"iid"`
+		SourceBranch string `json:"source_branch"`
+		TargetBranch string `json:"target_branch"`
+		State        string `json:"state"`
+		WebURL       string `json:"web_url"`
+	}
+	if err := json.Unmarshal(output, &rows); err != nil {
+		return []PRInfo{}, fmt.Errorf("failed to parse MR list: %w", err)
+	}
+
+	prs := make([]PRInfo, 0, len(rows))
+	for _, r := range rows {
+		prs = append(prs, PRInfo{
+			Number:      r.IID,
+			HeadRefName: r.SourceBranch,
+			BaseRefName: r.TargetBranch,
+			State:       glabStateToCanonical(r.State),
+			URL:         r.WebURL,
+		})
+	}
+	return prs, nil
+}
+
+// SetPRBase changes the target branch of an open MR via `glab mr update`. Used
+// only by the opt-in `mp stack status --apply-bases` path.
+func (g *GitLab) SetPRBase(ctx context.Context, workDir string, mrNumber int, base string) error {
+	_, err := g.exec.RunWithDir(ctx, workDir, "glab", "mr", "update", fmt.Sprintf("%d", mrNumber), "--target-branch", base)
+	if err != nil {
+		return fmt.Errorf("failed to set target branch of MR !%d to %s: %w%s", mrNumber, base, err, cliHint("glab", glabInstallHint))
+	}
+	return nil
 }
 
 // extractGitLabMRURL scans glab output for the first https URL.
