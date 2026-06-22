@@ -10,6 +10,56 @@ import (
 
 const submoduleRemoveErr = "fatal: working trees containing submodules cannot be moved or removed"
 
+func TestGit_Push(t *testing.T) {
+	tests := []struct {
+		name    string
+		mockErr error
+		wantErr bool
+	}{
+		{name: "success", mockErr: nil, wantErr: false},
+		{name: "failure", mockErr: MockError("authentication failed"), wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			exec := NewMockExec()
+			exec.AddResponse("git", []string{"push", "-u", "origin", "HEAD"}, nil, tt.mockErr)
+
+			git := NewGit(exec)
+			err := git.Push(context.Background(), "/repo")
+
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Push() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestGit_PushForceWithLease(t *testing.T) {
+	tests := []struct {
+		name    string
+		mockErr error
+		wantErr bool
+	}{
+		{name: "success", mockErr: nil, wantErr: false},
+		{name: "failure", mockErr: MockError("stale info"), wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			exec := NewMockExec()
+			exec.AddResponse("git", []string{"push", "--force-with-lease", "origin", "HEAD"}, nil, tt.mockErr)
+
+			git := NewGit(exec)
+			err := git.PushForceWithLease(context.Background(), "/repo")
+
+			if (err != nil) != tt.wantErr {
+				t.Errorf("PushForceWithLease() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestGit_WorktreeAdd(t *testing.T) {
 	tests := []struct {
 		name         string
