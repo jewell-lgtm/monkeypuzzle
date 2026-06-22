@@ -5,6 +5,7 @@ import Footer from '../components/Footer.astro';
 import Scene from '../components/Scene.astro';
 import WorkflowTerminal from '../components/WorkflowTerminal.astro';
 import TerminalBlock from '../components/TerminalBlock.astro';
+import Logo from '../components/Logo.astro';
 import PieceStack from '../components/PieceStack.astro';
 import Card from '../components/Card.astro';
 import Kbd from '../components/Kbd.astro';
@@ -175,11 +176,7 @@ const switchPopup = [
       </p>
       <div class="wf-dash">
         <div class="wf-dash__bar">
-          <span class="wf-dash__dots">
-            <i style="background:var(--mp-coral-500)"></i>
-            <i style="background:var(--mp-amber-500)"></i>
-            <i style="background:var(--mp-green-500)"></i>
-          </span>
+          <Logo variant="mark" size={15} class="wf-dash__logo" />
           <span class="wf-dash__url">monkeypuzzle.dev / acme</span>
         </div>
         <div class="wf-dash__grid">
