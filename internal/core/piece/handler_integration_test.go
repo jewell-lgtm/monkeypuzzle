@@ -1927,3 +1927,89 @@ func TestIntegration_IsBranchMerged_GitHubMultiCommitSquash(t *testing.T) {
 		t.Errorf("expected method %q, got %q", "squash-combined", status.Method)
 	}
 }
+
+// TestIntegration_IsBranchMerged_MultiCommitNotMerged guards the dangerous
+// direction of Method 3.6: a multi-commit branch that is genuinely NOT merged,
+// while main has advanced with an unrelated commit, must be reported not merged.
+// This exercises the combined-patch-id comparison loop scanning real candidates
+// and finding no match — the path the unit tests cannot reach, since MockExec
+// drops stdin from its match key and so cannot return distinct patch-ids.
+func TestIntegration_IsBranchMerged_MultiCommitNotMerged(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	tmpDataHome, err := os.MkdirTemp("", "mp-data-*")
+	if err != nil {
+		t.Fatalf("failed to create temp data dir: %v", err)
+	}
+	t.Cleanup(func() {
+		os.RemoveAll(tmpDataHome)
+		paths.ResetDataDir()
+	})
+	paths.SetDataDir(tmpDataHome)
+
+	tmpDir, err := os.MkdirTemp("", "mp-integration-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	setupGitRepo(t, tmpDir)
+	setupMonkeypuzzleConfig(t, tmpDir)
+
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get working directory: %v", err)
+	}
+	defer func() { _ = os.Chdir(oldWd) }()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("failed to change directory: %v", err)
+	}
+
+	deps := core.Deps{
+		FS:     adapters.NewOSFS(""),
+		Output: adapters.NewBufferOutput(),
+		Exec:   adapters.NewOSExec(),
+	}
+	handler := piece.NewHandler(deps)
+	ctx := context.Background()
+
+	info, err := handler.CreatePiece(ctx, "unmerged-piece", piece.CreatePieceOptions{})
+	if err != nil {
+		t.Fatalf("CreatePiece failed: %v", err)
+	}
+	worktree := info.WorktreePath
+
+	branchOut, err := exec.Command("git", "-C", worktree, "rev-parse", "--abbrev-ref", "HEAD").CombinedOutput()
+	if err != nil {
+		t.Fatalf("failed to read piece branch: %v\n%s", err, branchOut)
+	}
+	branchName := strings.TrimSpace(string(branchOut))
+
+	// Real, multi-commit work on the piece — never merged anywhere.
+	for i := 1; i <= 3; i++ {
+		fname := filepath.Join(worktree, fmt.Sprintf("piece%d.txt", i))
+		if err := os.WriteFile(fname, []byte(fmt.Sprintf("piece content %d", i)), 0644); err != nil {
+			t.Fatalf("write piece%d: %v", i, err)
+		}
+		runGit(t, worktree, "add", ".")
+		runGit(t, worktree, "commit", "-m", fmt.Sprintf("piece commit %d", i))
+	}
+
+	// Main advances with an UNRELATED commit, so Method 3.6's comparison loop has
+	// a real candidate to scan but none matching the branch's combined patch-id.
+	if err := os.WriteFile(filepath.Join(tmpDir, "unrelated.txt"), []byte("unrelated"), 0644); err != nil {
+		t.Fatalf("write unrelated: %v", err)
+	}
+	runGit(t, tmpDir, "add", ".")
+	runGit(t, tmpDir, "commit", "-m", "unrelated work on main")
+
+	status, err := handler.IsBranchMerged(ctx, worktree, branchName, "main")
+	if err != nil {
+		t.Fatalf("IsBranchMerged: %v", err)
+	}
+	if status.IsMerged {
+		t.Fatalf("expected IsMerged=false for an unmerged multi-commit branch, got true (method %q)", status.Method)
+	}
+}
