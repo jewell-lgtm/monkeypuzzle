@@ -9,6 +9,7 @@ import (
 	"go.temporal.io/sdk/client"
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/server/auth/crypto"
+	gitlabauth "github.com/jewell-lgtm/monkeypuzzle/internal/server/auth/gitlab"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/server/auth/identity"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/server/auth/session"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/server/auth/workos"
@@ -54,17 +55,20 @@ func runServe() error {
 	svc := service.New(st, syncpkg.NewTemporalTrigger(tc, st))
 
 	// The forge registry is provider-neutral and needs no OAuth secrets; both
-	// factories are always available. The gitlab base URL becomes configurable
-	// in B6; "" defaults to gitlab.com.
+	// factories are always available so a synced user of either forge can be read.
 	forgeRegistry := forge.Registry{
 		"github": forgegithub.NewFactory(),
-		"gitlab": forgegitlab.NewFactory(""),
+		"gitlab": forgegitlab.NewFactory(cfg.GitLabBaseURL),
 	}
 
 	// Logins is keyed by provider. GitHub goes through WorkOS; GitLab (direct
-	// OAuth) is registered in B6, gated on its client id/secret being set.
+	// OAuth) is opt-in — registered only when its client id/secret are set.
 	logins := map[string]identity.Provider{
 		"github": workos.NewAPIClient(cfg.WorkOSAPIKey, cfg.WorkOSClientID, cfg.PublicBaseURL+"/auth/callback"),
+	}
+	if cfg.GitLabEnabled() {
+		logins["gitlab"] = gitlabauth.NewOAuthClient(
+			cfg.GitLabBaseURL, cfg.GitLabOAuthClientID, cfg.GitLabOAuthClientSecret, cfg.PublicBaseURL+"/auth/callback")
 	}
 
 	webHandler := web.NewHandler(web.Deps{

@@ -45,12 +45,11 @@ func runWorker() error {
 	defer tc.Close()
 
 	w := worker.New(tc, syncpkg.TaskQueue, worker.Options{})
-	// The gitlab base URL becomes configurable in B6; "" defaults to gitlab.com.
 	syncpkg.RegisterWorker(w, &syncpkg.Activities{
 		Store: st,
 		Forge: forge.Registry{
 			"github": forgegithub.NewFactory(),
-			"gitlab": forgegitlab.NewFactory(""),
+			"gitlab": forgegitlab.NewFactory(cfg.GitLabBaseURL),
 		},
 		Cipher: cipher,
 	})

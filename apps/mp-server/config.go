@@ -20,6 +20,19 @@ type Config struct {
 	SessionSecret      []byte
 	TokenEncryptionKey []byte // exactly 32 bytes (AES-256-GCM)
 	SecureCookies      bool
+
+	// GitLab is opt-in: the gitlab login leg is registered only when both
+	// GitLabOAuthClientID and GitLabOAuthClientSecret are set, so existing
+	// GitHub-only deploys are unaffected.
+	GitLabBaseURL           string // e.g. https://gitlab.com or a self-managed instance
+	GitLabOAuthClientID     string
+	GitLabOAuthClientSecret string
+}
+
+// GitLabEnabled reports whether the direct-GitLab-OAuth login leg should be
+// registered (both client id and secret present).
+func (c Config) GitLabEnabled() bool {
+	return c.GitLabOAuthClientID != "" && c.GitLabOAuthClientSecret != ""
 }
 
 // LoadConfig reads the environment and fails loudly on any missing/invalid value.
@@ -33,6 +46,10 @@ func LoadConfig() (Config, error) {
 		WorkOSClientID:   os.Getenv("WORKOS_CLIENT_ID"),
 		AuthKitDomain:    os.Getenv("AUTHKIT_DOMAIN"),
 		SecureCookies:    os.Getenv("SECURE_COOKIES") == "true",
+
+		GitLabBaseURL:           envOr("GITLAB_BASE_URL", "https://gitlab.com"),
+		GitLabOAuthClientID:     os.Getenv("GITLAB_OAUTH_CLIENT_ID"),
+		GitLabOAuthClientSecret: os.Getenv("GITLAB_OAUTH_CLIENT_SECRET"),
 	}
 
 	required := map[string]string{
