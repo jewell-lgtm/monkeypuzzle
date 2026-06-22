@@ -3,7 +3,7 @@ package web
 import (
 	g "maragu.dev/gomponents"
 	c "maragu.dev/gomponents/components"
-	. "maragu.dev/gomponents/html"
+	. "maragu.dev/gomponents/html" //nolint:staticcheck // gomponents html is dot-imported by design (ST1001)
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/server/store"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/stackgraph"
