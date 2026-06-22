@@ -11,6 +11,7 @@ import (
 	"github.com/jewell-lgtm/monkeypuzzle/internal/server/auth/crypto"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/server/forge"
 	forgegithub "github.com/jewell-lgtm/monkeypuzzle/internal/server/forge/github"
+	forgegitlab "github.com/jewell-lgtm/monkeypuzzle/internal/server/forge/gitlab"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/server/store"
 	syncpkg "github.com/jewell-lgtm/monkeypuzzle/internal/server/sync"
 )
@@ -44,9 +45,13 @@ func runWorker() error {
 	defer tc.Close()
 
 	w := worker.New(tc, syncpkg.TaskQueue, worker.Options{})
+	// The gitlab base URL becomes configurable in B6; "" defaults to gitlab.com.
 	syncpkg.RegisterWorker(w, &syncpkg.Activities{
-		Store:  st,
-		Forge:  forge.Registry{"github": forgegithub.NewFactory()},
+		Store: st,
+		Forge: forge.Registry{
+			"github": forgegithub.NewFactory(),
+			"gitlab": forgegitlab.NewFactory(""),
+		},
 		Cipher: cipher,
 	})
 
