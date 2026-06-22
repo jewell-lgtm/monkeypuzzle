@@ -1,6 +1,7 @@
 package adapters
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -54,6 +55,19 @@ func (e *OSExec) RunWithEnv(ctx context.Context, dir string, env []string, name 
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = dir
 	cmd.Env = env
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return output, err
+	}
+	return output, nil
+}
+
+// RunWithDirInput executes a command in dir with input fed on stdin and returns
+// its combined output. We only read the input slice; the caller retains ownership.
+func (e *OSExec) RunWithDirInput(ctx context.Context, dir string, input []byte, name string, args ...string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Dir = dir
+	cmd.Stdin = bytes.NewReader(input)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return output, err
@@ -201,6 +215,29 @@ func (m *MockExec) RunWithEnv(ctx context.Context, dir string, env []string, nam
 		Args: args,
 		Dir:  dir,
 		Env:  env,
+	})
+
+	key := strings.Join(args, " ")
+	if resp, ok := m.responses[name][key]; ok {
+		return resp.output, resp.err
+	}
+
+	// Default: return error indicating no response configured
+	return nil, fmt.Errorf("no response configured for %s %s (dir: %s)", name, key, dir)
+}
+
+// RunWithDirInput records the call (the stdin input is not part of the match
+// key) and returns the response configured for name+args, mirroring RunWithDir.
+func (m *MockExec) RunWithDirInput(ctx context.Context, dir string, input []byte, name string, args ...string) ([]byte, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// filepath.Abs only fails if cwd cannot be determined; in tests, paths are controlled
+	dir, _ = filepath.Abs(dir) //nolint:errcheck // test mock, paths are controlled
+	m.calls = append(m.calls, CallRecord{
+		Name: name,
+		Args: args,
+		Dir:  dir,
 	})
 
 	key := strings.Join(args, " ")

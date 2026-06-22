@@ -254,6 +254,79 @@ func TestGit_IsBranchSquashMerged(t *testing.T) {
 	}
 }
 
+func TestGit_IsBranchSquashMergedByPatchID(t *testing.T) {
+	const mergeBase = "base000"
+
+	tests := []struct {
+		name    string
+		setup   func(m *MockExec)
+		want    bool
+		wantErr bool
+	}{
+		{
+			name: "combined patch-id present on main (multi-commit squash)",
+			setup: func(m *MockExec) {
+				m.AddResponse("git", []string{"merge-base", "main", "feature"}, []byte(mergeBase+"\n"), nil)
+				m.AddResponse("git", []string{"diff", mergeBase, "feature"}, []byte("BRANCH DIFF\n"), nil)
+				m.AddResponse("git", []string{"log", "-p", "--no-merges", mergeBase + "..main"}, []byte("MAIN LOG\n"), nil)
+				// patch-id is consulted for both the branch diff and main's commits;
+				// returning the same id models the squash commit on main carrying
+				// the branch's combined patch.
+				m.AddResponse("git", []string{"patch-id", "--stable"}, []byte("abc123 deadbeef\n"), nil)
+			},
+			want: true,
+		},
+		{
+			name: "branch introduced no net change",
+			setup: func(m *MockExec) {
+				m.AddResponse("git", []string{"merge-base", "main", "feature"}, []byte(mergeBase+"\n"), nil)
+				m.AddResponse("git", []string{"diff", mergeBase, "feature"}, []byte("   \n"), nil)
+			},
+			want: false,
+		},
+		{
+			name: "main has not advanced past merge-base",
+			setup: func(m *MockExec) {
+				m.AddResponse("git", []string{"merge-base", "main", "feature"}, []byte(mergeBase+"\n"), nil)
+				m.AddResponse("git", []string{"diff", mergeBase, "feature"}, []byte("BRANCH DIFF\n"), nil)
+				m.AddResponse("git", []string{"patch-id", "--stable"}, []byte("abc123 deadbeef\n"), nil)
+				m.AddResponse("git", []string{"log", "-p", "--no-merges", mergeBase + "..main"}, []byte(""), nil)
+			},
+			want: false,
+		},
+		{
+			name: "merge-base lookup fails",
+			setup: func(m *MockExec) {
+				m.AddResponse("git", []string{"merge-base", "main", "feature"}, nil, MockError("no merge base"))
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			exec := NewMockExec()
+			tt.setup(exec)
+
+			git := NewGit(exec)
+			got, err := git.IsBranchSquashMergedByPatchID(context.Background(), "/repo", "main", "feature")
+
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("IsBranchSquashMergedByPatchID() expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("IsBranchSquashMergedByPatchID() error = %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("IsBranchSquashMergedByPatchID() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestGit_GetCommitMessages(t *testing.T) {
 	tests := []struct {
 		name       string

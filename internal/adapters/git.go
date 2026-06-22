@@ -479,6 +479,74 @@ func (g *Git) IsBranchSquashMerged(ctx context.Context, workDir, mainBranch, bra
 	return true, nil
 }
 
+// IsBranchSquashMergedByPatchID reports whether the combined change branchName
+// introduced since its merge-base with mainBranch is already present on
+// mainBranch as a single commit — the topology a "Squash and merge" of a
+// multi-commit branch produces. IsBranchSquashMerged (git cherry) only matches
+// when an individual branch commit's patch-id survives onto main, so it misses
+// multi-commit squashes; this collapses the branch to one patch and compares
+// patch-ids against the commits main gained since the merge-base.
+//
+// The branch's combined patch-id comes from `git diff <merge-base> <branch>`;
+// the candidates come from `git log -p --no-merges <merge-base>..<mainBranch>`
+// piped through `git patch-id`. Returns false (no error) when the branch
+// introduced no net change or main has not advanced. A non-zero git exit is
+// returned as (false, err) so callers warn-and-continue like the other checks.
+func (g *Git) IsBranchSquashMergedByPatchID(ctx context.Context, workDir, mainBranch, branchName string) (bool, error) {
+	mergeBase, err := g.MergeBase(ctx, workDir, mainBranch, branchName)
+	if err != nil {
+		return false, err
+	}
+
+	diff, err := g.exec.RunWithDir(ctx, workDir, "git", "diff", mergeBase, branchName)
+	if err != nil {
+		return false, fmt.Errorf("failed to diff branch against merge-base: %w", err)
+	}
+	if strings.TrimSpace(string(diff)) == "" {
+		return false, nil // branch introduced no net change; nothing to match
+	}
+	branchPatchID, err := g.patchID(ctx, workDir, diff)
+	if err != nil {
+		return false, err
+	}
+	if branchPatchID == "" {
+		return false, nil
+	}
+
+	mainLog, err := g.exec.RunWithDir(ctx, workDir, "git", "log", "-p", "--no-merges", mergeBase+".."+mainBranch)
+	if err != nil {
+		return false, fmt.Errorf("failed to read main commits since merge-base: %w", err)
+	}
+	if strings.TrimSpace(string(mainLog)) == "" {
+		return false, nil // main has not advanced past the merge-base
+	}
+	patchIDs, err := g.exec.RunWithDirInput(ctx, workDir, mainLog, "git", "patch-id", "--stable")
+	if err != nil {
+		return false, fmt.Errorf("failed to compute patch-ids for main commits: %w", err)
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(patchIDs)), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) > 0 && fields[0] == branchPatchID {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// patchID returns the stable patch-id of a diff — the first field of
+// `git patch-id --stable` — or "" when the diff is empty.
+func (g *Git) patchID(ctx context.Context, workDir string, diff []byte) (string, error) {
+	out, err := g.exec.RunWithDirInput(ctx, workDir, diff, "git", "patch-id", "--stable")
+	if err != nil {
+		return "", fmt.Errorf("failed to compute patch-id: %w", err)
+	}
+	fields := strings.Fields(string(out))
+	if len(fields) == 0 {
+		return "", nil
+	}
+	return fields[0], nil
+}
+
 // BranchExistsOnRemote checks if a branch exists on the remote.
 func (g *Git) BranchExistsOnRemote(ctx context.Context, workDir, branchName string) (bool, error) {
 	output, err := g.exec.RunWithDir(ctx, workDir, "git", "ls-remote", "--heads", "origin", branchName)

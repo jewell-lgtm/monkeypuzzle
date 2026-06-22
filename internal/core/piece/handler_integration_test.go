@@ -1553,7 +1553,6 @@ func TestIntegration_SwitchPiece_Main(t *testing.T) {
 	}
 }
 
-
 // recordingMux is a test multiplexer that records calls. It reports as a
 // managed (non-noop) multiplexer with a configurable InSession value, so
 // tests can exercise the "switch to main before killing" branch without
@@ -1830,5 +1829,101 @@ func TestIntegration_MergePiece_RecordsMergedMarker_MultiCommit(t *testing.T) {
 	}
 	if status.Method != "recorded" {
 		t.Errorf("expected method %q, got %q", "recorded", status.Method)
+	}
+}
+
+// TestIntegration_IsBranchMerged_GitHubMultiCommitSquash proves the fix
+// end-to-end with real git: a MULTI-commit piece squash-merged the way GitHub's
+// "Squash and merge" does it — one combined commit on main, NOT via `mp merge`
+// (so no recorded marker) — is reported merged via method "squash-combined".
+// `git branch --merged` and `git cherry` both miss this topology; the combined
+// merge-base patch-id is what catches it.
+func TestIntegration_IsBranchMerged_GitHubMultiCommitSquash(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	tmpDataHome, err := os.MkdirTemp("", "mp-data-*")
+	if err != nil {
+		t.Fatalf("failed to create temp data dir: %v", err)
+	}
+	t.Cleanup(func() {
+		os.RemoveAll(tmpDataHome)
+		paths.ResetDataDir()
+	})
+	paths.SetDataDir(tmpDataHome)
+
+	tmpDir, err := os.MkdirTemp("", "mp-integration-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	setupGitRepo(t, tmpDir)
+	setupMonkeypuzzleConfig(t, tmpDir)
+
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get working directory: %v", err)
+	}
+	defer func() { _ = os.Chdir(oldWd) }()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("failed to change directory: %v", err)
+	}
+
+	deps := core.Deps{
+		FS:     adapters.NewOSFS(""),
+		Output: adapters.NewBufferOutput(),
+		Exec:   adapters.NewOSExec(),
+	}
+	handler := piece.NewHandler(deps)
+	ctx := context.Background()
+
+	info, err := handler.CreatePiece(ctx, "gh-squash-piece", piece.CreatePieceOptions{})
+	if err != nil {
+		t.Fatalf("CreatePiece failed: %v", err)
+	}
+	worktree := info.WorktreePath
+
+	// The piece's branch, read straight from the worktree HEAD (PieceInfo does
+	// not carry the branch name).
+	branchOut, err := exec.Command("git", "-C", worktree, "rev-parse", "--abbrev-ref", "HEAD").CombinedOutput()
+	if err != nil {
+		t.Fatalf("failed to read piece branch: %v\n%s", err, branchOut)
+	}
+	branchName := strings.TrimSpace(string(branchOut))
+
+	// Three distinct commits so the squash collapses them into one combined
+	// commit whose patch-id matches none of them individually.
+	for i := 1; i <= 3; i++ {
+		fname := filepath.Join(worktree, fmt.Sprintf("file%d.txt", i))
+		if err := os.WriteFile(fname, []byte(fmt.Sprintf("content %d", i)), 0644); err != nil {
+			t.Fatalf("write file%d: %v", i, err)
+		}
+		runGit(t, worktree, "add", ".")
+		runGit(t, worktree, "commit", "-m", fmt.Sprintf("commit %d", i))
+	}
+
+	// Simulate GitHub "Squash and merge": collapse the branch into one new commit
+	// on main from the main checkout, WITHOUT `mp merge`, so no recorded marker
+	// is written and detection must come from git alone.
+	runGit(t, tmpDir, "merge", "--squash", branchName)
+	runGit(t, tmpDir, "commit", "-m", fmt.Sprintf("Squash %s (#1)", branchName))
+
+	// Guard: confirm there is no recorded Merged marker, so we are exercising the
+	// git patch-id path (Method 3.6), not the recorded-marker path (Method -1).
+	if meta, err := piece.ReadPieceMetadata(worktree, deps.FS); err == nil && meta.Merged {
+		t.Fatalf("expected no recorded Merged marker (GitHub squash, not mp merge), but found one")
+	}
+
+	status, err := handler.IsBranchMerged(ctx, worktree, branchName, "main")
+	if err != nil {
+		t.Fatalf("IsBranchMerged: %v", err)
+	}
+	if !status.IsMerged {
+		t.Fatalf("expected IsMerged=true for GitHub multi-commit squash, got false (method %q)", status.Method)
+	}
+	if status.Method != "squash-combined" {
+		t.Errorf("expected method %q, got %q", "squash-combined", status.Method)
 	}
 }

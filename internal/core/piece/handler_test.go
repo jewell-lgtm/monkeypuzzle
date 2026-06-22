@@ -1318,6 +1318,48 @@ func TestHandler_IsBranchMerged_ViaSquash(t *testing.T) {
 	}
 }
 
+// TestHandler_IsBranchMerged_ViaCombinedSquash covers a MULTI-commit branch
+// squash-merged the way GitHub's "Squash and merge" does it: one combined commit
+// lands on main with no recorded marker and no visible merged PR. `git branch
+// --merged` does not list it and `git cherry` still reports unique commits ('+'),
+// so Methods 3 and 3.5 miss it — only the combined merge-base patch-id (Method
+// 3.6) recognises it, reporting method "squash-combined".
+func TestHandler_IsBranchMerged_ViaCombinedSquash(t *testing.T) {
+	fs := adapters.NewMemoryFS()
+	out := adapters.NewBufferOutput()
+	mockExec := adapters.NewMockExec()
+	deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
+	handler := piece.NewHandler(deps)
+
+	repoRoot := "/repo"
+	branchName := "feature-branch"
+	const mergeBase = "base000"
+
+	// Branch not on remote; no merged PR visible.
+	mockExec.AddResponse("git", []string{"ls-remote", "--heads", "origin", branchName}, []byte(""), nil)
+	mockExec.AddResponse("gh", []string{"pr", "list", "--head", branchName, "--state", "merged", "--json", "number", "--limit", "1"}, []byte(`[]`), nil)
+	// Method 3: not listed by branch --merged (squash is a non-ancestor).
+	mockExec.AddResponse("git", []string{"branch", "--merged", "main"}, []byte("  main\n"), nil)
+	// Method 3.5: multi-commit, so git cherry still reports unique commits ('+').
+	mockExec.AddResponse("git", []string{"cherry", "main", branchName}, []byte("+ abc123\n+ def456\n"), nil)
+	// Method 3.6: the branch's combined patch-id matches a commit on main.
+	mockExec.AddResponse("git", []string{"merge-base", "main", branchName}, []byte(mergeBase+"\n"), nil)
+	mockExec.AddResponse("git", []string{"diff", mergeBase, branchName}, []byte("BRANCH DIFF\n"), nil)
+	mockExec.AddResponse("git", []string{"log", "-p", "--no-merges", mergeBase + "..main"}, []byte("MAIN LOG\n"), nil)
+	mockExec.AddResponse("git", []string{"patch-id", "--stable"}, []byte("combined123 deadbeef\n"), nil)
+
+	status, err := handler.IsBranchMerged(context.Background(), repoRoot, branchName, "main")
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if !status.IsMerged {
+		t.Errorf("expected IsMerged=true for multi-commit squash, got false (method %q)", status.Method)
+	}
+	if status.Method != "squash-combined" {
+		t.Errorf("expected method %q, got %q", "squash-combined", status.Method)
+	}
+}
+
 func TestHandler_IsBranchMerged_PRNotMerged_FallsBackToGit(t *testing.T) {
 	fs := adapters.NewMemoryFS()
 	out := adapters.NewBufferOutput()

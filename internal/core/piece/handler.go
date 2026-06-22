@@ -930,13 +930,15 @@ type MergeStatus struct {
 }
 
 // IsBranchMerged checks if a piece branch has been merged to main.
-// Detection priority: -1) recorded merged marker (set by `mp merge`; the only
-// signal that survives a multi-commit squash), 0) is-piece-done.sh user hook
-// (opt-in escape hatch), 1) PR metadata, 2) provider PR list by branch,
-// 3) git branch --merged, 3.5) git cherry patch-id equivalence (squash-merge),
-// 4) commit history. Before the ancestry heuristics (3 & 4) it short-circuits
-// "unstarted" branches (no commits of their own, strictly behind main), which
-// would otherwise be indistinguishable from a fast-forward merge.
+// Detection priority: -1) recorded merged marker (set by `mp merge`; the signal
+// that survives a multi-commit squash even when local main is stale or no PR
+// provider is reachable), 0) is-piece-done.sh user hook (opt-in escape hatch),
+// 1) PR metadata, 2) provider PR list by branch, 3) git branch --merged,
+// 3.5) git cherry per-commit patch-id equivalence (single-commit squash),
+// 3.6) combined merge-base patch-id (multi-commit squash), 4) commit history.
+// Before the git heuristics (3 through 4) it short-circuits "unstarted" branches
+// (no commits of their own, strictly behind main), which would otherwise be
+// indistinguishable from a fast-forward merge.
 func (h *Handler) IsBranchMerged(ctx context.Context, repoRoot, branchName, mainBranch string) (MergeStatus, error) {
 	status := MergeStatus{}
 
@@ -952,11 +954,13 @@ func (h *Handler) IsBranchMerged(ctx context.Context, repoRoot, branchName, main
 	status.ExistsOnRemote = existsOnRemote
 
 	// Method "recorded" (highest priority): consult the durable marker `mp merge`
-	// persists in piece metadata. This is the only signal that survives a
-	// multi-commit squash-merge — git heuristics see a single combined commit
-	// whose patch-id matches none of the piece's commits. repoRoot here is the
-	// piece worktree path (cleanup/done pass it before removal), so the metadata
-	// is still readable. A missing/unreadable marker just falls through.
+	// persists in piece metadata. It is the signal that survives a multi-commit
+	// squash without depending on local state — the git heuristics below (3.6)
+	// can also detect such a squash, but only once local main contains the
+	// combined commit, whereas the marker is true the moment `mp merge` runs.
+	// repoRoot here is the piece worktree path (cleanup/done pass it before
+	// removal), so the metadata is still readable. A missing/unreadable marker
+	// just falls through.
 	if metadata, err := ReadPieceMetadata(repoRoot, h.deps.FS); err == nil && metadata.Merged {
 		status.IsMerged = true
 		status.Method = "recorded"
@@ -1025,10 +1029,12 @@ func (h *Handler) IsBranchMerged(ctx context.Context, repoRoot, branchName, main
 		return status, nil
 	}
 
-	// Method 3.5: Check via patch-id equivalence (git cherry). This catches
-	// squash-merges — including mp's own `mp merge` — where the piece commits
-	// land on main under a new SHA, so the branch is neither an ancestor nor
-	// listed by `git branch --merged`.
+	// Method 3.5: Check via per-commit patch-id equivalence (git cherry). This
+	// catches merges where each piece commit's patch-id survives onto main under
+	// a new SHA — a rebase-merge, or a single-commit squash — so the branch is
+	// neither an ancestor nor listed by `git branch --merged`. A multi-commit
+	// squash collapses into one commit matching no individual patch-id and is
+	// handled by Method 3.6 below.
 	merged, err = h.git.IsBranchSquashMerged(ctx, repoRoot, mainBranch, branchName)
 	if err != nil {
 		// Log warning but continue to fallback
@@ -1039,6 +1045,26 @@ func (h *Handler) IsBranchMerged(ctx context.Context, repoRoot, branchName, main
 	} else if merged {
 		status.IsMerged = true
 		status.Method = "squash"
+		return status, nil
+	}
+
+	// Method 3.6: Check via combined merge-base patch-id. A GitHub "Squash and
+	// merge" of a MULTI-commit branch lands one commit whose patch-id matches
+	// none of the branch's individual commits, so Method 3.5 misses it. This
+	// compares the branch's combined patch-id against the commits main gained
+	// since the merge-base — catching squash-merges that arrived without a
+	// recorded marker (e.g. merged on GitHub, not via `mp merge`) or without a
+	// reachable PR provider, as long as local main has fetched the squash.
+	merged, err = h.git.IsBranchSquashMergedByPatchID(ctx, repoRoot, mainBranch, branchName)
+	if err != nil {
+		// Log warning but continue to fallback
+		h.deps.Output.Write(core.Message{
+			Type:    core.MsgWarning,
+			Content: fmt.Sprintf("patch-id squash-merge check failed: %v", err),
+		})
+	} else if merged {
+		status.IsMerged = true
+		status.Method = "squash-combined"
 		return status, nil
 	}
 

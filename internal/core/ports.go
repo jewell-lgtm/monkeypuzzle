@@ -46,6 +46,10 @@ type Exec interface {
 	Run(ctx context.Context, name string, args ...string) ([]byte, error)
 	RunWithDir(ctx context.Context, dir, name string, args ...string) ([]byte, error)
 	RunWithEnv(ctx context.Context, dir string, env []string, name string, args ...string) ([]byte, error)
+	// RunWithDirInput runs name+args in dir, feeding input on the command's
+	// stdin, and returns its combined output. Used for git plumbing that reads a
+	// stream from stdin — e.g. piping a diff into `git patch-id`.
+	RunWithDirInput(ctx context.Context, dir string, input []byte, name string, args ...string) ([]byte, error)
 	// StartDetached launches a command in its own process group, redirects its
 	// combined stdout/stderr to logPath, and returns once the process has
 	// started without waiting for it to finish. The process is deliberately not

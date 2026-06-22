@@ -258,6 +258,13 @@ func (h *hybridExec) RunWithEnv(ctx context.Context, dir string, env []string, n
 	return h.real.RunWithEnv(ctx, dir, env, name, args...)
 }
 
+func (h *hybridExec) RunWithDirInput(ctx context.Context, dir string, input []byte, name string, args ...string) ([]byte, error) {
+	if h.shouldMock(name, args) {
+		return h.mock.RunWithDirInput(ctx, dir, input, name, args...)
+	}
+	return h.real.RunWithDirInput(ctx, dir, input, name, args...)
+}
+
 func (h *hybridExec) StartDetached(dir string, env []string, logPath, name string, args ...string) error {
 	if h.shouldMock(name, args) {
 		return h.mock.StartDetached(dir, env, logPath, name, args...)
