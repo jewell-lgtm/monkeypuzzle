@@ -103,6 +103,35 @@ func TestSanitizePieceName(t *testing.T) {
 	}
 }
 
+func TestStripBranchPrefix(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{name: "feat prefix", input: "feat/add-foo", expected: "add-foo"},
+		{name: "chore prefix", input: "chore/bump-deps", expected: "bump-deps"},
+		{name: "copilot prefix", input: "copilot/fix-bug", expected: "fix-bug"},
+		{name: "uppercase prefix", input: "Feat/Add-Foo", expected: "Add-Foo"},
+		{name: "stacked prefixes", input: "copilot/feat/add-foo", expected: "add-foo"},
+		{name: "unknown prefix kept", input: "matt/my-work", expected: "matt/my-work"},
+		{name: "no slash", input: "add-foo", expected: "add-foo"},
+		{name: "bare prefix word", input: "feat", expected: "feat"},
+		{name: "trailing slash", input: "feat/", expected: "feat/"},
+		{name: "leading slash", input: "/feat/add", expected: "/feat/add"},
+		{name: "nested path after known prefix", input: "feat/area/add-foo", expected: "area/add-foo"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := piece.StripBranchPrefix(tt.input)
+			if result != tt.expected {
+				t.Errorf("input %q: expected %q, got %q", tt.input, tt.expected, result)
+			}
+		})
+	}
+}
+
 func TestReadConfig(t *testing.T) {
 	fs := adapters.NewMemoryFS()
 	repoRoot := "/repo"

@@ -20,6 +20,50 @@ const (
 // hyphenRegex matches one or more consecutive hyphens.
 var hyphenRegex = regexp.MustCompile(`-+`)
 
+// branchPrefixes are conventional leading path segments on git branch names
+// (e.g. "feat/add-foo", "copilot/fix-bug") that carry no meaning as a piece
+// name and should be dropped before deriving one.
+var branchPrefixes = map[string]bool{
+	"feat":       true,
+	"feature":    true,
+	"fix":        true,
+	"bugfix":     true,
+	"hotfix":     true,
+	"chore":      true,
+	"docs":       true,
+	"doc":        true,
+	"refactor":   true,
+	"test":       true,
+	"tests":      true,
+	"ci":         true,
+	"build":      true,
+	"perf":       true,
+	"style":      true,
+	"copilot":    true,
+	"dependabot": true,
+	"renovate":   true,
+	"wip":        true,
+}
+
+// StripBranchPrefix removes leading conventional prefix segments (e.g. "feat/",
+// "copilot/") from a branch name before a piece name is derived from it. Only
+// known prefixes are dropped, and never the final segment, so "feat/add-foo"
+// becomes "add-foo" while "matt/work" and a bare "feat" are left untouched.
+func StripBranchPrefix(branch string) string {
+	for {
+		slash := strings.Index(branch, "/")
+		// No slash, or the slash is the first/last rune: nothing safe to strip.
+		if slash <= 0 || slash == len(branch)-1 {
+			break
+		}
+		if !branchPrefixes[strings.ToLower(branch[:slash])] {
+			break
+		}
+		branch = branch[slash+1:]
+	}
+	return branch
+}
+
 // SanitizePieceName turns a free-form string (a prompt or branch name) into a
 // safe, short piece name: lowercased, with spaces and special characters
 // collapsed to hyphens and invalid filesystem characters removed.
