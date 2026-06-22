@@ -11,7 +11,7 @@ The Docker development environment provides:
 - **mp CLI** pre-built and available in PATH
 - **git** for version control
 - **tmux** for terminal multiplexing (required by the piece commands)
-- **gh CLI** (GitHub CLI) for PR management
+- **gh CLI** (GitHub CLI) or **glab CLI** (GitLab CLI) for PR/MR management
 - **Essential development tools** (vim, nano, curl, wget, etc.)
 
 ## Prerequisites

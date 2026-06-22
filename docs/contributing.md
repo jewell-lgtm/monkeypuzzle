@@ -7,7 +7,7 @@
 - Go 1.24+ (use [mise](https://mise.jdx.dev/) for version management)
 - Git
 - tmux (for the piece commands)
-- gh CLI (for GitHub PR provider)
+- gh CLI (for the GitHub PR provider) or glab CLI (for the GitLab MR provider)
 
 ### Clone and build
 

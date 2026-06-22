@@ -567,7 +567,7 @@ mp abandon --name foo --delete-branch   # Also delete git branch
 
 ## mp pr create
 
-Create a GitHub pull request for the current piece. Pushes the branch to origin and creates the PR via the `gh` CLI. Run from within a piece worktree.
+Create a pull/merge request for the current piece. Pushes the branch to origin and opens the PR/MR via the configured provider's CLI — `gh` for GitHub or `glab` for GitLab (set `pr_provider` at `mp init`). Run from within a piece worktree.
 
 ### Usage
 
@@ -650,19 +650,21 @@ Whole-stack operations over pieces stacked via `--parent` (git-town-style). All 
 
 ### mp stack status
 
-Show the stack tree, PR state, and drift vs the GitHub PR list.
+Show the stack tree, PR/MR state, and drift vs the forge's PR/MR list.
 
 ```bash
 mp stack status
-mp stack status --from-github   # rebuild local lineage from open PR bases
-mp stack status --apply-bases   # edit PR bases on GitHub to match local lineage
+mp stack status --from-remote   # rebuild local lineage from open PR/MR bases
+mp stack status --apply-bases   # edit PR/MR bases on the forge to match local lineage
 ```
 
 | Flag            | Description                                          | Default |
 | --------------- | ---------------------------------------------------- | ------- |
-| `--from-github` | Rebuild local lineage from open PR bases             | `false` |
-| `--apply-bases` | Edit PR bases on GitHub to match local lineage       | `false` |
+| `--from-remote` | Rebuild local lineage from open PR/MR bases          | `false` |
+| `--apply-bases` | Edit PR/MR bases on the forge to match local lineage | `false` |
 | `--main`        | Main branch name                                     | `main`  |
+
+(`--from-github` remains as a hidden, deprecated alias for `--from-remote`.)
 
 ### mp stack sync
 
