@@ -289,7 +289,12 @@ func WithMergeDefaults(input MergeInput) MergeInput {
 type CleanupInput struct {
 	MainBranch string `json:"main_branch,omitempty"`
 	DryRun     bool   `json:"dry_run,omitempty"`
-	Force      bool   `json:"force,omitempty"`
+	// Apply performs the cleanup for real (the opt-in to remove worktrees and
+	// prune projects). Cleanup is dry-run by default; without Apply a
+	// non-interactive invocation only previews.
+	Apply bool `json:"apply,omitempty"`
+	// Force is a back-compat alias for Apply (it predates the dry-run default).
+	Force bool `json:"force,omitempty"`
 }
 
 // CleanupSchema returns the JSON schema for piece cleanup input.
@@ -297,6 +302,7 @@ func CleanupSchema() ([]byte, error) {
 	schema := map[string]any{
 		"main_branch": "main",
 		"dry_run":     false,
+		"apply":       false,
 		"force":       false,
 	}
 	return json.MarshalIndent(schema, "", "  ")
@@ -320,6 +326,7 @@ func WithCleanupDefaults(input CleanupInput) CleanupInput {
 	return CleanupInput{
 		MainBranch: mainBranch,
 		DryRun:     input.DryRun,
+		Apply:      input.Apply,
 		Force:      input.Force,
 	}
 }

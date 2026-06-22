@@ -62,7 +62,10 @@ var pieceCleanupCmd = &cobra.Command{
 merged (removing worktrees and killing tmux sessions), and prunes registry
 entries for projects whose repository directory no longer exists on disk.
 
-Use --dry-run to report what would be removed without changing anything.`,
+Dry-run by default: it reports what would be removed and changes nothing. Pass
+--apply to actually clean up. In an interactive terminal you are shown the
+preview and asked to confirm; non-interactive callers (flags/stdin JSON) preview
+unless --apply (or "apply": true) is given.`,
 	RunE: runPieceCleanup,
 }
 
@@ -109,6 +112,7 @@ var flagParent string
 var flagSkipSwitch bool
 var flagDryRun bool
 var flagForce bool
+var flagPieceCleanupApply bool
 var flagAbandonName string
 var flagDeleteBranch bool
 var flagOverwriteSession bool
@@ -143,8 +147,9 @@ func init() {
 	pieceMergeCmd.Flags().BoolVar(&flagPieceMergeReparent, "reparent-children", false, "Merge a piece that has child pieces: re-home them onto the merge target")
 	pieceMergeCmd.Flags().StringVar(&flagPieceMergeReparentStrategy, "reparent-strategy", "", "How to re-home children: 'rebase' (default, rewrites history) or 'merge' (no force-push)")
 	pieceCleanupCmd.Flags().StringVar(&flagMainBranch, "main-branch", "", "Main branch name to check for merged status (default: main)")
-	pieceCleanupCmd.Flags().BoolVar(&flagDryRun, "dry-run", false, "Show what would be cleaned without making changes")
-	pieceCleanupCmd.Flags().BoolVar(&flagForce, "force", false, "Skip confirmation prompts")
+	pieceCleanupCmd.Flags().BoolVar(&flagPieceCleanupApply, "apply", false, "Apply the cleanup (default is a dry-run preview)")
+	pieceCleanupCmd.Flags().BoolVar(&flagDryRun, "dry-run", false, "Preview what would be cleaned without changing anything")
+	pieceCleanupCmd.Flags().BoolVar(&flagForce, "force", false, "Apply without the interactive confirmation (alias for --apply)")
 	pieceCleanupCmd.Flags().BoolVar(&flagPieceCleanupSchema, "schema", false, "Output JSON schema and exit")
 	pieceAbandonCmd.Flags().StringVar(&flagAbandonName, "name", "", "Piece name to abandon (optional if in piece)")
 	pieceAbandonCmd.Flags().BoolVar(&flagForce, "force", false, "Force removal even with uncommitted changes")
@@ -729,41 +734,29 @@ func runPieceCleanup(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("not in a git repository")
 	}
 
-	opts := piececmd.CleanupOptions{
-		DryRun:     input.DryRun,
-		Force:      input.Force,
-		MainBranch: input.MainBranch,
-	}
-
-	results, err := handler.CleanupMergedPieces(ctx, repoRoot, opts)
+	// Cleanup is dry-run by default. Always preview first, then decide whether to
+	// apply: --apply (or --force) opts in, --dry-run stays a preview, an
+	// interactive terminal is asked to confirm, and any other (non-interactive)
+	// caller previews.
+	output, err := cleanupPass(ctx, handler, repoRoot, input.MainBranch, true)
 	if err != nil {
 		return err
 	}
 
-	// Prune registry entries for projects whose directory no longer exists.
-	removedProjects, err := projectcmd.PruneStale(input.DryRun)
+	anythingToDo := len(output.CleanedPieces) > 0 || len(output.RemovedProjects) > 0
+	apply, err := resolveApply(input.Apply || input.Force, input.DryRun, anythingToDo, func() (bool, error) {
+		return confirmApply("Clean up merged pieces?", cleanupSummary(output))
+	})
 	if err != nil {
-		return fmt.Errorf("failed to prune deleted projects: %w", err)
+		return err
 	}
-	for _, p := range removedProjects {
-		verb := "Pruned deleted project"
-		if input.DryRun {
-			verb = "[dry-run] Would prune deleted project"
+	if apply {
+		output, err = cleanupPass(ctx, handler, repoRoot, input.MainBranch, false)
+		if err != nil {
+			return err
 		}
-		fmt.Fprintf(os.Stderr, "%s: %s (%s)\n", verb, p.Name, p.Path)
 	}
 
-	// Output combined JSON to stdout.
-	output := cleanupOutput{
-		CleanedPieces:   results,
-		RemovedProjects: removedProjects,
-	}
-	if output.CleanedPieces == nil {
-		output.CleanedPieces = []piececmd.CleanupResult{}
-	}
-	if output.RemovedProjects == nil {
-		output.RemovedProjects = []registry.Project{}
-	}
 	jsonData, err := json.MarshalIndent(output, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal results: %w", err)
@@ -771,6 +764,57 @@ func runPieceCleanup(cmd *cobra.Command, args []string) error {
 	fmt.Println(string(jsonData))
 
 	return nil
+}
+
+// cleanupPass runs one cleanup pass (merged-piece removal + stale-project prune)
+// and returns the combined output. When dryRun is true nothing is mutated; it
+// only reports what would be removed.
+func cleanupPass(ctx context.Context, handler *piececmd.Handler, repoRoot, mainBranch string, dryRun bool) (cleanupOutput, error) {
+	results, err := handler.CleanupMergedPieces(ctx, repoRoot, piececmd.CleanupOptions{
+		DryRun:     dryRun,
+		MainBranch: mainBranch,
+	})
+	if err != nil {
+		return cleanupOutput{}, err
+	}
+
+	removedProjects, err := projectcmd.PruneStale(dryRun)
+	if err != nil {
+		return cleanupOutput{}, fmt.Errorf("failed to prune deleted projects: %w", err)
+	}
+	for _, p := range removedProjects {
+		verb := "Pruned deleted project"
+		if dryRun {
+			verb = "[dry-run] Would prune deleted project"
+		}
+		fmt.Fprintf(os.Stderr, "%s: %s (%s)\n", verb, p.Name, p.Path)
+	}
+
+	output := cleanupOutput{CleanedPieces: results, RemovedProjects: removedProjects}
+	if output.CleanedPieces == nil {
+		output.CleanedPieces = []piececmd.CleanupResult{}
+	}
+	if output.RemovedProjects == nil {
+		output.RemovedProjects = []registry.Project{}
+	}
+	return output, nil
+}
+
+// cleanupSummary renders a one-line summary of a cleanup preview for the
+// interactive confirmation prompt.
+func cleanupSummary(out cleanupOutput) string {
+	pieces := make([]string, len(out.CleanedPieces))
+	for i, p := range out.CleanedPieces {
+		pieces[i] = p.PieceName
+	}
+	parts := []string{}
+	if len(pieces) > 0 {
+		parts = append(parts, fmt.Sprintf("remove %d merged piece(s): %s", len(pieces), strings.Join(pieces, ", ")))
+	}
+	if len(out.RemovedProjects) > 0 {
+		parts = append(parts, fmt.Sprintf("prune %d deleted project(s)", len(out.RemovedProjects)))
+	}
+	return "Would " + strings.Join(parts, "; ")
 }
 
 // cleanupOutput is the stdout JSON shape for `mp cleanup` / `mp repair`.
@@ -799,6 +843,9 @@ func getCleanupInput() (piececmd.CleanupInput, error) {
 	}
 	if flagDryRun {
 		input.DryRun = true
+	}
+	if flagPieceCleanupApply {
+		input.Apply = true
 	}
 	if flagForce {
 		input.Force = true

@@ -778,6 +778,116 @@ func TestCLI_Cleanup_StdinDryRun(t *testing.T) {
 	}
 }
 
+// setupMergedPiece creates a piece, merges its branch into main, and returns its
+// worktree path — the fixture shared by the cleanup default/apply tests. It first
+// commits the mp config so piece worktrees are clean (as in a real repo), letting
+// `--apply` remove them without --force.
+func setupMergedPiece(t *testing.T, env *testEnv, name string) string {
+	t.Helper()
+	commit := exec.Command("git", "add", "-A")
+	commit.Dir = env.tmpDir
+	if out, err := commit.CombinedOutput(); err != nil {
+		t.Fatalf("git add config failed: %v\n%s", err, out)
+	}
+	commit = exec.Command("git", "commit", "-m", "track mp config")
+	commit.Dir = env.tmpDir
+	if out, err := commit.CombinedOutput(); err != nil {
+		t.Fatalf("git commit config failed: %v\n%s", err, out)
+	}
+
+	stdout, stderr, err := env.run("create", "--name", name, "--skip-switch")
+	if err != nil {
+		t.Fatalf("piece create failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+	var created map[string]any
+	if err := json.Unmarshal([]byte(stdout), &created); err != nil {
+		t.Fatalf("invalid JSON from piece create: %v", err)
+	}
+	cmd := exec.Command("git", "merge", name, "--no-edit")
+	cmd.Dir = env.tmpDir
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git merge failed: %v\n%s", err, output)
+	}
+	return created["worktree_path"].(string)
+}
+
+// TestCLI_Cleanup_DryRunByDefault verifies that a non-interactive `mp repair`
+// (no --apply) previews merged pieces without removing them.
+func TestCLI_Cleanup_DryRunByDefault(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	env.initGitRepo()
+	env.initProject("test")
+	worktree := setupMergedPiece(t, env, "merged-piece")
+
+	// "repair" alias, no flags: must preview, never delete.
+	stdout, stderr, err := env.run("repair")
+	if err != nil {
+		t.Fatalf("repair failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+
+	var result struct {
+		CleanedPieces []struct {
+			PieceName string `json:"piece_name"`
+		} `json:"cleaned_pieces"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("invalid JSON output: %v\noutput: %s", err, stdout)
+	}
+	found := false
+	for _, p := range result.CleanedPieces {
+		if p.PieceName == "merged-piece" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected merged-piece in dry-run preview, got %+v", result.CleanedPieces)
+	}
+	if !strings.Contains(stderr, "[dry-run]") {
+		t.Errorf("expected [dry-run] notice on stderr, got: %s", stderr)
+	}
+	if _, err := os.Stat(worktree); err != nil {
+		t.Errorf("worktree should still exist after default dry-run: %v", err)
+	}
+}
+
+// TestCLI_Cleanup_Apply verifies that --apply actually removes merged pieces.
+func TestCLI_Cleanup_Apply(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	env.initGitRepo()
+	env.initProject("test")
+	worktree := setupMergedPiece(t, env, "merged-piece")
+
+	stdout, stderr, err := env.run("cleanup", "--apply")
+	if err != nil {
+		t.Fatalf("cleanup --apply failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+
+	var result struct {
+		CleanedPieces []struct {
+			PieceName string `json:"piece_name"`
+		} `json:"cleaned_pieces"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("invalid JSON output: %v\noutput: %s", err, stdout)
+	}
+	found := false
+	for _, p := range result.CleanedPieces {
+		if p.PieceName == "merged-piece" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected merged-piece in cleaned list, got %+v", result.CleanedPieces)
+	}
+	if _, err := os.Stat(worktree); !os.IsNotExist(err) {
+		t.Errorf("worktree should be removed after --apply, stat err: %v", err)
+	}
+}
+
 // runWithEnv executes mp command with custom environment variables
 func (e *testEnv) runWithEnv(env map[string]string, args ...string) (string, string, error) {
 	cmd := exec.Command(e.binPath, args...)

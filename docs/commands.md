@@ -490,30 +490,37 @@ If main has commits not in the piece, merge fails. Run `mp update` first to inco
 
 ## mp cleanup
 
-Remove worktrees for merged pieces.
+Remove worktrees for merged pieces and prune deleted projects. Aliased as `mp repair`.
+
+**Dry-run by default.** With no `--apply`, cleanup only previews what would be
+removed. Pass `--apply` (or `"apply": true`) to actually clean up. In an
+interactive terminal you are shown the preview and asked to confirm.
 
 ### Usage
 
 ```bash
-mp cleanup              # Cleanup merged pieces
-mp cleanup --dry-run    # Preview what would be cleaned
-mp cleanup --force      # Skip confirmation
+mp cleanup              # Preview what would be cleaned (dry-run)
+mp cleanup --apply      # Actually remove merged pieces / prune projects
+mp cleanup --dry-run    # Explicit preview (also suppresses the confirm prompt)
+echo '{"apply":true}' | mp cleanup
 ```
 
 ### Flags
 
-| Flag            | Description                                | Default |
-| --------------- | ------------------------------------------ | ------- |
-| `--dry-run`     | Show what would be cleaned without changes | `false` |
-| `--force`       | Skip confirmation prompts                  | `false` |
-| `--main-branch` | Main branch to check merge status against  | `main`  |
+| Flag            | Description                                       | Default |
+| --------------- | ------------------------------------------------- | ------- |
+| `--apply`       | Apply the cleanup (default is a dry-run preview)  | `false` |
+| `--dry-run`     | Preview only; never prompt, never change anything | `false` |
+| `--force`       | Apply without the interactive confirmation (alias for `--apply`) | `false` |
+| `--main-branch` | Main branch to check merge status against         | `main`  |
 
 ### What it does
 
 1. Scans pieces directory for worktrees
 2. Checks if each piece's branch is merged (via git branch, PR, or remote)
-3. For merged pieces: removes worktree, kills tmux session
-4. Reports what was cleaned
+3. Previews the merged pieces and stale projects that would be removed
+4. With `--apply` (or an interactive confirmation): removes each worktree, kills
+   its tmux session, and prunes registry entries for deleted projects
 
 ---
 
@@ -661,19 +668,35 @@ mp stack status --apply-bases   # edit PR bases on GitHub to match local lineage
 
 Propagate main and each parent down through the stack.
 
+**Dry-run by default.** With no `--apply`, sync only previews which pieces would
+be synced. Pass `--apply` (or `"apply": true`) to actually sync. In an
+interactive terminal you are shown the preview and asked to confirm.
+
+**Sync source.** Sync first updates local main from an upstream ref (a fetch and
+fast-forward) before propagating it down the stack. That ref is `--from`,
+defaulting to `origin/<main>`. In an interactive terminal you are prompted for it
+(enter to accept the default); non-interactive callers use the default. A ref
+whose remote isn't configured (e.g. `origin/main` in a local-only repo) makes the
+main update a no-op.
+
 ```bash
-mp stack sync
-mp stack sync --strategy rebase   # rebase instead of the default merge
-mp stack sync --push              # push each branch after syncing
-mp stack sync --stack             # limit to the current piece's stack
+mp stack sync                     # preview which pieces would be synced (dry-run)
+mp stack sync --apply             # actually sync the stack
+mp stack sync --from upstream/main --apply   # sync main from a different remote
+mp stack sync --strategy rebase --apply   # rebase instead of the default merge
+mp stack sync --push --apply      # push each branch after syncing
+mp stack sync --stack             # limit the preview to the current piece's stack
 ```
 
-| Flag         | Description                                          | Default |
-| ------------ | ---------------------------------------------------- | ------- |
-| `--strategy` | Sync strategy: `merge` or `rebase`                   | `merge` |
-| `--push`     | Push each branch after syncing                       | `false` |
-| `--stack`    | Limit to the current piece's stack (run from a piece) | `false` |
-| `--main`     | Main branch name                                     | `main`  |
+| Flag         | Description                                          | Default       |
+| ------------ | ---------------------------------------------------- | ------------- |
+| `--apply`    | Apply the sync (default is a dry-run preview)        | `false`       |
+| `--dry-run`  | Preview only; never prompt, never change anything    | `false`       |
+| `--from`     | Upstream ref to update main from (fetch + fast-forward) | `origin/<main>` |
+| `--strategy` | Sync strategy: `merge` or `rebase`                   | `merge`       |
+| `--push`     | Push each branch after syncing                       | `false`       |
+| `--stack`    | Limit to the current piece's stack (run from a piece) | `false`      |
+| `--main`     | Main branch name                                     | `main`        |
 
 ### mp stack continue
 

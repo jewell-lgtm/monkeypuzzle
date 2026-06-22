@@ -64,7 +64,8 @@ func TestCLI_StackSync_PropagatesMainThroughTwoPieceStack(t *testing.T) {
 	mainCommit := strings.TrimSpace(gitOut(t, env.tmpDir, "rev-parse", "HEAD"))
 
 	// Sync the whole stack from the main repo (default merge strategy, no remote).
-	stdout, stderr, err := env.run("stack", "sync")
+	// --apply because sync is dry-run by default.
+	stdout, stderr, err := env.run("stack", "sync", "--apply")
 	if err != nil {
 		t.Fatalf("stack sync failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
 	}
@@ -91,6 +92,119 @@ func TestCLI_StackSync_PropagatesMainThroughTwoPieceStack(t *testing.T) {
 	}
 	if !isAncestor(t, pieceB, mainCommit, "HEAD") {
 		t.Errorf("main commit %s not reachable from piece b at %s", mainCommit, pieceB)
+	}
+}
+
+// TestCLI_StackSync_DryRunByDefault verifies that a non-interactive `mp stack
+// sync` (no --apply) previews the work without touching any branch.
+func TestCLI_StackSync_DryRunByDefault(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	env.initGitRepo()
+	env.initProject("test")
+
+	pieceA := createPiece(t, env, "a", "main")
+	createPiece(t, env, "b", "a")
+	shaABefore := strings.TrimSpace(gitOut(t, pieceA, "rev-parse", "HEAD"))
+
+	// Advance main so a real sync would have something to propagate.
+	gitCmd(t, env.tmpDir, "checkout", "main")
+	if err := os.WriteFile(filepath.Join(env.tmpDir, "main-change.txt"), []byte("from main\n"), 0o644); err != nil {
+		t.Fatalf("write main-change.txt: %v", err)
+	}
+	gitCmd(t, env.tmpDir, "add", "main-change.txt")
+	gitCmd(t, env.tmpDir, "commit", "-m", "feat: advance main")
+
+	// No --apply: must be a dry-run that mutates nothing.
+	stdout, stderr, err := env.run("stack", "sync")
+	if err != nil {
+		t.Fatalf("stack sync failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+
+	var result struct {
+		Updated []string `json:"updated"`
+		Status  string   `json:"status"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("invalid JSON output: %v\noutput: %s", err, stdout)
+	}
+	if result.Status != "dry-run" {
+		t.Errorf("expected status=dry-run, got %q", result.Status)
+	}
+	if !contains(result.Updated, "a") || !contains(result.Updated, "b") {
+		t.Errorf("expected preview to list both a and b, got %v", result.Updated)
+	}
+	if !strings.Contains(stderr, "[dry-run]") {
+		t.Errorf("expected [dry-run] notice on stderr, got: %s", stderr)
+	}
+
+	// The core guarantee: nothing moved.
+	if got := strings.TrimSpace(gitOut(t, pieceA, "rev-parse", "HEAD")); got != shaABefore {
+		t.Errorf("dry-run moved piece a: got %s want %s", got, shaABefore)
+	}
+	if _, err := os.Stat(filepath.Join(env.tmpDir, ".monkeypuzzle", "stack-snapshot.json")); err == nil {
+		t.Error("dry-run wrote an undo snapshot; it should not mutate state")
+	}
+}
+
+// TestCLI_StackSync_FromCustomRef verifies that --from drives the main update:
+// it fetches the named remote (not a hardcoded "origin") and fast-forwards local
+// main to that ref before propagating it down the stack.
+func TestCLI_StackSync_FromCustomRef(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	env.initGitRepo()
+	env.initProject("test")
+
+	// Wire a bare repo as a non-origin remote ("upstream") and seed it with main.
+	bare := filepath.Join(env.tmpDir, "upstream.git")
+	if out, err := exec.Command("git", "init", "--bare", bare).CombinedOutput(); err != nil {
+		t.Fatalf("git init --bare failed: %v\n%s", err, out)
+	}
+	env.gitInDir(env.tmpDir, "remote", "add", "upstream", bare)
+	env.gitInDir(env.tmpDir, "push", "upstream", "main")
+
+	pieceA := createPiece(t, env, "a", "main")
+	pieceB := createPiece(t, env, "b", "a")
+
+	// Advance upstream/main with a commit local main does not yet have, then move
+	// local main back so it must fast-forward to upstream to pick the commit up.
+	if err := os.WriteFile(filepath.Join(env.tmpDir, "upstream-change.txt"), []byte("from upstream\n"), 0o644); err != nil {
+		t.Fatalf("write upstream-change.txt: %v", err)
+	}
+	env.gitInDir(env.tmpDir, "add", "upstream-change.txt")
+	env.gitInDir(env.tmpDir, "commit", "-m", "feat: advance upstream")
+	upstreamCommit := env.gitInDir(env.tmpDir, "rev-parse", "HEAD")
+	env.gitInDir(env.tmpDir, "push", "upstream", "main")
+	env.gitInDir(env.tmpDir, "reset", "--hard", "HEAD~1")
+
+	stdout, stderr, err := env.run("stack", "sync", "--from", "upstream/main", "--apply")
+	if err != nil {
+		t.Fatalf("stack sync failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+
+	var result struct {
+		Updated []string `json:"updated"`
+		Status  string   `json:"status"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("invalid JSON output: %v\noutput: %s", err, stdout)
+	}
+	if result.Status != "synced" {
+		t.Errorf("expected status=synced, got %q", result.Status)
+	}
+
+	// Local main fast-forwarded to upstream/main, and the commit reached the stack.
+	if got := env.gitInDir(env.tmpDir, "rev-parse", "HEAD"); got != upstreamCommit {
+		t.Errorf("local main not fast-forwarded to upstream: got %s want %s", got, upstreamCommit)
+	}
+	if !isAncestor(t, pieceA, upstreamCommit, "HEAD") {
+		t.Errorf("upstream commit %s not reachable from piece a", upstreamCommit)
+	}
+	if !isAncestor(t, pieceB, upstreamCommit, "HEAD") {
+		t.Errorf("upstream commit %s not reachable from piece b", upstreamCommit)
 	}
 }
 
@@ -220,7 +334,7 @@ func TestCLI_StackUndo_RestoresPreSyncSHAs(t *testing.T) {
 	gitCmd(t, env.tmpDir, "add", "main-change.txt")
 	gitCmd(t, env.tmpDir, "commit", "-m", "main moves on")
 
-	if _, stderr, err := env.run("stack", "sync"); err != nil {
+	if _, stderr, err := env.run("stack", "sync", "--apply"); err != nil {
 		t.Fatalf("stack sync failed: %v\nstderr: %s", err, stderr)
 	}
 
@@ -277,7 +391,7 @@ func TestCLI_StackUndo_DirtyWorktreeFails(t *testing.T) {
 	gitCmd(t, env.tmpDir, "add", "main-change.txt")
 	gitCmd(t, env.tmpDir, "commit", "-m", "main moves on")
 
-	if _, stderr, err := env.run("stack", "sync"); err != nil {
+	if _, stderr, err := env.run("stack", "sync", "--apply"); err != nil {
 		t.Fatalf("stack sync failed: %v\nstderr: %s", err, stderr)
 	}
 

@@ -140,6 +140,10 @@ func (h *Handler) Sync(ctx context.Context, workDir string, in SyncInput) (SyncR
 		return SyncResult{}, err
 	}
 
+	if in.DryRun {
+		return h.previewSync(ctx, workDir, in)
+	}
+
 	mainRepoRoot, piecesDir, err := h.resolveRepo(ctx, workDir)
 	if err != nil {
 		return SyncResult{}, err
@@ -157,8 +161,8 @@ func (h *Handler) Sync(ctx context.Context, workDir string, in SyncInput) (SyncR
 		return SyncResult{}, fmt.Errorf("failed to write undo snapshot: %w", err)
 	}
 
-	// Update main from origin (no-op when there's no remote).
-	if err := h.updateMain(ctx, mainRepoRoot, in.MainBranch); err != nil {
+	// Update main from the chosen upstream (no-op when its remote isn't configured).
+	if err := h.updateMain(ctx, mainRepoRoot, in.MainBranch, in.From); err != nil {
 		result.Status = "aborted"
 		return result, err
 	}
@@ -179,6 +183,60 @@ func (h *Handler) Sync(ctx context.Context, workDir string, in SyncInput) (SyncR
 	}
 
 	h.emit(core.MsgSuccess, fmt.Sprintf("Stack synced (%s): %d piece(s) updated", in.Strategy, len(result.Updated)))
+	return result, nil
+}
+
+// previewSync walks the stack exactly as a real sync would (parent before child)
+// and reports which pieces would be updated, without fetching, snapshotting, or
+// touching any branch. It is the read-only half of Sync used for dry-runs.
+func (h *Handler) previewSync(ctx context.Context, workDir string, in SyncInput) (SyncResult, error) {
+	_, piecesDir, err := h.resolveRepo(ctx, workDir)
+	if err != nil {
+		return SyncResult{}, err
+	}
+
+	result := SyncResult{MainBranch: in.MainBranch, Strategy: in.Strategy, Status: "dry-run"}
+
+	scope, err := h.scopeSet(ctx, workDir, piecesDir, in)
+	if err != nil {
+		return SyncResult{}, err
+	}
+
+	h.emit(core.MsgInfo, fmt.Sprintf("[dry-run] Would update %q from %q (fetch + fast-forward)", in.MainBranch, in.From))
+
+	roots, err := piece.GetPieceChildren("main", piecesDir, h.deps.FS)
+	if err != nil {
+		return SyncResult{}, err
+	}
+	sort.Strings(roots)
+
+	type node struct{ name, parent string }
+	queue := make([]node, 0, len(roots))
+	for _, r := range roots {
+		queue = append(queue, node{r, in.MainBranch})
+	}
+	for len(queue) > 0 {
+		n := queue[0]
+		queue = queue[1:]
+
+		if inScope(scope, n.name) {
+			result.Updated = append(result.Updated, n.name)
+			h.emit(core.MsgInfo, fmt.Sprintf("[dry-run] Would sync %q (%s %q into %q)", n.name, in.Strategy, n.parent, n.name))
+		} else {
+			result.Skipped = append(result.Skipped, n.name)
+		}
+
+		children, err := piece.GetPieceChildren(n.name, piecesDir, h.deps.FS)
+		if err != nil {
+			return result, err
+		}
+		sort.Strings(children)
+		for _, c := range children {
+			queue = append(queue, node{c, n.name})
+		}
+	}
+
+	h.emit(core.MsgInfo, fmt.Sprintf("[dry-run] %d piece(s) would be synced; pass --apply to sync", len(result.Updated)))
 	return result, nil
 }
 
@@ -347,34 +405,49 @@ func (h *Handler) syncRebase(ctx context.Context, mainRepoRoot, piecesDir string
 	return result, nil
 }
 
-// updateMain fetches origin and fast-forwards the local main branch to origin/main.
-// No-op when the repo has no origin remote (local main is the source of truth).
-func (h *Handler) updateMain(ctx context.Context, mainRepoRoot, mainBranch string) error {
+// updateMain fetches the remote behind `from` and fast-forwards the local main
+// branch to it. `from` is a ref like "origin/main"; its remote part is fetched
+// and the branch part is the ref fetched. No-op when that remote isn't
+// configured (e.g. a local-only repo, where local main is the source of truth).
+func (h *Handler) updateMain(ctx context.Context, mainRepoRoot, mainBranch, from string) error {
+	remote, ref := splitRemoteRef(from)
+
 	remotes, err := h.git.Remotes(ctx, mainRepoRoot)
 	if err != nil {
 		return fmt.Errorf("failed to list remotes: %w", err)
 	}
-	hasOrigin := false
+	configured := false
 	for _, r := range remotes {
-		if r == "origin" {
-			hasOrigin = true
+		if r == remote {
+			configured = true
 			break
 		}
 	}
-	if !hasOrigin {
+	if !configured {
 		return nil
 	}
-	if err := h.git.Fetch(ctx, mainRepoRoot, "origin", mainBranch); err != nil {
+	if err := h.git.Fetch(ctx, mainRepoRoot, remote, ref); err != nil {
 		return err
 	}
 	if err := h.git.Checkout(ctx, mainRepoRoot, mainBranch); err != nil {
 		return fmt.Errorf("failed to checkout %s in main repo: %w", mainBranch, err)
 	}
-	if err := h.git.MergeFFOnly(ctx, mainRepoRoot, "origin/"+mainBranch); err != nil {
-		h.emit(core.MsgError, mainDivergedMsg(mainBranch, mainRepoRoot))
-		return fmt.Errorf("local %s diverged from origin/%s", mainBranch, mainBranch)
+	if err := h.git.MergeFFOnly(ctx, mainRepoRoot, from); err != nil {
+		h.emit(core.MsgError, mainDivergedMsg(mainBranch, from, mainRepoRoot))
+		return fmt.Errorf("local %s diverged from %s", mainBranch, from)
 	}
 	return nil
+}
+
+// splitRemoteRef splits a sync-from ref like "origin/main" into its remote
+// ("origin") and branch ("main") parts. The split is on the first "/" so branch
+// names that themselves contain slashes (e.g. "origin/feature/x") are preserved.
+// A ref with no "/" is treated as a bare branch on no remote.
+func splitRemoteRef(from string) (remote, ref string) {
+	if i := strings.IndexByte(from, '/'); i >= 0 {
+		return from[:i], from[i+1:]
+	}
+	return "", from
 }
 
 // scopeSet returns nil (all pieces) unless in.Stack, in which case it returns the
@@ -621,8 +694,8 @@ func rebaseInProgressMsg(path string) string {
 	return fmt.Sprintf("Stack sync aborted: a rebase is already in progress in %s. Finish it (git rebase --continue) or abort it (git rebase --abort) before syncing.", path)
 }
 
-func mainDivergedMsg(mainBranch, repoRoot string) string {
-	return fmt.Sprintf("Stack sync aborted: local %s has diverged from origin/%s and can't fast-forward (main was likely force-pushed). Fix: 'git -C %s checkout %s && git reset --hard origin/%s', then run 'mp stack sync'.", mainBranch, mainBranch, repoRoot, mainBranch, mainBranch)
+func mainDivergedMsg(mainBranch, from, repoRoot string) string {
+	return fmt.Sprintf("Stack sync aborted: local %s has diverged from %s and can't fast-forward (it was likely force-pushed). Fix: 'git -C %s checkout %s && git reset --hard %s', then run 'mp stack sync'.", mainBranch, from, repoRoot, mainBranch, from)
 }
 
 func stashPopConflictMsg(piece, path string) string {

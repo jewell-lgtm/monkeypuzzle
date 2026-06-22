@@ -55,21 +55,36 @@ func WithStatusDefaults(in StatusInput) StatusInput {
 // SyncInput holds input for `mp stack sync`.
 type SyncInput struct {
 	MainBranch string `json:"main_branch,omitempty"`
-	Strategy   string `json:"strategy,omitempty"` // "merge" (default) | "rebase"
-	Push       bool   `json:"push,omitempty"`
+	// From is the upstream ref the local main branch is updated from before the
+	// sync propagates down the stack, e.g. "origin/main". Defaults to
+	// "origin/<main_branch>". The CLI prompts for it interactively when a human
+	// runs sync without supplying it. A ref whose remote isn't configured (e.g.
+	// "origin/main" in a local-only repo) makes the main-update a no-op.
+	From     string `json:"from,omitempty"`
+	Strategy string `json:"strategy,omitempty"` // "merge" (default) | "rebase"
+	Push     bool   `json:"push,omitempty"`
 	// Stack limits the sync to the current piece's stack (ancestors + self +
 	// descendants) instead of every piece in the repo. Requires running from a
 	// piece worktree.
 	Stack bool `json:"stack,omitempty"`
+	// DryRun previews which pieces would be synced without touching any branch.
+	// Sync is dry-run by default; Apply opts into mutating the stack.
+	DryRun bool `json:"dry_run,omitempty"`
+	// Apply performs the sync for real (the opt-in to mutate). Without it a
+	// non-interactive invocation only previews.
+	Apply bool `json:"apply,omitempty"`
 }
 
 // SyncSchema returns the JSON schema for stack sync input.
 func SyncSchema() ([]byte, error) {
 	return json.MarshalIndent(map[string]any{
 		"main_branch": "main",
+		"from":        "origin/main",
 		"strategy":    StrategyMerge,
 		"push":        false,
 		"stack":       false,
+		"dry_run":     false,
+		"apply":       false,
 	}, "", "  ")
 }
 
@@ -102,7 +117,11 @@ func WithSyncDefaults(in SyncInput) SyncInput {
 	if strategy == "" {
 		strategy = StrategyMerge
 	}
-	return SyncInput{MainBranch: main, Strategy: strategy, Push: in.Push, Stack: in.Stack}
+	from := strings.TrimSpace(in.From)
+	if from == "" {
+		from = "origin/" + main
+	}
+	return SyncInput{MainBranch: main, From: from, Strategy: strategy, Push: in.Push, Stack: in.Stack, DryRun: in.DryRun, Apply: in.Apply}
 }
 
 // AppendInput holds input for `mp stack append` (create a child of the current piece).

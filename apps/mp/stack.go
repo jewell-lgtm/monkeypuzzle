@@ -5,12 +5,14 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/adapters"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
 	stackcmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/stack"
+	"github.com/jewell-lgtm/monkeypuzzle/internal/tui/textprompt"
 	"github.com/jewell-lgtm/monkeypuzzle/pkg/cli"
 )
 
@@ -20,8 +22,9 @@ var stackCmd = &cobra.Command{
 	Long: `Whole-stack operations over pieces: sync a stack against main and itself,
 inspect the tree against the GitHub PR list, and append/prepend pieces.
 
-All operations are non-interactive: anything risky aborts cleanly and prints
-plain-English next steps (e.g. which PR base to change on GitHub).`,
+Anything risky aborts cleanly and prints plain-English next steps (e.g. which
+PR base to change on GitHub). 'sync' is dry-run by default and asks to confirm
+in an interactive terminal; everything else runs straight through.`,
 }
 
 var stackStatusCmd = &cobra.Command{
@@ -33,7 +36,13 @@ var stackStatusCmd = &cobra.Command{
 var stackSyncCmd = &cobra.Command{
 	Use:   "sync",
 	Short: "Propagate main and each parent down through the stack",
-	RunE:  runStackSync,
+	Long: `Propagate main and each parent down through the stack (default merge strategy).
+
+Dry-run by default: it previews which pieces would be synced and changes
+nothing. Pass --apply to actually sync. In an interactive terminal you are shown
+the preview and asked to confirm; non-interactive callers (flags/stdin JSON)
+preview unless --apply (or "apply": true) is given.`,
+	RunE: runStackSync,
 }
 
 var stackAppendCmd = &cobra.Command{
@@ -85,8 +94,11 @@ var (
 	flagStackStatusSchema bool
 
 	flagStackStrategy   string
+	flagStackSyncFrom   string
 	flagStackPush       bool
 	flagStackStackScope bool
+	flagStackSyncApply  bool
+	flagStackSyncDryRun bool
 	flagStackSyncSchema bool
 
 	flagStackName          string
@@ -108,9 +120,12 @@ func init() {
 	stackStatusCmd.Flags().BoolVar(&flagStackStatusSchema, "schema", false, "Output JSON schema and exit")
 
 	stackSyncCmd.Flags().StringVar(&flagStackMain, "main", "main", "Main branch name")
+	stackSyncCmd.Flags().StringVar(&flagStackSyncFrom, "from", "", "Upstream ref to sync main from, e.g. origin/main (prompts when omitted on a terminal; defaults to origin/<main>)")
 	stackSyncCmd.Flags().StringVar(&flagStackStrategy, "strategy", "merge", "Sync strategy: merge (default) or rebase")
 	stackSyncCmd.Flags().BoolVar(&flagStackPush, "push", false, "Push each branch after syncing")
 	stackSyncCmd.Flags().BoolVar(&flagStackStackScope, "stack", false, "Limit to the current piece's stack (run from a piece worktree)")
+	stackSyncCmd.Flags().BoolVar(&flagStackSyncApply, "apply", false, "Apply the sync (default is a dry-run preview)")
+	stackSyncCmd.Flags().BoolVar(&flagStackSyncDryRun, "dry-run", false, "Preview which pieces would be synced without changing anything")
 	stackSyncCmd.Flags().BoolVar(&flagStackSyncSchema, "schema", false, "Output JSON schema and exit")
 
 	stackAppendCmd.Flags().StringVar(&flagStackName, "name", "", "Piece name")
@@ -202,28 +217,102 @@ func runStackSync(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to get working directory: %w", err)
 	}
 
-	var input stackcmd.SyncInput
-	if cmd.Flags().Changed("main") || cmd.Flags().Changed("strategy") || flagStackPush || flagStackStackScope {
-		input = stackcmd.SyncInput{MainBranch: flagStackMain, Strategy: flagStackStrategy, Push: flagStackPush, Stack: flagStackStackScope}
-	} else if cli.HasStdinData() {
-		data, err := io.ReadAll(os.Stdin)
-		if err != nil {
-			return fmt.Errorf("failed to read stdin: %w", err)
+	input, err := getSyncInput(cmd)
+	if err != nil {
+		return err
+	}
+
+	// Ask a human where to sync main from when they didn't say. Non-interactive
+	// callers fall through and the handler defaults to origin/<main>.
+	if input.From == "" && cli.IsTerminal() && !cli.HasStdinData() {
+		mainName := input.MainBranch
+		if mainName == "" {
+			mainName = "main"
 		}
-		if input, err = stackcmd.ParseSyncJSON(data); err != nil {
+		from, ok, err := textprompt.Run("Sync the stack from which ref?", "origin/"+mainName)
+		if err != nil {
 			return err
 		}
+		if !ok {
+			return fmt.Errorf("cancelled")
+		}
+		input.From = from
 	}
 
 	handler, err := newStackHandler()
 	if err != nil {
 		return err
 	}
+
+	// Sync is dry-run by default. Always preview first, then decide whether to
+	// apply: --apply opts in, --dry-run stays a preview, an interactive terminal
+	// is asked to confirm, and any other (non-interactive) caller previews.
+	preview := input
+	preview.DryRun = true
+	preview.Apply = false
+	previewResult, err := handler.Sync(cmd.Context(), wd, preview)
+	if err != nil {
+		return err
+	}
+
+	apply, err := resolveApply(input.Apply, input.DryRun, len(previewResult.Updated) > 0, func() (bool, error) {
+		return confirmApply(
+			"Sync the stack?",
+			fmt.Sprintf("Would sync %d piece(s) via %s: %s",
+				len(previewResult.Updated), previewResult.Strategy, strings.Join(previewResult.Updated, ", ")),
+		)
+	})
+	if err != nil {
+		return err
+	}
+	if !apply {
+		return cli.PrintJSON(previewResult)
+	}
+
+	input.DryRun = false
+	input.Apply = true
 	result, err := handler.Sync(cmd.Context(), wd, input)
 	if err != nil {
 		return err
 	}
 	return cli.PrintJSON(result)
+}
+
+// getSyncInput resolves `mp stack sync` input from stdin JSON, then overlays any
+// explicitly-set flags (flags win over stdin).
+func getSyncInput(cmd *cobra.Command) (stackcmd.SyncInput, error) {
+	var input stackcmd.SyncInput
+	if cli.HasStdinData() {
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return input, fmt.Errorf("failed to read stdin: %w", err)
+		}
+		if input, err = stackcmd.ParseSyncJSON(data); err != nil {
+			return input, err
+		}
+	}
+	if cmd.Flags().Changed("main") {
+		input.MainBranch = flagStackMain
+	}
+	if cmd.Flags().Changed("from") {
+		input.From = flagStackSyncFrom
+	}
+	if cmd.Flags().Changed("strategy") {
+		input.Strategy = flagStackStrategy
+	}
+	if cmd.Flags().Changed("push") {
+		input.Push = flagStackPush
+	}
+	if cmd.Flags().Changed("stack") {
+		input.Stack = flagStackStackScope
+	}
+	if cmd.Flags().Changed("apply") {
+		input.Apply = flagStackSyncApply
+	}
+	if cmd.Flags().Changed("dry-run") {
+		input.DryRun = flagStackSyncDryRun
+	}
+	return input, nil
 }
 
 func runStackAppend(cmd *cobra.Command, args []string) error {

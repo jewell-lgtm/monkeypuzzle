@@ -13,6 +13,20 @@ func TestWithSyncDefaults(t *testing.T) {
 	if got.Strategy != StrategyMerge {
 		t.Errorf("expected default strategy merge, got %q", got.Strategy)
 	}
+	if got.From != "origin/main" {
+		t.Errorf("expected From default 'origin/main', got %q", got.From)
+	}
+}
+
+func TestWithSyncDefaults_From(t *testing.T) {
+	// From tracks the main branch when defaulted.
+	if got := WithSyncDefaults(SyncInput{MainBranch: "trunk"}); got.From != "origin/trunk" {
+		t.Errorf("expected From default to follow main 'origin/trunk', got %q", got.From)
+	}
+	// An explicit From is preserved (trimmed) regardless of main.
+	if got := WithSyncDefaults(SyncInput{From: "  upstream/dev  "}); got.From != "upstream/dev" {
+		t.Errorf("expected explicit From preserved, got %q", got.From)
+	}
 }
 
 func TestValidateSyncInput(t *testing.T) {
@@ -57,7 +71,7 @@ func TestSyncSchema_Valid(t *testing.T) {
 	if err := json.Unmarshal(schema, &m); err != nil {
 		t.Fatalf("schema not valid JSON: %v", err)
 	}
-	for _, k := range []string{"main_branch", "strategy", "push", "stack"} {
+	for _, k := range []string{"main_branch", "from", "strategy", "push", "stack"} {
 		if _, ok := m[k]; !ok {
 			t.Errorf("schema missing key %q", k)
 		}
