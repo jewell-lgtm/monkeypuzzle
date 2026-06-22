@@ -69,7 +69,7 @@ func init() {
 	// reinit shares init's flags so behaviour stays identical.
 	reinitCmd.Flags().AddFlagSet(initCmd.Flags())
 	initCmd.Flags().StringVar(&flagName, "name", "", "Project name")
-	initCmd.Flags().StringVar(&flagPRProvider, "pr-provider", "", "PR provider (github)")
+	initCmd.Flags().StringVar(&flagPRProvider, "pr-provider", "", "PR/MR provider (github, gitlab)")
 	initCmd.Flags().StringVar(&flagInitDir, "dir", "", "Directory (relative to the repo root) for monkeypuzzle state (default .monkeypuzzle); the mapping is recorded in ~/.config/monkeypuzzle/project-dirs.json")
 	initCmd.Flags().BoolVarP(&flagYes, "yes", "y", false, "Overwrite existing config without prompting")
 	initCmd.Flags().BoolVar(&flagSchema, "schema", false, "Output JSON schema with defaults and exit")
@@ -77,7 +77,7 @@ func init() {
 
 	// Register completion functions (errors ignored - completion is optional)
 	_ = initCmd.RegisterFlagCompletionFunc("pr-provider", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-		return []string{"github"}, cobra.ShellCompDirectiveNoFileComp
+		return []string{"github", "gitlab"}, cobra.ShellCompDirectiveNoFileComp
 	})
 }
 
@@ -256,19 +256,9 @@ func runInteractiveMode(workDir string) (initcmd.Input, error) {
 		name = finalModel.ProjectName.Placeholder
 	}
 
-	// Get PR provider default
-	fields := initcmd.Fields()
-	var prProvider string
-	for _, f := range fields {
-		if f.Name == "pr_provider" {
-			prProvider = f.Default
-			break
-		}
-	}
-
 	input := initcmd.Input{
 		Name:       name,
-		PRProvider: prProvider,
+		PRProvider: initTUI.PRMethodValue(finalModel.PRMethod),
 	}
 
 	return input, nil

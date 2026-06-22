@@ -36,14 +36,16 @@ func (m Model) viewProjectName() string {
 }
 
 func (m Model) viewPRMethod() string {
+	labels := make([]string, len(prMethodOptions))
+	for i, o := range prMethodOptions {
+		labels[i] = o.Label
+	}
 	return fmt.Sprintf(
 		"%s\n\n%s\n\n%s\n\n%s",
 		styles.Title.Render("Monkeypuzzle Init"),
-		styles.Label.Render("PR management:"),
-		renderOptions([]string{
-			"GitHub via gh CLI",
-		}, m.PRMethod),
-		styles.Subtle.Render("enter to continue • esc to cancel"),
+		styles.Label.Render("PR/MR management:"),
+		renderOptions(labels, m.PRMethod),
+		styles.Subtle.Render("↑/↓ to choose • enter to continue • esc to cancel"),
 	)
 }
 
@@ -58,7 +60,7 @@ func (m Model) viewConfirm() string {
 		styles.Title.Render("Monkeypuzzle Init"),
 		styles.Label.Render("Configuration:"),
 		name,
-		"github",
+		PRMethodValue(m.PRMethod),
 		styles.Subtle.Render("enter to create config • esc to cancel"),
 	)
 }

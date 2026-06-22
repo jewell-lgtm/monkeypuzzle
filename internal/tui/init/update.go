@@ -36,8 +36,8 @@ func (m Model) moveCursor(dir int) Model {
 		if m.PRMethod < 0 {
 			m.PRMethod = 0
 		}
-		if m.PRMethod > 0 {
-			m.PRMethod = 0
+		if last := len(prMethodOptions) - 1; m.PRMethod > last {
+			m.PRMethod = last
 		}
 	}
 	return m
