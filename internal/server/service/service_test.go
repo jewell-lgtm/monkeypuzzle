@@ -23,9 +23,9 @@ func seed(t *testing.T) (*Service, *store.MemoryStore, int64) {
 	t.Helper()
 	ctx := context.Background()
 	mem := store.NewMemoryStore()
-	uid, _ := mem.UpsertUser(ctx, store.User{GitHubUserID: 1, GitHubLogin: "octo"})
-	rid, _ := mem.UpsertRepo(ctx, store.Repo{GitHubRepoID: 7, Owner: "o", Name: "r", DefaultBranch: "main"})
-	other, _ := mem.UpsertRepo(ctx, store.Repo{GitHubRepoID: 8, Owner: "x", Name: "hidden", DefaultBranch: "main"})
+	uid, _ := mem.UpsertUser(ctx, store.User{Provider: "github", ForgeUserID: 1, ForgeLogin: "octo"})
+	rid, _ := mem.UpsertRepo(ctx, store.Repo{Provider: "github", ForgeRepoID: 7, Owner: "o", Name: "r", DefaultBranch: "main"})
+	other, _ := mem.UpsertRepo(ctx, store.Repo{Provider: "github", ForgeRepoID: 8, Owner: "x", Name: "hidden", DefaultBranch: "main"})
 	_ = other
 	if err := mem.SetUserRepos(ctx, uid, []int64{rid}); err != nil {
 		t.Fatal(err)

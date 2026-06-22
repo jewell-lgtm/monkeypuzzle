@@ -1,7 +1,7 @@
 // Package store is the persistence layer for mp server. It is the cache layer
-// between the app and GitHub: Temporal workers fetch repos/PRs from the GitHub
-// API and persist them here, and every read path (HTML UI, MCP tools) reads
-// only from the store — never from GitHub directly.
+// between the app and the forge: Temporal workers fetch repos/PRs from the forge
+// API (GitHub or GitLab) and persist them here, and every read path (HTML UI,
+// MCP tools) reads only from the store — never from the forge directly.
 //
 // Following the repo's ports/adapters convention, Store is an interface with a
 // real Postgres implementation (PgxStore) and an in-memory implementation
@@ -24,24 +24,30 @@ const (
 	SyncFailed  = "failed"
 )
 
-// User is an authenticated account. Identity comes from WorkOS (ExternalUserID is
-// the WorkOS `sub`, shared by the human session and the agent's MCP token); the
-// GitHub fields are derived from the GitHub token WorkOS passes through.
-// AccessTokenEnc holds that GitHub token encrypted at rest; the store treats it
-// as opaque bytes (callers encrypt/decrypt) and it is only decrypted in the worker.
+// User is an authenticated account. ExternalUserID is the identity provider's
+// stable subject (the WorkOS `sub` for GitHub, or a "gitlab:"-prefixed id for
+// direct GitLab OAuth), shared by the human session and the agent's MCP token.
+// Provider names the forge ("github"/"gitlab"); the forge fields are derived
+// from the access token. AccessTokenEnc holds that forge token encrypted at
+// rest; the store treats it as opaque bytes (callers encrypt/decrypt) and it is
+// only decrypted in the worker. ForgeUserID/ForgeLogin persist in the SQL
+// columns github_user_id/github_login (kept for migration safety).
 type User struct {
 	ID             int64
 	ExternalUserID string
-	GitHubUserID   int64
-	GitHubLogin    string
+	Provider       string
+	ForgeUserID    int64
+	ForgeLogin     string
 	AvatarURL      string
 	AccessTokenEnc []byte
 }
 
-// Repo is a GitHub repository the user can access.
+// Repo is a forge repository the user can access. Provider names the forge;
+// ForgeRepoID persists in the SQL column github_repo_id.
 type Repo struct {
 	ID            int64
-	GitHubRepoID  int64
+	Provider      string
+	ForgeRepoID   int64
 	Owner         string
 	Name          string
 	DefaultBranch string
@@ -78,8 +84,8 @@ type Store interface {
 	// Migrate applies the schema idempotently. Safe to call on every boot.
 	Migrate(ctx context.Context) error
 
-	// UpsertUser inserts or updates a user keyed by GitHubUserID and returns its
-	// id. AccessTokenEnc is persisted as-is (already encrypted).
+	// UpsertUser inserts or updates a user keyed by (Provider, ForgeUserID) and
+	// returns its id. AccessTokenEnc is persisted as-is (already encrypted).
 	UpsertUser(ctx context.Context, u User) (int64, error)
 	// GetUserByID returns the user (including AccessTokenEnc) or ErrNotFound.
 	GetUserByID(ctx context.Context, id int64) (User, error)
@@ -87,7 +93,8 @@ type Store interface {
 	// by the MCP resource server to map a validated token to a local user.
 	GetUserByExternalID(ctx context.Context, externalUserID string) (User, error)
 
-	// UpsertRepo inserts or updates a repo keyed by GitHubRepoID and returns its id.
+	// UpsertRepo inserts or updates a repo keyed by (Provider, ForgeRepoID) and
+	// returns its id.
 	UpsertRepo(ctx context.Context, r Repo) (int64, error)
 	// SetUserRepos replaces the set of repos visible to a user.
 	SetUserRepos(ctx context.Context, userID int64, repoIDs []int64) error

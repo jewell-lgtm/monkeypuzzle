@@ -55,8 +55,9 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 	}
 	uid, err := h.deps.Store.UpsertUser(ctx, store.User{
 		ExternalUserID: res.ProviderUserID,
-		GitHubUserID:   profile.ID,
-		GitHubLogin:    profile.Login,
+		Provider:       "github",
+		ForgeUserID:    profile.ID,
+		ForgeLogin:     profile.Login,
 		AvatarURL:      profile.AvatarURL,
 		AccessTokenEnc: enc,
 	})

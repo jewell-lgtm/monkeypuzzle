@@ -62,7 +62,7 @@ func (a *Activities) PersistRepos(ctx context.Context, in PersistReposInput) err
 	ids := make([]int64, 0, len(in.Repos))
 	for _, r := range in.Repos {
 		id, err := a.Store.UpsertRepo(ctx, store.Repo{
-			GitHubRepoID:  r.GitHubRepoID,
+			ForgeRepoID:   r.GitHubRepoID,
 			Owner:         r.Owner,
 			Name:          r.Name,
 			DefaultBranch: r.DefaultBranch,

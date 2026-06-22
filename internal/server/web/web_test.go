@@ -31,8 +31,8 @@ func (noopTrigger) SyncStatus(context.Context, int64) (store.SyncStatus, error) 
 func TestWeb_Smoke(t *testing.T) {
 	ctx := context.Background()
 	mem := store.NewMemoryStore()
-	uid, _ := mem.UpsertUser(ctx, store.User{ExternalUserID: "ext1", GitHubUserID: 1, GitHubLogin: "octo"})
-	rid, _ := mem.UpsertRepo(ctx, store.Repo{GitHubRepoID: 7, Owner: "o", Name: "r", DefaultBranch: "main"})
+	uid, _ := mem.UpsertUser(ctx, store.User{ExternalUserID: "ext1", Provider: "github", ForgeUserID: 1, ForgeLogin: "octo"})
+	rid, _ := mem.UpsertRepo(ctx, store.Repo{Provider: "github", ForgeRepoID: 7, Owner: "o", Name: "r", DefaultBranch: "main"})
 	_ = mem.SetUserRepos(ctx, uid, []int64{rid})
 
 	key := make([]byte, crypto.KeySize)

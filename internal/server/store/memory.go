@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"sort"
+	"strconv"
 	"sync"
 )
 
@@ -10,31 +11,37 @@ import (
 // adapters.MemoryFS: a concurrency-safe map-backed fake with the same contract
 // as the real implementation.
 type MemoryStore struct {
-	mu         sync.RWMutex
-	nextUser   int64
-	nextRepo   int64
-	nextPR     int64
-	users      map[int64]User           // id -> user
-	usersByGH  map[int64]int64          // github_user_id -> id
-	usersByExt map[string]int64         // external_user_id -> id
-	repos      map[int64]Repo           // id -> repo
-	reposByGH  map[int64]int64          // github_repo_id -> id
-	userRepos  map[int64]map[int64]bool // user id -> set of repo ids
-	prs        map[int64][]PullRequest  // repo id -> PRs
-	sync       map[int64]SyncStatus     // user id -> status
+	mu           sync.RWMutex
+	nextUser     int64
+	nextRepo     int64
+	nextPR       int64
+	users        map[int64]User           // id -> user
+	usersByForge map[string]int64         // "provider/forge_user_id" -> id
+	usersByExt   map[string]int64         // external_user_id -> id
+	repos        map[int64]Repo           // id -> repo
+	reposByForge map[string]int64         // "provider/forge_repo_id" -> id
+	userRepos    map[int64]map[int64]bool // user id -> set of repo ids
+	prs          map[int64][]PullRequest  // repo id -> PRs
+	sync         map[int64]SyncStatus     // user id -> status
+}
+
+// forgeKey composites a provider and a forge-native id into the in-memory key,
+// mirroring the (provider, forge_id) unique index in Postgres.
+func forgeKey(provider string, forgeID int64) string {
+	return provider + "/" + strconv.FormatInt(forgeID, 10)
 }
 
 // NewMemoryStore returns an empty in-memory store.
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
-		users:      map[int64]User{},
-		usersByGH:  map[int64]int64{},
-		usersByExt: map[string]int64{},
-		repos:      map[int64]Repo{},
-		reposByGH:  map[int64]int64{},
-		userRepos:  map[int64]map[int64]bool{},
-		prs:        map[int64][]PullRequest{},
-		sync:       map[int64]SyncStatus{},
+		users:        map[int64]User{},
+		usersByForge: map[string]int64{},
+		usersByExt:   map[string]int64{},
+		repos:        map[int64]Repo{},
+		reposByForge: map[string]int64{},
+		userRepos:    map[int64]map[int64]bool{},
+		prs:          map[int64][]PullRequest{},
+		sync:         map[int64]SyncStatus{},
 	}
 }
 
@@ -44,7 +51,8 @@ func (m *MemoryStore) Migrate(context.Context) error { return nil }
 func (m *MemoryStore) UpsertUser(_ context.Context, u User) (int64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if id, ok := m.usersByGH[u.GitHubUserID]; ok {
+	key := forgeKey(u.Provider, u.ForgeUserID)
+	if id, ok := m.usersByForge[key]; ok {
 		u.ID = id
 		m.users[id] = u
 		m.usersByExt[u.ExternalUserID] = id
@@ -53,7 +61,7 @@ func (m *MemoryStore) UpsertUser(_ context.Context, u User) (int64, error) {
 	m.nextUser++
 	u.ID = m.nextUser
 	m.users[u.ID] = u
-	m.usersByGH[u.GitHubUserID] = u.ID
+	m.usersByForge[key] = u.ID
 	m.usersByExt[u.ExternalUserID] = u.ID
 	return u.ID, nil
 }
@@ -81,7 +89,8 @@ func (m *MemoryStore) GetUserByExternalID(_ context.Context, externalUserID stri
 func (m *MemoryStore) UpsertRepo(_ context.Context, r Repo) (int64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if id, ok := m.reposByGH[r.GitHubRepoID]; ok {
+	key := forgeKey(r.Provider, r.ForgeRepoID)
+	if id, ok := m.reposByForge[key]; ok {
 		r.ID = id
 		m.repos[id] = r
 		return id, nil
@@ -89,7 +98,7 @@ func (m *MemoryStore) UpsertRepo(_ context.Context, r Repo) (int64, error) {
 	m.nextRepo++
 	r.ID = m.nextRepo
 	m.repos[r.ID] = r
-	m.reposByGH[r.GitHubRepoID] = r.ID
+	m.reposByForge[key] = r.ID
 	return r.ID, nil
 }
 

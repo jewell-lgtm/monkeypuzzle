@@ -10,12 +10,12 @@ func TestMemoryStore_UserUpsertAndGet(t *testing.T) {
 	ctx := context.Background()
 	s := NewMemoryStore()
 
-	id, err := s.UpsertUser(ctx, User{ExternalUserID: "wos_1", GitHubUserID: 42, GitHubLogin: "octo", AccessTokenEnc: []byte("enc1")})
+	id, err := s.UpsertUser(ctx, User{ExternalUserID: "wos_1", Provider: "github", ForgeUserID: 42, ForgeLogin: "octo", AccessTokenEnc: []byte("enc1")})
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Upsert same github_user_id updates in place (same id, new fields).
-	id2, err := s.UpsertUser(ctx, User{ExternalUserID: "wos_1", GitHubUserID: 42, GitHubLogin: "octocat", AccessTokenEnc: []byte("enc2")})
+	// Upsert same (provider, forge_user_id) updates in place (same id, new fields).
+	id2, err := s.UpsertUser(ctx, User{ExternalUserID: "wos_1", Provider: "github", ForgeUserID: 42, ForgeLogin: "octocat", AccessTokenEnc: []byte("enc2")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -26,7 +26,7 @@ func TestMemoryStore_UserUpsertAndGet(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if u.GitHubLogin != "octocat" || string(u.AccessTokenEnc) != "enc2" {
+	if u.ForgeLogin != "octocat" || string(u.AccessTokenEnc) != "enc2" {
 		t.Fatalf("update not applied: %+v", u)
 	}
 
@@ -47,10 +47,10 @@ func TestMemoryStore_UserUpsertAndGet(t *testing.T) {
 func TestMemoryStore_ReposAndVisibility(t *testing.T) {
 	ctx := context.Background()
 	s := NewMemoryStore()
-	uid, _ := s.UpsertUser(ctx, User{GitHubUserID: 1, GitHubLogin: "u"})
+	uid, _ := s.UpsertUser(ctx, User{Provider: "github", ForgeUserID: 1, ForgeLogin: "u"})
 
-	r1, _ := s.UpsertRepo(ctx, Repo{GitHubRepoID: 10, Owner: "o", Name: "beta", DefaultBranch: "main"})
-	r2, _ := s.UpsertRepo(ctx, Repo{GitHubRepoID: 11, Owner: "o", Name: "alpha", DefaultBranch: "main"})
+	r1, _ := s.UpsertRepo(ctx, Repo{Provider: "github", ForgeRepoID: 10, Owner: "o", Name: "beta", DefaultBranch: "main"})
+	r2, _ := s.UpsertRepo(ctx, Repo{Provider: "github", ForgeRepoID: 11, Owner: "o", Name: "alpha", DefaultBranch: "main"})
 
 	if err := s.SetUserRepos(ctx, uid, []int64{r1, r2}); err != nil {
 		t.Fatal(err)
@@ -65,7 +65,7 @@ func TestMemoryStore_ReposAndVisibility(t *testing.T) {
 	}
 
 	got, err := s.GetRepoByOwnerName(ctx, "o", "alpha")
-	if err != nil || got.GitHubRepoID != 11 {
+	if err != nil || got.ForgeRepoID != 11 {
 		t.Fatalf("get repo: %+v err=%v", got, err)
 	}
 	if _, err := s.GetRepoByOwnerName(ctx, "o", "missing"); !errors.Is(err, ErrNotFound) {
@@ -82,10 +82,29 @@ func TestMemoryStore_ReposAndVisibility(t *testing.T) {
 	}
 }
 
+// Provider scoping: a GitHub id and a GitLab id that happen to share the same
+// numeric value are distinct rows, not an upsert collision.
+func TestMemoryStore_ProviderScopesForgeIDs(t *testing.T) {
+	ctx := context.Background()
+	s := NewMemoryStore()
+
+	gh, _ := s.UpsertUser(ctx, User{ExternalUserID: "ext-gh", Provider: "github", ForgeUserID: 1, ForgeLogin: "gh"})
+	gl, _ := s.UpsertUser(ctx, User{ExternalUserID: "ext-gl", Provider: "gitlab", ForgeUserID: 1, ForgeLogin: "gl"})
+	if gh == gl {
+		t.Fatalf("github and gitlab users with the same forge id collided: %d == %d", gh, gl)
+	}
+
+	r1, _ := s.UpsertRepo(ctx, Repo{Provider: "github", ForgeRepoID: 5, Owner: "o", Name: "r", DefaultBranch: "main"})
+	r2, _ := s.UpsertRepo(ctx, Repo{Provider: "gitlab", ForgeRepoID: 5, Owner: "o", Name: "r", DefaultBranch: "main"})
+	if r1 == r2 {
+		t.Fatalf("github and gitlab repos with the same forge id collided: %d == %d", r1, r2)
+	}
+}
+
 func TestMemoryStore_ReplaceAndListPullRequests(t *testing.T) {
 	ctx := context.Background()
 	s := NewMemoryStore()
-	rid, _ := s.UpsertRepo(ctx, Repo{GitHubRepoID: 10, Owner: "o", Name: "r", DefaultBranch: "main"})
+	rid, _ := s.UpsertRepo(ctx, Repo{Provider: "github", ForgeRepoID: 10, Owner: "o", Name: "r", DefaultBranch: "main"})
 
 	prs := []PullRequest{
 		{Number: 3, HeadRef: "c", BaseRef: "b", State: "OPEN"},
@@ -118,7 +137,7 @@ func TestMemoryStore_ReplaceAndListPullRequests(t *testing.T) {
 func TestMemoryStore_SyncStatus(t *testing.T) {
 	ctx := context.Background()
 	s := NewMemoryStore()
-	uid, _ := s.UpsertUser(ctx, User{GitHubUserID: 1, GitHubLogin: "u"})
+	uid, _ := s.UpsertUser(ctx, User{Provider: "github", ForgeUserID: 1, ForgeLogin: "u"})
 
 	// Default is idle when never set.
 	st, err := s.GetSyncStatus(ctx, uid)

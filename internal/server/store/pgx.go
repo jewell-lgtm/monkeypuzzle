@@ -64,9 +64,9 @@ func splitStatements(sql string) []string {
 
 func (s *PgxStore) UpsertUser(ctx context.Context, u User) (int64, error) {
 	const q = `
-INSERT INTO users (external_user_id, github_user_id, github_login, avatar_url, access_token_enc, updated_at)
-VALUES ($1, $2, $3, $4, $5, now())
-ON CONFLICT (github_user_id) DO UPDATE SET
+INSERT INTO users (external_user_id, provider, github_user_id, github_login, avatar_url, access_token_enc, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, now())
+ON CONFLICT (provider, github_user_id) DO UPDATE SET
   external_user_id = EXCLUDED.external_user_id,
   github_login = EXCLUDED.github_login,
   avatar_url = EXCLUDED.avatar_url,
@@ -74,7 +74,7 @@ ON CONFLICT (github_user_id) DO UPDATE SET
   updated_at = now()
 RETURNING id`
 	var id int64
-	err := s.pool.QueryRow(ctx, q, u.ExternalUserID, u.GitHubUserID, u.GitHubLogin, u.AvatarURL, u.AccessTokenEnc).Scan(&id)
+	err := s.pool.QueryRow(ctx, q, u.ExternalUserID, u.Provider, u.ForgeUserID, u.ForgeLogin, u.AvatarURL, u.AccessTokenEnc).Scan(&id)
 	if err != nil {
 		return 0, fmt.Errorf("store: upsert user: %w", err)
 	}
@@ -82,22 +82,22 @@ RETURNING id`
 }
 
 func (s *PgxStore) GetUserByExternalID(ctx context.Context, externalUserID string) (User, error) {
-	const q = `SELECT id, external_user_id, github_user_id, github_login, avatar_url, access_token_enc FROM users WHERE external_user_id = $1`
+	const q = `SELECT id, external_user_id, provider, github_user_id, github_login, avatar_url, access_token_enc FROM users WHERE external_user_id = $1`
 	var u User
-	err := s.pool.QueryRow(ctx, q, externalUserID).Scan(&u.ID, &u.ExternalUserID, &u.GitHubUserID, &u.GitHubLogin, &u.AvatarURL, &u.AccessTokenEnc)
+	err := s.pool.QueryRow(ctx, q, externalUserID).Scan(&u.ID, &u.ExternalUserID, &u.Provider, &u.ForgeUserID, &u.ForgeLogin, &u.AvatarURL, &u.AccessTokenEnc)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return User{}, ErrNotFound
 	}
 	if err != nil {
-		return User{}, fmt.Errorf("store: get user by workos id: %w", err)
+		return User{}, fmt.Errorf("store: get user by external id: %w", err)
 	}
 	return u, nil
 }
 
 func (s *PgxStore) GetUserByID(ctx context.Context, id int64) (User, error) {
-	const q = `SELECT id, external_user_id, github_user_id, github_login, avatar_url, access_token_enc FROM users WHERE id = $1`
+	const q = `SELECT id, external_user_id, provider, github_user_id, github_login, avatar_url, access_token_enc FROM users WHERE id = $1`
 	var u User
-	err := s.pool.QueryRow(ctx, q, id).Scan(&u.ID, &u.ExternalUserID, &u.GitHubUserID, &u.GitHubLogin, &u.AvatarURL, &u.AccessTokenEnc)
+	err := s.pool.QueryRow(ctx, q, id).Scan(&u.ID, &u.ExternalUserID, &u.Provider, &u.ForgeUserID, &u.ForgeLogin, &u.AvatarURL, &u.AccessTokenEnc)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return User{}, ErrNotFound
 	}
@@ -109,9 +109,9 @@ func (s *PgxStore) GetUserByID(ctx context.Context, id int64) (User, error) {
 
 func (s *PgxStore) UpsertRepo(ctx context.Context, r Repo) (int64, error) {
 	const q = `
-INSERT INTO repos (github_repo_id, owner, name, default_branch, private, html_url, synced_at)
-VALUES ($1, $2, $3, $4, $5, $6, now())
-ON CONFLICT (github_repo_id) DO UPDATE SET
+INSERT INTO repos (provider, github_repo_id, owner, name, default_branch, private, html_url, synced_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, now())
+ON CONFLICT (provider, github_repo_id) DO UPDATE SET
   owner = EXCLUDED.owner,
   name = EXCLUDED.name,
   default_branch = EXCLUDED.default_branch,
@@ -120,7 +120,7 @@ ON CONFLICT (github_repo_id) DO UPDATE SET
   synced_at = now()
 RETURNING id`
 	var id int64
-	err := s.pool.QueryRow(ctx, q, r.GitHubRepoID, r.Owner, r.Name, r.DefaultBranch, r.Private, r.HTMLURL).Scan(&id)
+	err := s.pool.QueryRow(ctx, q, r.Provider, r.ForgeRepoID, r.Owner, r.Name, r.DefaultBranch, r.Private, r.HTMLURL).Scan(&id)
 	if err != nil {
 		return 0, fmt.Errorf("store: upsert repo: %w", err)
 	}
@@ -148,7 +148,7 @@ func (s *PgxStore) SetUserRepos(ctx context.Context, userID int64, repoIDs []int
 
 func (s *PgxStore) ListReposForUser(ctx context.Context, userID int64) ([]Repo, error) {
 	const q = `
-SELECT r.id, r.github_repo_id, r.owner, r.name, r.default_branch, r.private, r.html_url
+SELECT r.id, r.provider, r.github_repo_id, r.owner, r.name, r.default_branch, r.private, r.html_url
 FROM repos r JOIN user_repos ur ON ur.repo_id = r.id
 WHERE ur.user_id = $1
 ORDER BY r.owner, r.name`
@@ -160,7 +160,7 @@ ORDER BY r.owner, r.name`
 	var out []Repo
 	for rows.Next() {
 		var r Repo
-		if err := rows.Scan(&r.ID, &r.GitHubRepoID, &r.Owner, &r.Name, &r.DefaultBranch, &r.Private, &r.HTMLURL); err != nil {
+		if err := rows.Scan(&r.ID, &r.Provider, &r.ForgeRepoID, &r.Owner, &r.Name, &r.DefaultBranch, &r.Private, &r.HTMLURL); err != nil {
 			return nil, fmt.Errorf("store: list repos: scan: %w", err)
 		}
 		out = append(out, r)
@@ -169,9 +169,9 @@ ORDER BY r.owner, r.name`
 }
 
 func (s *PgxStore) GetRepoByOwnerName(ctx context.Context, owner, name string) (Repo, error) {
-	const q = `SELECT id, github_repo_id, owner, name, default_branch, private, html_url FROM repos WHERE owner = $1 AND name = $2`
+	const q = `SELECT id, provider, github_repo_id, owner, name, default_branch, private, html_url FROM repos WHERE owner = $1 AND name = $2`
 	var r Repo
-	err := s.pool.QueryRow(ctx, q, owner, name).Scan(&r.ID, &r.GitHubRepoID, &r.Owner, &r.Name, &r.DefaultBranch, &r.Private, &r.HTMLURL)
+	err := s.pool.QueryRow(ctx, q, owner, name).Scan(&r.ID, &r.Provider, &r.ForgeRepoID, &r.Owner, &r.Name, &r.DefaultBranch, &r.Private, &r.HTMLURL)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Repo{}, ErrNotFound
 	}

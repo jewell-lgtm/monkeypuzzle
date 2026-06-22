@@ -33,7 +33,7 @@ func TestSyncUserDataWorkflow_HappyPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	uid, _ := mem.UpsertUser(ctx, store.User{GitHubUserID: 4242, GitHubLogin: "octo", AccessTokenEnc: enc})
+	uid, _ := mem.UpsertUser(ctx, store.User{Provider: "github", ForgeUserID: 4242, ForgeLogin: "octo", AccessTokenEnc: enc})
 
 	stub := forge.NewStubFactory()
 	stub.SetUser("tok-123", forge.User{ID: 4242, Login: "octo"})

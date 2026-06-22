@@ -66,7 +66,7 @@ func TestMCP_HappyPath_SyncThenListStacks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	uid, _ := mem.UpsertUser(ctx, store.User{GitHubUserID: 4242, GitHubLogin: "octo", AccessTokenEnc: enc})
+	uid, _ := mem.UpsertUser(ctx, store.User{Provider: "github", ForgeUserID: 4242, ForgeLogin: "octo", AccessTokenEnc: enc})
 
 	// --- stub GitHub: 1 repo, a 3-PR stack ---
 	stub := forge.NewStubFactory()
