@@ -632,3 +632,25 @@ func (g *Git) HasTrackedChanges(ctx context.Context, workDir string) (bool, erro
 	}
 	return strings.TrimSpace(string(output)) != "", nil
 }
+
+// Push pushes the current branch (HEAD) to origin with upstream tracking.
+// Pushing a branch is forge-neutral, so it lives on the git adapter rather than
+// a forge adapter — the stack flow uses it regardless of provider.
+func (g *Git) Push(ctx context.Context, workDir string) error {
+	_, err := g.exec.RunWithDir(ctx, workDir, "git", "push", "-u", "origin", "HEAD")
+	if err != nil {
+		return fmt.Errorf("failed to push to remote: %w", err)
+	}
+	return nil
+}
+
+// PushForceWithLease force-pushes the current branch (HEAD) with --force-with-lease,
+// which refuses to clobber remote commits the local repo hasn't seen. Used after a
+// rebase rewrites an already-pushed branch. Forge-neutral, like Push.
+func (g *Git) PushForceWithLease(ctx context.Context, workDir string) error {
+	_, err := g.exec.RunWithDir(ctx, workDir, "git", "push", "--force-with-lease", "origin", "HEAD")
+	if err != nil {
+		return fmt.Errorf("failed to force-push to remote: %w", err)
+	}
+	return nil
+}
