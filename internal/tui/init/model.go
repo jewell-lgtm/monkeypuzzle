@@ -17,6 +17,23 @@ const (
 	StepDone
 )
 
+// prMethodOptions lists the PR/MR providers the wizard offers, in display order.
+// It is the single source of truth shared by the view (labels), the update
+// cursor (bounds), and PRMethodValue (selection -> provider value).
+var prMethodOptions = []struct{ Label, Value string }{
+	{"GitHub via gh CLI", "github"},
+	{"GitLab via glab CLI", "gitlab"},
+}
+
+// PRMethodValue maps a wizard selection index to its provider value, defaulting
+// to github when the index is out of range.
+func PRMethodValue(i int) string {
+	if i < 0 || i >= len(prMethodOptions) {
+		return "github"
+	}
+	return prMethodOptions[i].Value
+}
+
 type Model struct {
 	Step        Step
 	ProjectName textinput.Model

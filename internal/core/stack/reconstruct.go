@@ -4,16 +4,16 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/jewell-lgtm/monkeypuzzle/internal/adapters"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core/piece"
+	"github.com/jewell-lgtm/monkeypuzzle/internal/core/pr"
 )
 
-// StackNodePR is the GitHub PR associated with a piece, if any.
+// StackNodePR is the PR/MR associated with a piece, if any.
 type StackNodePR struct {
 	Number int    `json:"number"`
 	State  string `json:"state"` // OPEN, MERGED, CLOSED
 	URL    string `json:"url"`
-	Base   string `json:"base"` // PR base branch as seen on GitHub
+	Base   string `json:"base"` // PR/MR base branch as seen on the forge
 }
 
 // StackNode is one piece in the rendered stack tree.
@@ -27,12 +27,15 @@ type StackNode struct {
 
 // StackStatusResult is the output of `mp stack status`.
 type StackStatusResult struct {
-	MainBranch    string     `json:"main_branch"`
-	Tree          *StackNode `json:"tree"`
-	GitHubChecked bool       `json:"github_checked"`
-	Reconstructed []string   `json:"reconstructed,omitempty"` // pieces whose parent was rewritten by --from-github
-	Applied       []string   `json:"applied,omitempty"`       // PRs whose base was edited by --apply-bases
-	Drift         []string   `json:"drift,omitempty"`         // flat list of all drift messages
+	MainBranch string     `json:"main_branch"`
+	Tree       *StackNode `json:"tree"`
+	// ForgeChecked reports whether the PR/MR provider was reachable. GitHubChecked
+	// is the deprecated alias, populated identically for back-compat.
+	ForgeChecked  bool     `json:"forge_checked"`
+	GitHubChecked bool     `json:"github_checked"`
+	Reconstructed []string `json:"reconstructed,omitempty"` // pieces whose parent was rewritten by --from-remote
+	Applied       []string `json:"applied,omitempty"`       // PRs/MRs whose base was edited by --apply-bases
+	Drift         []string `json:"drift,omitempty"`         // flat list of all drift messages
 }
 
 // SyncResult is the output of `mp stack sync`.
@@ -54,29 +57,29 @@ func localParentBranch(parent, mainBranch string) string {
 	return parent
 }
 
-// driftBaseMessage is fallback #6: a PR base on GitHub disagrees with local lineage.
-func driftBaseMessage(prNumber int, prURL, ghBase, localParent string) string {
+// driftBaseMessage is fallback #6: a PR/MR base on the forge disagrees with local lineage.
+func driftBaseMessage(prNumber int, prURL, forgeBase, localParent string) string {
 	return fmt.Sprintf(
-		"PR #%d base on GitHub is %q but this piece's local parent is %q. "+
-			"Fix on GitHub: open %s, click Edit by the title, set base to %q — "+
-			"or run 'mp stack status --apply-bases'. To accept GitHub's lineage locally instead, run 'mp stack status --from-github'.",
-		prNumber, ghBase, localParent, prURL, localParent)
+		"PR/MR #%d base on the forge is %q but this piece's local parent is %q. "+
+			"Fix on the forge: open %s and set the base/target branch to %q — "+
+			"or run 'mp stack status --apply-bases'. To accept the forge's lineage locally instead, run 'mp stack status --from-remote'.",
+		prNumber, forgeBase, localParent, prURL, localParent)
 }
 
-// driftMergedMessage notes a merged PR whose piece still exists locally.
+// driftMergedMessage notes a merged PR/MR whose piece still exists locally.
 func driftMergedMessage(prNumber int, pieceName string) string {
-	return fmt.Sprintf("PR #%d is merged — run 'mp done' to clean up %q.", prNumber, pieceName)
+	return fmt.Sprintf("PR/MR #%d is merged — run 'mp done' to clean up %q.", prNumber, pieceName)
 }
 
 // driftOrphanMessage notes a piece whose parent doesn't exist locally.
 func driftOrphanMessage(parent string) string {
-	return fmt.Sprintf("parent piece %q not found locally (run 'mp stack status --from-github' if it lives on GitHub)", parent)
+	return fmt.Sprintf("parent piece %q not found locally (run 'mp stack status --from-remote' if it lives on the forge)", parent)
 }
 
 // buildStackTree builds the rendered tree from local pieces, attaching PR info and
 // drift annotations. Returns the synthetic root (representing main) and a flat list
 // of every drift message found.
-func buildStackTree(items []piece.PieceListItem, prByHead map[string]adapters.PRInfo, mainBranch string) (*StackNode, []string) {
+func buildStackTree(items []piece.PieceListItem, prByHead map[string]pr.PRInfo, mainBranch string) (*StackNode, []string) {
 	// Stable order for deterministic output.
 	sorted := append([]piece.PieceListItem(nil), items...)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Name < sorted[j].Name })
@@ -85,8 +88,8 @@ func buildStackTree(items []piece.PieceListItem, prByHead map[string]adapters.PR
 	for i := range sorted {
 		it := sorted[i]
 		n := &StackNode{Piece: it.Name, Parent: it.Parent}
-		if pr, ok := prByHead[it.Name]; ok {
-			n.PR = &StackNodePR{Number: pr.Number, State: pr.State, URL: pr.URL, Base: pr.BaseRefName}
+		if info, ok := prByHead[it.Name]; ok {
+			n.PR = &StackNodePR{Number: info.Number, State: info.State, URL: info.URL, Base: info.BaseRefName}
 		}
 		nodes[it.Name] = n
 	}
@@ -142,7 +145,7 @@ type parentRewrite struct {
 // For each piece with an OPEN PR whose base differs from its current local parent,
 // it proposes setting the parent to the PR base (mapped to the "main" sentinel when
 // the base is the main branch). Pure: callers persist the rewrites.
-func reconstructParents(items []piece.PieceListItem, prByHead map[string]adapters.PRInfo, mainBranch string) []parentRewrite {
+func reconstructParents(items []piece.PieceListItem, prByHead map[string]pr.PRInfo, mainBranch string) []parentRewrite {
 	existing := make(map[string]bool, len(items))
 	for _, it := range items {
 		existing[it.Name] = true
@@ -150,11 +153,11 @@ func reconstructParents(items []piece.PieceListItem, prByHead map[string]adapter
 
 	var rewrites []parentRewrite
 	for _, it := range items {
-		pr, ok := prByHead[it.Name]
-		if !ok || pr.State != "OPEN" {
+		info, ok := prByHead[it.Name]
+		if !ok || info.State != "OPEN" {
 			continue
 		}
-		newParent := pr.BaseRefName
+		newParent := info.BaseRefName
 		if newParent == mainBranch {
 			newParent = "main"
 		}
@@ -178,16 +181,16 @@ type baseFix struct {
 }
 
 // computeBaseFixes finds open PRs whose base on GitHub disagrees with local lineage.
-func computeBaseFixes(items []piece.PieceListItem, prByHead map[string]adapters.PRInfo, mainBranch string) []baseFix {
+func computeBaseFixes(items []piece.PieceListItem, prByHead map[string]pr.PRInfo, mainBranch string) []baseFix {
 	var fixes []baseFix
 	for _, it := range items {
-		pr, ok := prByHead[it.Name]
-		if !ok || pr.State != "OPEN" {
+		info, ok := prByHead[it.Name]
+		if !ok || info.State != "OPEN" {
 			continue
 		}
 		want := localParentBranch(it.Parent, mainBranch)
-		if pr.BaseRefName != want {
-			fixes = append(fixes, baseFix{PRNumber: pr.Number, Base: want})
+		if info.BaseRefName != want {
+			fixes = append(fixes, baseFix{PRNumber: info.Number, Base: want})
 		}
 	}
 	sort.Slice(fixes, func(i, j int) bool { return fixes[i].PRNumber < fixes[j].PRNumber })

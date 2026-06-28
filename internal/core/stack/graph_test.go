@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/adapters"
+	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
 )
 
 // graphPRsJSON: #1 roots on main, #2 stacks on #1, #3 is MERGED (drops out).
@@ -26,7 +27,7 @@ func graphMock(prs string) *adapters.MockExec {
 }
 
 func TestGraphBuildsForestFromForge(t *testing.T) {
-	h := &Handler{github: adapters.NewGitHub(graphMock(graphPRsJSON))}
+	h := NewHandler(core.Deps{Exec: graphMock(graphPRsJSON), Output: adapters.NewBufferOutput()})
 
 	got, err := h.Graph(context.Background(), GraphInput{Repo: "o/n", DefaultBranch: "main"})
 	if err != nil {
@@ -54,7 +55,7 @@ func TestGraphAutoDetectsDefaultBranch(t *testing.T) {
 	m := graphMock("[]")
 	m.AddResponse("gh", []string{"repo", "view", "o/n", "--json", "defaultBranchRef"},
 		[]byte(`{"defaultBranchRef":{"name":"trunk"}}`), nil)
-	h := &Handler{github: adapters.NewGitHub(m)}
+	h := NewHandler(core.Deps{Exec: m, Output: adapters.NewBufferOutput()})
 
 	got, err := h.Graph(context.Background(), GraphInput{Repo: "o/n"})
 	if err != nil {
@@ -66,14 +67,14 @@ func TestGraphAutoDetectsDefaultBranch(t *testing.T) {
 }
 
 func TestGraphRequiresRepo(t *testing.T) {
-	h := &Handler{github: adapters.NewGitHub(adapters.NewMockExec())}
+	h := NewHandler(core.Deps{Exec: adapters.NewMockExec(), Output: adapters.NewBufferOutput()})
 	if _, err := h.Graph(context.Background(), GraphInput{}); err == nil {
 		t.Fatal("want error when repo is empty")
 	}
 }
 
 func TestGraphRejectsUnsupportedProvider(t *testing.T) {
-	h := &Handler{github: adapters.NewGitHub(adapters.NewMockExec())}
+	h := NewHandler(core.Deps{Exec: adapters.NewMockExec(), Output: adapters.NewBufferOutput()})
 	if _, err := h.Graph(context.Background(), GraphInput{Repo: "o/n", Provider: ProviderGitLab}); err == nil {
 		t.Fatal("want error for unsupported provider")
 	}
@@ -88,7 +89,7 @@ func TestGraphSurfacesGhError(t *testing.T) {
 		"--json", "number,headRefName,baseRefName,state,url,title,author,isDraft",
 		"--limit", "200",
 	}, []byte("HTTP 404: Not Found (https://api.github.com/repos/o/n/pulls)"), adapters.MockError("exit status 1"))
-	h := &Handler{github: adapters.NewGitHub(m)}
+	h := NewHandler(core.Deps{Exec: m, Output: adapters.NewBufferOutput()})
 
 	_, err := h.Graph(context.Background(), GraphInput{Repo: "o/n", DefaultBranch: "main"})
 	if err == nil {

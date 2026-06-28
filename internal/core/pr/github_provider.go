@@ -2,9 +2,26 @@ package pr
 
 import (
 	"context"
+	"errors"
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/adapters"
 )
+
+// toPRInfos converts adapter PRInfo rows (which already carry canonical State)
+// into the provider-neutral pr.PRInfo type.
+func toPRInfos(rows []adapters.PRInfo) []PRInfo {
+	out := make([]PRInfo, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, PRInfo{
+			Number:      r.Number,
+			HeadRefName: r.HeadRefName,
+			BaseRefName: r.BaseRefName,
+			State:       r.State,
+			URL:         r.URL,
+		})
+	}
+	return out
+}
 
 // GitHubProvider implements Provider by delegating to adapters.GitHub (which shells out to gh).
 type GitHubProvider struct {
@@ -47,4 +64,19 @@ func (p *GitHubProvider) IsMerged(ctx context.Context, workDir string, number in
 
 func (p *GitHubProvider) FindMergedByBranch(ctx context.Context, workDir, branchName string) (bool, int, error) {
 	return p.gh.FindMergedPRByBranch(ctx, workDir, branchName)
+}
+
+func (p *GitHubProvider) ListPRs(ctx context.Context, workDir string) ([]PRInfo, error) {
+	rows, err := p.gh.ListPRs(ctx, workDir)
+	if errors.Is(err, adapters.ErrGHUnavailable) {
+		return nil, ErrProviderUnavailable
+	}
+	if err != nil {
+		return nil, err
+	}
+	return toPRInfos(rows), nil
+}
+
+func (p *GitHubProvider) SetPRBase(ctx context.Context, workDir string, number int, base string) error {
+	return p.gh.SetPRBase(ctx, workDir, number, base)
 }

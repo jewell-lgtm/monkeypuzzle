@@ -18,18 +18,27 @@ const (
 // StatusInput holds input for `mp stack status`.
 type StatusInput struct {
 	MainBranch string `json:"main_branch,omitempty"`
-	// FromGitHub rewrites local lineage (piece-metadata.json parents) from open PR
-	// bases — the multi-machine rebuild path.
+	// FromRemote rewrites local lineage (piece-metadata.json parents) from open
+	// PR/MR bases — the multi-machine rebuild path.
+	FromRemote bool `json:"from_remote,omitempty"`
+	// FromGitHub is the deprecated alias for FromRemote, kept so existing stdin
+	// JSON ({"from_github": true}) and scripts keep working. Use FromRemote.
 	FromGitHub bool `json:"from_github,omitempty"`
-	// ApplyBases pushes local lineage to GitHub by editing each open PR's base.
+	// ApplyBases pushes local lineage to the forge by editing each open PR/MR's base.
 	ApplyBases bool `json:"apply_bases,omitempty"`
+}
+
+// fromRemote reports whether the lineage-rebuild was requested via either the
+// canonical FromRemote or the deprecated FromGitHub alias.
+func (in StatusInput) fromRemote() bool {
+	return in.FromRemote || in.FromGitHub
 }
 
 // StatusSchema returns the JSON schema for stack status input.
 func StatusSchema() ([]byte, error) {
 	return json.MarshalIndent(map[string]any{
 		"main_branch": "main",
-		"from_github": false,
+		"from_remote": false,
 		"apply_bases": false,
 	}, "", "  ")
 }
@@ -49,7 +58,7 @@ func WithStatusDefaults(in StatusInput) StatusInput {
 	if main == "" {
 		main = "main"
 	}
-	return StatusInput{MainBranch: main, FromGitHub: in.FromGitHub, ApplyBases: in.ApplyBases}
+	return StatusInput{MainBranch: main, FromRemote: in.FromRemote, FromGitHub: in.FromGitHub, ApplyBases: in.ApplyBases}
 }
 
 // Forge providers for `mp stack graph`.

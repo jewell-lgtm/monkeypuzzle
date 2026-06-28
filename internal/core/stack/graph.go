@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/jewell-lgtm/monkeypuzzle/internal/adapters"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/stackgraph"
 )
 
@@ -35,14 +36,20 @@ func (h *Handler) Graph(ctx context.Context, in GraphInput) (GraphResult, error)
 		return GraphResult{}, fmt.Errorf("provider %q is not supported yet (only %q)", in.Provider, ProviderGitHub)
 	}
 
-	prs, err := h.github.ListPRsForRepo(ctx, in.Repo, in.Limit)
+	// graph is GitHub-only today (guarded above), so it talks to the GitHub
+	// adapter directly rather than the per-repo pr.Provider abstraction. Routing
+	// the no-clone forest fetch through pr.Provider (for --provider gitlab) is the
+	// forge-unification follow-up.
+	gh := adapters.NewGitHub(h.deps.Exec)
+
+	prs, err := gh.ListPRsForRepo(ctx, in.Repo, in.Limit)
 	if err != nil {
 		return GraphResult{}, fmt.Errorf("cannot read stacks for %s: %w", in.Repo, err)
 	}
 
 	defaultBranch := in.DefaultBranch
 	if defaultBranch == "" {
-		defaultBranch, err = h.github.RepoDefaultBranch(ctx, in.Repo)
+		defaultBranch, err = gh.RepoDefaultBranch(ctx, in.Repo)
 		if err != nil {
 			return GraphResult{}, fmt.Errorf("failed to resolve default branch for %s: %w", in.Repo, err)
 		}

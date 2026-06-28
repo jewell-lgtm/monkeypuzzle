@@ -11,6 +11,7 @@ import (
 	"github.com/jewell-lgtm/monkeypuzzle/internal/adapters"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core/piece"
+	"github.com/jewell-lgtm/monkeypuzzle/internal/core/pr"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/projectdir"
 )
 
@@ -19,7 +20,6 @@ import (
 type Handler struct {
 	deps   core.Deps
 	git    *adapters.Git
-	github *adapters.GitHub
 	pieces *piece.Handler
 }
 
@@ -28,9 +28,27 @@ func NewHandler(deps core.Deps) *Handler {
 	return &Handler{
 		deps:   deps,
 		git:    adapters.NewGit(deps.Exec),
-		github: adapters.NewGitHub(deps.Exec),
 		pieces: piece.NewHandler(deps),
 	}
+}
+
+// providerForRepo loads the configured PR/MR provider for the given repo root,
+// defaulting to GitHub. Mirrors pr.Handler.providerForRepo (stack importing pr
+// is acyclic: pr does not import stack).
+func (h *Handler) providerForRepo(repoRoot string) (pr.Provider, error) {
+	cfg, err := piece.ReadConfig(repoRoot, h.deps.FS)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read config (run mp init first): %w", err)
+	}
+	providerType := cfg.PR.Provider
+	if providerType == "" {
+		providerType = "github"
+	}
+	return pr.NewProvider(pr.ProviderConfig{
+		ProviderType: providerType,
+		Config:       cfg.PR.Config,
+		Deps:         pr.ProviderDeps{Exec: h.deps.Exec},
+	})
 }
 
 func (h *Handler) emit(t core.MessageType, content string) {
@@ -53,9 +71,9 @@ func (h *Handler) resolveRepo(ctx context.Context, workDir string) (mainRepoRoot
 
 // ---- Status ----------------------------------------------------------------
 
-// Status reports the stack tree, PR state per piece, and drift between local
-// lineage and GitHub PR bases. With FromGitHub it rebuilds local lineage from PR
-// bases; with ApplyBases it edits PR bases to match local lineage.
+// Status reports the stack tree, PR/MR state per piece, and drift between local
+// lineage and the forge's PR/MR bases. With FromRemote it rebuilds local lineage
+// from PR/MR bases; with ApplyBases it edits PR/MR bases to match local lineage.
 func (h *Handler) Status(ctx context.Context, workDir string, in StatusInput) (StackStatusResult, error) {
 	in = WithStatusDefaults(in)
 
@@ -70,23 +88,29 @@ func (h *Handler) Status(ctx context.Context, workDir string, in StatusInput) (S
 
 	result := StackStatusResult{MainBranch: in.MainBranch}
 
-	prs, ghErr := h.github.ListPRs(ctx, mainRepoRoot)
-	ghAvailable := true
-	if errors.Is(ghErr, adapters.ErrGHUnavailable) {
-		ghAvailable = false
-		h.emit(core.MsgWarning, ghUnavailableMsg())
-	} else if ghErr != nil {
-		return StackStatusResult{}, ghErr
+	provider, err := h.providerForRepo(mainRepoRoot)
+	if err != nil {
+		return StackStatusResult{}, err
 	}
-	result.GitHubChecked = ghAvailable
 
-	prByHead := make(map[string]adapters.PRInfo, len(prs))
+	prs, listErr := provider.ListPRs(ctx, mainRepoRoot)
+	forgeAvailable := true
+	if errors.Is(listErr, pr.ErrProviderUnavailable) {
+		forgeAvailable = false
+		h.emit(core.MsgWarning, forgeUnavailableMsg())
+	} else if listErr != nil {
+		return StackStatusResult{}, listErr
+	}
+	result.GitHubChecked = forgeAvailable
+	result.ForgeChecked = forgeAvailable
+
+	prByHead := make(map[string]pr.PRInfo, len(prs))
 	for _, p := range prs {
 		prByHead[p.HeadRefName] = p
 	}
 
-	// Reconstruct local lineage from PR bases (machine-#2 rebuild). Metadata-only.
-	if in.FromGitHub && ghAvailable {
+	// Reconstruct local lineage from PR/MR bases (machine-#2 rebuild). Metadata-only.
+	if in.fromRemote() && forgeAvailable {
 		for _, rw := range reconstructParents(items, prByHead, in.MainBranch) {
 			wt := filepath.Join(piecesDir, rw.Piece)
 			meta, err := piece.ReadPieceMetadata(wt, h.deps.FS)
@@ -106,18 +130,18 @@ func (h *Handler) Status(ctx context.Context, workDir string, in StatusInput) (S
 		}
 	}
 
-	// Push local lineage to GitHub by editing PR bases (opt-in).
-	if in.ApplyBases && ghAvailable {
+	// Push local lineage to the forge by editing PR/MR bases (opt-in).
+	if in.ApplyBases && forgeAvailable {
 		for _, f := range computeBaseFixes(items, prByHead, in.MainBranch) {
-			if err := h.github.SetPRBase(ctx, mainRepoRoot, f.PRNumber, f.Base); err != nil {
+			if err := provider.SetPRBase(ctx, mainRepoRoot, f.PRNumber, f.Base); err != nil {
 				return StackStatusResult{}, err
 			}
 			result.Applied = append(result.Applied, fmt.Sprintf("#%d", f.PRNumber))
 			// Reflect the fix so drift isn't re-reported for it below.
-			for head, pr := range prByHead {
-				if pr.Number == f.PRNumber {
-					pr.BaseRefName = f.Base
-					prByHead[head] = pr
+			for head, info := range prByHead {
+				if info.Number == f.PRNumber {
+					info.BaseRefName = f.Base
+					prByHead[head] = info
 				}
 			}
 		}
@@ -272,7 +296,7 @@ func (h *Handler) syncMerge(ctx context.Context, piecesDir string, roots []strin
 			}
 			result.Updated = append(result.Updated, n.name)
 			if in.Push {
-				if err := h.github.Push(ctx, wt); err != nil {
+				if err := h.git.Push(ctx, wt); err != nil {
 					h.emit(core.MsgWarning, fmt.Sprintf("Push failed for %q: %v", n.name, err))
 				} else {
 					result.Pushed = append(result.Pushed, n.name)
@@ -382,7 +406,7 @@ func (h *Handler) syncRebase(ctx context.Context, mainRepoRoot, piecesDir string
 			for _, p := range migrated {
 				wt := filepath.Join(piecesDir, p)
 				h.emit(core.MsgWarning, forcePushMsg(p))
-				if err := h.github.PushForceWithLease(ctx, wt); err != nil {
+				if err := h.git.PushForceWithLease(ctx, wt); err != nil {
 					h.emit(core.MsgWarning, fmt.Sprintf("Force-push failed for %q: %v", p, err))
 				} else {
 					result.Pushed = append(result.Pushed, p)
@@ -702,8 +726,8 @@ func stashPopConflictMsg(piece, path string) string {
 	return fmt.Sprintf("Stack synced %q, but restoring your uncommitted changes hit conflicts in %s. Your work is safe — resolve the conflict markers there (your stash is also recoverable via 'git stash list'). The rest of the stack was synced.", piece, path)
 }
 
-func ghUnavailableMsg() string {
-	return "GitHub is unavailable (gh not installed or not logged in). Showing local lineage only; PR state and drift checks are skipped."
+func forgeUnavailableMsg() string {
+	return "The PR/MR provider is unavailable (gh/glab not installed or not logged in). Showing local lineage only; PR/MR state and drift checks are skipped."
 }
 
 func forcePushMsg(piece string) string {
