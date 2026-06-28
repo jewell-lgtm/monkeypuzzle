@@ -53,13 +53,36 @@ func providerOrDefault(p string) string {
 	return p
 }
 
-// StackGraph runs `mp stack graph` and parses its {stacks: [...]} output. The
-// token is supplied only through the child's environment (GH_TOKEN, or
-// GITLAB_TOKEN for gitlab) and is never included in any returned error.
-func (r *ExecRunner) StackGraph(ctx context.Context, in StackGraphInput) ([]stackgraph.Stack, error) {
-	ctx, cancel := context.WithTimeout(ctx, stackGraphTimeout)
-	defer cancel()
+// minimalEnvVars are the only host environment variables forwarded to the child
+// `mp`/`gh` process: enough to find the binary (PATH), a home for git/gh config
+// (HOME), proxy settings, and custom CA bundles. Everything else — notably the
+// server's secrets (TOKEN_ENCRYPTION_KEY, SESSION_SECRET, WORKOS_API_KEY,
+// DATABASE_URL) — is deliberately withheld.
+var minimalEnvVars = []string{
+	"PATH", "HOME",
+	"HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY", "ALL_PROXY",
+	"https_proxy", "http_proxy", "no_proxy", "all_proxy",
+	"SSL_CERT_FILE", "SSL_CERT_DIR",
+}
 
+// minimalEnv returns a KEY=VALUE slice carrying only the allow-listed host
+// variables that are actually set, so the child inherits none of the server's
+// secrets.
+func minimalEnv() []string {
+	env := make([]string, 0, len(minimalEnvVars))
+	for _, k := range minimalEnvVars {
+		if v, ok := os.LookupEnv(k); ok {
+			env = append(env, k+"="+v)
+		}
+	}
+	return env
+}
+
+// buildCmd assembles the fully configured `mp stack graph` command: its args,
+// and a minimal environment carrying only the forge token (GH_TOKEN, or
+// GITLAB_TOKEN for gitlab) plus the allow-listed host vars. The token rides in
+// the env only — never in cmd.Args.
+func (r *ExecRunner) buildCmd(ctx context.Context, in StackGraphInput) *exec.Cmd {
 	provider := providerOrDefault(in.Provider)
 	args := []string{"stack", "graph", "--repo", in.RepoSlug, "--provider", provider}
 	if in.DefaultBranch != "" {
@@ -72,7 +95,18 @@ func (r *ExecRunner) StackGraph(ctx context.Context, in StackGraphInput) ([]stac
 		tokenEnv = "GITLAB_TOKEN="
 	}
 	// Token rides in the child env only — never logged, never in cmd.Args.
-	cmd.Env = append(os.Environ(), tokenEnv+in.Token)
+	cmd.Env = append(minimalEnv(), tokenEnv+in.Token)
+	return cmd
+}
+
+// StackGraph runs `mp stack graph` and parses its {stacks: [...]} output. The
+// token is supplied only through the child's environment (GH_TOKEN, or
+// GITLAB_TOKEN for gitlab) and is never included in any returned error.
+func (r *ExecRunner) StackGraph(ctx context.Context, in StackGraphInput) ([]stackgraph.Stack, error) {
+	ctx, cancel := context.WithTimeout(ctx, stackGraphTimeout)
+	defer cancel()
+
+	cmd := r.buildCmd(ctx, in)
 
 	out, err := cmd.Output()
 	if err != nil {
