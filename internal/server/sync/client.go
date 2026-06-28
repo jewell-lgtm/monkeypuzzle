@@ -29,12 +29,12 @@ func NewTemporalTrigger(c client.Client, s store.Store) *TemporalTrigger {
 }
 
 // StartSync starts (or restarts) the per-user sync. A deterministic workflow ID
-// plus TERMINATE_IF_RUNNING coalesces repeated triggers into one fresh run.
+// plus TERMINATE_EXISTING coalesces repeated triggers into one fresh run.
 func (t *TemporalTrigger) StartSync(ctx context.Context, userID int64) (string, error) {
 	opts := client.StartWorkflowOptions{
-		ID:                    fmt.Sprintf("sync-user-%d", userID),
-		TaskQueue:             TaskQueue,
-		WorkflowIDReusePolicy: enumspb.WORKFLOW_ID_REUSE_POLICY_TERMINATE_IF_RUNNING,
+		ID:                       fmt.Sprintf("sync-user-%d", userID),
+		TaskQueue:                TaskQueue,
+		WorkflowIDConflictPolicy: enumspb.WORKFLOW_ID_CONFLICT_POLICY_TERMINATE_EXISTING,
 	}
 	we, err := t.client.ExecuteWorkflow(ctx, opts, SyncUserDataWorkflow, SyncInput{UserID: userID})
 	if err != nil {

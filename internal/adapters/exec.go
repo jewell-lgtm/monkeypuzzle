@@ -76,7 +76,7 @@ func (e *OSExec) StartDetached(dir string, env []string, logPath, name string, a
 	}
 	// The child inherits a dup of the file descriptor, so closing our handle
 	// after Start does not affect the running process.
-	defer logFile.Close()
+	defer func() { _ = logFile.Close() }()
 
 	cmd := exec.Command(name, args...)
 	cmd.Dir = dir
