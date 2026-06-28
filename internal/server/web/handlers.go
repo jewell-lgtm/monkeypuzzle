@@ -12,26 +12,49 @@ import (
 	"github.com/jewell-lgtm/monkeypuzzle/internal/server/store"
 )
 
-const oauthStateCookie = "mp_oauth_state"
+const (
+	oauthStateCookie    = "mp_oauth_state"
+	oauthProviderCookie = "mp_oauth_provider"
+	defaultProvider     = "github"
+)
 
-// login starts the WorkOS login flow: set a CSRF state cookie, redirect to WorkOS.
+// login renders the provider chooser when called without ?provider=, otherwise
+// it starts that provider's OAuth flow: set CSRF state + provider cookies,
+// redirect to the provider's authorization URL. An unknown provider is a 400.
 func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
+	provider := r.URL.Query().Get("provider")
+	if provider == "" {
+		h.render(w, loginPage())
+		return
+	}
+	login, ok := h.deps.Logins[provider]
+	if !ok {
+		http.Error(w, "unknown login provider", http.StatusBadRequest)
+		return
+	}
 	state := randomState()
+	h.setCookie(w, oauthStateCookie, state)
+	h.setCookie(w, oauthProviderCookie, provider)
+	http.Redirect(w, r, login.AuthorizationURL(state), http.StatusFound)
+}
+
+// setCookie writes a short-lived, HttpOnly OAuth cookie.
+func (h *Handler) setCookie(w http.ResponseWriter, name, value string) {
 	http.SetCookie(w, &http.Cookie{
-		Name:     oauthStateCookie,
-		Value:    state,
+		Name:     name,
+		Value:    value,
 		Path:     "/",
 		HttpOnly: true,
 		Secure:   h.deps.SecureCookies,
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   600,
 	})
-	http.Redirect(w, r, h.deps.Login.AuthorizationURL(state), http.StatusFound)
 }
 
-// callback completes login: verify state, exchange the code with WorkOS (which
-// returns the WorkOS user id + passed-through GitHub token), derive the GitHub
-// profile, store the user (encrypted token), set the session, and kick off a sync.
+// callback completes login: verify state, recover the provider from its cookie,
+// exchange the code (WorkOS for GitHub, direct OAuth for GitLab) for an identity
+// + forge token, derive the forge profile, store the user (encrypted token), set
+// the session, and kick off a sync.
 func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	stateCookie, err := r.Cookie(oauthStateCookie)
@@ -39,25 +62,40 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid oauth state", http.StatusBadRequest)
 		return
 	}
-	res, err := h.deps.Login.Authenticate(ctx, r.URL.Query().Get("code"))
+	provider := defaultProvider
+	if pc, err := r.Cookie(oauthProviderCookie); err == nil && pc.Value != "" {
+		provider = pc.Value
+	}
+	login, ok := h.deps.Logins[provider]
+	if !ok {
+		http.Error(w, "unknown login provider", http.StatusBadRequest)
+		return
+	}
+	res, err := login.Authenticate(ctx, r.URL.Query().Get("code"))
 	if err != nil {
 		http.Error(w, "authentication failed", http.StatusBadGateway)
 		return
 	}
-	profile, err := h.deps.GitHub.ForToken(res.GitHubToken).GetAuthenticatedUser(ctx)
+	client, err := h.deps.Forge.ForToken(res.Provider, res.Token)
 	if err != nil {
-		http.Error(w, "failed to fetch GitHub profile", http.StatusBadGateway)
+		http.Error(w, "unknown forge provider", http.StatusInternalServerError)
 		return
 	}
-	enc, err := h.deps.Cipher.Encrypt([]byte(res.GitHubToken))
+	profile, err := client.GetAuthenticatedUser(ctx)
+	if err != nil {
+		http.Error(w, "failed to fetch forge profile", http.StatusBadGateway)
+		return
+	}
+	enc, err := h.deps.Cipher.Encrypt([]byte(res.Token))
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 	uid, err := h.deps.Store.UpsertUser(ctx, store.User{
 		ExternalUserID: res.ProviderUserID,
-		GitHubUserID:   profile.ID,
-		GitHubLogin:    profile.Login,
+		Provider:       res.Provider,
+		ForgeUserID:    profile.ID,
+		ForgeLogin:     profile.Login,
 		AvatarURL:      profile.AvatarURL,
 		AccessTokenEnc: enc,
 	})

@@ -102,7 +102,7 @@ func (s *Service) stacksViaMp(ctx context.Context, userID int64, repo store.Repo
 	stacks, err := s.runner.StackGraph(ctx, mprunner.StackGraphInput{
 		RepoSlug:      repo.Owner + "/" + repo.Name,
 		DefaultBranch: repo.DefaultBranch,
-		Provider:      "github",
+		Provider:      repo.Provider,
 		Token:         string(token),
 	})
 	if err != nil {

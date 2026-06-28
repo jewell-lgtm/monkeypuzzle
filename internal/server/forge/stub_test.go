@@ -1,4 +1,4 @@
-package githubapi
+package forge
 
 import (
 	"context"
@@ -10,8 +10,8 @@ import (
 func TestStubFactory(t *testing.T) {
 	ctx := context.Background()
 	f := NewStubFactory()
-	f.SetUser("tok", GitHubUser{ID: 7, Login: "octo"})
-	f.SetRepos("tok", Repo{GitHubRepoID: 1, Owner: "o", Name: "r", DefaultBranch: "main"})
+	f.SetUser("tok", User{ID: 7, Login: "octo"})
+	f.SetRepos("tok", Repo{ForgeRepoID: 1, Owner: "o", Name: "r", DefaultBranch: "main"})
 	f.SetPullRequests("tok", "o", "r",
 		stackgraph.PRRef{Number: 1, HeadRef: "a", BaseRef: "main", State: stackgraph.StateOpen})
 
@@ -33,5 +33,23 @@ func TestStubFactory(t *testing.T) {
 	// Unknown token errors on user lookup.
 	if _, err := f.ForToken("nope").GetAuthenticatedUser(ctx); err == nil {
 		t.Fatal("expected error for unknown token")
+	}
+}
+
+func TestRegistry_ForToken(t *testing.T) {
+	stub := NewStubFactory()
+	stub.SetUser("tok", User{ID: 1, Login: "u"})
+	reg := Registry{"github": stub}
+
+	c, err := reg.ForToken("github", "tok")
+	if err != nil {
+		t.Fatalf("ForToken: %v", err)
+	}
+	if u, err := c.GetAuthenticatedUser(context.Background()); err != nil || u.Login != "u" {
+		t.Fatalf("user: %+v err=%v", u, err)
+	}
+
+	if _, err := reg.ForToken("gitlab", "tok"); err == nil {
+		t.Fatal("expected error for unregistered provider")
 	}
 }

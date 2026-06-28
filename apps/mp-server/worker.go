@@ -9,7 +9,9 @@ import (
 	"go.temporal.io/sdk/worker"
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/server/auth/crypto"
-	"github.com/jewell-lgtm/monkeypuzzle/internal/server/githubapi"
+	"github.com/jewell-lgtm/monkeypuzzle/internal/server/forge"
+	forgegithub "github.com/jewell-lgtm/monkeypuzzle/internal/server/forge/github"
+	forgegitlab "github.com/jewell-lgtm/monkeypuzzle/internal/server/forge/gitlab"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/server/store"
 	syncpkg "github.com/jewell-lgtm/monkeypuzzle/internal/server/sync"
 )
@@ -44,9 +46,12 @@ func runWorker() error {
 
 	w := worker.New(tc, syncpkg.TaskQueue, worker.Options{})
 	syncpkg.RegisterWorker(w, &syncpkg.Activities{
-		Store:   st,
-		Factory: githubapi.NewFactory(),
-		Cipher:  cipher,
+		Store: st,
+		Forge: forge.Registry{
+			"github": forgegithub.NewFactory(),
+			"gitlab": forgegitlab.NewFactory(cfg.GitLabBaseURL),
+		},
+		Cipher: cipher,
 	})
 
 	log.Printf("mp-worker polling task queue %q", syncpkg.TaskQueue)

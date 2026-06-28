@@ -22,6 +22,19 @@ type Config struct {
 	SecureCookies      bool
 	UseMpCLI           bool   // reconstruct stacks via `mp stack graph` (default false; needs mp + gh in image)
 	MpBin              string // path to the mp binary (default: sibling of mp-server, else PATH)
+
+	// GitLab is opt-in: the gitlab login leg is registered only when both
+	// GitLabOAuthClientID and GitLabOAuthClientSecret are set, so existing
+	// GitHub-only deploys are unaffected.
+	GitLabBaseURL           string // e.g. https://gitlab.com or a self-managed instance
+	GitLabOAuthClientID     string
+	GitLabOAuthClientSecret string
+}
+
+// GitLabEnabled reports whether the direct-GitLab-OAuth login leg should be
+// registered (both client id and secret present).
+func (c Config) GitLabEnabled() bool {
+	return c.GitLabOAuthClientID != "" && c.GitLabOAuthClientSecret != ""
 }
 
 // LoadConfig reads the environment and fails loudly on any missing/invalid value.
@@ -37,6 +50,10 @@ func LoadConfig() (Config, error) {
 		SecureCookies:    os.Getenv("SECURE_COOKIES") == "true",
 		UseMpCLI:         os.Getenv("USE_MP_CLI") == "true",
 		MpBin:            os.Getenv("MP_BIN"),
+
+		GitLabBaseURL:           envOr("GITLAB_BASE_URL", "https://gitlab.com"),
+		GitLabOAuthClientID:     os.Getenv("GITLAB_OAUTH_CLIENT_ID"),
+		GitLabOAuthClientSecret: os.Getenv("GITLAB_OAUTH_CLIENT_SECRET"),
 	}
 
 	required := map[string]string{

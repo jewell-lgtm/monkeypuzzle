@@ -15,9 +15,13 @@ import (
 	"go.temporal.io/sdk/client"
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/server/auth/crypto"
+	gitlabauth "github.com/jewell-lgtm/monkeypuzzle/internal/server/auth/gitlab"
+	"github.com/jewell-lgtm/monkeypuzzle/internal/server/auth/identity"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/server/auth/session"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/server/auth/workos"
-	"github.com/jewell-lgtm/monkeypuzzle/internal/server/githubapi"
+	"github.com/jewell-lgtm/monkeypuzzle/internal/server/forge"
+	forgegithub "github.com/jewell-lgtm/monkeypuzzle/internal/server/forge/github"
+	forgegitlab "github.com/jewell-lgtm/monkeypuzzle/internal/server/forge/gitlab"
 	mcppkg "github.com/jewell-lgtm/monkeypuzzle/internal/server/mcp"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/server/mprunner"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/server/service"
@@ -55,18 +59,33 @@ func runServe() error {
 	}
 	defer tc.Close()
 
-	ghFactory := githubapi.NewFactory()
 	// Optional `mp stack graph` path (flag-gated by USE_MP_CLI); falls back to the
 	// in-process Go path on any failure. Reuses the same token cipher as sync.
 	runner := mprunner.NewExecRunner(cfg.MpBin)
 	svc := service.New(st, syncpkg.NewTemporalTrigger(tc, st), runner, cipher, cfg.UseMpCLI)
 
-	login := workos.NewAPIClient(cfg.WorkOSAPIKey, cfg.WorkOSClientID, cfg.PublicBaseURL+"/auth/callback")
+	// The forge registry is provider-neutral and needs no OAuth secrets; both
+	// factories are always available so a synced user of either forge can be read.
+	forgeRegistry := forge.Registry{
+		"github": forgegithub.NewFactory(),
+		"gitlab": forgegitlab.NewFactory(cfg.GitLabBaseURL),
+	}
+
+	// Logins is keyed by provider. GitHub goes through WorkOS; GitLab (direct
+	// OAuth) is opt-in — registered only when its client id/secret are set.
+	logins := map[string]identity.Provider{
+		"github": workos.NewAPIClient(cfg.WorkOSAPIKey, cfg.WorkOSClientID, cfg.PublicBaseURL+"/auth/callback"),
+	}
+	if cfg.GitLabEnabled() {
+		logins["gitlab"] = gitlabauth.NewOAuthClient(
+			cfg.GitLabBaseURL, cfg.GitLabOAuthClientID, cfg.GitLabOAuthClientSecret, cfg.PublicBaseURL+"/auth/callback")
+	}
+
 	webHandler := web.NewHandler(web.Deps{
 		Service:       svc,
 		Store:         st,
-		Login:         login,
-		GitHub:        ghFactory,
+		Logins:        logins,
+		Forge:         forgeRegistry,
 		Session:       session.NewSecureCookieCodec(cfg.SessionSecret),
 		Cipher:        cipher,
 		SecureCookies: cfg.SecureCookies,

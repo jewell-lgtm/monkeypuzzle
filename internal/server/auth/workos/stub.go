@@ -11,9 +11,14 @@ type StubClient struct {
 	Identity identity.Identity
 }
 
-// NewStubClient returns a stub that authenticates any code to the given identity.
-func NewStubClient(providerUserID, githubToken string) *StubClient {
-	return &StubClient{Identity: identity.Identity{ProviderUserID: providerUserID, GitHubToken: githubToken}}
+// NewStubClient returns a stub that authenticates any code to the given identity
+// (provider "github").
+func NewStubClient(providerUserID, token string) *StubClient {
+	return &StubClient{Identity: identity.Identity{
+		ProviderUserID: providerUserID,
+		Provider:       "github",
+		Token:          token,
+	}}
 }
 
 func (s *StubClient) AuthorizationURL(state string) string {
