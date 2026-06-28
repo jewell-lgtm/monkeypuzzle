@@ -2,9 +2,15 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"go.temporal.io/sdk/client"
 
@@ -76,12 +82,82 @@ func runServe() error {
 	mcpHandler := mcppkg.NewHTTPHandler(mcppkg.NewServer(svc), verifier, resourceURL+"/.well-known/oauth-protected-resource")
 
 	mux := http.NewServeMux()
+	// Health endpoints are registered first and are NOT behind auth: probes hit
+	// them unauthenticated. Liveness never touches dependencies; readiness gates
+	// on the DB and best-effort checks Temporal.
+	mux.HandleFunc("GET /healthz", healthzHandler)
+	mux.HandleFunc("GET /readyz", newReadyzHandler(st, func(ctx context.Context) error {
+		_, err := tc.CheckHealth(ctx, &client.CheckHealthRequest{})
+		return err
+	}))
 	webHandler.Routes(mux)
 	mux.Handle("GET /.well-known/oauth-protected-resource", mcppkg.ProtectedResourceMetadata(resourceURL, cfg.AuthKitDomain))
 	mux.Handle("/mcp", mcpHandler)
 	mux.Handle("/mcp/", mcpHandler)
 
 	addr := ":" + cfg.Port
-	log.Printf("mp-server serving on %s (public %s)", addr, cfg.PublicBaseURL)
-	return http.ListenAndServe(addr, mux)
+	srv := &http.Server{Addr: addr, Handler: mux}
+
+	// Serve in the background so the main goroutine can wait for a termination
+	// signal and drive a graceful shutdown.
+	errCh := make(chan error, 1)
+	go func() {
+		log.Printf("mp-server serving on %s (public %s)", addr, cfg.PublicBaseURL)
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			errCh <- err
+		}
+	}()
+
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
+	select {
+	case err := <-errCh:
+		return err
+	case sig := <-stop:
+		log.Printf("mp-server received %s, draining connections", sig)
+	}
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		return fmt.Errorf("graceful shutdown: %w", err)
+	}
+	log.Print("mp-server stopped")
+	return nil
+}
+
+// healthzHandler is the liveness probe: it returns 200 unconditionally whenever
+// the process is serving. It performs NO dependency checks on purpose — a DB or
+// Temporal blip must not get the pod killed and restarted.
+func healthzHandler(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	_, _ = io.WriteString(w, "ok")
+}
+
+// dbPinger is the readiness check's hard dependency: a reachable store.
+type dbPinger interface {
+	Ping(ctx context.Context) error
+}
+
+// newReadyzHandler builds the readiness probe. The DB ping is the hard gate
+// (503 with a short reason on failure). temporalCheck, when non-nil, is a
+// best-effort probe whose failure is logged but does NOT fail readiness — a
+// Temporal outage should degrade sync, not take the whole server out of rotation.
+func newReadyzHandler(db dbPinger, temporalCheck func(context.Context) error) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+		defer cancel()
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		if err := db.Ping(ctx); err != nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = fmt.Fprintf(w, "db unreachable: %v", err)
+			return
+		}
+		if temporalCheck != nil {
+			if err := temporalCheck(ctx); err != nil {
+				log.Printf("readyz: temporal health check failed (best-effort): %v", err)
+			}
+		}
+		_, _ = io.WriteString(w, "ok")
+	}
 }

@@ -51,12 +51,14 @@ spec:
             periodSeconds: {{ .Values.server.startupProbe.periodSeconds }}
           {{- end }}
           readinessProbe:
-            tcpSocket:
+            httpGet:
+              path: /readyz
               port: http
             initialDelaySeconds: 5
             periodSeconds: 10
           livenessProbe:
-            tcpSocket:
+            httpGet:
+              path: /healthz
               port: http
             initialDelaySeconds: 15
             periodSeconds: 20

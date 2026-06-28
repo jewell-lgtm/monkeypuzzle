@@ -41,6 +41,9 @@ func NewMemoryStore() *MemoryStore {
 // Migrate is a no-op for the in-memory store.
 func (m *MemoryStore) Migrate(context.Context) error { return nil }
 
+// Ping always succeeds: the in-memory store is always reachable.
+func (m *MemoryStore) Ping(context.Context) error { return nil }
+
 func (m *MemoryStore) UpsertUser(_ context.Context, u User) (int64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

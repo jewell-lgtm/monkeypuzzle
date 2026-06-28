@@ -77,6 +77,8 @@ type SyncStatus struct {
 type Store interface {
 	// Migrate applies the schema idempotently. Safe to call on every boot.
 	Migrate(ctx context.Context) error
+	// Ping verifies the backing store is reachable; used by readiness checks.
+	Ping(ctx context.Context) error
 
 	// UpsertUser inserts or updates a user keyed by GitHubUserID and returns its
 	// id. AccessTokenEnc is persisted as-is (already encrypted).

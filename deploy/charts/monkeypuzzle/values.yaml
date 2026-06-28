@@ -62,7 +62,14 @@ containerSecurityContext:
 # The web/MCP server (`mp-server serve`).
 server:
   replicas: 1
-  resources: {}
+  # Sensible defaults; override per-environment. Set to {} to drop entirely.
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
   # First start runs DB migrations + dials Temporal before binding :8080, so a
   # startupProbe gives it room before liveness applies.
   startupProbe:
@@ -80,7 +87,13 @@ server:
 # The Temporal sync worker (`mp-server worker`).
 worker:
   replicas: 1
-  resources: {}
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
   podAnnotations: {}
   nodeSelector: {}
   tolerations: []
@@ -110,7 +123,13 @@ postgres:
     enabled: true
     size: 8Gi
     storageClass: ""
-  resources: {}
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 1
+      memory: 512Mi
 
 # Used when postgres.enabled is false. Full DSN, e.g.
 # postgres://user:pass@host:5432/mp?sslmode=require
@@ -130,7 +149,13 @@ temporal:
   # Expose the Temporal Web UI (port 8233) via a Service. Off by default.
   ui:
     enabled: false
-  resources: {}
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 1
+      memory: 1Gi
 
 externalTemporal:
   hostPort: ""   # e.g. temporal-frontend.temporal.svc.cluster.local:7233

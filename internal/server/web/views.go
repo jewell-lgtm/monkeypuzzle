@@ -37,10 +37,14 @@ func navBar() g.Node {
 }
 
 // dashboardPage renders the shell instantly; AlpineJS hydrates the repo list
-// from /partials/repos (fast TTFB) and polls while a first sync runs.
-func dashboardPage() g.Node {
+// from /partials/repos (fast TTFB) and polls while a first sync runs. syncError
+// shows a non-fatal banner when the first-login sync trigger failed.
+func dashboardPage(syncError bool) g.Node {
 	return page("Monkey Puzzle",
 		navBar(),
+		g.If(syncError, Div(Class("notice"),
+			g.Text("We couldn't start syncing your repositories just now — try \"Sync now\" in a moment."),
+		)),
 		Main(g.Attr("x-data", "dashboard()"), g.Attr("x-init", "init()"),
 			Div(Class("bar"),
 				H1(g.Text("Your repositories")),
