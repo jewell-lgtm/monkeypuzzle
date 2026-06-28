@@ -87,6 +87,17 @@ had pushed).`,
 	RunE: runStackUndo,
 }
 
+var stackGraphCmd = &cobra.Command{
+	Use:   "graph",
+	Short: "Reconstruct a repo's stacked-PR forest straight from the forge (no clone)",
+	Long: `Build the forest of stacked PRs for a repository purely from its open PRs'
+base->head edges — no local clone required. Auth comes from the ambient
+GH_TOKEN/GITHUB_TOKEN (or GITLAB_TOKEN) environment, so a server can run this as
+a specific user. Output is the same forest the hosted dashboard renders, because
+both call the shared stackgraph builder.`,
+	RunE: runStackGraph,
+}
+
 var (
 	flagStackMain         string
 	flagStackFromGitHub   bool
@@ -111,6 +122,12 @@ var (
 	flagStackSetParentPiece  string
 	flagStackSetParentParent string
 	flagStackSetParentSchema bool
+
+	flagStackGraphRepo     string
+	flagStackGraphBranch   string
+	flagStackGraphProvider string
+	flagStackGraphLimit    int
+	flagStackGraphSchema   bool
 )
 
 func init() {
@@ -142,6 +159,12 @@ func init() {
 	stackSetParentCmd.Flags().StringVar(&flagStackSetParentParent, "parent", "", "New parent piece name, or \"main\"")
 	stackSetParentCmd.Flags().BoolVar(&flagStackSetParentSchema, "schema", false, "Output JSON schema and exit")
 
+	stackGraphCmd.Flags().StringVar(&flagStackGraphRepo, "repo", "", "Repository as owner/name (required)")
+	stackGraphCmd.Flags().StringVar(&flagStackGraphBranch, "default-branch", "", "Trunk branch (auto-detected from the forge if omitted)")
+	stackGraphCmd.Flags().StringVar(&flagStackGraphProvider, "provider", "github", "Forge provider: github (default) or gitlab")
+	stackGraphCmd.Flags().IntVar(&flagStackGraphLimit, "limit", 200, "Max PRs to fetch")
+	stackGraphCmd.Flags().BoolVar(&flagStackGraphSchema, "schema", false, "Output JSON schema and exit")
+
 	stackCmd.AddCommand(stackStatusCmd)
 	stackCmd.AddCommand(stackSyncCmd)
 	stackCmd.AddCommand(stackAppendCmd)
@@ -149,6 +172,7 @@ func init() {
 	stackCmd.AddCommand(stackContinueCmd)
 	stackCmd.AddCommand(stackSetParentCmd)
 	stackCmd.AddCommand(stackUndoCmd)
+	stackCmd.AddCommand(stackGraphCmd)
 	rootCmd.AddCommand(stackCmd)
 }
 
@@ -196,6 +220,46 @@ func runStackStatus(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	result, err := handler.Status(cmd.Context(), wd, input)
+	if err != nil {
+		return err
+	}
+	return cli.PrintJSON(result)
+}
+
+func runStackGraph(cmd *cobra.Command, args []string) error {
+	if flagStackGraphSchema {
+		schema, err := stackcmd.GraphSchema()
+		if err != nil {
+			return err
+		}
+		fmt.Println(string(schema))
+		return nil
+	}
+
+	var input stackcmd.GraphInput
+	if cmd.Flags().Changed("repo") || cmd.Flags().Changed("default-branch") ||
+		cmd.Flags().Changed("provider") || cmd.Flags().Changed("limit") {
+		input = stackcmd.GraphInput{
+			Repo:          flagStackGraphRepo,
+			DefaultBranch: flagStackGraphBranch,
+			Provider:      flagStackGraphProvider,
+			Limit:         flagStackGraphLimit,
+		}
+	} else if cli.HasStdinData() {
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return fmt.Errorf("failed to read stdin: %w", err)
+		}
+		if input, err = stackcmd.ParseGraphJSON(data); err != nil {
+			return err
+		}
+	}
+
+	handler, err := newStackHandler()
+	if err != nil {
+		return err
+	}
+	result, err := handler.Graph(cmd.Context(), input)
 	if err != nil {
 		return err
 	}
