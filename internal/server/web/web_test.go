@@ -77,6 +77,28 @@ func TestWeb_Smoke(t *testing.T) {
 	}
 }
 
+// TestDashboard_SyncErrorBanner: the non-fatal sync banner renders only when the
+// dashboard is told the first-login sync trigger failed.
+func TestDashboard_SyncErrorBanner(t *testing.T) {
+	const marker = "start syncing your repositories"
+
+	var withErr strings.Builder
+	if err := dashboardPage(true).Render(&withErr); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(withErr.String(), marker) {
+		t.Fatalf("sync_error banner missing when syncError=true: %s", withErr.String())
+	}
+
+	var noErr strings.Builder
+	if err := dashboardPage(false).Render(&noErr); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(noErr.String(), marker) {
+		t.Fatalf("sync_error banner present when syncError=false: %s", noErr.String())
+	}
+}
+
 func getBody(t *testing.T, c *http.Client, url string) string {
 	t.Helper()
 	resp, err := c.Get(url)

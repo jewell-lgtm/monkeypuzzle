@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -31,11 +32,46 @@ func NewPgxStore(ctx context.Context, dsn string) (*PgxStore, error) {
 // Close releases the connection pool.
 func (s *PgxStore) Close() { s.pool.Close() }
 
+// Ping verifies Postgres is reachable. Used by the server's readiness probe.
+func (s *PgxStore) Ping(ctx context.Context) error {
+	if err := s.pool.Ping(ctx); err != nil {
+		return fmt.Errorf("store: ping: %w", err)
+	}
+	return nil
+}
+
+// migrateLockKey is a fixed key for the session-level advisory lock that
+// serializes Migrate across processes (the server and the worker both migrate at
+// boot). The value is arbitrary but must be stable across all instances.
+const migrateLockKey int64 = 0x6d705f6d6967 // "mp_mig"
+
 // Migrate applies schema.sql idempotently, one statement at a time (the
 // extended protocol pgx uses forbids multiple statements per Exec).
+//
+// The server and the worker both run Migrate at startup, so it is wrapped in a
+// Postgres session-level advisory lock taken on a single dedicated connection:
+// concurrent boots queue on the lock instead of racing the same DDL. The lock is
+// session-scoped, so the dedicated connection must outlive the migration and the
+// unlock — hence the explicit Acquire/Release rather than a pooled Exec.
 func (s *PgxStore) Migrate(ctx context.Context) error {
+	conn, err := s.pool.Acquire(ctx)
+	if err != nil {
+		return fmt.Errorf("store: migrate: acquire conn: %w", err)
+	}
+	defer conn.Release()
+
+	if _, err := conn.Exec(ctx, `SELECT pg_advisory_lock($1)`, migrateLockKey); err != nil {
+		return fmt.Errorf("store: migrate: lock: %w", err)
+	}
+	defer func() {
+		if _, err := conn.Exec(ctx, `SELECT pg_advisory_unlock($1)`, migrateLockKey); err != nil {
+			// Best-effort: the lock is released when the session ends regardless.
+			log.Printf("store: migrate: advisory unlock: %v", err)
+		}
+	}()
+
 	for _, stmt := range splitStatements(schemaSQL) {
-		if _, err := s.pool.Exec(ctx, stmt); err != nil {
+		if _, err := conn.Exec(ctx, stmt); err != nil {
 			return fmt.Errorf("store: migrate: %w", err)
 		}
 	}

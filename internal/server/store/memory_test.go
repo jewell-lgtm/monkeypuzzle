@@ -44,6 +44,12 @@ func TestMemoryStore_UserUpsertAndGet(t *testing.T) {
 	}
 }
 
+func TestMemoryStore_Ping(t *testing.T) {
+	if err := NewMemoryStore().Ping(context.Background()); err != nil {
+		t.Fatalf("memory store Ping should always succeed, got %v", err)
+	}
+}
+
 func TestMemoryStore_ReposAndVisibility(t *testing.T) {
 	ctx := context.Background()
 	s := NewMemoryStore()

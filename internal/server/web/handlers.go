@@ -3,6 +3,7 @@ package web
 import (
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 
 	g "maragu.dev/gomponents"
@@ -71,8 +72,15 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 	}
 	session.Set(w, value, h.deps.SecureCookies)
 	// First-login sync so data populates while the user lands on the dashboard.
-	_, _ = h.deps.Service.StartSync(ctx, uid)
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+	// Non-fatal: a trigger failure (e.g. Temporal down) must not block login, but
+	// silently swallowing it yields a confusing empty dashboard — so log it and
+	// surface a notice via a query param the dashboard renders into a banner.
+	dest := "/"
+	if _, err := h.deps.Service.StartSync(ctx, uid); err != nil {
+		log.Printf("web: first-login sync failed for user %d: %v", uid, err)
+		dest = "/?sync_error=1"
+	}
+	http.Redirect(w, r, dest, http.StatusSeeOther)
 }
 
 // logout clears the session.
@@ -84,7 +92,7 @@ func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
 // dashboard renders the shell immediately (skeleton); Alpine hydrates the repo
 // list from /partials/repos for fast TTFB.
 func (h *Handler) dashboard(w http.ResponseWriter, r *http.Request) {
-	h.render(w, dashboardPage())
+	h.render(w, dashboardPage(r.URL.Query().Get("sync_error") != ""))
 }
 
 // partialRepos returns just the repo-list HTML fragment from the cache.
