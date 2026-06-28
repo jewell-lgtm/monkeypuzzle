@@ -78,21 +78,26 @@ func (s *PgxStore) Migrate(ctx context.Context) error {
 	return nil
 }
 
-// splitStatements splits a SQL file into individual statements on ';',
-// dropping chunks that are blank or comment-only.
+// splitStatements splits a SQL file into individual statements on ';', dropping
+// chunks that are blank once comments are removed.
+//
+// Line comments (-- ... to end-of-line) are stripped BEFORE splitting, so a ';'
+// inside a comment (e.g. a descriptive schema note) does not spuriously split a
+// statement. This schema has no ';' inside string literals, so splitting the
+// comment-stripped text on ';' is sufficient.
 func splitStatements(sql string) []string {
-	var out []string
-	for _, chunk := range strings.Split(sql, ";") {
-		hasSQL := false
-		for _, line := range strings.Split(chunk, "\n") {
-			line = strings.TrimSpace(line)
-			if line != "" && !strings.HasPrefix(line, "--") {
-				hasSQL = true
-				break
-			}
+	var sb strings.Builder
+	for _, line := range strings.Split(sql, "\n") {
+		if i := strings.Index(line, "--"); i >= 0 {
+			line = line[:i]
 		}
-		if hasSQL {
-			out = append(out, strings.TrimSpace(chunk))
+		sb.WriteString(line)
+		sb.WriteByte('\n')
+	}
+	var out []string
+	for _, chunk := range strings.Split(sb.String(), ";") {
+		if stmt := strings.TrimSpace(chunk); stmt != "" {
+			out = append(out, stmt)
 		}
 	}
 	return out
