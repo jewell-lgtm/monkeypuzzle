@@ -140,7 +140,8 @@ type dbPinger interface {
 }
 
 // newReadyzHandler builds the readiness probe. The DB ping is the hard gate
-// (503 with a short reason on failure). temporalCheck, when non-nil, is a
+// (503 with a generic body on failure; the raw error is logged, not returned).
+// temporalCheck, when non-nil, is a
 // best-effort probe whose failure is logged but does NOT fail readiness — a
 // Temporal outage should degrade sync, not take the whole server out of rotation.
 func newReadyzHandler(db dbPinger, temporalCheck func(context.Context) error) http.HandlerFunc {
@@ -149,8 +150,12 @@ func newReadyzHandler(db dbPinger, temporalCheck func(context.Context) error) ht
 		defer cancel()
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		if err := db.Ping(ctx); err != nil {
+			// Log the raw driver error server-side (it can carry DB
+			// user/database/host:port), but return a generic body so we don't
+			// disclose it to unauthenticated probe callers.
+			log.Printf("readyz: db ping failed: %v", err)
 			w.WriteHeader(http.StatusServiceUnavailable)
-			_, _ = fmt.Fprintf(w, "db unreachable: %v", err)
+			_, _ = io.WriteString(w, "database unreachable")
 			return
 		}
 		if temporalCheck != nil {

@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -40,16 +41,25 @@ func TestReadyz_DBHealthy(t *testing.T) {
 	}
 }
 
-// TestReadyz_DBDown: readiness returns 503 with a reason when the DB ping fails.
+// TestReadyz_DBDown: readiness returns 503 with a generic body when the DB ping
+// fails. The raw driver error (which can carry DB user/database/host:port) must
+// be logged server-side only, never disclosed to unauthenticated probe callers.
 func TestReadyz_DBDown(t *testing.T) {
-	h := newReadyzHandler(fakePinger{err: errors.New("connection refused")}, nil)
+	rawErr := "failed to connect to `user=mp database=mp host=db.internal:5432`: connection refused"
+	h := newReadyzHandler(fakePinger{err: errors.New(rawErr)}, nil)
 	rec := httptest.NewRecorder()
 	h(rec, httptest.NewRequest(http.MethodGet, "/readyz", nil))
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("readyz status = %d, want 503", rec.Code)
 	}
-	body, _ := io.ReadAll(rec.Result().Body)
-	if len(body) == 0 {
-		t.Fatal("readyz 503 should include a short reason")
+	got, _ := io.ReadAll(rec.Result().Body)
+	body := string(got)
+	if !strings.Contains(body, "database unreachable") {
+		t.Fatalf("readyz body = %q, want it to contain %q", body, "database unreachable")
+	}
+	for _, leak := range []string{"user=", "db unreachable:", rawErr} {
+		if strings.Contains(body, leak) {
+			t.Fatalf("readyz body = %q leaks %q to clients", body, leak)
+		}
 	}
 }
