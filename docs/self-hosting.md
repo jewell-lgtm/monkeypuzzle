@@ -1,8 +1,8 @@
 # Self-hosting the Monkeypuzzle server
 
 The `mp` CLI is free and runs entirely in your terminal. The **server** adds a
-web dashboard + MCP endpoint that syncs your GitHub repos into Postgres and draws
-each stacked-PR tree as a live forest. It's source-available under FSL-1.1-MIT —
+web dashboard + MCP endpoint that syncs your GitHub repos and GitLab projects into
+Postgres and draws each stacked PR/MR tree as a live forest. It's source-available under FSL-1.1-MIT —
 self-hosting and internal use are free.
 
 This guide installs the server on Kubernetes with the official Helm chart in
@@ -21,7 +21,7 @@ production.
 | Component | What it is | Chart resource |
 | --- | --- | --- |
 | **server** (`mp-server serve`) | HTTP: HTML dashboard for humans + MCP endpoint for agents | Deployment + Service (+ Ingress) |
-| **worker** (`mp-server worker`) | Temporal worker that syncs GitHub → Postgres | Deployment |
+| **worker** (`mp-server worker`) | Temporal worker that syncs GitHub/GitLab → Postgres | Deployment |
 | **Postgres** | App cache + encrypted token store | StatefulSet (bundled) or external |
 | **Temporal** | Drives the sync workflows | Deployment (bundled dev server) or external |
 
@@ -51,6 +51,24 @@ humans (web) and agents (MCP). In the WorkOS dashboard:
    **Client ID Metadata Document** so MCP clients can register.
 4. Note your **API key** (`sk_...`), **Client ID** (`client_...`), and **AuthKit
    domain** (`https://<your-app>.authkit.app`).
+
+### (Optional) GitLab login
+
+WorkOS has no built-in GitLab connector, so GitLab sign-in uses a **direct
+GitLab OAuth2** leg instead — GitHub keeps using WorkOS unchanged. It is opt-in:
+the GitLab login button only appears when both `GITLAB_OAUTH_CLIENT_ID` and
+`GITLAB_OAUTH_CLIENT_SECRET` are set.
+
+1. In GitLab (**User settings → Applications**, or a group/instance application),
+   create an OAuth application with scopes **`read_api`** and **`read_user`** and
+   redirect URI `https://<your-host>/auth/callback`.
+2. Provide the credentials via env:
+
+   ```bash
+   GITLAB_OAUTH_CLIENT_ID=...        # GitLab application id
+   GITLAB_OAUTH_CLIENT_SECRET=...    # GitLab application secret
+   GITLAB_BASE_URL=https://gitlab.com  # or your self-managed instance URL
+   ```
 
 ## 2. Generate server secrets
 
