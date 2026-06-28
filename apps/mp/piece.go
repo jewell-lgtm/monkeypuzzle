@@ -540,7 +540,7 @@ func runPieceUpdate(cmd *cobra.Command, args []string) error {
 	handler := newPieceHandler(deps)
 
 	// Get input
-	input, err := getUpdateInput()
+	input, err := getUpdateInput(cmd)
 	if err != nil {
 		return err
 	}
@@ -560,12 +560,13 @@ func runPieceUpdate(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func getUpdateInput() (piececmd.UpdateInput, error) {
+func getUpdateInput(cmd *cobra.Command) (piececmd.UpdateInput, error) {
 	var input piececmd.UpdateInput
 
-	if flagMainBranch != "" {
-		input = piececmd.UpdateInput{MainBranch: flagMainBranch}
-	} else if cli.HasStdinData() {
+	// Read stdin JSON first, then let an explicit --main-branch flag override it.
+	// The flag defaults to "main", so gating on Changed() avoids silently
+	// clobbering a main_branch supplied via stdin (e.g. on a master-trunk repo).
+	if cli.HasStdinData() {
 		data, err := io.ReadAll(os.Stdin)
 		if err != nil {
 			return piececmd.UpdateInput{}, fmt.Errorf("failed to read stdin: %w", err)
@@ -574,6 +575,10 @@ func getUpdateInput() (piececmd.UpdateInput, error) {
 		if err != nil {
 			return piececmd.UpdateInput{}, err
 		}
+	}
+
+	if cmd.Flags().Changed("main-branch") {
+		input.MainBranch = flagMainBranch
 	}
 
 	return piececmd.WithUpdateDefaults(input), nil
@@ -606,7 +611,7 @@ func runPieceMerge(cmd *cobra.Command, args []string) error {
 	handler := newPieceHandler(deps)
 
 	// Get input
-	input, err := getMergeInput()
+	input, err := getMergeInput(cmd)
 	if err != nil {
 		return err
 	}
@@ -654,7 +659,7 @@ func runPieceMerge(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func getMergeInput() (piececmd.MergeInput, error) {
+func getMergeInput(cmd *cobra.Command) (piececmd.MergeInput, error) {
 	var input piececmd.MergeInput
 
 	if cli.HasStdinData() {
@@ -668,8 +673,9 @@ func getMergeInput() (piececmd.MergeInput, error) {
 		}
 	}
 
-	// Flags override JSON input
-	if flagMainBranch != "" {
+	// Flags override JSON input. --main-branch defaults to "main", so only apply
+	// it when the user explicitly set it (otherwise a stdin main_branch is lost).
+	if cmd.Flags().Changed("main-branch") {
 		input.MainBranch = flagMainBranch
 	}
 	if flagForce {
@@ -718,7 +724,7 @@ func runPieceCleanup(cmd *cobra.Command, args []string) error {
 	handler := newPieceHandler(deps)
 
 	// Get input
-	input, err := getCleanupInput()
+	input, err := getCleanupInput(cmd)
 	if err != nil {
 		return err
 	}
@@ -823,7 +829,7 @@ type cleanupOutput struct {
 	RemovedProjects []registry.Project       `json:"removed_projects"`
 }
 
-func getCleanupInput() (piececmd.CleanupInput, error) {
+func getCleanupInput(cmd *cobra.Command) (piececmd.CleanupInput, error) {
 	var input piececmd.CleanupInput
 
 	if cli.HasStdinData() {
@@ -837,8 +843,9 @@ func getCleanupInput() (piececmd.CleanupInput, error) {
 		}
 	}
 
-	// Flags override stdin.
-	if flagMainBranch != "" {
+	// Flags override stdin. Gate --main-branch on Changed() so a stdin main_branch
+	// is preserved when the flag was left at its "main" default.
+	if cmd.Flags().Changed("main-branch") {
 		input.MainBranch = flagMainBranch
 	}
 	if flagDryRun {
@@ -929,7 +936,7 @@ func runPieceDone(cmd *cobra.Command, args []string) error {
 	handler := newPieceHandler(deps)
 
 	// Get input
-	input, err := getDoneInput()
+	input, err := getDoneInput(cmd)
 	if err != nil {
 		return err
 	}
@@ -949,7 +956,7 @@ func runPieceDone(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func getDoneInput() (piececmd.DoneInput, error) {
+func getDoneInput(cmd *cobra.Command) (piececmd.DoneInput, error) {
 	var input piececmd.DoneInput
 
 	if cli.HasStdinData() {
@@ -963,8 +970,9 @@ func getDoneInput() (piececmd.DoneInput, error) {
 		}
 	}
 
-	// Flags override stdin
-	if flagMainBranch != "" {
+	// Flags override stdin. --main-branch defaults to "main", so only apply it when
+	// explicitly set to avoid clobbering a stdin main_branch value.
+	if cmd.Flags().Changed("main-branch") {
 		input.MainBranch = flagMainBranch
 	}
 

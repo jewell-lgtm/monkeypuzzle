@@ -32,6 +32,7 @@ var fields = []input.Field{
 		Description: "Open the PR/MR as a draft",
 		Required:    false,
 		Default:     "false",
+		Type:        "bool",
 	},
 }
 

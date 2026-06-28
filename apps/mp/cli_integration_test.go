@@ -531,6 +531,53 @@ func TestCLI_PieceDone_FromMergedPiece(t *testing.T) {
 	}
 }
 
+// initGitRepoMaster initializes a git repo whose trunk is "master" (not "main"),
+// to exercise commands that must honor a caller-supplied main_branch.
+func (e *testEnv) initGitRepoMaster() {
+	e.t.Helper()
+	e.initGitRepo()
+	// initGitRepo normalizes to "main"; rename the trunk to "master" and ensure
+	// no "main" branch lingers, so any code defaulting to "main" would break.
+	e.gitInDir(e.tmpDir, "branch", "-M", "master")
+}
+
+// TestCLI_Update_HonorsStdinMainBranch is a regression test for the agent
+// contract: on a master-trunk repo, `echo '{"main_branch":"master"}' | mp update`
+// must use "master" and not silently fall back to the flag's "main" default
+// (which would fail with a merge-base error against a non-existent main).
+func TestCLI_Update_HonorsStdinMainBranch(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	env.initGitRepoMaster()
+	env.initProject("test")
+
+	// Sanity: there is no "main" branch — only "master".
+	branches := env.gitInDir(env.tmpDir, "branch", "--format=%(refname:short)")
+	if strings.Contains(branches, "main") {
+		t.Fatalf("expected master-only trunk, got branches: %q", branches)
+	}
+
+	stdout, stderr, err := env.run("create", "--name", "feat", "--skip-switch")
+	if err != nil {
+		t.Fatalf("piece create failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+	var created map[string]any
+	if err := json.Unmarshal([]byte(stdout), &created); err != nil {
+		t.Fatalf("invalid JSON from piece create: %v", err)
+	}
+	worktreePath := created["worktree_path"].(string)
+
+	// Honoring stdin main_branch="master" merges master (a no-op) and succeeds.
+	stdout, stderr, err = env.runInDirWithStdin(worktreePath, `{"main_branch":"master"}`, "update")
+	if err != nil {
+		t.Fatalf("update with stdin main_branch=master failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+	if strings.Contains(stderr, "merge-base") || strings.Contains(stdout, "merge-base") {
+		t.Errorf("update should not hit a merge-base error against main\nstdout: %s\nstderr: %s", stdout, stderr)
+	}
+}
+
 // TestCLI_PieceAbandon_CurrentPiece tests mp abandon from current piece without --name
 func TestCLI_PieceAbandon_CurrentPiece(t *testing.T) {
 	env := setupTestEnv(t)
