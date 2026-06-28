@@ -2,10 +2,8 @@ package stack
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
-	"github.com/jewell-lgtm/monkeypuzzle/internal/adapters"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/stackgraph"
 )
 
@@ -39,10 +37,7 @@ func (h *Handler) Graph(ctx context.Context, in GraphInput) (GraphResult, error)
 
 	prs, err := h.github.ListPRsForRepo(ctx, in.Repo, in.Limit)
 	if err != nil {
-		if errors.Is(err, adapters.ErrGHUnavailable) {
-			return GraphResult{}, fmt.Errorf("cannot read %s: gh CLI is missing or unauthenticated (set GH_TOKEN): %w", in.Repo, err)
-		}
-		return GraphResult{}, err
+		return GraphResult{}, fmt.Errorf("cannot read stacks for %s: %w", in.Repo, err)
 	}
 
 	defaultBranch := in.DefaultBranch

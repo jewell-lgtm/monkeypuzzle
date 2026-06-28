@@ -2,6 +2,7 @@ package stack
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/adapters"
@@ -75,5 +76,32 @@ func TestGraphRejectsUnsupportedProvider(t *testing.T) {
 	h := &Handler{github: adapters.NewGitHub(adapters.NewMockExec())}
 	if _, err := h.Graph(context.Background(), GraphInput{Repo: "o/n", Provider: ProviderGitLab}); err == nil {
 		t.Fatal("want error for unsupported provider")
+	}
+}
+
+// TestGraphSurfacesGhError: when `gh pr list` fails, Graph must surface gh's real
+// diagnostic (the 404) and the repo slug — not collapse it to "set GH_TOKEN".
+func TestGraphSurfacesGhError(t *testing.T) {
+	m := adapters.NewMockExec()
+	m.AddResponse("gh", []string{
+		"pr", "list", "--repo", "o/n", "--state", "all",
+		"--json", "number,headRefName,baseRefName,state,url,title,author,isDraft",
+		"--limit", "200",
+	}, []byte("HTTP 404: Not Found (https://api.github.com/repos/o/n/pulls)"), adapters.MockError("exit status 1"))
+	h := &Handler{github: adapters.NewGitHub(m)}
+
+	_, err := h.Graph(context.Background(), GraphInput{Repo: "o/n", DefaultBranch: "main"})
+	if err == nil {
+		t.Fatal("want error when gh pr list fails")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "o/n") {
+		t.Errorf("want repo slug in error, got %q", msg)
+	}
+	if !strings.Contains(msg, "404") || !strings.Contains(msg, "Not Found") {
+		t.Errorf("want gh's real diagnostic surfaced, got %q", msg)
+	}
+	if strings.Contains(msg, "set GH_TOKEN") {
+		t.Errorf("must not collapse gh error to 'set GH_TOKEN', got %q", msg)
 	}
 }

@@ -223,7 +223,7 @@ func (g *GitHub) ListPRsForRepo(ctx context.Context, repoSlug string, limit int)
 		"--limit", fmt.Sprintf("%d", limit),
 	)
 	if err != nil {
-		return []PRInfo{}, ErrGHUnavailable
+		return nil, fmt.Errorf("gh pr list failed for %s: %s", repoSlug, strings.TrimSpace(string(output)))
 	}
 
 	var prs []PRInfo
@@ -238,7 +238,7 @@ func (g *GitHub) ListPRsForRepo(ctx context.Context, repoSlug string, limit int)
 func (g *GitHub) RepoDefaultBranch(ctx context.Context, repoSlug string) (string, error) {
 	output, err := g.exec.Run(ctx, "gh", "repo", "view", repoSlug, "--json", "defaultBranchRef")
 	if err != nil {
-		return "", ErrGHUnavailable
+		return "", fmt.Errorf("gh repo view failed for %s: %s", repoSlug, strings.TrimSpace(string(output)))
 	}
 
 	var v struct {
