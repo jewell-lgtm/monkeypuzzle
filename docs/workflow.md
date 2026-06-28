@@ -8,7 +8,7 @@ Monkeypuzzle gives each in-flight piece of work its own git worktree + tmux sess
 
 A **piece** is an isolated git worktree for a single change. Each piece:
 
-- Lives in its own directory under `~/.local/share/monkeypuzzle/pieces/{repo-hash}/` (Linux) or `~/Library/Application Support/monkeypuzzle/pieces/{repo-hash}/` (macOS)
+- Lives in its own directory at `<repo>/.monkeypuzzle/pieces/<piece-name>/` — a git worktree gitignored inside the repo
 - Has its own branch
 - Has its own tmux session (`mp/<project>/<piece>`) **when you work interactively from inside tmux** — agents and scripts driving mp through its stateless API get the worktree path instead of a session (see [Sessions are interactive-only](#sessions-are-interactive-only))
 
@@ -249,8 +249,7 @@ mp merge
 ```bash
 mp list                                  # current repo
 mp list --all                            # across all registered projects
-ls ~/.local/share/monkeypuzzle/pieces/         # raw filesystem (Linux)
-ls ~/Library/Application\ Support/monkeypuzzle/pieces/   # macOS
+ls .monkeypuzzle/pieces/                 # raw filesystem (from the repo root)
 ```
 
 ### Cleaning up

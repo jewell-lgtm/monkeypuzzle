@@ -13,14 +13,14 @@
 ```bash
 git clone https://github.com/jewell-lgtm/monkeypuzzle.git
 cd monkeypuzzle
-go build -o mp .
+go build -o mp ./apps/mp   # the mp CLI lives in apps/mp (or just: make build → bin/mp)
 sudo mv mp /usr/local/bin/  # or add to PATH
 ```
 
 ### Via go install
 
 ```bash
-go install github.com/jewell-lgtm/monkeypuzzle@latest
+go install github.com/jewell-lgtm/monkeypuzzle/apps/mp@latest
 ```
 
 ## Verify installation
