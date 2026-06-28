@@ -25,7 +25,7 @@ a:not(.mp-btn):focus-visible {
 }
 .mp-logo__mark { display: block; flex: none; }
 .mp-logo__word { white-space: nowrap; }
-.mp-logo__word b { color: var(--mp-primary); font-weight: 700; }
+.mp-logo__word b { color: var(--mp-logo); font-weight: 700; }
 
 /* ── Button ── */
 .mp-btn {
@@ -165,8 +165,6 @@ a:not(.mp-btn):focus-visible {
 }
 .mp-term__bar { display: flex; align-items: center; gap: 8px; padding: 9px 13px;
   background: var(--mp-ink-850); border-bottom: 1px solid var(--mp-border); }
-.mp-term__dots { display: flex; gap: 6px; }
-.mp-term__dots i { width: 11px; height: 11px; border-radius: 50%; display: block; }
 .mp-term__title { font-size: var(--mp-text-xs); color: var(--mp-text-muted); letter-spacing: 0.02em;
   margin-left: 6px; display: flex; align-items: center; gap: 7px; }
 .mp-term__body { padding: 14px 16px; color: var(--mp-ink-200); white-space: pre-wrap; word-break: break-word; }

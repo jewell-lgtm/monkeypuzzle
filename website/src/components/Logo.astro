@@ -1,6 +1,6 @@
 ---
 // Monkeypuzzle wordmark + logomark. The mark is a jigsaw PIECE (a "branch");
-// green piece with a coral piece-node knob. Ported from brand/Logo.jsx.
+// solid single-colour piece (the --mp-logo token). Ported from brand/Logo.jsx.
 interface Props {
   variant?: 'full' | 'mark';
   size?: number;
@@ -21,7 +21,7 @@ const {
 
 const fontSize = Math.round(size * 0.92);
 const Tag = href ? 'a' : 'span';
-const fill = mono ? 'currentColor' : 'var(--mp-primary)';
+const fill = mono ? 'currentColor' : 'var(--mp-logo)';
 // Rounded jigsaw piece: tab top, tab right, blank left.
 const PIECE_D =
   'M8.5 7 H12.5 a3.5 3.5 0 0 1 7 0 H23.5 a1.5 1.5 0 0 1 1.5 1.5 V12.5 a3.5 3.5 0 0 1 0 7 V23.5 a1.5 1.5 0 0 1 -1.5 1.5 H8.5 A1.5 1.5 0 0 1 7 23.5 V19.5 a3.5 3.5 0 0 0 0 -7 V8.5 A1.5 1.5 0 0 1 8.5 7 Z';
@@ -30,7 +30,7 @@ const PIECE_D =
 <Tag class:list={['mp-logo', cls]} href={href} style={`font-size:${fontSize}px`}>
   <svg class="mp-logo__mark" width={size} height={size} viewBox="0 0 32 32" fill="none" aria-hidden="true">
     <path d={PIECE_D} fill={fill} stroke-linejoin="round" />
-    {node && !mono && <circle cx="25.6" cy="16" r="2.3" fill="var(--mp-pop)" />}
+    {node && !mono && <circle cx="25.6" cy="16" r="2.3" fill="var(--mp-logo)" />}
   </svg>
   {variant === 'full' && <span class="mp-logo__word">monkey<b>puzzle</b></span>}
 </Tag>

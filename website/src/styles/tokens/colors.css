@@ -72,6 +72,9 @@
   --mp-pop: var(--mp-coral-500);
   --mp-on-pop: #2a0c06;
 
+  /* Logo mark — one solid colour: brand green, no coral node. Swap here. */
+  --mp-logo: var(--mp-green-500);
+
   --mp-success: var(--mp-green-300);
   --mp-warning: var(--mp-amber-500);
   --mp-danger: var(--mp-coral-500);

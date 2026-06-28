@@ -2,6 +2,8 @@
 // A TerminalBlock that types its command lines and reveals output when it
 // scrolls into view (driven by the workflow page's animation script). Command
 // text is also rendered inline so it works with JS disabled / reduced motion.
+import Logo from './Logo.astro';
+
 interface Line {
   cmd?: string;
   out?: string;
@@ -30,11 +32,7 @@ const TONE: Record<string, string> = {
 
 <div class:list={['mp-term', 'wf-term', cls]} data-term-anim>
   <div class="mp-term__bar">
-    <span class="mp-term__dots">
-      <i style="background:var(--mp-coral-500)"></i>
-      <i style="background:var(--mp-amber-500)"></i>
-      <i style="background:var(--mp-green-500)"></i>
-    </span>
+    <Logo variant="mark" size={16} class="mp-term__logo" />
     <span class="mp-term__title">{title}</span>
   </div>
   <div class="mp-term__body">{

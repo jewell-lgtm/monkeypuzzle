@@ -1,6 +1,8 @@
 ---
 // TerminalBlock — a faux terminal panel, the brand's storytelling device.
 // Pass `lines` (each either {cmd} or {text, tone}). Ported from brand/TerminalBlock.jsx.
+import Logo from './Logo.astro';
+
 interface Line {
   cmd?: string;
   text?: string;
@@ -29,11 +31,7 @@ const TONE: Record<string, string> = {
 
 <div class:list={['mp-term', cls]}>
   <div class="mp-term__bar">
-    <span class="mp-term__dots">
-      <i style="background:var(--mp-coral-500)"></i>
-      <i style="background:var(--mp-amber-500)"></i>
-      <i style="background:var(--mp-green-500)"></i>
-    </span>
+    <Logo variant="mark" size={16} class="mp-term__logo" />
     <span class="mp-term__title">{title}</span>
   </div>
   <div class="mp-term__body">{

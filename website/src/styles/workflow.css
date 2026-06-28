@@ -62,8 +62,6 @@
   border-radius: var(--mp-radius-lg); overflow: hidden; background: var(--mp-ink-900); box-shadow: var(--mp-shadow-lg);
 }
 .wf-dash__bar { display: flex; align-items: center; gap: 8px; padding: 10px 14px; background: var(--mp-ink-850); border-bottom: 1px solid var(--mp-border); }
-.wf-dash__dots { display: flex; gap: 6px; }
-.wf-dash__dots i { width: 11px; height: 11px; border-radius: 50%; display: block; }
 .wf-dash__url { font-family: var(--mp-font-mono); font-size: var(--mp-text-xs); color: var(--mp-text-muted); background: var(--mp-ink-950); border: 1px solid var(--mp-border); border-radius: var(--mp-radius-pill); padding: 4px 14px; margin-left: 8px; }
 .wf-dash__grid { display: grid; grid-template-columns: 210px 1fr; min-height: 326px; }
 .wf-dash__side { border-right: 1px solid var(--mp-border); padding: 16px 12px; display: flex; flex-direction: column; gap: 3px; }
