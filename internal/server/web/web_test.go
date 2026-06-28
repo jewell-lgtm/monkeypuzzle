@@ -40,7 +40,7 @@ func TestWeb_Smoke(t *testing.T) {
 	codec := session.NewSecureCookieCodec([]byte("smoke-secret-smoke-secret-smoke-1"))
 
 	h := NewHandler(Deps{
-		Service: service.New(mem, noopTrigger{}),
+		Service: service.New(mem, noopTrigger{}, nil, nil, false),
 		Store:   mem,
 		Login:   workos.NewStubClient("ext1", "ghtok"),
 		GitHub:  githubapi.NewStubFactory(),

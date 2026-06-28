@@ -13,6 +13,7 @@ import (
 	"github.com/jewell-lgtm/monkeypuzzle/internal/server/auth/workos"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/server/githubapi"
 	mcppkg "github.com/jewell-lgtm/monkeypuzzle/internal/server/mcp"
+	"github.com/jewell-lgtm/monkeypuzzle/internal/server/mprunner"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/server/service"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/server/store"
 	syncpkg "github.com/jewell-lgtm/monkeypuzzle/internal/server/sync"
@@ -49,7 +50,10 @@ func runServe() error {
 	defer tc.Close()
 
 	ghFactory := githubapi.NewFactory()
-	svc := service.New(st, syncpkg.NewTemporalTrigger(tc, st))
+	// Optional `mp stack graph` path (flag-gated by USE_MP_CLI); falls back to the
+	// in-process Go path on any failure. Reuses the same token cipher as sync.
+	runner := mprunner.NewExecRunner(cfg.MpBin)
+	svc := service.New(st, syncpkg.NewTemporalTrigger(tc, st), runner, cipher, cfg.UseMpCLI)
 
 	login := workos.NewAPIClient(cfg.WorkOSAPIKey, cfg.WorkOSClientID, cfg.PublicBaseURL+"/auth/callback")
 	webHandler := web.NewHandler(web.Deps{

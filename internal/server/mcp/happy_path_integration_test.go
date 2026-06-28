@@ -88,7 +88,7 @@ func TestMCP_HappyPath_SyncThenListStacks(t *testing.T) {
 	}
 
 	// --- MCP server over the populated store, behind bearer auth ---
-	svc := service.New(mem, noopTrigger{})
+	svc := service.New(mem, noopTrigger{}, nil, nil, false)
 	srv := NewServer(svc)
 	verifier := func(_ context.Context, token string, _ *http.Request) (*auth.TokenInfo, error) {
 		if token != "test-token" {

@@ -20,6 +20,8 @@ type Config struct {
 	SessionSecret      []byte
 	TokenEncryptionKey []byte // exactly 32 bytes (AES-256-GCM)
 	SecureCookies      bool
+	UseMpCLI           bool   // reconstruct stacks via `mp stack graph` (default false; needs mp + gh in image)
+	MpBin              string // path to the mp binary (default: sibling of mp-server, else PATH)
 }
 
 // LoadConfig reads the environment and fails loudly on any missing/invalid value.
@@ -33,6 +35,8 @@ func LoadConfig() (Config, error) {
 		WorkOSClientID:   os.Getenv("WORKOS_CLIENT_ID"),
 		AuthKitDomain:    os.Getenv("AUTHKIT_DOMAIN"),
 		SecureCookies:    os.Getenv("SECURE_COOKIES") == "true",
+		UseMpCLI:         os.Getenv("USE_MP_CLI") == "true",
+		MpBin:            os.Getenv("MP_BIN"),
 	}
 
 	required := map[string]string{
