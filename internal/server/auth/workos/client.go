@@ -55,7 +55,11 @@ func (c *APIClient) Authenticate(ctx context.Context, code string) (identity.Ide
 	if resp.OAuthTokens == nil || resp.OAuthTokens.AccessToken == "" {
 		return identity.Identity{}, errors.New("workos: no GitHub OAuth token in response; enable 'Return GitHub OAuth tokens' in the WorkOS dashboard")
 	}
-	return identity.Identity{ProviderUserID: resp.User.ID, GitHubToken: resp.OAuthTokens.AccessToken}, nil
+	return identity.Identity{
+		ProviderUserID: resp.User.ID,
+		Provider:       "github",
+		Token:          resp.OAuthTokens.AccessToken,
+	}, nil
 }
 
 var _ identity.Provider = (*APIClient)(nil)

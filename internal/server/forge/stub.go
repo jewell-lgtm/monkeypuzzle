@@ -1,4 +1,4 @@
-package githubapi
+package forge
 
 import (
 	"context"
@@ -11,7 +11,7 @@ import (
 // users, repos, and PRs keyed by token, the analog of adapters.MockExec. It is
 // safe for the single-goroutine setup used in tests (configure, then run).
 type StubFactory struct {
-	users map[string]GitHubUser
+	users map[string]User
 	repos map[string][]Repo
 	prs   map[string]map[string][]stackgraph.PRRef // token -> "owner/name" -> PRs
 }
@@ -19,14 +19,14 @@ type StubFactory struct {
 // NewStubFactory returns an empty stub.
 func NewStubFactory() *StubFactory {
 	return &StubFactory{
-		users: map[string]GitHubUser{},
+		users: map[string]User{},
 		repos: map[string][]Repo{},
 		prs:   map[string]map[string][]stackgraph.PRRef{},
 	}
 }
 
 // SetUser registers the account a token authenticates as.
-func (f *StubFactory) SetUser(token string, u GitHubUser) { f.users[token] = u }
+func (f *StubFactory) SetUser(token string, u User) { f.users[token] = u }
 
 // SetRepos registers the repos a token can access.
 func (f *StubFactory) SetRepos(token string, repos ...Repo) { f.repos[token] = repos }
@@ -40,7 +40,7 @@ func (f *StubFactory) SetPullRequests(token, owner, name string, prs ...stackgra
 }
 
 // ForToken returns a client scoped to token.
-func (f *StubFactory) ForToken(token string) GitHubClient {
+func (f *StubFactory) ForToken(token string) Client {
 	return &stubClient{f: f, token: token}
 }
 
@@ -49,10 +49,10 @@ type stubClient struct {
 	token string
 }
 
-func (c *stubClient) GetAuthenticatedUser(context.Context) (GitHubUser, error) {
+func (c *stubClient) GetAuthenticatedUser(context.Context) (User, error) {
 	u, ok := c.f.users[c.token]
 	if !ok {
-		return GitHubUser{}, fmt.Errorf("githubapi stub: unknown token %q", c.token)
+		return User{}, fmt.Errorf("forge stub: unknown token %q", c.token)
 	}
 	return u, nil
 }
@@ -67,8 +67,6 @@ func (c *stubClient) ListPullRequests(_ context.Context, owner, name string) ([]
 
 // compile-time assertions.
 var (
-	_ Factory      = (*StubFactory)(nil)
-	_ Factory      = goFactory{}
-	_ GitHubClient = (*stubClient)(nil)
-	_ GitHubClient = (*goClient)(nil)
+	_ Factory = (*StubFactory)(nil)
+	_ Client  = (*stubClient)(nil)
 )

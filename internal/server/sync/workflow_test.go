@@ -7,7 +7,7 @@ import (
 	"go.temporal.io/sdk/testsuite"
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/server/auth/crypto"
-	"github.com/jewell-lgtm/monkeypuzzle/internal/server/githubapi"
+	"github.com/jewell-lgtm/monkeypuzzle/internal/server/forge"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/server/store"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/stackgraph"
 )
@@ -33,18 +33,18 @@ func TestSyncUserDataWorkflow_HappyPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	uid, _ := mem.UpsertUser(ctx, store.User{GitHubUserID: 4242, GitHubLogin: "octo", AccessTokenEnc: enc})
+	uid, _ := mem.UpsertUser(ctx, store.User{Provider: "github", ForgeUserID: 4242, ForgeLogin: "octo", AccessTokenEnc: enc})
 
-	stub := githubapi.NewStubFactory()
-	stub.SetUser("tok-123", githubapi.GitHubUser{ID: 4242, Login: "octo"})
-	stub.SetRepos("tok-123", githubapi.Repo{GitHubRepoID: 7, Owner: "o", Name: "r", DefaultBranch: "main"})
+	stub := forge.NewStubFactory()
+	stub.SetUser("tok-123", forge.User{ID: 4242, Login: "octo"})
+	stub.SetRepos("tok-123", forge.Repo{ForgeRepoID: 7, Owner: "o", Name: "r", DefaultBranch: "main"})
 	stub.SetPullRequests("tok-123", "o", "r",
 		stackgraph.PRRef{Number: 1, HeadRef: "feat-a", BaseRef: "main", State: stackgraph.StateOpen},
 		stackgraph.PRRef{Number: 2, HeadRef: "feat-b", BaseRef: "feat-a", State: stackgraph.StateOpen},
 		stackgraph.PRRef{Number: 3, HeadRef: "feat-c", BaseRef: "feat-b", State: stackgraph.StateOpen},
 	)
 
-	a := &Activities{Store: mem, Factory: stub, Cipher: cipher}
+	a := &Activities{Store: mem, Forge: forge.Registry{"github": stub}, Cipher: cipher}
 
 	var ts testsuite.WorkflowTestSuite
 	env := ts.NewTestWorkflowEnvironment()

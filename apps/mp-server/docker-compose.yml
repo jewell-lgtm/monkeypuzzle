@@ -36,6 +36,11 @@ services:
     environment:
       DATABASE_URL: postgres://mp:mp@postgres:5432/mp?sslmode=disable
       TEMPORAL_HOSTPORT: temporal:7233
+      # GitLab login is opt-in: set the OAuth client id/secret in .env to enable
+      # the "Sign in with GitLab" leg. GITLAB_BASE_URL defaults to gitlab.com.
+      GITLAB_BASE_URL: ${GITLAB_BASE_URL:-https://gitlab.com}
+      GITLAB_OAUTH_CLIENT_ID: ${GITLAB_OAUTH_CLIENT_ID:-}
+      GITLAB_OAUTH_CLIENT_SECRET: ${GITLAB_OAUTH_CLIENT_SECRET:-}
     ports: ["8080:8080"]
     depends_on:
       postgres: {condition: service_healthy}
@@ -50,6 +55,9 @@ services:
     environment:
       DATABASE_URL: postgres://mp:mp@postgres:5432/mp?sslmode=disable
       TEMPORAL_HOSTPORT: temporal:7233
+      # The worker reads GitLab projects/MRs; it needs the base URL but no OAuth
+      # secrets (the access token is decrypted from the store per user).
+      GITLAB_BASE_URL: ${GITLAB_BASE_URL:-https://gitlab.com}
     depends_on:
       postgres: {condition: service_healthy}
       temporal: {condition: service_started}

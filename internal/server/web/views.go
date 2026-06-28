@@ -36,6 +36,19 @@ func navBar() g.Node {
 	)
 }
 
+// loginPage offers a provider choice. Each link starts that provider's OAuth
+// flow (GitHub via WorkOS, GitLab direct).
+func loginPage() g.Node {
+	return page("Sign in · Monkey Puzzle",
+		Main(Class("login"),
+			H1(g.Text("🐒 Monkey Puzzle")),
+			P(Class("muted"), g.Text("Sign in to see your stacks.")),
+			A(Class("btn"), Href("/login?provider=github"), g.Text("Sign in with GitHub")),
+			A(Class("btn"), Href("/login?provider=gitlab"), g.Text("Sign in with GitLab")),
+		),
+	)
+}
+
 // dashboardPage renders the shell instantly; AlpineJS hydrates the repo list
 // from /partials/repos (fast TTFB) and polls while a first sync runs. syncError
 // shows a non-fatal banner when the first-login sync trigger failed.
