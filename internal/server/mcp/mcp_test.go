@@ -11,7 +11,7 @@ import (
 // (including the recursive stack tree). This guards against schema-inference
 // panics without needing the full integration harness.
 func TestNewServer_RegistersToolsWithoutPanic(t *testing.T) {
-	svc := service.New(store.NewMemoryStore(), nil)
+	svc := service.New(store.NewMemoryStore(), nil, nil, nil, false)
 	if NewServer(svc) == nil {
 		t.Fatal("NewServer returned nil")
 	}
