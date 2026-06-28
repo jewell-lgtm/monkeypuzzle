@@ -5,6 +5,7 @@ package input
 
 import (
 	"encoding/json"
+	"strconv"
 )
 
 // Field defines a single input field with validation rules.
@@ -15,16 +16,35 @@ type Field struct {
 	Required    bool     `json:"required"`
 	Default     string   `json:"default,omitempty"`
 	ValidValues []string `json:"valid_values,omitempty"`
+	// Type is the JSON type of the field's value: "" (string, the default),
+	// "bool", or "int". It controls how Default is emitted in GenerateSchema so
+	// the schema round-trips back through the input struct (e.g. a bool default
+	// is emitted as JSON `false`, not the string "false").
+	Type string `json:"type,omitempty"`
 }
 
 // GenerateSchema creates a JSON schema from field definitions.
-// Returns a map of field names to their default values.
+// Returns a map of field names to their (typed) default values.
 func GenerateSchema(fields []Field) ([]byte, error) {
 	schema := make(map[string]any)
 	for _, f := range fields {
-		schema[f.Name] = f.Default
+		schema[f.Name] = typedDefault(f)
 	}
 	return json.MarshalIndent(schema, "", "  ")
+}
+
+// typedDefault converts a field's string Default into a value of its declared
+// Type so the generated schema marshals to the correct JSON type.
+func typedDefault(f Field) any {
+	switch f.Type {
+	case "bool":
+		return f.Default == "true"
+	case "int":
+		n, _ := strconv.Atoi(f.Default)
+		return n
+	default:
+		return f.Default
+	}
 }
 
 // GetDefaults returns a map of field names to default values.

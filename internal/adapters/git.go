@@ -483,9 +483,29 @@ func (g *Git) IsBranchSquashMerged(ctx context.Context, workDir, mainBranch, bra
 func (g *Git) BranchExistsOnRemote(ctx context.Context, workDir, branchName string) (bool, error) {
 	output, err := g.exec.RunWithDir(ctx, workDir, "git", "ls-remote", "--heads", "origin", branchName)
 	if err != nil {
+		// A brand-new local repo simply has no "origin" remote; that's not an
+		// error worth surfacing -- the branch just isn't on a remote. Only
+		// propagate the failure when origin actually exists.
+		if !g.hasRemote(ctx, workDir, "origin") {
+			return false, nil
+		}
 		return false, fmt.Errorf("failed to check remote branches: %w", err)
 	}
 	return strings.TrimSpace(string(output)) != "", nil
+}
+
+// hasRemote reports whether a remote with the given name is configured.
+func (g *Git) hasRemote(ctx context.Context, workDir, name string) bool {
+	out, err := g.exec.RunWithDir(ctx, workDir, "git", "remote")
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if strings.TrimSpace(line) == name {
+			return true
+		}
+	}
+	return false
 }
 
 // MergeBase returns the best common ancestor commit of two refs.

@@ -29,6 +29,43 @@ func TestGenerateSchema(t *testing.T) {
 	}
 }
 
+func TestGenerateSchema_TypedDefaults(t *testing.T) {
+	fields := []Field{
+		{Name: "draft", Default: "false", Type: "bool"},
+		{Name: "enabled", Default: "true", Type: "bool"},
+		{Name: "count", Default: "10", Type: "int"},
+		{Name: "title", Default: "hello"},
+	}
+
+	data, err := GenerateSchema(fields)
+	if err != nil {
+		t.Fatalf("GenerateSchema failed: %v", err)
+	}
+
+	var schema map[string]any
+	if err := json.Unmarshal(data, &schema); err != nil {
+		t.Fatalf("failed to unmarshal schema: %v", err)
+	}
+
+	// bool fields must marshal to JSON bools, not strings.
+	if v, ok := schema["draft"].(bool); !ok || v != false {
+		t.Errorf("expected draft=false (bool), got %#v", schema["draft"])
+	}
+	if v, ok := schema["enabled"].(bool); !ok || v != true {
+		t.Errorf("expected enabled=true (bool), got %#v", schema["enabled"])
+	}
+
+	// int fields must marshal to JSON numbers (decoded as float64).
+	if v, ok := schema["count"].(float64); !ok || v != 10 {
+		t.Errorf("expected count=10 (number), got %#v", schema["count"])
+	}
+
+	// untyped fields stay strings.
+	if v, ok := schema["title"].(string); !ok || v != "hello" {
+		t.Errorf("expected title=\"hello\" (string), got %#v", schema["title"])
+	}
+}
+
 func TestGetDefaults(t *testing.T) {
 	fields := []Field{
 		{Name: "title", Default: ""},

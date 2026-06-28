@@ -2,6 +2,7 @@ package adapters
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -341,7 +342,10 @@ func TestGit_BranchExistsOnRemote(t *testing.T) {
 		name       string
 		branch     string
 		mockOutput []byte
+		mockErr    error
+		remoteOut  []byte // output of `git remote`, consulted only on ls-remote error
 		want       bool
+		wantErr    bool
 	}{
 		{
 			name:       "exists",
@@ -355,18 +359,37 @@ func TestGit_BranchExistsOnRemote(t *testing.T) {
 			mockOutput: []byte(""),
 			want:       false,
 		},
+		{
+			// ls-remote fails but origin is configured -> a real error to surface.
+			name:      "ls-remote error with origin",
+			branch:    "feature",
+			mockErr:   errors.New("exit status 128"),
+			remoteOut: []byte("origin\n"),
+			want:      false,
+			wantErr:   true,
+		},
+		{
+			// ls-remote fails because there is no origin remote -> benign.
+			name:      "ls-remote error no origin",
+			branch:    "feature",
+			mockErr:   errors.New("exit status 128"),
+			remoteOut: []byte(""),
+			want:      false,
+			wantErr:   false,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			exec := NewMockExec()
-			exec.AddResponse("git", []string{"ls-remote", "--heads", "origin", tt.branch}, tt.mockOutput, nil)
+			exec.AddResponse("git", []string{"ls-remote", "--heads", "origin", tt.branch}, tt.mockOutput, tt.mockErr)
+			exec.AddResponse("git", []string{"remote"}, tt.remoteOut, nil)
 
 			git := NewGit(exec)
 			got, err := git.BranchExistsOnRemote(context.Background(), "/repo", tt.branch)
 
-			if err != nil {
-				t.Errorf("BranchExistsOnRemote() error = %v", err)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("BranchExistsOnRemote() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 			if got != tt.want {
