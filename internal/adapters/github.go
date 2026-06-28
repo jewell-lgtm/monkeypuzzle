@@ -171,14 +171,20 @@ func (g *GitHub) FindMergedPRByBranch(ctx context.Context, workDir, branchName s
 	return true, results[0].Number, nil
 }
 
-// PRInfo is one row of `gh pr list --json number,headRefName,baseRefName,state,url`.
-// It encodes a stack edge: HeadRefName is the piece branch, BaseRefName its parent.
+// PRInfo is one row of `gh pr list --json …`. It encodes a stack edge:
+// HeadRefName is the piece branch, BaseRefName its parent. Title/Author/IsDraft
+// are populated by the richer ListPRsForRepo fetch; ListPRs leaves them zero.
 type PRInfo struct {
 	Number      int    `json:"number"`
 	HeadRefName string `json:"headRefName"`
 	BaseRefName string `json:"baseRefName"`
 	State       string `json:"state"` // OPEN, MERGED, CLOSED
 	URL         string `json:"url"`
+	Title       string `json:"title"`
+	Author      struct {
+		Login string `json:"login"`
+	} `json:"author"`
+	IsDraft bool `json:"isDraft"`
 }
 
 // ListPRs returns all PRs (open, merged, closed) for the repo. This is the source
@@ -200,6 +206,50 @@ func (g *GitHub) ListPRs(ctx context.Context, workDir string) ([]PRInfo, error) 
 		return []PRInfo{}, fmt.Errorf("failed to parse PR list: %w", err)
 	}
 	return prs, nil
+}
+
+// ListPRsForRepo lists PRs for an arbitrary repo (owner/name) WITHOUT a local
+// clone, via `gh pr list --repo`. Auth comes from the ambient GH_TOKEN/
+// GITHUB_TOKEN environment, so a server can shell out as a specific user. Returns
+// ErrGHUnavailable when gh is missing or unauthenticated. limit<=0 defaults to 200.
+func (g *GitHub) ListPRsForRepo(ctx context.Context, repoSlug string, limit int) ([]PRInfo, error) {
+	if limit <= 0 {
+		limit = 200
+	}
+	output, err := g.exec.Run(ctx, "gh", "pr", "list",
+		"--repo", repoSlug,
+		"--state", "all",
+		"--json", "number,headRefName,baseRefName,state,url,title,author,isDraft",
+		"--limit", fmt.Sprintf("%d", limit),
+	)
+	if err != nil {
+		return []PRInfo{}, ErrGHUnavailable
+	}
+
+	var prs []PRInfo
+	if err := json.Unmarshal(output, &prs); err != nil {
+		return []PRInfo{}, fmt.Errorf("failed to parse PR list: %w", err)
+	}
+	return prs, nil
+}
+
+// RepoDefaultBranch returns the default branch of repoSlug (owner/name) via
+// `gh repo view`, no local clone required. Auth via the ambient GH_TOKEN.
+func (g *GitHub) RepoDefaultBranch(ctx context.Context, repoSlug string) (string, error) {
+	output, err := g.exec.Run(ctx, "gh", "repo", "view", repoSlug, "--json", "defaultBranchRef")
+	if err != nil {
+		return "", ErrGHUnavailable
+	}
+
+	var v struct {
+		DefaultBranchRef struct {
+			Name string `json:"name"`
+		} `json:"defaultBranchRef"`
+	}
+	if err := json.Unmarshal(output, &v); err != nil {
+		return "", fmt.Errorf("failed to parse repo view: %w", err)
+	}
+	return v.DefaultBranchRef.Name, nil
 }
 
 // SetPRBase changes the base branch of an open PR via `gh pr edit`. Used only by

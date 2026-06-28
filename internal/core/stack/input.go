@@ -52,6 +52,59 @@ func WithStatusDefaults(in StatusInput) StatusInput {
 	return StatusInput{MainBranch: main, FromGitHub: in.FromGitHub, ApplyBases: in.ApplyBases}
 }
 
+// Forge providers for `mp stack graph`.
+const (
+	ProviderGitHub = "github"
+	ProviderGitLab = "gitlab"
+)
+
+// GraphInput holds input for `mp stack graph`: reconstruct a repo's stacked-PR
+// forest straight from the forge, with no local clone.
+type GraphInput struct {
+	// Repo is the repository as owner/name. Required.
+	Repo string `json:"repo,omitempty"`
+	// DefaultBranch is the trunk every stack roots on. Auto-detected from the
+	// forge when empty.
+	DefaultBranch string `json:"default_branch,omitempty"`
+	// Provider is the forge: "github" (default) or "gitlab".
+	Provider string `json:"provider,omitempty"`
+	// Limit caps how many PRs are fetched (default 200).
+	Limit int `json:"limit,omitempty"`
+}
+
+// GraphSchema returns the JSON schema for stack graph input.
+func GraphSchema() ([]byte, error) {
+	return json.MarshalIndent(map[string]any{
+		"repo":           "",
+		"default_branch": "",
+		"provider":       ProviderGitHub,
+		"limit":          200,
+	}, "", "  ")
+}
+
+// ParseGraphJSON parses JSON input into GraphInput.
+func ParseGraphJSON(data []byte) (GraphInput, error) {
+	var in GraphInput
+	if err := json.Unmarshal(data, &in); err != nil {
+		return GraphInput{}, fmt.Errorf("invalid JSON: %w", err)
+	}
+	return in, nil
+}
+
+// WithGraphDefaults applies defaults to graph input.
+func WithGraphDefaults(in GraphInput) GraphInput {
+	in.Repo = strings.TrimSpace(in.Repo)
+	in.DefaultBranch = strings.TrimSpace(in.DefaultBranch)
+	in.Provider = strings.TrimSpace(in.Provider)
+	if in.Provider == "" {
+		in.Provider = ProviderGitHub
+	}
+	if in.Limit <= 0 {
+		in.Limit = 200
+	}
+	return in
+}
+
 // SyncInput holds input for `mp stack sync`.
 type SyncInput struct {
 	MainBranch string `json:"main_branch,omitempty"`
