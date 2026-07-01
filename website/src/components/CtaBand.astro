@@ -1,19 +1,126 @@
 ---
 import Badge from './Badge.astro';
 import Button from './Button.astro';
-import { LOGIN_URL, GITHUB_URL } from '../config';
+import { GITHUB_URL } from '../config';
 ---
 
 <section class="section" style="padding-top:0" id="get-started">
   <div class="site">
     <div class="band">
       <Badge tone="green" dot>the CLI is free &amp; open source</Badge>
-      <h2 style="margin-top:16px">Your branches, finally in order.</h2>
-      <p>Start with the free CLI. Add the dashboard when you want every stack in one place — hosted, or self-host it yourself.</p>
+      <h2 style="margin-top:16px">Your fleet's work, finally in order.</h2>
+      <p>
+        Start with the free CLI today — the install command is at the top of the
+        page. Leave your email to follow what ships next.
+      </p>
       <div class="band__actions">
-        <Button size="lg" variant="accent" href={LOGIN_URL} iconTrailing="ArrowRight">Get started</Button>
+        <!--
+          Email capture posts to the `subscribe` Astro Action (src/actions).
+          States: idle → loading (button disabled = double-click guard) →
+          success (form swapped for confirmation) / error (inline, recoverable).
+          The action returns outcomes as data, not exceptions.
+        -->
+        <form class="band__form" id="waitlist-form" novalidate>
+          <input
+            type="email"
+            name="email"
+            required
+            maxlength="254"
+            placeholder="you@yourco.dev"
+            aria-label="Email address"
+            autocomplete="email"
+          />
+          <Button size="lg" variant="accent" type="submit" iconTrailing="ArrowRight">
+            Follow what ships next
+          </Button>
+        </form>
         <Button size="lg" variant="secondary" icon="Github" href={GITHUB_URL}>Star on GitHub</Button>
       </div>
+      <p class="band__form-msg" id="waitlist-msg" role="status" aria-live="polite"></p>
+      <noscript>
+        <p class="band__form-msg">
+          JavaScript is off — star <a href={GITHUB_URL}>the repo</a> or watch releases to follow along instead.
+        </p>
+      </noscript>
     </div>
   </div>
 </section>
+
+<style>
+  .band__form {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .band__form input {
+    font-family: var(--mp-font-mono, monospace);
+    font-size: 14px;
+    color: var(--mp-text-primary);
+    background: var(--mp-bg-primary);
+    border: 1px solid var(--mp-border-default);
+    border-radius: var(--mp-radius-md, 8px);
+    padding: 0 14px;
+    min-width: 240px;
+  }
+  .band__form input:focus-visible {
+    outline: none;
+    box-shadow: var(--mp-glow-green);
+    border-color: var(--mp-accent-primary, currentColor);
+  }
+  .band__form input[aria-invalid='true'] {
+    border-color: var(--mp-status-error, #e5484d);
+  }
+  .band__form-msg {
+    min-height: 1.4em;
+    margin-top: 14px;
+    font-family: var(--mp-font-mono, monospace);
+    font-size: 13px;
+  }
+  .band__form-msg[data-tone='ok'] { color: var(--mp-status-ok, #46a758); }
+  .band__form-msg[data-tone='err'] { color: var(--mp-status-error, #e5484d); }
+</style>
+
+<script>
+  import { actions } from 'astro:actions';
+
+  const form = document.getElementById('waitlist-form') as HTMLFormElement | null;
+  const msg = document.getElementById('waitlist-msg');
+  const input = form?.querySelector('input[name="email"]') as HTMLInputElement | null;
+  const button = form?.querySelector('button[type="submit"]') as HTMLButtonElement | null;
+
+  function show(tone: 'ok' | 'err', text: string) {
+    if (!msg) return;
+    msg.dataset.tone = tone;
+    msg.textContent = text;
+  }
+
+  form?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (!input || !button || button.disabled) return; // disabled = in flight (double-click guard)
+
+    input.setAttribute('aria-invalid', 'false');
+    const original = button.textContent;
+    button.disabled = true;
+    button.textContent = 'Sending…';
+
+    try {
+      const { data, error } = await actions.subscribe(new FormData(form));
+      if (error || !data) {
+        show('err', 'Something went wrong — please try again.');
+      } else if (data.ok) {
+        show('ok', data.message);
+        form.reset();
+        if (data.code === 'added') input.disabled = true;
+      } else {
+        show('err', data.message);
+        if (data.code === 'invalid') input.setAttribute('aria-invalid', 'true');
+      }
+    } catch {
+      show('err', 'Network hiccup — check your connection and try again.');
+    } finally {
+      button.disabled = false;
+      button.textContent = original;
+    }
+  });
+</script>

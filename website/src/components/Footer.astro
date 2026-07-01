@@ -1,6 +1,6 @@
 ---
 import Logo from './Logo.astro';
-import { LOGIN_URL, GITHUB_URL, DOCS_URL } from '../config';
+import { GITHUB_URL, DOCS_URL } from '../config';
 ---
 
 <div class="site">
@@ -13,7 +13,7 @@ import { LOGIN_URL, GITHUB_URL, DOCS_URL } from '../config';
       <div class="footer__col">
         <h2 class="h">Product</h2>
         <a href="#features">Features</a>
-        <a href={LOGIN_URL}>Download</a>
+        <a href={`${GITHUB_URL}/releases`}>Download</a>
         <a href={`${GITHUB_URL}/releases`}>Changelog</a>
       </div>
       <div class="footer__col">

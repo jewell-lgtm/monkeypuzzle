@@ -12,7 +12,7 @@ import Kbd from '../components/Kbd.astro';
 import Badge from '../components/Badge.astro';
 import Button from '../components/Button.astro';
 import Icon from '../components/Icon.astro';
-import { LOGIN_URL, GITHUB_URL } from '../config';
+import { GITHUB_URL } from '../config';
 import '../styles/workflow.css';
 
 const switchPopup = [
@@ -206,8 +206,8 @@ const switchPopup = [
         </div>
       </div>
       <div class="band__actions" style="margin-top:30px; justify-content:center;">
-        <Button size="lg" variant="accent" href={LOGIN_URL} iconTrailing="ArrowRight">Open the dashboard</Button>
-        <Button size="lg" variant="secondary" icon="Github" href={`${GITHUB_URL}/tree/main/apps/mp-server`}>Self-host it</Button>
+        <Button size="lg" variant="accent" href="/#get-started" iconTrailing="ArrowRight">Get the CLI</Button>
+        <Button size="lg" variant="secondary" icon="Github" href={`${GITHUB_URL}/tree/main/apps/mp-server`}>Self-host the dashboard</Button>
       </div>
     </section>
 
@@ -270,7 +270,7 @@ const switchPopup = [
           <h2 style="margin-top:16px">Cut. Stack. Restack. Submit. Merge.</h2>
           <p>One workflow for your terminal, your team's dashboard, and your agents.</p>
           <div class="band__actions">
-            <Button size="lg" variant="accent" href={LOGIN_URL} iconTrailing="ArrowRight">Get started</Button>
+            <Button size="lg" variant="accent" href="/#get-started" iconTrailing="ArrowRight">Get started</Button>
             <Button size="lg" variant="secondary" href="/#editions">See the editions</Button>
           </div>
         </div>

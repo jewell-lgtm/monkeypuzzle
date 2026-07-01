@@ -62,10 +62,6 @@ steps:
     image: *kaniko_image
     environment:
       REGISTRY: *registry
-      # The server URL the static site links to. Set as a Woodpecker secret so
-      # the deploy host stays out of this (public) file.
-      PUBLIC_SERVER_URL:
-        from_secret: public_server_url
     commands:
       - >
         SHORT_SHA=$(printf '%s' "$CI_COMMIT_SHA" | cut -c1-8);
@@ -77,7 +73,6 @@ steps:
         --context=dir:///woodpecker/src/website
         --dockerfile=Dockerfile
         $DESTINATIONS
-        --build-arg=PUBLIC_SERVER_URL=$${PUBLIC_SERVER_URL}
         --cache=true
         --cache-repo=$${REGISTRY}/monkeypuzzle-website-cache
         --use-new-run
