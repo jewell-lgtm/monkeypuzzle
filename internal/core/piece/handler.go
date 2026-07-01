@@ -1378,18 +1378,17 @@ func (h *Handler) AbandonPiece(ctx context.Context, pieceName string, opts Aband
 	repoRoot = detectedRepoRoot
 
 	// If we're running inside the worktree being removed, switch the active
-	// client to the main repo session before killing this one.
+	// client to the main repo session so the user isn't stranded when the piece
+	// session is killed below.
 	h.switchClientToMainIfInside(ctx, repoRoot, target.WorktreePath)
 
-	// Kill session if exists
-	if target.HasSession {
-		if err := h.mux.Kill(ctx, target.SessionName); err != nil {
-			h.deps.Output.Write(core.Message{
-				Type:    core.MsgWarning,
-				Content: fmt.Sprintf("Failed to kill session: %v", err),
-			})
-		}
-	}
+	// Do the destructive git work (remove worktree, delete branch) BEFORE
+	// killing the session. When `mp abandon` runs from inside the piece's own
+	// tmux session, killing that session terminates this very process — it
+	// lives in one of the session's panes — so anything ordered after the kill
+	// silently never runs. That is exactly how a piece could survive an abandon:
+	// the session died but the worktree removal never happened, leaving the
+	// directory on disk and the piece still listed in the picker. Kill last.
 
 	// Remove worktree (force if requested)
 	if opts.Force {
@@ -1422,6 +1421,18 @@ func (h *Handler) AbandonPiece(ctx context.Context, pieceName string, opts Aband
 		Content: fmt.Sprintf("Abandoned piece: %s", pieceName),
 		Data:    result,
 	})
+
+	// Kill the session last. All destructive work is now done and persisted, so
+	// even if this tears down the very session we're running in, the abandon has
+	// already fully succeeded.
+	if target.HasSession {
+		if err := h.mux.Kill(ctx, target.SessionName); err != nil {
+			h.deps.Output.Write(core.Message{
+				Type:    core.MsgWarning,
+				Content: fmt.Sprintf("Failed to kill session: %v", err),
+			})
+		}
+	}
 
 	return result, nil
 }
@@ -1481,6 +1492,14 @@ func (h *Handler) FlattenPieces(ctx context.Context, repoRoot string, opts Flatt
 		return result, fmt.Errorf("failed to list pieces: %w", err)
 	}
 
+	// Sessions to tear down, collected during the loop and killed only after
+	// every worktree has been removed. Killing a session inline is unsafe here:
+	// if flatten is run from inside one of the pieces being removed, killing
+	// that session terminates this process mid-loop (it lives in the session's
+	// pane), stranding every remaining piece. See the same hazard in
+	// AbandonPiece.
+	var sessionsToKill []string
+
 	for i := range pieces {
 		p := pieces[i]
 		item := FlattenItem{PieceName: p.Name, WorktreePath: p.WorktreePath}
@@ -1502,11 +1521,6 @@ func (h *Handler) FlattenPieces(ctx context.Context, repoRoot string, opts Flatt
 		// If we're inside the worktree about to be removed, move the active
 		// client to the main repo session first.
 		h.switchClientToMainIfInside(ctx, repoRoot, p.WorktreePath)
-
-		// Kill the session if it exists (ignore errors — it may be gone).
-		if p.HasSession {
-			_ = h.mux.Kill(ctx, p.SessionName)
-		}
 
 		var removeErr error
 		if opts.Force {
@@ -1535,6 +1549,11 @@ func (h *Handler) FlattenPieces(ctx context.Context, repoRoot string, opts Flatt
 			}
 		}
 
+		// Defer the session kill (ignore errors later — it may be gone).
+		if p.HasSession {
+			sessionsToKill = append(sessionsToKill, p.SessionName)
+		}
+
 		result.Removed = append(result.Removed, item)
 		h.deps.Output.Write(core.Message{
 			Type:    core.MsgSuccess,
@@ -1543,6 +1562,14 @@ func (h *Handler) FlattenPieces(ctx context.Context, repoRoot string, opts Flatt
 	}
 
 	result.Count = len(result.Removed)
+
+	// All worktrees are gone; now it's safe to kill the sessions. If one of them
+	// is the session we're running in, tearing it down here can only lose the
+	// final return — the removals are already done and persisted.
+	for _, s := range sessionsToKill {
+		_ = h.mux.Kill(ctx, s)
+	}
+
 	return result, nil
 }
 

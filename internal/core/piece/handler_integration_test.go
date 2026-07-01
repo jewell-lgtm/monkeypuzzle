@@ -1553,7 +1553,6 @@ func TestIntegration_SwitchPiece_Main(t *testing.T) {
 	}
 }
 
-
 // recordingMux is a test multiplexer that records calls. It reports as a
 // managed (non-noop) multiplexer with a configurable InSession value, so
 // tests can exercise the "switch to main before killing" branch without
@@ -1563,6 +1562,10 @@ type recordingMux struct {
 	switchTos []switchToCall
 	killed    []string
 	sessions  map[string]bool
+	// onKill, if set, fires at the start of Kill — lets a test observe on-disk
+	// state at the moment the session would be torn down (in production the kill
+	// terminates the calling process, so anything ordered after it never runs).
+	onKill func(sessionName string)
 }
 
 type switchToCall struct {
@@ -1581,6 +1584,9 @@ func (r *recordingMux) SwitchTo(_ context.Context, sessionName, workDir string) 
 }
 
 func (r *recordingMux) Kill(_ context.Context, sessionName string) error {
+	if r.onKill != nil {
+		r.onKill(sessionName)
+	}
 	r.killed = append(r.killed, sessionName)
 	delete(r.sessions, sessionName)
 	return nil
@@ -1735,6 +1741,199 @@ func TestIntegration_AbandonPiece_DoesNotSwitchWhenNotInSession(t *testing.T) {
 
 	if len(mux.switchTos) != 0 {
 		t.Errorf("expected no SwitchTo calls when InSession() is false, got %#v", mux.switchTos)
+	}
+}
+
+// TestIntegration_AbandonPiece_RemovesWorktreeBeforeKillingSession is a
+// regression test for the bug where abandoning a piece from inside its own tmux
+// session left the worktree on disk. AbandonPiece used to kill the session
+// before removing the worktree; in production the kill terminates the abandon
+// process (it runs in one of the session's panes), so the worktree removal
+// never happened and the piece kept appearing in the picker (ListPieces reads
+// directory entries, so a leftover directory == a listed piece). The fix
+// removes the worktree first and kills the session last. We assert the
+// invariant directly: by the time the session is killed, the worktree must
+// already be gone.
+func TestIntegration_AbandonPiece_RemovesWorktreeBeforeKillingSession(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	tmpDataHome, err := os.MkdirTemp("", "mp-data-*")
+	if err != nil {
+		t.Fatalf("failed to create temp data dir: %v", err)
+	}
+	t.Cleanup(func() {
+		os.RemoveAll(tmpDataHome)
+		paths.ResetDataDir()
+	})
+	paths.SetDataDir(tmpDataHome)
+
+	tmpDir, err := os.MkdirTemp("", "mp-abandon-order-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	setupGitRepo(t, tmpDir)
+	setupMonkeypuzzleConfig(t, tmpDir)
+
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get working directory: %v", err)
+	}
+	defer func() { _ = os.Chdir(oldWd) }()
+
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("failed to change directory: %v", err)
+	}
+
+	deps := core.Deps{
+		FS:     adapters.NewOSFS(""),
+		Output: adapters.NewBufferOutput(),
+		Exec:   adapters.NewOSExec(),
+	}
+	mux := newRecordingMux(true)
+	handler := piece.NewHandlerWithMultiplexer(deps, mux)
+
+	info, err := handler.CreatePiece(context.Background(), "abandon-order", piece.CreatePieceOptions{})
+	if err != nil {
+		t.Fatalf("CreatePiece failed: %v", err)
+	}
+
+	// Pretend the active client is attached to the piece's session, and observe
+	// whether the worktree still exists at the moment the session is killed.
+	mux.sessions[info.SessionName] = true
+	var killObserved bool
+	var worktreeExistedAtKill bool
+	mux.onKill = func(string) {
+		killObserved = true
+		if _, statErr := os.Stat(info.WorktreePath); statErr == nil {
+			worktreeExistedAtKill = true
+		}
+	}
+
+	// Abandon from inside the worktree — the case that used to strand the piece.
+	if err := os.Chdir(info.WorktreePath); err != nil {
+		t.Fatalf("failed to chdir into worktree: %v", err)
+	}
+
+	if _, err := handler.AbandonPiece(context.Background(), "abandon-order", piece.AbandonOptions{Force: true}); err != nil {
+		t.Fatalf("AbandonPiece failed: %v", err)
+	}
+
+	if !killObserved {
+		t.Fatal("expected the piece session to be killed")
+	}
+	if worktreeExistedAtKill {
+		t.Error("worktree still existed when the session was killed: removal must happen before the kill, otherwise abandoning from inside the session (where the kill terminates this process) never removes the worktree")
+	}
+
+	// End state: the worktree directory is actually gone, so the picker won't
+	// list it.
+	if _, err := os.Stat(info.WorktreePath); !os.IsNotExist(err) {
+		t.Errorf("expected worktree %s to be removed; stat err = %v", info.WorktreePath, err)
+	}
+}
+
+// TestIntegration_FlattenPieces_RemovesAllWorktreesBeforeKillingSessions guards
+// the same ordering hazard as the abandon regression above, but for flatten's
+// loop. Flatten used to kill each piece's session inline before removing its
+// worktree; run from inside one of the pieces, that kill would terminate the
+// flatten process mid-loop and strand the remaining pieces. The fix removes all
+// worktrees first and kills sessions afterwards. We assert no worktree still
+// exists at the moment any session is killed.
+func TestIntegration_FlattenPieces_RemovesAllWorktreesBeforeKillingSessions(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	tmpDataHome, err := os.MkdirTemp("", "mp-data-*")
+	if err != nil {
+		t.Fatalf("failed to create temp data dir: %v", err)
+	}
+	t.Cleanup(func() {
+		os.RemoveAll(tmpDataHome)
+		paths.ResetDataDir()
+	})
+	paths.SetDataDir(tmpDataHome)
+
+	tmpDir, err := os.MkdirTemp("", "mp-flatten-order-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	setupGitRepo(t, tmpDir)
+	setupMonkeypuzzleConfig(t, tmpDir)
+
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get working directory: %v", err)
+	}
+	defer func() { _ = os.Chdir(oldWd) }()
+
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("failed to change directory: %v", err)
+	}
+
+	deps := core.Deps{
+		FS:     adapters.NewOSFS(""),
+		Output: adapters.NewBufferOutput(),
+		Exec:   adapters.NewOSExec(),
+	}
+	mux := newRecordingMux(true)
+	handler := piece.NewHandlerWithMultiplexer(deps, mux)
+
+	pieceA, err := handler.CreatePiece(context.Background(), "flatten-a", piece.CreatePieceOptions{})
+	if err != nil {
+		t.Fatalf("CreatePiece(flatten-a) failed: %v", err)
+	}
+	pieceB, err := handler.CreatePiece(context.Background(), "flatten-b", piece.CreatePieceOptions{})
+	if err != nil {
+		t.Fatalf("CreatePiece(flatten-b) failed: %v", err)
+	}
+
+	// Both pieces have live sessions; record whether any worktree still exists
+	// at the moment a session is killed.
+	mux.sessions[pieceA.SessionName] = true
+	mux.sessions[pieceB.SessionName] = true
+	worktrees := []string{pieceA.WorktreePath, pieceB.WorktreePath}
+	var killObserved bool
+	var worktreeExistedAtKill bool
+	mux.onKill = func(string) {
+		killObserved = true
+		for _, wt := range worktrees {
+			if _, statErr := os.Stat(wt); statErr == nil {
+				worktreeExistedAtKill = true
+			}
+		}
+	}
+
+	// Flatten from inside one of the pieces — the case that used to abort the
+	// loop when that piece's session was killed.
+	if err := os.Chdir(pieceA.WorktreePath); err != nil {
+		t.Fatalf("failed to chdir into worktree: %v", err)
+	}
+
+	res, err := handler.FlattenPieces(context.Background(), "", piece.FlattenOptions{Force: true})
+	if err != nil {
+		t.Fatalf("FlattenPieces failed: %v", err)
+	}
+
+	if !killObserved {
+		t.Fatal("expected piece sessions to be killed")
+	}
+	if worktreeExistedAtKill {
+		t.Error("a worktree still existed when a session was killed: flatten must remove every worktree before killing any session, or running it from inside a piece strands the rest")
+	}
+	if res.Count != 2 {
+		t.Errorf("expected 2 pieces flattened, got %d (removed=%d failed=%d)", res.Count, len(res.Removed), len(res.Failed))
+	}
+	for _, wt := range worktrees {
+		if _, err := os.Stat(wt); !os.IsNotExist(err) {
+			t.Errorf("expected worktree %s to be removed; stat err = %v", wt, err)
+		}
 	}
 }
 
