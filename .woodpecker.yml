@@ -137,7 +137,9 @@ steps:
 
   # --- Release: cut binaries + Homebrew formula on a version tag -----------
   - name: release
-    image: goreleaser/goreleaser:latest
+    # Pinned: we use the deprecated-but-supported `brews` config (formula, not
+    # cask — Linux/WSL support); an unpinned image could change behaviour.
+    image: goreleaser/goreleaser:v2.16.0
     environment:
       GITHUB_TOKEN:
         from_secret: github_token
