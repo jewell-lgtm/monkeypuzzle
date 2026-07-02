@@ -7,11 +7,17 @@
     "dev": "astro dev",
     "build": "astro build",
     "preview": "astro preview",
-    "astro": "astro"
+    "astro": "astro",
+    "test": "vitest run",
+    "smoke": "node scripts/smoke.mjs"
   },
   "dependencies": {
+    "@astrojs/node": "^9.4.4",
     "astro": "^5.16.6",
     "lucide-static": "^0.460.0"
+  },
+  "devDependencies": {
+    "vitest": "^3.2.4"
   },
   "pnpm": {
     "onlyBuiltDependencies": ["esbuild", "sharp"]

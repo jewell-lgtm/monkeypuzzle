@@ -13,16 +13,24 @@ pnpm build      # static output → dist/
 pnpm preview    # serve the built site
 ```
 
-## Linking to the server app
+## Email capture (Astro Action)
 
-The nav "Sign in" / "Get started" and the CTA buttons link to the **mp-server**
-login (`GET /login` → WorkOS OAuth). The target is configurable in
-`src/config.ts` via `SERVER_URL`, defaulting to the server's local dev address:
+The CTA band's form posts to the `subscribe` Astro Action (`src/actions/`),
+which appends normalized emails to a JSONL file — `WAITLIST_FILE`, default
+`./data/waitlist.jsonl`, mounted as a volume in production (k8s PVC at
+`/data`). Core logic + tests live in `src/lib/waitlist.ts`. Because of the
+action the site runs on the node adapter (`node dist/server/entry.mjs`);
+pages are still fully prerendered. `security.allowedDomains` in
+`astro.config.mjs` must list every host the site serves on, or Astro's CSRF
+origin check rejects all form posts (Astro ≥5.18 behavior).
 
 ```bash
-# default: http://localhost:8080 (mp-server PORT)
-PUBLIC_SERVER_URL=https://app.monkeypuzzle.dev pnpm build
+pnpm test    # vitest — waitlist handler branches
+pnpm smoke   # build first; serves dist/ and checks every route
 ```
+
+(The old nav/CTA links to the mp-server login were removed on purpose — no
+dead ends until the hosted dashboard launches.)
 
 ## Design system
 

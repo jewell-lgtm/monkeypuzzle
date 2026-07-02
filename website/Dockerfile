@@ -8,14 +8,17 @@ RUN corepack enable && corepack prepare pnpm@9.15.9 --activate
 COPY package.json pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile
 COPY . .
-# Bake the server URL the static site links to (login/dashboard). Generic by
-# default (config.ts falls back to localhost); deployments pass their real URL,
-# e.g. --build-arg PUBLIC_SERVER_URL=https://app.example.com
-ARG PUBLIC_SERVER_URL=""
-ENV PUBLIC_SERVER_URL=${PUBLIC_SERVER_URL}
 RUN pnpm build
 
-FROM nginx:1.27-alpine
-COPY nginx.conf /etc/nginx/conf.d/default.conf
-COPY --from=build /app/dist /usr/share/nginx/html
-EXPOSE 80
+# Node runtime (replaces nginx): pages are prerendered, but the email-capture
+# Astro Action needs a server. Standalone build bundles its dependencies —
+# only dist/ is needed at runtime.
+FROM node:22-alpine
+WORKDIR /app
+ENV HOST=0.0.0.0 PORT=4321 NODE_ENV=production
+# The waitlist JSONL must live on a mounted volume (k8s: PVC at /data) —
+# container-local storage would silently lose signups on every restart.
+ENV WAITLIST_FILE=/data/waitlist.jsonl
+COPY --from=build /app/dist ./dist
+EXPOSE 4321
+CMD ["node", "dist/server/entry.mjs"]
