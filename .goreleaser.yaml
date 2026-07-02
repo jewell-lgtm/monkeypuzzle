@@ -65,28 +65,30 @@ changelog:
       - "^chore:"
       - "Merge branch"
 
-homebrew_casks:
+# A formula (not a cask): Linux/WSL are first-class install targets, and casks
+# are macOS-only. Formula binaries are poured without the Gatekeeper quarantine
+# xattr, so no de-quarantine hook is needed either. One install command
+# everywhere: brew install jewell-lgtm/tap/monkeypuzzle
+# (goreleaser marks `brews` deprecated in favour of casks — deliberate choice
+# here; the CI image is version-pinned so behaviour can't drift under us.)
+brews:
   - name: monkeypuzzle
-    # Both binaries are symlinked into the Homebrew prefix; mp-mcp resolves mp
-    # as a sibling on PATH.
-    binaries:
-      - mp
-      - mp-mcp
+    ids: [monkeypuzzle]
     repository:
       owner: jewell-lgtm
       name: homebrew-tap
       branch: main
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
-    directory: Casks
+    directory: Formula
     homepage: "https://github.com/jewell-lgtm/monkeypuzzle"
     description: "Stack your branches — a CLI for stacked-PR git workflows (pieces)."
     license: MIT
     commit_author:
       name: monkeypuzzle-bot
       email: 41898282+github-actions[bot]@users.noreply.github.com
-    # Binaries aren't code-signed, so strip the Gatekeeper quarantine flag on
-    # install — otherwise macOS blocks the first run of an unsigned binary.
-    hooks:
-      post:
-        install: |
-          system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/mp", "#{staged_path}/mp-mcp"]
+    # Both binaries install side by side; mp-mcp resolves mp as a sibling on PATH.
+    install: |
+      bin.install "mp"
+      bin.install "mp-mcp"
+    test: |
+      system "#{bin}/mp", "--version"
