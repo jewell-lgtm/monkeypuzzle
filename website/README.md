@@ -24,8 +24,17 @@ pages are still fully prerendered. `security.allowedDomains` in
 `astro.config.mjs` must list every host the site serves on, or Astro's CSRF
 origin check rejects all form posts (Astro ≥5.18 behavior).
 
+**Bot gate:** two layers in front of the sink — a honeypot field (`website`;
+filled = fake success, nothing stored) and Cloudflare Turnstile. The widget's
+site key is committed in `src/config.ts` (public by design; currently CF's
+always-pass TEST key — swap in the real one). The secret key comes from the
+`TURNSTILE_SECRET_KEY` env (k8s Secret `monkeypuzzle-website-turnstile`);
+when it's set, verification **fails closed** — missing/rejected tokens and
+Cloudflare outages all surface a visible retryable error. Unset (local dev,
+tests), the gate is off.
+
 ```bash
-pnpm test    # vitest — waitlist handler branches
+pnpm test    # vitest — waitlist + turnstile branches
 pnpm smoke   # build first; serves dist/ and checks every route
 ```
 
