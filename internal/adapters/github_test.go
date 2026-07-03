@@ -148,14 +148,37 @@ func TestGitHub_FindMergedPRByBranch(t *testing.T) {
 		{
 			name:       "found merged PR",
 			branch:     "feature",
-			mockOutput: []byte(`[{"number":42}]`),
+			mockOutput: []byte(`[{"number":42,"state":"MERGED"}]`),
 			wantMerged: true,
 			wantNum:    42,
 		},
 		{
-			name:       "no merged PR",
+			name:       "no PR at all",
 			branch:     "feature",
 			mockOutput: []byte(`[]`),
+			wantMerged: false,
+			wantNum:    0,
+		},
+		{
+			// Regression: branch name reused after an old PR merged — the
+			// newer open PR decides, the stale merged one must not.
+			name:       "stale merged PR shadowed by newer open PR",
+			branch:     "feature",
+			mockOutput: []byte(`[{"number":6,"state":"OPEN"},{"number":1,"state":"MERGED"}]`),
+			wantMerged: false,
+			wantNum:    0,
+		},
+		{
+			name:       "latest PR merged, older closed",
+			branch:     "feature",
+			mockOutput: []byte(`[{"number":9,"state":"MERGED"},{"number":2,"state":"CLOSED"}]`),
+			wantMerged: true,
+			wantNum:    9,
+		},
+		{
+			name:       "latest PR closed, older merged",
+			branch:     "feature",
+			mockOutput: []byte(`[{"number":9,"state":"CLOSED"},{"number":2,"state":"MERGED"}]`),
 			wantMerged: false,
 			wantNum:    0,
 		},
@@ -170,7 +193,7 @@ func TestGitHub_FindMergedPRByBranch(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			exec := NewMockExec()
-			exec.AddResponse("gh", []string{"pr", "list", "--head", tt.branch, "--state", "merged", "--json", "number", "--limit", "1"}, tt.mockOutput, tt.mockErr)
+			exec.AddResponse("gh", []string{"pr", "list", "--head", tt.branch, "--state", "all", "--json", "number,state", "--limit", "20"}, tt.mockOutput, tt.mockErr)
 
 			gh := NewGitHub(exec)
 			merged, num, err := gh.FindMergedPRByBranch(context.Background(), "/repo", tt.branch)

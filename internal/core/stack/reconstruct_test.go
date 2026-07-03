@@ -126,3 +126,42 @@ func TestComputeBaseFixes_NoneWhenAligned(t *testing.T) {
 		t.Errorf("expected no fixes, got %+v", fixes)
 	}
 }
+
+// Regression: a branch deleted after merge and recreated for new work has two
+// PRs with the same head. The current PR (open, or newest) must win — with
+// last-write-wins the stale merged PR shadowed the open one and stack status
+// reported the whole stack as landed.
+func TestIndexPRsByHead_CurrentPRWins(t *testing.T) {
+	prs := []pr.PRInfo{
+		{Number: 6, HeadRefName: "feat", State: "OPEN"},
+		{Number: 1, HeadRefName: "feat", State: "MERGED"}, // stale, listed after (gh returns newest-first)
+		{Number: 2, HeadRefName: "other", State: "MERGED"},
+	}
+
+	byHead := indexPRsByHead(prs)
+	if got := byHead["feat"]; got.Number != 6 || got.State != "OPEN" {
+		t.Errorf("feat resolved to PR#%d (%s), want open #6", got.Number, got.State)
+	}
+	if got := byHead["other"]; got.Number != 2 {
+		t.Errorf("other resolved to PR#%d, want #2", got.Number)
+	}
+
+	// Order independence: stale first, open last.
+	byHead = indexPRsByHead([]pr.PRInfo{
+		{Number: 1, HeadRefName: "feat", State: "MERGED"},
+		{Number: 6, HeadRefName: "feat", State: "OPEN"},
+	})
+	if got := byHead["feat"]; got.Number != 6 {
+		t.Errorf("feat resolved to PR#%d, want #6 regardless of input order", got.Number)
+	}
+}
+
+func TestIndexPRsByHead_SameStateNewestWins(t *testing.T) {
+	byHead := indexPRsByHead([]pr.PRInfo{
+		{Number: 3, HeadRefName: "feat", State: "MERGED"},
+		{Number: 9, HeadRefName: "feat", State: "MERGED"},
+	})
+	if got := byHead["feat"]; got.Number != 9 {
+		t.Errorf("feat resolved to PR#%d, want newest #9", got.Number)
+	}
+}

@@ -196,3 +196,28 @@ func computeBaseFixes(items []piece.PieceListItem, prByHead map[string]pr.PRInfo
 	sort.Slice(fixes, func(i, j int) bool { return fixes[i].PRNumber < fixes[j].PRNumber })
 	return fixes
 }
+
+// indexPRsByHead maps head branch -> PR, resolving reused branch names to the
+// branch's CURRENT PR: an open PR always wins over a merged/closed one, and
+// between PRs in the same state the newest (highest number) wins. Without
+// this, a branch deleted and recreated after an old PR merged resolves to the
+// stale merged PR and the whole stack reads as landed when it isn't.
+func indexPRsByHead(prs []pr.PRInfo) map[string]pr.PRInfo {
+	byHead := make(map[string]pr.PRInfo, len(prs))
+	for _, p := range prs {
+		cur, ok := byHead[p.HeadRefName]
+		if !ok || prSupersedes(p, cur) {
+			byHead[p.HeadRefName] = p
+		}
+	}
+	return byHead
+}
+
+// prSupersedes reports whether a should replace b as a branch's current PR.
+func prSupersedes(a, b pr.PRInfo) bool {
+	aOpen, bOpen := a.State == "OPEN", b.State == "OPEN"
+	if aOpen != bOpen {
+		return aOpen
+	}
+	return a.Number > b.Number
+}

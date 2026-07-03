@@ -139,9 +139,31 @@ func (g *GitLab) IsPRMerged(ctx context.Context, workDir string, mrNumber int) (
 	return result.MergedAt != nil && *result.MergedAt != "", nil
 }
 
-// FindMergedPRByBranch looks for a merged MR with the given source branch.
-// Returns (merged, mrNumber, error). If no merged MR exists, returns (false, 0, nil).
+// FindMergedPRByBranch checks whether the branch's CURRENT MR is merged.
+// Returns (merged, mrNumber, error). If no MR exists, returns (false, 0, nil).
+//
+// Mirrors the GitHub adapter: a source branch can be reused after an old MR
+// merged, so an open MR for the branch means "not merged" regardless of any
+// older merged MR — otherwise cleanup would sweep an in-progress piece.
 func (g *GitLab) FindMergedPRByBranch(ctx context.Context, workDir, branchName string) (bool, int, error) {
+	opened, err := g.exec.RunWithDir(ctx, workDir, "glab", "mr", "list",
+		"--source-branch", branchName,
+		"--state", "opened",
+		"-F", "json",
+	)
+	if err != nil {
+		return false, 0, fmt.Errorf("failed to list open MRs: %w", err)
+	}
+	var openMRs []struct {
+		IID int `json:"iid"`
+	}
+	if err := json.Unmarshal(opened, &openMRs); err != nil {
+		return false, 0, fmt.Errorf("failed to parse MR list: %w", err)
+	}
+	if len(openMRs) > 0 {
+		return false, 0, nil
+	}
+
 	output, err := g.exec.RunWithDir(ctx, workDir, "glab", "mr", "list",
 		"--source-branch", branchName,
 		"--state", "merged",
