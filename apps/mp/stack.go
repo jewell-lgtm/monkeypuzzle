@@ -132,6 +132,7 @@ var (
 
 	flagStackStatusJSON bool
 	flagStackGraphJSON  bool
+	flagStackSyncJSON   bool
 )
 
 func init() {
@@ -152,6 +153,7 @@ func init() {
 	stackSyncCmd.Flags().BoolVar(&flagStackSyncApply, "apply", false, "Apply the sync (default is a dry-run preview)")
 	stackSyncCmd.Flags().BoolVar(&flagStackSyncDryRun, "dry-run", false, "Preview which pieces would be synced without changing anything")
 	stackSyncCmd.Flags().BoolVar(&flagStackSyncSchema, "schema", false, "Output JSON schema and exit")
+	stackSyncCmd.Flags().BoolVar(&flagStackSyncJSON, "json", false, "Output JSON even on a terminal")
 
 	stackAppendCmd.Flags().StringVar(&flagStackName, "name", "", "Piece name")
 	stackAppendCmd.Flags().StringVar(&flagStackPrompt, "prompt", "", "Piece prompt (recorded in piece metadata; used to name the piece)")
@@ -348,6 +350,10 @@ func runStackSync(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	if !apply {
+		// The dry-run lines already streamed to the terminal; JSON is for pipes.
+		if cli.IsTerminal() && !flagStackSyncJSON {
+			return nil
+		}
 		return cli.PrintJSON(previewResult)
 	}
 
@@ -356,6 +362,10 @@ func runStackSync(cmd *cobra.Command, args []string) error {
 	result, err := handler.Sync(cmd.Context(), wd, input)
 	if err != nil {
 		return err
+	}
+	// The ✓ summary already streamed via Output on a terminal.
+	if cli.IsTerminal() && !flagStackSyncJSON {
+		return nil
 	}
 	return cli.PrintJSON(result)
 }
