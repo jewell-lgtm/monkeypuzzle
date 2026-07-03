@@ -25,13 +25,15 @@ ambiguous.)
 
 Output goes to stderr (human-readable) while stdout is reserved for JSON (machine-readable).
 
-**Remote execution.** Three global flags route a command somewhere else before
-any of the above happens: `--project <name>` runs it against a registered
-project (proxied over ssh when the registry entry has a host, from its path
-when local), and `--host <ssh-host>` / `--dir <abs-path>` (env: `MP_HOST` /
-`MP_DIR`) are the raw form. The whole invocation is forwarded verbatim to the
-`mp` binary on the host, so the remote surface is byte-identical — flags,
-stdin JSON, JSON out. See [Remote development](remote-development.md) and
+**Remote execution.** Three flags, placed **between `mp` and the verb**, route
+a command somewhere else before any of the above happens: `mp --project <name>
+<cmd>` runs it against a registered project (proxied over ssh when the registry
+entry has a host, from its path when local), and `mp --host <ssh-host> [--dir
+<path>] <cmd>` (env: `MP_HOST` / `MP_DIR`) is the raw form. Placement matters:
+after the verb these names belong to the verb (`mp init --dir`, `mp switch
+--project`). The whole invocation is forwarded verbatim to the `mp` binary on
+the host, so the remote surface is byte-identical — flags, stdin JSON, JSON
+out. See [Remote development](remote-development.md) and
 [`mp remote doctor`](#mp-remote).
 
 **Session management is interactive-only.** mp creates or switches a
@@ -859,7 +861,8 @@ mp remote doctor wire     # probe one ssh host
 mp remote doctor          # probe every host in the project registry
 ```
 
-`doctor` reports, per host: key-based (BatchMode) ssh reachability, the remote
+Like `mp config`, `doctor` uses positional args — there is no JSON-stdin mode.
+It reports, per host: key-based (BatchMode) ssh reachability, the remote
 `mp` version vs the local one, and `git`/`tmux`/`gh` presence plus `gh` auth
 state. Human summary on stderr, JSON array on stdout; exits non-zero if a host
 is unreachable or missing `mp`/`git`. Run it once after setting up a host, and

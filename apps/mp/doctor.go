@@ -30,7 +30,10 @@ and gh with working auth. Run it once after installing mp on a new host, and
 first whenever a proxied command misbehaves.
 
 The host argument is an ssh destination (alias or user@host). With no
-argument, every distinct host in the project registry is checked.`,
+argument, every distinct host in the project registry is checked.
+
+Like 'mp config', this is a diagnostic that uses positional args — there is
+no JSON-stdin mode; the JSON report always goes to stdout.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runRemoteDoctor,
 }
@@ -55,13 +58,16 @@ type doctorReport struct {
 }
 
 // doctorProbe is the single shell script run on the host; one key=value line
-// per check keeps it one ssh round-trip.
-const doctorProbe = `export PATH="$HOME/.local/bin:$PATH"
-echo "mp=$(mp --version 2>/dev/null || echo missing)"
+// per check keeps it one ssh round-trip. It probes the same binary the proxy
+// would run (MP_REMOTE_BIN honored) under the same PATH.
+func doctorProbe() string {
+	return `export PATH="$HOME/.local/bin:$PATH"
+echo "mp=$(` + cli.ShQuote(remoteBin()) + ` --version 2>/dev/null || echo missing)"
 echo "git=$(command -v git >/dev/null && echo yes || echo no)"
 echo "tmux=$(command -v tmux >/dev/null && echo yes || echo no)"
 echo "gh=$(command -v gh >/dev/null && echo yes || echo no)"
 echo "gh_auth=$(gh auth status >/dev/null 2>&1 && echo yes || echo no)"`
+}
 
 func runRemoteDoctor(cmd *cobra.Command, args []string) error {
 	var hosts []string
@@ -104,7 +110,13 @@ func runRemoteDoctor(cmd *cobra.Command, args []string) error {
 
 func probeHost(host string) doctorReport {
 	r := doctorReport{Host: host, LocalVersion: resolveVersion()}
-	out, err := exec.Command("ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", host, "--", doctorProbe).Output()
+	// The registry file is user-writable; a poisoned host must not reach ssh.
+	if err := cli.ValidSSHDest(host); err != nil {
+		r.SSHError = err.Error()
+		return r
+	}
+	// sh -c so the POSIX probe survives fish/csh login shells.
+	out, err := exec.Command("ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "--", host, "sh -c "+cli.ShQuote(doctorProbe())).Output()
 	if err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {

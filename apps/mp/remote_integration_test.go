@@ -292,8 +292,8 @@ func TestCLI_RemoteDoctor_RegistryScan(t *testing.T) {
 	if got := strings.Count(stdout, `"host": "wire"`); got != 1 {
 		t.Errorf("host wire probed %d times in JSON, want exactly 1 (dedupe)", got)
 	}
-	if strings.Contains(stdout, "loc") {
-		t.Errorf("local project leaked into doctor output: %s", stdout)
+	if got := strings.Count(stdout, `"reachable"`); got != 1 {
+		t.Errorf("doctor probed %d targets, want 1 (local projects skipped, host deduped)", got)
 	}
 	if _, err := os.Stat(filepath.Join(shimDir, "argv")); err != nil {
 		t.Error("registry scan did not probe the remote host")
