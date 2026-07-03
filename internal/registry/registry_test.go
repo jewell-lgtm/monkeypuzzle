@@ -94,3 +94,39 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 		t.Errorf("unexpected order: %+v", loaded.Projects)
 	}
 }
+
+func TestUpsertRemoteDedupeByHostAndPath(t *testing.T) {
+	r := Registry{}
+	r.Upsert("/repo/api", "api-local")
+	if _, added := r.UpsertRemote("wire", "/repo/api", "api"); !added {
+		t.Fatal("same path on a host must be a distinct project from the local one")
+	}
+	if _, added := r.UpsertRemote("wire", "/repo/api", "api-renamed"); added {
+		t.Fatal("same (host, path) must dedupe")
+	}
+	if len(r.Projects) != 2 {
+		t.Fatalf("expected 2 projects, got %d", len(r.Projects))
+	}
+	p, ok := r.Find("api-renamed")
+	if !ok || p.Host != "wire" {
+		t.Errorf("Find(api-renamed) = %+v, %v", p, ok)
+	}
+}
+
+func TestRemoteHostSurvivesRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("MP_DATA_DIR", dir)
+
+	r := Registry{}
+	r.UpsertRemote("wire", "/home/u/api", "api")
+	if err := r.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	loaded, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if loaded.Projects[0].Host != "wire" {
+		t.Errorf("host lost in round trip: %+v", loaded.Projects[0])
+	}
+}

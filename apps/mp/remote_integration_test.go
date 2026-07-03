@@ -177,3 +177,40 @@ func TestCLI_RemoteProxy_LocalRunsStayLocal(t *testing.T) {
 		t.Error("ssh shim was invoked for a local command")
 	}
 }
+
+func TestCLI_RemoteProxy_ProjectRouting(t *testing.T) {
+	e := setupTestEnv(t)
+	defer e.cleanup()
+	canned := `{"pieces":[]}`
+	record, path := sshShim(t, e, canned, 0)
+
+	// Seed the registry with one remote project.
+	if err := os.MkdirAll(e.dataDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	reg := `{"version":"1","projects":[{"name":"api","path":"/home/u/api","host":"wire","added_at":"2026-01-01T00:00:00Z"}]}`
+	if err := os.WriteFile(filepath.Join(e.dataDir, "projects.json"), []byte(reg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, err := runProxy(e, path, nil, "list", "--project", "api")
+	if err != nil {
+		t.Fatalf("proxied mp failed: %v\nstderr: %s", err, stderr)
+	}
+	if stdout != canned {
+		t.Errorf("stdout = %q, want %q", stdout, canned)
+	}
+	argv, err := os.ReadFile(record)
+	if err != nil {
+		t.Fatalf("shim was not invoked: %v", err)
+	}
+	if !strings.Contains(string(argv), "cd '/home/u/api' && exec 'mp' 'list'") {
+		t.Errorf("ssh argv = %q, want cd into the registered path and --project stripped", argv)
+	}
+
+	// Unknown project fails locally, before any ssh.
+	_, stderr, err = runProxy(e, path, nil, "list", "--project", "nope")
+	if err == nil || !strings.Contains(stderr, "no registered project") {
+		t.Errorf("unknown project: err = %v stderr = %q", err, stderr)
+	}
+}

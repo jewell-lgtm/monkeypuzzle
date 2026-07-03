@@ -22,7 +22,8 @@ const (
 // Project is a single registered monkeypuzzle project.
 type Project struct {
 	Name    string    `json:"name"`
-	Path    string    `json:"path"` // absolute, symlink-resolved repo root
+	Path    string    `json:"path"`           // absolute, symlink-resolved repo root (on Host when set)
+	Host    string    `json:"host,omitempty"` // ssh host where the repo lives; empty = this machine
 	AddedAt time.Time `json:"added_at"`
 }
 
@@ -94,16 +95,36 @@ func (r Registry) indexByPath(path string) int {
 	return -1
 }
 
-// Upsert adds the project (deduped by path) or updates its name. Returns the
-// stored Project and whether it was newly added.
+// indexBy returns the index of a project with the given (host, path), or -1.
+// The same path on different hosts is two different projects.
+func (r Registry) indexBy(host, path string) int {
+	for i, p := range r.Projects {
+		if p.Host == host && p.Path == path {
+			return i
+		}
+	}
+	return -1
+}
+
+// Upsert adds a local project (deduped by path) or updates its name. Returns
+// the stored Project and whether it was newly added.
 func (r *Registry) Upsert(path, name string) (Project, bool) {
-	if i := r.indexByPath(path); i >= 0 {
+	return r.upsert("", path, name)
+}
+
+// UpsertRemote is Upsert for a project living on an ssh host.
+func (r *Registry) UpsertRemote(host, path, name string) (Project, bool) {
+	return r.upsert(host, path, name)
+}
+
+func (r *Registry) upsert(host, path, name string) (Project, bool) {
+	if i := r.indexBy(host, path); i >= 0 {
 		if name != "" {
 			r.Projects[i].Name = name
 		}
 		return r.Projects[i], false
 	}
-	p := Project{Name: name, Path: path, AddedAt: time.Now().UTC()}
+	p := Project{Name: name, Path: path, Host: host, AddedAt: time.Now().UTC()}
 	r.Projects = append(r.Projects, p)
 	return p, true
 }

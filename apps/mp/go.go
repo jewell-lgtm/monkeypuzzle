@@ -132,7 +132,9 @@ func collectDashboard(ctx context.Context, infos []projectcmd.Info) ([]dashProje
 	out := make([]dashProject, 0, len(infos))
 	for _, info := range infos {
 		dp := dashProject{Info: info, MainSession: session.MainName(info.Name)}
-		if info.Exists && info.IsProject {
+		// Remote projects are listed but not enumerated: their pieces live on
+		// the host (`mp --project <name> list` proxies into them).
+		if info.Host == "" && info.Exists && info.IsProject {
 			pieces, err := handler.ListPieces(ctx, info.Path)
 			if err != nil {
 				dp.Error = err.Error()
