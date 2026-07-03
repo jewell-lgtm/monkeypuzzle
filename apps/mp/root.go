@@ -18,9 +18,10 @@ var rootCmd = &cobra.Command{
 
 func init() {
 	// Registered for --help only; extractRemoteTarget strips these from argv
-	// before cobra ever parses, so their cobra values are never read.
-	rootCmd.PersistentFlags().String("host", "", "run this command on a remote ssh host where mp is installed (env: MP_HOST)")
-	rootCmd.PersistentFlags().String("dir", "", "remote directory to run in, absolute path; requires --host (env: MP_DIR)")
+	// before cobra ever parses, so their cobra values are never read. They
+	// only count between `mp` and the verb: `mp --host wire list`.
+	rootCmd.PersistentFlags().String("host", "", "before the verb: run the command on a remote ssh host where mp is installed (env: MP_HOST)")
+	rootCmd.PersistentFlags().String("dir", "", "before the verb: remote directory to run in (absolute, or relative to the ssh login home); requires --host (env: MP_DIR)")
 }
 
 func Execute() error {

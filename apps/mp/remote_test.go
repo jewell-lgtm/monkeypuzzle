@@ -4,28 +4,9 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-)
 
-func TestShQuote(t *testing.T) {
-	tests := []struct {
-		in, want string
-	}{
-		{"", "''"},
-		{"simple", "'simple'"},
-		{"/home/matt/code/api", "'/home/matt/code/api'"},
-		{"with space", "'with space'"},
-		{"it's", `'it'\''s'`},
-		{"'; rm -rf /; '", `''\''; rm -rf /; '\'''`},
-		{"a$b`c", "'a$b`c'"},
-		{"multi\nline", "'multi\nline'"},
-		{"~/code", "'~/code'"}, // tilde does NOT expand inside quotes -- --dir must be absolute
-	}
-	for _, tt := range tests {
-		if got := shQuote(tt.in); got != tt.want {
-			t.Errorf("shQuote(%q) = %s, want %s", tt.in, got, tt.want)
-		}
-	}
-}
+	"github.com/jewell-lgtm/monkeypuzzle/pkg/cli"
+)
 
 func TestExtractRemoteTarget(t *testing.T) {
 	tests := []struct {
@@ -49,24 +30,39 @@ func TestExtractRemoteTarget(t *testing.T) {
 		},
 		{
 			name:     "equals form",
-			args:     []string{"create", "--host=wire", "--dir=/x"},
+			args:     []string{"--host=wire", "--dir=/x", "create"},
 			wantRest: []string{"create"},
 			wantTgt:  &remoteTarget{host: "wire", dir: "/x"},
 		},
 		{
-			name:     "flag value that merely contains --host is not stripped",
-			args:     []string{"create", "--prompt", "--host is a flag"},
-			wantRest: []string{"create", "--prompt", "--host is a flag"},
+			name:    "host after the verb is refused, not swallowed",
+			args:    []string{"create", "--host", "wire"},
+			wantErr: "--host must come before the command",
 		},
 		{
-			name:    "dir without host errors",
+			name:     "host after -- is positional territory",
+			args:     []string{"run", "--", "--host"},
+			wantRest: []string{"run", "--", "--host"},
+		},
+		{
+			name:     "verb-owned --dir stays with the verb",
+			args:     []string{"init", "--dir", "/x"},
+			wantRest: []string{"init", "--dir", "/x"},
+		},
+		{
+			name:    "leading dir without host errors",
 			args:    []string{"--dir", "/x", "list"},
 			wantErr: "--dir requires --host",
 		},
 		{
 			name:    "host missing value errors",
-			args:    []string{"list", "--host"},
+			args:    []string{"--host"},
 			wantErr: "flag needs an argument",
+		},
+		{
+			name:    "option-shaped host is rejected",
+			args:    []string{"--host", "-oProxyCommand=evil", "list"},
+			wantErr: "invalid ssh host",
 		},
 		{
 			name:     "MP_HOST env drives forwarding",
@@ -87,6 +83,18 @@ func TestExtractRemoteTarget(t *testing.T) {
 			args:     []string{"list"},
 			env:      map[string]string{"MP_DIR": "/x"},
 			wantRest: []string{"list"},
+		},
+		{
+			name:     "completion never proxies even with MP_HOST",
+			args:     []string{"__complete", "li"},
+			env:      map[string]string{"MP_HOST": "wire"},
+			wantRest: []string{"__complete", "li"},
+		},
+		{
+			name:     "help never proxies even with MP_HOST",
+			args:     []string{"help", "create"},
+			env:      map[string]string{"MP_HOST": "wire"},
+			wantRest: []string{"help", "create"},
 		},
 	}
 	for _, tt := range tests {
@@ -120,24 +128,54 @@ func TestExtractRemoteTarget(t *testing.T) {
 	}
 }
 
+func TestValidSSHDest(t *testing.T) {
+	for _, ok := range []string{"wire", "user@wire", "wire.example.com", "10.0.0.7", "box_1"} {
+		if err := validSSHDest(ok); err != nil {
+			t.Errorf("validSSHDest(%q) = %v, want nil", ok, err)
+		}
+	}
+	for _, bad := range []string{"", "-oProxyCommand=x", "host name", "host;rm", "host`x`", "a'b", `a"b`, "a$b", "a|b", "a&b", "a\\b"} {
+		if err := validSSHDest(bad); err == nil {
+			t.Errorf("validSSHDest(%q) = nil, want error", bad)
+		}
+	}
+}
+
 func TestRemoteCommand(t *testing.T) {
 	t.Setenv("MP_REMOTE_BIN", "")
+	inner := func(s string) string { return "sh -c " + cli.ShQuote(s) }
 	pathPrefix := `export PATH="$HOME/.local/bin:$PATH"; `
 
 	tgt := &remoteTarget{host: "wire", dir: "/home/u/my repo"}
 	got := remoteCommand(tgt, []string{"create", "--prompt", "fix the o'clock bug", "--json"})
-	want := pathPrefix + `cd '/home/u/my repo' && exec 'mp' 'create' '--prompt' 'fix the o'\''clock bug' '--json'`
+	want := inner(pathPrefix + `cd '/home/u/my repo' && exec 'mp' 'create' '--prompt' 'fix the o'\''clock bug' '--json'`)
 	if got != want {
 		t.Errorf("remoteCommand = %s\nwant            %s", got, want)
 	}
 
 	noDir := &remoteTarget{host: "wire"}
-	if got := remoteCommand(noDir, []string{"go", "--json"}); got != pathPrefix+`exec 'mp' 'go' '--json'` {
+	if got := remoteCommand(noDir, []string{"go", "--json"}); got != inner(pathPrefix+`exec 'mp' 'go' '--json'`) {
 		t.Errorf("remoteCommand without dir = %s", got)
 	}
 
 	t.Setenv("MP_REMOTE_BIN", "/opt/mp/bin/mp")
-	if got := remoteCommand(noDir, []string{"list"}); got != pathPrefix+`exec '/opt/mp/bin/mp' 'list'` {
+	if got := remoteCommand(noDir, []string{"list"}); got != inner(pathPrefix+`exec '/opt/mp/bin/mp' 'list'`) {
 		t.Errorf("remoteCommand with MP_REMOTE_BIN = %s", got)
+	}
+}
+
+func TestSSHArgv(t *testing.T) {
+	t.Setenv("MP_REMOTE_BIN", "")
+	tgt := &remoteTarget{host: "wire", dir: "/x"}
+
+	got := sshArgv(tgt, []string{"list"}, false)
+	want := []string{"ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "--", "wire", remoteCommand(tgt, []string{"list"})}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("sshArgv(pty=false) = %v, want %v", got, want)
+	}
+
+	withPty := sshArgv(tgt, []string{"list"}, true)
+	if withPty[5] != "-t" || len(withPty) != len(want)+1 {
+		t.Errorf("sshArgv(pty=true) = %v, want -t inserted before --", withPty)
 	}
 }
