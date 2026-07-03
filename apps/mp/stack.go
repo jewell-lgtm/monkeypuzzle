@@ -328,33 +328,39 @@ func runStackSync(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Sync is dry-run by default. Always preview first, then decide whether to
-	// apply: --apply opts in, --dry-run stays a preview, an interactive terminal
-	// is asked to confirm, and any other (non-interactive) caller previews.
-	preview := input
-	preview.DryRun = true
-	preview.Apply = false
-	previewResult, err := handler.Sync(cmd.Context(), wd, preview)
-	if err != nil {
-		return err
+	// Sync is dry-run by default. --apply skips the preview and syncs directly
+	// (previewing anyway would spam "[dry-run] ... pass --apply to sync" at a
+	// caller who already passed it). --dry-run stays a preview, an interactive
+	// terminal previews then confirms, and any other caller previews.
+	if input.Apply && input.DryRun {
+		return fmt.Errorf("cannot use --apply and --dry-run together")
 	}
-
-	apply, err := resolveApply(input.Apply, input.DryRun, len(previewResult.Updated) > 0, func() (bool, error) {
-		return confirmApply(
-			"Sync the stack?",
-			fmt.Sprintf("Would sync %d piece(s) via %s: %s",
-				len(previewResult.Updated), previewResult.Strategy, strings.Join(previewResult.Updated, ", ")),
-		)
-	})
-	if err != nil {
-		return err
-	}
-	if !apply {
-		// The dry-run lines already streamed to the terminal; JSON is for pipes.
-		if cli.IsTerminal() && cli.IsStdoutTerminal() && !flagStackSyncJSON {
-			return nil
+	if !input.Apply {
+		preview := input
+		preview.DryRun = true
+		preview.Apply = false
+		previewResult, err := handler.Sync(cmd.Context(), wd, preview)
+		if err != nil {
+			return err
 		}
-		return cli.PrintJSON(previewResult)
+
+		apply, err := resolveApply(false, input.DryRun, len(previewResult.Updated) > 0, func() (bool, error) {
+			return confirmApply(
+				"Sync the stack?",
+				fmt.Sprintf("Would sync %d piece(s) via %s: %s",
+					len(previewResult.Updated), previewResult.Strategy, strings.Join(previewResult.Updated, ", ")),
+			)
+		})
+		if err != nil {
+			return err
+		}
+		if !apply {
+			// The dry-run lines already streamed to the terminal; JSON is for pipes.
+			if cli.IsTerminal() && cli.IsStdoutTerminal() && !flagStackSyncJSON {
+				return nil
+			}
+			return cli.PrintJSON(previewResult)
+		}
 	}
 
 	input.DryRun = false
