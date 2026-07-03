@@ -1865,92 +1865,42 @@ type TreeNode struct {
 // BuildPieceTree builds a tree structure from a list of pieces.
 // Returns the root node (representing "main") with children attached.
 // Orphaned pieces (parent doesn't exist) are grouped under a special orphan node.
+//
+// Two-phase: create one node per piece up front, then link each node to its
+// parent. Linking against the pre-built node map means input order is
+// irrelevant — a child sorting before its parent (the mod-time sort puts the
+// newest piece first) can never create a duplicate node.
 func BuildPieceTree(pieces []PieceListItem) *TreeNode {
-	// Build a map of piece names to pieces for quick lookup
-	pieceMap := make(map[string]*PieceListItem)
-	for i := range pieces {
-		pieceMap[pieces[i].Name] = &pieces[i]
-	}
-
-	// Create root node
 	root := &TreeNode{Piece: nil, Children: []*TreeNode{}}
 
-	// Track which pieces have been added as children
-	added := make(map[string]bool)
-
-	// First pass: add all pieces with existing parents
+	// First pass: one node per piece
+	nodes := make(map[string]*TreeNode, len(pieces))
 	for i := range pieces {
-		piece := &pieces[i]
-		if piece.Parent == "main" {
-			node := &TreeNode{Piece: piece, Children: []*TreeNode{}}
-			root.Children = append(root.Children, node)
-			added[piece.Name] = true
-		} else if parent, exists := pieceMap[piece.Parent]; exists {
-			// Parent exists, find or create parent node and add as child
-			parentNode := findOrCreateNode(root, parent.Name, pieceMap)
-			node := &TreeNode{Piece: piece, Children: []*TreeNode{}}
-			parentNode.Children = append(parentNode.Children, node)
-			added[piece.Name] = true
-		}
+		nodes[pieces[i].Name] = &TreeNode{Piece: &pieces[i], Children: []*TreeNode{}}
 	}
 
-	// Second pass: handle orphaned pieces (parent doesn't exist)
+	// Second pass: link to parent, or group under the orphan node
 	var orphanNode *TreeNode
 	for i := range pieces {
 		piece := &pieces[i]
-		if !added[piece.Name] && piece.Parent != "main" {
+		node := nodes[piece.Name]
+		switch {
+		case piece.Parent == "main":
+			root.Children = append(root.Children, node)
+		case nodes[piece.Parent] != nil:
+			parent := nodes[piece.Parent]
+			parent.Children = append(parent.Children, node)
+		default:
 			// This piece's parent doesn't exist - it's orphaned
 			if orphanNode == nil {
 				orphanNode = &TreeNode{Piece: nil, Children: []*TreeNode{}, IsOrphan: true}
 				root.Children = append(root.Children, orphanNode)
 			}
-			node := &TreeNode{Piece: piece, Children: []*TreeNode{}, IsOrphan: false}
 			orphanNode.Children = append(orphanNode.Children, node)
 		}
 	}
 
 	return root
-}
-
-// findOrCreateNode finds a node by piece name in the tree, or creates it if not found.
-// This is a helper for BuildPieceTree to handle pieces that need to be parents.
-func findOrCreateNode(root *TreeNode, pieceName string, pieceMap map[string]*PieceListItem) *TreeNode {
-	// Search recursively for the node
-	var findNode func(*TreeNode) *TreeNode
-	findNode = func(node *TreeNode) *TreeNode {
-		if node.Piece != nil && node.Piece.Name == pieceName {
-			return node
-		}
-		for _, child := range node.Children {
-			if result := findNode(child); result != nil {
-				return result
-			}
-		}
-		return nil
-	}
-
-	if node := findNode(root); node != nil {
-		return node
-	}
-
-	// Node doesn't exist, need to create it
-	piece, exists := pieceMap[pieceName]
-	if !exists {
-		// This shouldn't happen if BuildPieceTree logic is correct
-		return root
-	}
-
-	// Create the node and add it to root if parent is main, otherwise recursively add
-	node := &TreeNode{Piece: piece, Children: []*TreeNode{}}
-	if piece.Parent == "main" {
-		root.Children = append(root.Children, node)
-		return node
-	}
-
-	// Parent is not main, need to add to parent node
-	parentNode := findOrCreateNode(root, piece.Parent, pieceMap)
-	parentNode.Children = append(parentNode.Children, node)
-	return node
 }
 
 // SwitchPiece switches to a piece by name.
