@@ -130,9 +130,11 @@ var (
 	flagStackGraphLimit    int
 	flagStackGraphSchema   bool
 
-	flagStackStatusJSON bool
-	flagStackGraphJSON  bool
-	flagStackSyncJSON   bool
+	flagStackStatusJSON  bool
+	flagStackGraphJSON   bool
+	flagStackSyncJSON    bool
+	flagStackAppendJSON  bool
+	flagStackPrependJSON bool
 )
 
 func init() {
@@ -158,10 +160,12 @@ func init() {
 	stackAppendCmd.Flags().StringVar(&flagStackName, "name", "", "Piece name")
 	stackAppendCmd.Flags().StringVar(&flagStackPrompt, "prompt", "", "Piece prompt (recorded in piece metadata; used to name the piece)")
 	stackAppendCmd.Flags().BoolVar(&flagStackAppendSchema, "schema", false, "Output JSON schema and exit")
+	stackAppendCmd.Flags().BoolVar(&flagStackAppendJSON, "json", false, "Output JSON even on a terminal")
 
 	stackPrependCmd.Flags().StringVar(&flagStackName, "name", "", "Piece name")
 	stackPrependCmd.Flags().StringVar(&flagStackPrompt, "prompt", "", "Piece prompt (recorded in piece metadata; used to name the piece)")
 	stackPrependCmd.Flags().BoolVar(&flagStackPrependSchema, "schema", false, "Output JSON schema and exit")
+	stackPrependCmd.Flags().BoolVar(&flagStackPrependJSON, "json", false, "Output JSON even on a terminal")
 
 	stackContinueCmd.Flags().BoolVar(&flagStackContinueSchema, "schema", false, "Output JSON schema and exit")
 
@@ -441,6 +445,11 @@ func runStackAppend(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	// On a terminal the handler's success line tells the story; the JSON
+	// payload is for pipes and agents (or --json).
+	if cli.IsTerminal() && !flagStackAppendJSON {
+		return nil
+	}
 	return cli.PrintJSON(info)
 }
 
@@ -471,6 +480,9 @@ func runStackPrepend(cmd *cobra.Command, args []string) error {
 	info, err := handler.Prepend(cmd.Context(), wd, stackcmd.PrependInput(in))
 	if err != nil {
 		return err
+	}
+	if cli.IsTerminal() && !flagStackPrependJSON {
+		return nil
 	}
 	return cli.PrintJSON(info)
 }
