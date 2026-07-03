@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/jewell-lgtm/monkeypuzzle/internal/registry"
 	"github.com/jewell-lgtm/monkeypuzzle/pkg/cli"
 )
 
@@ -14,19 +15,29 @@ import (
 // forwards the whole invocation over ssh to an `mp` binary on the remote
 // host, where the repo and worktrees live. Nothing in core runs locally, so
 // worktree paths, hooks, and forge auth all resolve on the remote machine.
+// `mp --project <name> <cmd>` addresses a registered project the same way:
+// proxied when the registry entry has a host, run from its path when local.
 //
 // The proxy flags are extracted from argv *before* cobra parses anything,
 // and only from the stretch between `mp` and the first non-flag token (the
 // verb): `mp --host wire list`, never `mp list --host wire`. That keeps
 // forwarding lossless under version skew (flags only a newer remote mp
 // understands never fail local parsing) and keeps verbs that own flags with
-// the same names (`mp init --dir`) untouched.
+// the same names (`mp init --dir`, `mp switch --project`) untouched.
 
 // remoteTarget is an ssh destination for proxied execution.
 type remoteTarget struct {
 	host    string
 	dir     string // remote working directory; empty = ssh login dir
 	fromEnv bool   // target came from MP_HOST, not an explicit flag
+}
+
+// remoteSpec is the raw routing input parsed out of argv/env, before the
+// registry is consulted.
+type remoteSpec struct {
+	host, dir, project string
+	hostFromEnv        bool
+	dirFromFlag        bool
 }
 
 // localOnlyVerbs never proxy, even with MP_HOST exported: completion and help
@@ -37,14 +48,12 @@ var localOnlyVerbs = map[string]bool{
 	"help": true, "remote": true,
 }
 
-// extractRemoteTarget strips --host/--dir (and = forms) from the leading
-// flags of argv — extraction stops at the first token that isn't a proxy
-// flag — and returns the remaining args plus the target, if any. Falls back
-// to MP_HOST/MP_DIR when the flags are absent. A --dir without a host is an
-// error: mp never proxies based on cwd or a bare directory alone.
-func extractRemoteTarget(args []string) ([]string, *remoteTarget, error) {
-	var host, dir string
-	dirFromFlag := false
+// extractRemoteSpec strips --host/--dir/--project (and = forms) from the
+// leading flags of argv — extraction stops at the first token that isn't a
+// proxy flag — and returns the remaining args plus the routing spec. Falls
+// back to MP_HOST/MP_DIR when the flags are absent.
+func extractRemoteSpec(args []string) ([]string, remoteSpec, error) {
+	var spec remoteSpec
 	i := 0
 scan:
 	for i < len(args) {
@@ -52,9 +61,9 @@ scan:
 		var name, value string
 		var hasValue bool
 		switch {
-		case arg == "--host" || arg == "--dir":
+		case arg == "--host" || arg == "--dir" || arg == "--project":
 			name = arg
-		case strings.HasPrefix(arg, "--host="), strings.HasPrefix(arg, "--dir="):
+		case strings.HasPrefix(arg, "--host="), strings.HasPrefix(arg, "--dir="), strings.HasPrefix(arg, "--project="):
 			name, value, _ = strings.Cut(arg, "=")
 			hasValue = true
 		default:
@@ -62,65 +71,87 @@ scan:
 		}
 		if !hasValue {
 			if i+1 >= len(args) {
-				return nil, nil, fmt.Errorf("flag needs an argument: %s", name)
+				return nil, remoteSpec{}, fmt.Errorf("flag needs an argument: %s", name)
 			}
 			i++
 			value = args[i]
 		}
 		i++
-		if name == "--host" {
-			host = value
-		} else {
-			dir = value
-			dirFromFlag = true
+		switch name {
+		case "--host":
+			spec.host = value
+		case "--dir":
+			spec.dir = value
+			spec.dirFromFlag = true
+		case "--project":
+			spec.project = value
 		}
 	}
 	rest := args[i:]
 
 	// A --host past the verb would be silently swallowed by the help-only
-	// persistent flag; refuse it loudly. (--dir stays verb-owned, e.g.
-	// `mp init --dir`.)
-	if host == "" {
+	// persistent flag; refuse it loudly. (--dir/--project stay verb-owned
+	// past the verb, e.g. `mp init --dir`, `mp switch --project`.)
+	if spec.host == "" {
 		for _, a := range rest {
 			if a == "--" {
 				break
 			}
 			if a == "--host" || strings.HasPrefix(a, "--host=") {
-				return nil, nil, fmt.Errorf("--host must come before the command (use: mp --host <ssh-host> %s)", rest[0])
+				return nil, remoteSpec{}, fmt.Errorf("--host must come before the command (use: mp --host <ssh-host> %s)", rest[0])
 			}
 		}
 	}
 
-	fromEnv := false
-	if host == "" && os.Getenv("MP_HOST") != "" {
-		host = os.Getenv("MP_HOST")
-		fromEnv = true
+	if spec.host == "" && os.Getenv("MP_HOST") != "" {
+		spec.host = os.Getenv("MP_HOST")
+		spec.hostFromEnv = true
 	}
-	if dir == "" {
-		dir = os.Getenv("MP_DIR")
+	if spec.dir == "" {
+		spec.dir = os.Getenv("MP_DIR")
 	}
 
-	if host == "" || (len(rest) > 0 && localOnlyVerbs[rest[0]]) {
-		if dirFromFlag && host == "" {
-			return nil, nil, fmt.Errorf("--dir requires --host (mp never proxies from a directory alone)")
-		}
-		// A stray MP_DIR without a host is ignored rather than fatal.
-		return rest, nil, nil
+	if len(rest) > 0 && localOnlyVerbs[rest[0]] {
+		return rest, remoteSpec{}, nil
 	}
-	if err := validSSHDest(host); err != nil {
-		return nil, nil, err
-	}
-	return rest, &remoteTarget{host: host, dir: dir, fromEnv: fromEnv}, nil
+	return rest, spec, nil
 }
 
-// validSSHDest rejects ssh destinations that could be parsed as ssh options
-// or smuggle shell syntax — a registry file is user-writable, so a poisoned
-// host must fail closed rather than reach ssh's argv.
-func validSSHDest(host string) error {
-	if host == "" || strings.HasPrefix(host, "-") || strings.ContainsAny(host, " \t\n'\"`$;|&\\") {
-		return fmt.Errorf("invalid ssh host %q", host)
+// resolveTarget turns a routing spec into an ssh target and/or a local chdir.
+// Precedence: --host flag (MP_HOST counts) > registry host > local. mp never
+// proxies based on cwd or a bare directory alone.
+func resolveTarget(spec remoteSpec) (target *remoteTarget, chdir string, err error) {
+	var proj registry.Project
+	if spec.project != "" {
+		reg, err := registry.Load()
+		if err != nil {
+			return nil, "", err
+		}
+		proj, err = reg.FindUnique(spec.project)
+		if err != nil {
+			return nil, "", err
+		}
 	}
-	return nil
+
+	host, fromEnv := spec.host, spec.hostFromEnv
+	if host == "" && proj.Host != "" {
+		host, fromEnv = proj.Host, false
+	}
+
+	if host == "" {
+		if spec.dirFromFlag {
+			return nil, "", fmt.Errorf("--dir requires a remote target (--host, or --project with a remote project)")
+		}
+		return nil, proj.Path, nil // Path is "" without --project: plain local run
+	}
+	if err := cli.ValidSSHDest(host); err != nil {
+		return nil, "", err
+	}
+	dir := spec.dir
+	if dir == "" {
+		dir = proj.Path
+	}
+	return &remoteTarget{host: host, dir: dir, fromEnv: fromEnv}, "", nil
 }
 
 // remoteBin is the mp binary to run on the remote host; MP_REMOTE_BIN (local

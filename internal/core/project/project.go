@@ -49,11 +49,14 @@ func Add(dir string) (registry.Project, bool, error) {
 	return p, added, nil
 }
 
-// AddRemote registers a project living on an ssh host. The directory is
-// resolved to an absolute path on the host at add time (so relative paths and
-// tildes never leak into the registry), and must already be an mp project
-// there. The project name is read from the remote monkeypuzzle.json.
+// AddRemote registers a project living on an ssh host. The directory —
+// absolute, or relative to the ssh login home (a quoted `~` never expands) —
+// is resolved to an absolute path on the host at add time, and must already
+// be an mp project there. The name is read from the remote monkeypuzzle.json.
 func AddRemote(host, dir string) (registry.Project, bool, error) {
+	if err := cli.ValidSSHDest(host); err != nil {
+		return registry.Project{}, false, err
+	}
 	probe := `root=$(readlink -f ` + cli.ShQuote(dir) + `) && test -f "$root/.monkeypuzzle/monkeypuzzle.json" && printf %s "$root"`
 	root, err := sshOutput(host, probe)
 	if err != nil {
@@ -84,9 +87,10 @@ func AddRemote(host, dir string) (registry.Project, bool, error) {
 	return p, added, nil
 }
 
-// sshOutput runs a shell command on host and returns its stdout.
+// sshOutput runs a shell command on host and returns its stdout. The command
+// is wrapped in `sh -c` so POSIX syntax survives fish/csh login shells.
 func sshOutput(host, command string) (string, error) {
-	out, err := exec.Command("ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", host, "--", command).Output()
+	out, err := exec.Command("ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "--", host, "sh -c "+cli.ShQuote(command)).Output()
 	return string(out), err
 }
 
@@ -97,9 +101,9 @@ func Remove(nameOrPath string) (registry.Project, error) {
 	if err != nil {
 		return registry.Project{}, err
 	}
-	p, ok := reg.Remove(nameOrPath)
-	if !ok {
-		return registry.Project{}, fmt.Errorf("no registered project matching %q", nameOrPath)
+	p, err := reg.Remove(nameOrPath)
+	if err != nil {
+		return registry.Project{}, err
 	}
 	if err := reg.Save(); err != nil {
 		return registry.Project{}, err

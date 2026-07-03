@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/paths"
@@ -57,17 +58,17 @@ func TestFindAndRemove(t *testing.T) {
 		t.Error("Find should fail for unknown")
 	}
 
-	if _, ok := r.Remove("/repo/a"); !ok {
-		t.Error("Remove by path failed")
+	if _, err := r.Remove("/repo/a"); err != nil {
+		t.Errorf("Remove by path failed: %v", err)
 	}
-	if _, ok := r.Remove("b"); !ok {
-		t.Error("Remove by name failed")
+	if _, err := r.Remove("b"); err != nil {
+		t.Errorf("Remove by name failed: %v", err)
 	}
 	if len(r.Projects) != 0 {
 		t.Fatalf("expected empty after removals, got %d", len(r.Projects))
 	}
-	if _, ok := r.Remove("a"); ok {
-		t.Error("Remove of already-removed should report false")
+	if _, err := r.Remove("a"); err == nil {
+		t.Error("Remove of already-removed should error")
 	}
 }
 
@@ -128,5 +129,32 @@ func TestRemoteHostSurvivesRoundTrip(t *testing.T) {
 	}
 	if loaded.Projects[0].Host != "wire" {
 		t.Errorf("host lost in round trip: %+v", loaded.Projects[0])
+	}
+}
+
+func TestFindUniqueAmbiguity(t *testing.T) {
+	r := Registry{Projects: []Project{
+		{Name: "api", Path: "/local/api"},
+		{Name: "api", Path: "/home/u/api", Host: "wire"},
+	}}
+	if _, err := r.FindUnique("api"); err == nil || !strings.Contains(err.Error(), "ambiguous") {
+		t.Errorf("FindUnique(api) = %v, want ambiguous error", err)
+	}
+	p, err := r.FindUnique("wire:/home/u/api")
+	if err != nil || p.Host != "wire" {
+		t.Errorf("FindUnique(host:path) = %+v, %v", p, err)
+	}
+	p, err = r.FindUnique("/local/api")
+	if err != nil || p.Host != "" {
+		t.Errorf("FindUnique(path) = %+v, %v", p, err)
+	}
+	if _, err := r.Remove("api"); err == nil {
+		t.Error("Remove of ambiguous name must error, not delete an arbitrary entry")
+	}
+	if _, err := r.Remove("wire:/home/u/api"); err != nil {
+		t.Errorf("Remove(host:path) = %v", err)
+	}
+	if len(r.Projects) != 1 || r.Projects[0].Host != "" {
+		t.Errorf("wrong entry removed: %+v", r.Projects)
 	}
 }

@@ -182,7 +182,7 @@ func TestCLI_RemoteProxy_ProjectRouting(t *testing.T) {
 	e := setupTestEnv(t)
 	defer e.cleanup()
 	canned := `{"pieces":[]}`
-	record, path := sshShim(t, e, canned, 0)
+	record, path := sshShim(t, e, canned, 0) // record = shim dir
 
 	// Seed the registry with one remote project.
 	if err := os.MkdirAll(e.dataDir, 0o755); err != nil {
@@ -193,24 +193,48 @@ func TestCLI_RemoteProxy_ProjectRouting(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	stdout, stderr, err := runProxy(e, path, nil, "list", "--project", "api")
+	stdout, stderr, err := runProxy(e, path, "", nil, "--project", "api", "list")
 	if err != nil {
 		t.Fatalf("proxied mp failed: %v\nstderr: %s", err, stderr)
 	}
 	if stdout != canned {
 		t.Errorf("stdout = %q, want %q", stdout, canned)
 	}
-	argv, err := os.ReadFile(record)
-	if err != nil {
-		t.Fatalf("shim was not invoked: %v", err)
-	}
-	if !strings.Contains(string(argv), "cd '/home/u/api' && exec 'mp' 'list'") {
+	argv := shimFile(t, record, "argv")
+	if !strings.Contains(argv, `cd '\''/home/u/api'\'' && exec '\''mp'\'' '\''list'\''`) {
 		t.Errorf("ssh argv = %q, want cd into the registered path and --project stripped", argv)
 	}
 
 	// Unknown project fails locally, before any ssh.
-	_, stderr, err = runProxy(e, path, nil, "list", "--project", "nope")
+	_, stderr, err = runProxy(e, path, "", nil, "--project", "nope", "list")
 	if err == nil || !strings.Contains(stderr, "no registered project") {
 		t.Errorf("unknown project: err = %v stderr = %q", err, stderr)
+	}
+}
+
+func TestCLI_LocalProjectChdir(t *testing.T) {
+	e := setupTestEnv(t)
+	defer e.cleanup()
+	e.initGitRepo()
+	e.initProject("chdir-proj")
+	shimDir, path := sshShim(t, e, "{}", 0)
+
+	// Drive the registered local project by name from an unrelated cwd:
+	// resolveTarget must chdir, not proxy. (mp init registered it.)
+	elsewhere := filepath.Join(e.tmpDir, "elsewhere")
+	if err := os.MkdirAll(elsewhere, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(e.binPath, "--project", "chdir-proj", "list")
+	cmd.Dir = elsewhere
+	cmd.Env = append(e.env(), "PATH="+path)
+	var stdout, stderr strings.Builder
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("mp --project <local> list failed: %v\nstderr: %s", err, stderr.String())
+	}
+	if _, err := os.Stat(filepath.Join(shimDir, "argv")); err == nil {
+		t.Error("local --project must not invoke ssh")
 	}
 }

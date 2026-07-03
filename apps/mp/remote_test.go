@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -8,17 +10,17 @@ import (
 	"github.com/jewell-lgtm/monkeypuzzle/pkg/cli"
 )
 
-func TestExtractRemoteTarget(t *testing.T) {
+func TestExtractRemoteSpec(t *testing.T) {
 	tests := []struct {
 		name     string
 		args     []string
 		env      map[string]string
 		wantRest []string
-		wantTgt  *remoteTarget
+		wantSpec remoteSpec
 		wantErr  string
 	}{
 		{
-			name:     "no host, args untouched",
+			name:     "no proxy flags, args untouched",
 			args:     []string{"create", "--prompt", "add rate limiting"},
 			wantRest: []string{"create", "--prompt", "add rate limiting"},
 		},
@@ -26,13 +28,19 @@ func TestExtractRemoteTarget(t *testing.T) {
 			name:     "host and dir flags stripped",
 			args:     []string{"--host", "wire", "--dir", "/home/u/api", "list", "--json"},
 			wantRest: []string{"list", "--json"},
-			wantTgt:  &remoteTarget{host: "wire", dir: "/home/u/api"},
+			wantSpec: remoteSpec{host: "wire", dir: "/home/u/api", dirFromFlag: true},
 		},
 		{
-			name:     "equals form",
-			args:     []string{"--host=wire", "--dir=/x", "create"},
+			name:     "equals form with project",
+			args:     []string{"--host=wire", "--project=api", "create"},
 			wantRest: []string{"create"},
-			wantTgt:  &remoteTarget{host: "wire", dir: "/x"},
+			wantSpec: remoteSpec{host: "wire", project: "api"},
+		},
+		{
+			name:     "project alone",
+			args:     []string{"--project", "api", "create", "--json"},
+			wantRest: []string{"create", "--json"},
+			wantSpec: remoteSpec{project: "api"},
 		},
 		{
 			name:    "host after the verb is refused, not swallowed",
@@ -45,44 +53,28 @@ func TestExtractRemoteTarget(t *testing.T) {
 			wantRest: []string{"run", "--", "--host"},
 		},
 		{
-			name:     "verb-owned --dir stays with the verb",
-			args:     []string{"init", "--dir", "/x"},
-			wantRest: []string{"init", "--dir", "/x"},
+			name:     "verb-owned --dir and --project stay with the verb",
+			args:     []string{"switch", "--project", "api", "--piece", "x"},
+			wantRest: []string{"switch", "--project", "api", "--piece", "x"},
 		},
 		{
-			name:    "leading dir without host errors",
-			args:    []string{"--dir", "/x", "list"},
-			wantErr: "--dir requires --host",
-		},
-		{
-			name:    "host missing value errors",
-			args:    []string{"--host"},
+			name:    "flag missing value errors",
+			args:    []string{"--project"},
 			wantErr: "flag needs an argument",
-		},
-		{
-			name:    "option-shaped host is rejected",
-			args:    []string{"--host", "-oProxyCommand=evil", "list"},
-			wantErr: "invalid ssh host",
 		},
 		{
 			name:     "MP_HOST env drives forwarding",
 			args:     []string{"go", "--json"},
 			env:      map[string]string{"MP_HOST": "wire", "MP_DIR": "/srv/api"},
 			wantRest: []string{"go", "--json"},
-			wantTgt:  &remoteTarget{host: "wire", dir: "/srv/api", fromEnv: true},
+			wantSpec: remoteSpec{host: "wire", dir: "/srv/api", hostFromEnv: true},
 		},
 		{
 			name:     "flag beats env",
 			args:     []string{"--host", "other", "list"},
 			env:      map[string]string{"MP_HOST": "wire"},
 			wantRest: []string{"list"},
-			wantTgt:  &remoteTarget{host: "other"},
-		},
-		{
-			name:     "stray MP_DIR without any host is ignored",
-			args:     []string{"list"},
-			env:      map[string]string{"MP_DIR": "/x"},
-			wantRest: []string{"list"},
+			wantSpec: remoteSpec{host: "other"},
 		},
 		{
 			name:     "completion never proxies even with MP_HOST",
@@ -91,10 +83,10 @@ func TestExtractRemoteTarget(t *testing.T) {
 			wantRest: []string{"__complete", "li"},
 		},
 		{
-			name:     "help never proxies even with MP_HOST",
-			args:     []string{"help", "create"},
+			name:     "remote doctor never proxies even with MP_HOST",
+			args:     []string{"remote", "doctor"},
 			env:      map[string]string{"MP_HOST": "wire"},
-			wantRest: []string{"help", "create"},
+			wantRest: []string{"remote", "doctor"},
 		},
 	}
 	for _, tt := range tests {
@@ -108,7 +100,7 @@ func TestExtractRemoteTarget(t *testing.T) {
 			if _, ok := tt.env["MP_DIR"]; !ok {
 				t.Setenv("MP_DIR", "")
 			}
-			rest, tgt, err := extractRemoteTarget(tt.args)
+			rest, spec, err := extractRemoteSpec(tt.args)
 			if tt.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 					t.Fatalf("err = %v, want containing %q", err, tt.wantErr)
@@ -121,22 +113,131 @@ func TestExtractRemoteTarget(t *testing.T) {
 			if !reflect.DeepEqual(rest, tt.wantRest) {
 				t.Errorf("rest = %v, want %v", rest, tt.wantRest)
 			}
-			if !reflect.DeepEqual(tgt, tt.wantTgt) {
-				t.Errorf("target = %+v, want %+v", tgt, tt.wantTgt)
+			if spec != tt.wantSpec {
+				t.Errorf("spec = %+v, want %+v", spec, tt.wantSpec)
 			}
 		})
 	}
 }
 
-func TestValidSSHDest(t *testing.T) {
-	for _, ok := range []string{"wire", "user@wire", "wire.example.com", "10.0.0.7", "box_1"} {
-		if err := validSSHDest(ok); err != nil {
-			t.Errorf("validSSHDest(%q) = %v, want nil", ok, err)
-		}
+func TestResolveTarget(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Setenv("MP_DATA_DIR", dataDir)
+	reg := `{"version":"1","projects":[
+		{"name":"api","path":"/home/u/api","host":"wire","added_at":"2026-01-01T00:00:00Z"},
+		{"name":"web","path":"/local/web","added_at":"2026-01-01T00:00:00Z"},
+		{"name":"dup","path":"/local/dup","added_at":"2026-01-01T00:00:00Z"},
+		{"name":"dup","path":"/home/u/dup","host":"wire","added_at":"2026-01-01T00:00:00Z"}]}`
+	if err := os.WriteFile(filepath.Join(dataDir, "projects.json"), []byte(reg), 0o644); err != nil {
+		t.Fatal(err)
 	}
-	for _, bad := range []string{"", "-oProxyCommand=x", "host name", "host;rm", "host`x`", "a'b", `a"b`, "a$b", "a|b", "a&b", "a\\b"} {
-		if err := validSSHDest(bad); err == nil {
-			t.Errorf("validSSHDest(%q) = nil, want error", bad)
+
+	tests := []struct {
+		name      string
+		spec      remoteSpec
+		wantTgt   *remoteTarget
+		wantChdir string
+		wantErr   string
+	}{
+		{name: "empty spec is a plain local run", spec: remoteSpec{}},
+		{
+			name:    "remote project proxies to its host+path",
+			spec:    remoteSpec{project: "api"},
+			wantTgt: &remoteTarget{host: "wire", dir: "/home/u/api"},
+		},
+		{
+			name:      "local project resolves to chdir",
+			spec:      remoteSpec{project: "web"},
+			wantChdir: "/local/web",
+		},
+		{
+			name:    "explicit host wins, project supplies dir",
+			spec:    remoteSpec{host: "other", project: "api"},
+			wantTgt: &remoteTarget{host: "other", dir: "/home/u/api"},
+		},
+		{
+			name:    "--dir overrides the project path when proxying",
+			spec:    remoteSpec{project: "api", dir: "/elsewhere", dirFromFlag: true},
+			wantTgt: &remoteTarget{host: "wire", dir: "/elsewhere"},
+		},
+		{
+			name:    "--dir with a local project errors",
+			spec:    remoteSpec{project: "web", dir: "/x", dirFromFlag: true},
+			wantErr: "--dir requires a remote target",
+		},
+		{
+			name:    "--dir alone errors",
+			spec:    remoteSpec{dir: "/x", dirFromFlag: true},
+			wantErr: "--dir requires a remote target",
+		},
+		{
+			name: "stray MP_DIR without a host is ignored",
+			spec: remoteSpec{dir: "/x"},
+		},
+		{
+			name:    "ambiguous name refuses to guess a machine",
+			spec:    remoteSpec{project: "dup"},
+			wantErr: "ambiguous",
+		},
+		{
+			name:    "host:path disambiguates",
+			spec:    remoteSpec{project: "wire:/home/u/dup"},
+			wantTgt: &remoteTarget{host: "wire", dir: "/home/u/dup"},
+		},
+		{
+			name:      "plain path disambiguates to local",
+			spec:      remoteSpec{project: "/local/dup"},
+			wantChdir: "/local/dup",
+		},
+		{
+			name:    "unknown project errors",
+			spec:    remoteSpec{project: "nope"},
+			wantErr: "no registered project",
+		},
+		{
+			name:    "option-shaped host is rejected",
+			spec:    remoteSpec{host: "-oProxyCommand=evil"},
+			wantErr: "invalid ssh host",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tgt, chdir, err := resolveTarget(tt.spec)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("err = %v, want containing %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected err: %v", err)
+			}
+			if !reflect.DeepEqual(tgt, tt.wantTgt) {
+				t.Errorf("target = %+v, want %+v", tgt, tt.wantTgt)
+			}
+			if chdir != tt.wantChdir {
+				t.Errorf("chdir = %q, want %q", chdir, tt.wantChdir)
+			}
+		})
+	}
+}
+
+func TestSplitHostPath(t *testing.T) {
+	tests := []struct {
+		in, host, path string
+	}{
+		{"/local/path", "", "/local/path"},
+		{"relative/dir", "", "relative/dir"},
+		{"wire:/home/u/api", "wire", "/home/u/api"},
+		{"wire:code/api", "wire", "code/api"},
+		{"user@wire:code", "user@wire", "code"},
+		{":/weird", "", ":/weird"},
+		{"./a:b", "", "./a:b"}, // colon after a slash: a local path, not a host
+	}
+	for _, tt := range tests {
+		host, path := splitHostPath(tt.in)
+		if host != tt.host || path != tt.path {
+			t.Errorf("splitHostPath(%q) = (%q, %q), want (%q, %q)", tt.in, host, path, tt.host, tt.path)
 		}
 	}
 }

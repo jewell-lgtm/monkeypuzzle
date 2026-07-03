@@ -6,9 +6,11 @@ package registry
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/paths"
@@ -77,7 +79,16 @@ func (r Registry) Save() error {
 	if r.Version == "" {
 		r.Version = currentVersion
 	}
-	sort.Slice(r.Projects, func(i, j int) bool { return r.Projects[i].Name < r.Projects[j].Name })
+	sort.Slice(r.Projects, func(i, j int) bool {
+		a, b := r.Projects[i], r.Projects[j]
+		if a.Name != b.Name {
+			return a.Name < b.Name
+		}
+		if a.Host != b.Host {
+			return a.Host < b.Host
+		}
+		return a.Path < b.Path
+	})
 	data, err := json.MarshalIndent(r, "", "  ")
 	if err != nil {
 		return err
@@ -130,7 +141,8 @@ func (r *Registry) upsert(host, path, name string) (Project, bool) {
 }
 
 // Find looks up a project by name or by path. Returns the project and true if
-// found.
+// found; with duplicates it returns the first match — use FindUnique when the
+// caller must not guess.
 func (r Registry) Find(nameOrPath string) (Project, bool) {
 	if i := r.indexByPath(nameOrPath); i >= 0 {
 		return r.Projects[i], true
@@ -143,14 +155,57 @@ func (r Registry) Find(nameOrPath string) (Project, bool) {
 	return Project{}, false
 }
 
-// Remove deletes the project matching name or path. Returns the removed project
-// and true if anything was removed.
-func (r *Registry) Remove(nameOrPath string) (Project, bool) {
-	for i, p := range r.Projects {
-		if p.Path == nameOrPath || p.Name == nameOrPath {
-			r.Projects = append(r.Projects[:i], r.Projects[i+1:]...)
-			return p, true
+// matches returns every project whose name, path, or scp-style "host:path"
+// matches the query. The same repo cloned locally and on a host shares a
+// name, so more than one match is a real possibility, not a corrupt registry.
+func (r Registry) matches(query string) []Project {
+	var out []Project
+	for _, p := range r.Projects {
+		if p.Name == query || p.Path == query || (p.Host != "" && p.Host+":"+p.Path == query) {
+			out = append(out, p)
 		}
 	}
-	return Project{}, false
+	return out
+}
+
+// Location renders where a project lives, for error messages and tables.
+func (p Project) Location() string {
+	if p.Host != "" {
+		return p.Host + ":" + p.Path
+	}
+	return p.Path
+}
+
+// ErrNotFound reports no project matched a query.
+var ErrNotFound = errors.New("no registered project matched")
+
+// FindUnique looks up a project by name, path, or "host:path", erroring when
+// the query is ambiguous instead of guessing a machine.
+func (r Registry) FindUnique(query string) (Project, error) {
+	m := r.matches(query)
+	switch len(m) {
+	case 0:
+		return Project{}, fmt.Errorf("%w %q (see `mp project list`)", ErrNotFound, query)
+	case 1:
+		return m[0], nil
+	default:
+		locs := make([]string, len(m))
+		for i, p := range m {
+			locs[i] = p.Location()
+		}
+		return Project{}, fmt.Errorf("project %q is ambiguous: %s — pass the path or host:path", query, strings.Join(locs, ", "))
+	}
+}
+
+// Remove deletes the project matching name, path, or "host:path". Errors when
+// nothing matches or the query is ambiguous.
+func (r *Registry) Remove(query string) (Project, error) {
+	target, err := r.FindUnique(query)
+	if err != nil {
+		return Project{}, err
+	}
+	if i := r.indexBy(target.Host, target.Path); i >= 0 {
+		r.Projects = append(r.Projects[:i], r.Projects[i+1:]...)
+	}
+	return target, nil
 }

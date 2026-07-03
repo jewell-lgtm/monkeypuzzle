@@ -104,7 +104,12 @@ type projectAddInput struct {
 
 func runProjectAdd(cmd *cobra.Command, args []string) error {
 	if flagProjectAddSchema {
-		return cli.PrintJSON(projectAddInput{Path: "", Host: ""})
+		// Anonymous struct without omitempty so the optional host field is
+		// visible in the schema output.
+		return cli.PrintJSON(struct {
+			Path string `json:"path"`
+			Host string `json:"host"`
+		}{})
 	}
 
 	in, err := resolveProjectAddInput(args)
@@ -129,12 +134,25 @@ func runProjectAdd(cmd *cobra.Command, args []string) error {
 	if added {
 		verb = "Registered"
 	}
-	loc := p.Path
-	if p.Host != "" {
-		loc = p.Host + ":" + p.Path
-	}
-	fmt.Fprintf(os.Stderr, "%s %s -> %s\n", verb, p.Name, loc)
+	fmt.Fprintf(os.Stderr, "%s %s -> %s\n", verb, p.Name, p.Location())
+	warnNameCollision(p)
 	return cli.PrintJSON(p)
+}
+
+// warnNameCollision flags a just-registered project whose name is shared with
+// another entry (the same repo cloned locally and on a host does this), since
+// `--project <name>` will refuse to guess between them.
+func warnNameCollision(p registry.Project) {
+	reg, err := registry.Load()
+	if err != nil {
+		return
+	}
+	for _, other := range reg.Projects {
+		if other.Name == p.Name && other.Location() != p.Location() {
+			fmt.Fprintf(os.Stderr, "⚠ name %q is also registered at %s — `--project %s` will need the path or host:path\n", p.Name, other.Location(), p.Name)
+			return
+		}
+	}
 }
 
 // splitHostPath splits scp-style "host:path" into (host, path). A string
