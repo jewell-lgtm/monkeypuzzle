@@ -129,6 +129,9 @@ var (
 	flagStackGraphProvider string
 	flagStackGraphLimit    int
 	flagStackGraphSchema   bool
+
+	flagStackStatusJSON bool
+	flagStackGraphJSON  bool
 )
 
 func init() {
@@ -139,6 +142,7 @@ func init() {
 	_ = stackStatusCmd.Flags().MarkHidden("from-github")
 	stackStatusCmd.Flags().BoolVar(&flagStackApplyBases, "apply-bases", false, "Edit PR/MR bases on the forge to match local lineage")
 	stackStatusCmd.Flags().BoolVar(&flagStackStatusSchema, "schema", false, "Output JSON schema and exit")
+	stackStatusCmd.Flags().BoolVar(&flagStackStatusJSON, "json", false, "Output JSON even on a terminal")
 
 	stackSyncCmd.Flags().StringVar(&flagStackMain, "main", "main", "Main branch name")
 	stackSyncCmd.Flags().StringVar(&flagStackSyncFrom, "from", "", "Upstream ref to sync main from, e.g. origin/main (prompts when omitted on a terminal; defaults to origin/<main>)")
@@ -168,6 +172,7 @@ func init() {
 	stackGraphCmd.Flags().StringVar(&flagStackGraphProvider, "provider", "github", "Forge provider: github (default) or gitlab")
 	stackGraphCmd.Flags().IntVar(&flagStackGraphLimit, "limit", 200, "Max PRs to fetch")
 	stackGraphCmd.Flags().BoolVar(&flagStackGraphSchema, "schema", false, "Output JSON schema and exit")
+	stackGraphCmd.Flags().BoolVar(&flagStackGraphJSON, "json", false, "Output JSON even on a terminal")
 
 	stackCmd.AddCommand(stackStatusCmd)
 	stackCmd.AddCommand(stackSyncCmd)
@@ -227,6 +232,11 @@ func runStackStatus(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	// Humans at a terminal get the tree; pipes/agents keep the JSON contract.
+	if cli.IsTerminal() && !flagStackStatusJSON {
+		fmt.Print(renderStackStatus(result))
+		return nil
+	}
 	return cli.PrintJSON(result)
 }
 
@@ -266,6 +276,10 @@ func runStackGraph(cmd *cobra.Command, args []string) error {
 	result, err := handler.Graph(cmd.Context(), input)
 	if err != nil {
 		return err
+	}
+	if cli.IsTerminal() && !flagStackGraphJSON {
+		fmt.Print(renderStackGraph(result))
+		return nil
 	}
 	return cli.PrintJSON(result)
 }
