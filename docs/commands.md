@@ -25,6 +25,15 @@ ambiguous.)
 
 Output goes to stderr (human-readable) while stdout is reserved for JSON (machine-readable).
 
+**Remote execution.** Three global flags route a command somewhere else before
+any of the above happens: `--project <name>` runs it against a registered
+project (proxied over ssh when the registry entry has a host, from its path
+when local), and `--host <ssh-host>` / `--dir <abs-path>` (env: `MP_HOST` /
+`MP_DIR`) are the raw form. The whole invocation is forwarded verbatim to the
+`mp` binary on the host, so the remote surface is byte-identical — flags,
+stdin JSON, JSON out. See [Remote development](remote-development.md) and
+[`mp remote doctor`](#mp-remote).
+
 **Session management is interactive-only.** mp creates or switches a
 multiplexer session **only** when driven interactively — a real terminal on
 stdin (isatty) **and** running inside the configured multiplexer (`$TMUX` for
@@ -797,7 +806,9 @@ Manage the global registry of monkeypuzzle projects. A "project" is any git repo
 ```bash
 mp project add                       # register the current directory
 mp project add /path/to/repo
+mp project add wire:code/api         # scp-style: a project on an ssh host
 echo '{"path":"/repo"}' | mp project add
+echo '{"host":"wire","path":"code/api"}' | mp project add
 
 mp project list                      # human-readable table (alias: ls, status)
 mp project list --json               # machine output
@@ -806,7 +817,7 @@ mp project remove my-project         # unregister (alias: rm); repo on disk unto
 mp project remove --target /path/to/repo
 ```
 
-`mp project list` shows best-effort live state per project (current branch, number of pieces).
+`mp project list` shows best-effort live state per project (current branch, number of pieces). Remote projects show as `(remote)` with a `host:path` location; their JSON rows carry a `"host"` field. The `HOST:PATH` form resolves the path to an absolute path on the host at add time and requires the repo to already be `mp init`-ed there — see [Remote development](remote-development.md).
 
 ---
 
@@ -834,6 +845,25 @@ mp --json        # JSON for the current project
 ```
 
 The JSON form includes per-project `pieces` and `branches` arrays so callers can build their own pickers (see [`mp switch`](#mp-switch)). The `branches` array includes both local branches and remote-only refs (e.g. `origin/foo`, marked `"remote": true`) that have no local branch yet — selecting one fetches the remote and adopts it as a piece.
+
+---
+
+## mp remote
+
+Remote-host utilities for the ssh proxy (see [Remote development](remote-development.md)).
+
+### Usage
+
+```bash
+mp remote doctor wire     # probe one ssh host
+mp remote doctor          # probe every host in the project registry
+```
+
+`doctor` reports, per host: key-based (BatchMode) ssh reachability, the remote
+`mp` version vs the local one, and `git`/`tmux`/`gh` presence plus `gh` auth
+state. Human summary on stderr, JSON array on stdout; exits non-zero if a host
+is unreachable or missing `mp`/`git`. Run it once after setting up a host, and
+first whenever a proxied command misbehaves.
 
 ---
 
