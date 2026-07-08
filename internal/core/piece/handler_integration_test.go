@@ -690,6 +690,92 @@ func TestIntegration_CreatePiece_ThenSwitch(t *testing.T) {
 	}
 }
 
+func TestIntegration_CreatePiece_FromInsideWorktree_AnchorsAtMainRoot(t *testing.T) {
+	// Regression: `mp create` run from inside a piece worktree used
+	// `git rev-parse --show-toplevel`, which returns the worktree root, so the
+	// new piece was nested under the old one (<worktree>/.monkeypuzzle/pieces/...)
+	// and registered in the wrong registry — the follow-up switch couldn't find it.
+
+	// Skip if git is not available
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	// Override data dir for tests
+	tmpDataHome, err := os.MkdirTemp("", "mp-data-*")
+	if err != nil {
+		t.Fatalf("failed to create temp data dir: %v", err)
+	}
+	t.Cleanup(func() {
+		os.RemoveAll(tmpDataHome)
+		paths.ResetDataDir()
+	})
+	paths.SetDataDir(tmpDataHome)
+
+	// Create temp directory for test repo
+	tmpDir, err := os.MkdirTemp("", "mp-integration-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Initialize git repo
+	setupGitRepo(t, tmpDir)
+
+	// Create monkeypuzzle config
+	setupMonkeypuzzleConfig(t, tmpDir)
+
+	// Change to repo directory
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get working directory: %v", err)
+	}
+	defer func() { _ = os.Chdir(oldWd) }()
+
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("failed to change directory: %v", err)
+	}
+
+	// Create handler
+	deps := core.Deps{
+		FS:     adapters.NewOSFS(""),
+		Output: adapters.NewBufferOutput(),
+		Exec:   adapters.NewOSExec(),
+	}
+	handler := piece.NewHandler(deps)
+
+	// Create the first piece from the main repo root
+	first, err := handler.CreatePiece(context.Background(), "outer-piece", piece.CreatePieceOptions{})
+	if err != nil {
+		t.Fatalf("CreatePiece (outer) failed: %v", err)
+	}
+
+	// Create the second piece from *inside* the first piece's worktree
+	if err := os.Chdir(first.WorktreePath); err != nil {
+		t.Fatalf("failed to change into worktree: %v", err)
+	}
+	second, err := handler.CreatePiece(context.Background(), "inner-piece", piece.CreatePieceOptions{})
+	if err != nil {
+		t.Fatalf("CreatePiece (inner) failed: %v", err)
+	}
+
+	// The new piece must live under the main repo's pieces dir, not the worktree's
+	wantPath, _ := filepath.EvalSymlinks(filepath.Join(tmpDir, ".monkeypuzzle", "pieces", "inner-piece"))
+	gotPath, _ := filepath.EvalSymlinks(second.WorktreePath)
+	if gotPath != wantPath {
+		t.Errorf("expected worktree at %q, got %q", wantPath, gotPath)
+	}
+	nested := filepath.Join(first.WorktreePath, ".monkeypuzzle", "pieces", "inner-piece")
+	if _, err := os.Stat(nested); err == nil {
+		t.Errorf("piece was nested inside the outer worktree at %q", nested)
+	}
+
+	// And the follow-up switch (still inside the outer worktree) must find it
+	if _, err := handler.SwitchPiece(context.Background(), second.Name); err != nil {
+		t.Fatalf("SwitchPiece after CreatePiece from worktree failed: %v", err)
+	}
+}
+
 func TestIntegration_CreatePieceWithInput_WithName(t *testing.T) {
 	// Skip if git is not available
 	if _, err := exec.LookPath("git"); err != nil {

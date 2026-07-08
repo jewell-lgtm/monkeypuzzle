@@ -87,7 +87,10 @@ func (h *Handler) CreatePiece(ctx context.Context, pieceName string, opts Create
 		if err != nil {
 			return PieceInfo{}, fmt.Errorf("failed to get working directory: %w", err)
 		}
-		repoRoot, err = h.git.RepoRoot(ctx, wd)
+		// Resolve to the *main* repo root, not `git rev-parse --show-toplevel`:
+		// from inside a piece worktree the latter returns the worktree itself,
+		// which would nest the new piece (and its registry entry) under it.
+		repoRoot, err = h.git.GetMainRepoRoot(ctx, wd)
 		if err != nil {
 			return PieceInfo{}, fmt.Errorf("not in a git repository: %w", err)
 		}
@@ -235,7 +238,7 @@ func (h *Handler) AdoptPiece(ctx context.Context, input AdoptPieceInput) (PieceI
 		}
 		repoRoot, err = h.git.GetMainRepoRoot(ctx, wd)
 		if err != nil {
-			repoRoot, err = h.git.RepoRoot(ctx, wd)
+			repoRoot, err = h.git.GetMainRepoRoot(ctx, wd)
 			if err != nil {
 				return PieceInfo{}, fmt.Errorf("not in a git repository: %w", err)
 			}

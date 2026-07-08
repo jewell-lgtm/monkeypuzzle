@@ -25,6 +25,7 @@ func TestHandler_CreatePiece(t *testing.T) {
 
 	// Setup mock responses
 	repoRoot := "/repo"
+	mockExec.AddResponse("git", []string{"rev-parse", "--git-dir"}, []byte(repoRoot+"/.git\n"), nil)
 	mockExec.AddResponse("git", []string{"rev-parse", "--show-toplevel"}, []byte(repoRoot+"\n"), nil)
 
 	// Execute - will fail at worktree creation since we didn't mock it, but that's ok
@@ -474,6 +475,7 @@ func TestHandler_CreatePiece_SanitizesName(t *testing.T) {
 
 	// Setup mock responses
 	repoRoot := "/repo"
+	mockExec.AddResponse("git", []string{"rev-parse", "--git-dir"}, []byte(repoRoot+"/.git\n"), nil)
 	mockExec.AddResponse("git", []string{"rev-parse", "--show-toplevel"}, []byte(repoRoot+"\n"), nil)
 
 	// Test with a name containing spaces and uppercase
@@ -509,6 +511,7 @@ func TestHandler_CreatePiece_NameAlreadyExists(t *testing.T) {
 
 	// Setup mock responses
 	repoRoot := "/repo"
+	mockExec.AddResponse("git", []string{"rev-parse", "--git-dir"}, []byte(repoRoot+"/.git\n"), nil)
 	mockExec.AddResponse("git", []string{"rev-parse", "--show-toplevel"}, []byte(repoRoot+"\n"), nil)
 
 	// Get the actual pieces directory that will be used
@@ -972,6 +975,7 @@ func TestHandler_CreatePiece_OnPieceCreateHook_FiresDetached(t *testing.T) {
 	pieceName := "test-piece"
 	worktreePath := filepath.Join(repoRoot, ".monkeypuzzle", "pieces", pieceName)
 
+	mockExec.AddResponse("git", []string{"rev-parse", "--git-dir"}, []byte(repoRoot+"/.git\n"), nil)
 	mockExec.AddResponse("git", []string{"rev-parse", "--show-toplevel"}, []byte(repoRoot+"\n"), nil)
 	mockExec.AddResponse("git", []string{"worktree", "add", "-b", pieceName, worktreePath, "main"}, nil, nil)
 
@@ -1021,6 +1025,7 @@ func TestHandler_CreatePiece_OnPieceCreateHookFailsToStart_KeepsPiece(t *testing
 	pieceName := "test-piece"
 	worktreePath := filepath.Join(repoRoot, ".monkeypuzzle", "pieces", pieceName)
 
+	mockExec.AddResponse("git", []string{"rev-parse", "--git-dir"}, []byte(repoRoot+"/.git\n"), nil)
 	mockExec.AddResponse("git", []string{"rev-parse", "--show-toplevel"}, []byte(repoRoot+"\n"), nil)
 	mockExec.AddResponse("git", []string{"worktree", "add", "-b", pieceName, worktreePath, "main"}, nil, nil)
 
@@ -1851,6 +1856,7 @@ func TestHandler_CreatePiece_WritesPieceMetadata(t *testing.T) {
 	worktreePath := filepath.Join(piecesDir, pieceName)
 
 	// Mock git repo root
+	mockExec.AddResponse("git", []string{"rev-parse", "--git-dir"}, []byte(repoRoot+"/.git\n"), nil)
 	mockExec.AddResponse("git", []string{"rev-parse", "--show-toplevel"}, []byte(repoRoot+"\n"), nil)
 	// Mock getting current branch for metadata
 	mockExec.AddResponse("git", []string{"rev-parse", "--abbrev-ref", "HEAD"}, []byte("main\n"), nil)
@@ -1903,6 +1909,7 @@ func TestHandler_CreatePiece_WritesPieceMetadata_FromFeatureBranch(t *testing.T)
 	worktreePath := filepath.Join(piecesDir, pieceName)
 
 	// Mock git repo root
+	mockExec.AddResponse("git", []string{"rev-parse", "--git-dir"}, []byte(repoRoot+"/.git\n"), nil)
 	mockExec.AddResponse("git", []string{"rev-parse", "--show-toplevel"}, []byte(repoRoot+"\n"), nil)
 	// Mock getting current branch for metadata - we're on a feature branch
 	mockExec.AddResponse("git", []string{"rev-parse", "--abbrev-ref", "HEAD"}, []byte("parent-feature\n"), nil)
@@ -1951,6 +1958,7 @@ func TestHandler_CreatePieceFromPrompt(t *testing.T) {
 	piecesDir := filepath.Join(repoRoot, ".monkeypuzzle", "pieces")
 	worktreePath := filepath.Join(piecesDir, "add-dark-mode")
 
+	mockExec.AddResponse("git", []string{"rev-parse", "--git-dir"}, []byte(repoRoot+"/.git\n"), nil)
 	mockExec.AddResponse("git", []string{"rev-parse", "--show-toplevel"}, []byte(repoRoot+"\n"), nil)
 	mockExec.AddResponse("git", []string{"rev-parse", "--abbrev-ref", "HEAD"}, []byte("main\n"), nil)
 	mockExec.AddResponse("git", []string{"worktree", "add", "-b", "add-dark-mode", worktreePath, "main"}, []byte(""), nil)
