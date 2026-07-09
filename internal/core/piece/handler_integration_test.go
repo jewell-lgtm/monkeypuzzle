@@ -1830,6 +1830,79 @@ func TestIntegration_AbandonPiece_DoesNotSwitchWhenNotInSession(t *testing.T) {
 	}
 }
 
+func TestIntegration_AbandonPiece_DoesNotSwitchOrKillWhenWorktreeRemovalFails(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	tmpDataHome, err := os.MkdirTemp("", "mp-data-*")
+	if err != nil {
+		t.Fatalf("failed to create temp data dir: %v", err)
+	}
+	t.Cleanup(func() {
+		os.RemoveAll(tmpDataHome)
+		paths.ResetDataDir()
+	})
+	paths.SetDataDir(tmpDataHome)
+
+	tmpDir, err := os.MkdirTemp("", "mp-abandon-fail-visible-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	setupGitRepo(t, tmpDir)
+	setupMonkeypuzzleConfig(t, tmpDir)
+
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get working directory: %v", err)
+	}
+	defer func() { _ = os.Chdir(oldWd) }()
+
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("failed to change directory: %v", err)
+	}
+
+	deps := core.Deps{
+		FS:     adapters.NewOSFS(""),
+		Output: adapters.NewBufferOutput(),
+		Exec:   adapters.NewOSExec(),
+	}
+	mux := newRecordingMux(true)
+	handler := piece.NewHandlerWithMultiplexer(deps, mux)
+
+	info, err := handler.CreatePiece(context.Background(), "dirty-abandon", piece.CreatePieceOptions{})
+	if err != nil {
+		t.Fatalf("CreatePiece failed: %v", err)
+	}
+	mux.sessions[info.SessionName] = true
+
+	if err := os.WriteFile(filepath.Join(info.WorktreePath, "untracked.txt"), []byte("dirty\n"), 0644); err != nil {
+		t.Fatalf("failed to dirty worktree: %v", err)
+	}
+	if err := os.Chdir(info.WorktreePath); err != nil {
+		t.Fatalf("failed to chdir into worktree: %v", err)
+	}
+
+	_, err = handler.AbandonPiece(context.Background(), "dirty-abandon", piece.AbandonOptions{})
+	if err == nil {
+		t.Fatal("expected AbandonPiece to fail for a dirty worktree without force")
+	}
+	if !strings.Contains(err.Error(), "failed to remove worktree") {
+		t.Fatalf("expected worktree removal error, got %v", err)
+	}
+	if len(mux.switchTos) != 0 {
+		t.Fatalf("expected no SwitchTo calls after failed worktree removal, got %#v", mux.switchTos)
+	}
+	if len(mux.killed) != 0 {
+		t.Fatalf("expected no Kill calls after failed worktree removal, got %#v", mux.killed)
+	}
+	if _, err := os.Stat(info.WorktreePath); err != nil {
+		t.Fatalf("expected failed abandon to leave worktree in place; stat err = %v", err)
+	}
+}
+
 // TestIntegration_AbandonPiece_RemovesWorktreeBeforeKillingSession is a
 // regression test for the bug where abandoning a piece from inside its own tmux
 // session left the worktree on disk. AbandonPiece used to kill the session

@@ -1259,16 +1259,24 @@ func (h *Handler) removePieceForce(ctx context.Context, repoRoot, pieceName, wor
 // be removed. Without this, abandoning/finishing the piece you're currently
 // attached to strands the client in a dying session.
 func (h *Handler) switchClientToMainIfInside(ctx context.Context, mainRepoRoot, worktreePath string) {
-	if adapters.IsNoopMultiplexer(h.mux) || !h.mux.InSession() {
+	if !h.shouldSwitchClientToMain(worktreePath) {
 		return
+	}
+	h.switchClientToMain(ctx, mainRepoRoot)
+}
+
+func (h *Handler) shouldSwitchClientToMain(worktreePath string) bool {
+	if adapters.IsNoopMultiplexer(h.mux) || !h.mux.InSession() {
+		return false
 	}
 	wd, err := os.Getwd()
 	if err != nil {
-		return
+		return false
 	}
-	if !isPathInside(wd, worktreePath) {
-		return
-	}
+	return isPathInside(wd, worktreePath)
+}
+
+func (h *Handler) switchClientToMain(ctx context.Context, mainRepoRoot string) {
 	mainSession := h.mainSessionName(mainRepoRoot)
 	if err := h.mux.SwitchTo(ctx, mainSession, mainRepoRoot); err != nil {
 		h.deps.Output.Write(core.Message{
@@ -1380,10 +1388,7 @@ func (h *Handler) AbandonPiece(ctx context.Context, pieceName string, opts Aband
 	}
 	repoRoot = detectedRepoRoot
 
-	// If we're running inside the worktree being removed, switch the active
-	// client to the main repo session so the user isn't stranded when the piece
-	// session is killed below.
-	h.switchClientToMainIfInside(ctx, repoRoot, target.WorktreePath)
+	shouldSwitchToMain := h.shouldSwitchClientToMain(target.WorktreePath)
 
 	// Do the destructive git work (remove worktree, delete branch) BEFORE
 	// killing the session. When `mp abandon` runs from inside the piece's own
@@ -1392,6 +1397,11 @@ func (h *Handler) AbandonPiece(ctx context.Context, pieceName string, opts Aband
 	// silently never runs. That is exactly how a piece could survive an abandon:
 	// the session died but the worktree removal never happened, leaving the
 	// directory on disk and the piece still listed in the picker. Kill last.
+	//
+	// Do not switch the tmux client to main until after worktree removal succeeds:
+	// if removal fails (for example because the worktree is dirty and --force was
+	// not passed), the user must see the error in the piece session that ran the
+	// command instead of being moved away to main.
 
 	// Remove worktree (force if requested)
 	if opts.Force {
@@ -1414,6 +1424,14 @@ func (h *Handler) AbandonPiece(ctx context.Context, pieceName string, opts Aband
 		} else {
 			result.BranchDeleted = true
 		}
+	}
+
+	// If we're running inside the worktree being removed, switch the active
+	// client to the main repo session so the user isn't stranded when the piece
+	// session is killed below. This happens only after all fatal operations have
+	// succeeded, so failures remain visible in the piece session.
+	if shouldSwitchToMain {
+		h.switchClientToMain(ctx, repoRoot)
 	}
 
 	// Set main repo path for caller to navigate to
