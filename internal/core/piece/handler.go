@@ -744,11 +744,21 @@ func (h *Handler) SyncPiece(ctx context.Context, workDir string, input SyncInput
 		return SyncResult{}, err
 	}
 
+	// MP_MAIN_BRANCH is documented (and used by existing hooks, e.g. the
+	// after-piece-merge example in docs/workflow.md) as the repo's actual trunk
+	// branch name. Only set it here when the parent really is main; syncing a
+	// stacked child against a parent piece has no trunk branch to report, and
+	// passing the parent piece's name would silently violate that contract.
+	hookMainBranch := ""
+	if parent == "main" {
+		hookMainBranch = parentBranch
+	}
+
 	hookCtx := HookContext{
 		PieceName:    status.PieceName,
 		WorktreePath: status.WorktreePath,
 		RepoRoot:     status.RepoRoot,
-		MainBranch:   parentBranch,
+		MainBranch:   hookMainBranch,
 	}
 
 	if err := h.hooks.RunHook(ctx, status.RepoRoot, HookBeforePieceUpdate, hookCtx); err != nil {
