@@ -61,7 +61,7 @@ That's the whole integration. No `--reviewer` baked in, no opinion about labels 
 | Hook | Fires when | Extra env on top of piece basics |
 | --- | --- | --- |
 | `on-piece-create.sh` | `mp create` finishes the worktree (runs detached/fire-and-forget; output → `.monkeypuzzle/logs/`) | `MP_SESSION_NAME` |
-| `before-piece-update.sh` / `after-piece-update.sh` | around `mp update` | `MP_MAIN_BRANCH` |
+| `before-piece-update.sh` / `after-piece-update.sh` | around `mp update` / `mp sync` | `MP_MAIN_BRANCH` |
 | `before-piece-merge.sh` / `after-piece-merge.sh` | around `mp merge` | `MP_MAIN_BRANCH` |
 | `before-pr-create.sh` / `after-pr-create.sh` | around `mp pr create` | `MP_PR_NUMBER`, `MP_PR_URL`, `MP_PR_BASE_BRANCH` |
 | `before-pr-ready.sh` / `after-pr-ready.sh` | around `mp pr ready` | same as PR create |
@@ -94,6 +94,7 @@ The key rule: **non-interactive invocations (flags or JSON) fail loudly on genui
 | `mp list` | Show pieces (`--all` for cross-project) |
 | `mp switch` | Jump to a piece (tmux switch-client when in tmux) |
 | `mp update` | Sync piece with main |
+| `mp sync` | Sync piece with its parent (prefers origin's version) |
 | `mp merge` | Merge piece back to main |
 | `mp pr create [--draft]` | Push + open PR/MR via configured provider |
 | `mp pr ready` | Flip a draft PR/MR to ready |

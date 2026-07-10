@@ -1146,3 +1146,209 @@ func TestCLI_Version(t *testing.T) {
 		t.Errorf("expected version output to mention mp, got %q", out)
 	}
 }
+
+// createPieceForSync creates a piece (optionally parented) and returns its
+// worktree path.
+func (e *testEnv) createPieceForSync(name, parent string) string {
+	e.t.Helper()
+	args := []string{"create", "--name", name, "--skip-switch"}
+	if parent != "" {
+		args = append(args, "--parent", parent)
+	}
+	stdout, stderr, err := e.run(args...)
+	if err != nil {
+		e.t.Fatalf("piece create %s failed: %v\nstdout: %s\nstderr: %s", name, err, stdout, stderr)
+	}
+	var created map[string]any
+	if err := json.Unmarshal([]byte(stdout), &created); err != nil {
+		e.t.Fatalf("invalid JSON from piece create: %v\noutput: %s", err, stdout)
+	}
+	return created["worktree_path"].(string)
+}
+
+// commitFile writes a file and commits it in dir, returning the commit SHA.
+func (e *testEnv) commitFile(dir, name, content, msg string) string {
+	e.t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+		e.t.Fatalf("failed to write %s: %v", name, err)
+	}
+	e.gitInDir(dir, "add", name)
+	e.gitInDir(dir, "commit", "-m", msg)
+	return e.gitInDir(dir, "rev-parse", "HEAD")
+}
+
+// TestCLI_Sync_PrefersOriginParent verifies `mp sync` merges origin's version of
+// the parent piece, not the local branch: a commit that exists only on
+// origin/<parent> must land in the child, even though the local parent branch
+// doesn't have it.
+func TestCLI_Sync_PrefersOriginParent(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	env.initGitRepo()
+	env.initProject("test")
+	env.addBareOrigin()
+
+	parentWT := env.createPieceForSync("parent-piece", "")
+	env.commitFile(parentWT, "parent.txt", "v1", "parent work")
+	env.gitInDir(parentWT, "push", "-u", "origin", "parent-piece")
+
+	childWT := env.createPieceForSync("child-piece", "parent-piece")
+
+	// Advance the parent on origin only: commit + push, then rewind the local
+	// parent branch so the new commit exists solely on origin/parent-piece.
+	originOnly := env.commitFile(parentWT, "parent.txt", "v2", "parent origin-only work")
+	env.gitInDir(parentWT, "push", "origin", "parent-piece")
+	env.gitInDir(parentWT, "reset", "--hard", "HEAD~1")
+
+	stdout, stderr, err := env.runInDir(childWT, "sync")
+	if err != nil {
+		t.Fatalf("sync failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+
+	var result map[string]any
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("invalid JSON output: %v\noutput: %s", err, stdout)
+	}
+	if result["source"] != "origin" {
+		t.Errorf("expected source \"origin\", got %v", result["source"])
+	}
+	if result["merged_ref"] != "origin/parent-piece" {
+		t.Errorf("expected merged_ref \"origin/parent-piece\", got %v", result["merged_ref"])
+	}
+	if result["parent"] != "parent-piece" {
+		t.Errorf("expected parent \"parent-piece\", got %v", result["parent"])
+	}
+	if !env.branchContainsCommit(childWT, originOnly) {
+		t.Error("child should contain the origin-only parent commit after sync")
+	}
+}
+
+// TestCLI_Sync_LocalFallbackWithoutRemote verifies `mp sync` falls back to the
+// local parent branch when the parent isn't on origin (here: no origin at all).
+func TestCLI_Sync_LocalFallbackWithoutRemote(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	env.initGitRepo()
+	env.initProject("test")
+
+	parentWT := env.createPieceForSync("parent-piece", "")
+	childWT := env.createPieceForSync("child-piece", "parent-piece")
+	localCommit := env.commitFile(parentWT, "parent.txt", "v1", "parent local work")
+
+	stdout, stderr, err := env.runInDir(childWT, "sync")
+	if err != nil {
+		t.Fatalf("sync failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+
+	var result map[string]any
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("invalid JSON output: %v\noutput: %s", err, stdout)
+	}
+	if result["source"] != "local" {
+		t.Errorf("expected source \"local\", got %v", result["source"])
+	}
+	if result["merged_ref"] != "parent-piece" {
+		t.Errorf("expected merged_ref \"parent-piece\", got %v", result["merged_ref"])
+	}
+	if !env.branchContainsCommit(childWT, localCommit) {
+		t.Error("child should contain the local parent commit after sync")
+	}
+}
+
+// TestCLI_Sync_RootPieceUsesOriginMain verifies a root piece (parent=main) syncs
+// from origin/main by default: a commit only on origin/main lands in the piece
+// even though local main was rewound.
+func TestCLI_Sync_RootPieceUsesOriginMain(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	env.initGitRepo()
+	env.initProject("test")
+	env.addBareOrigin()
+
+	pieceWT := env.createPieceForSync("feat", "")
+
+	// Advance main on origin only.
+	originOnly := env.commitFile(env.tmpDir, "trunk.txt", "v1", "trunk origin-only work")
+	env.gitInDir(env.tmpDir, "push", "origin", "main")
+	env.gitInDir(env.tmpDir, "reset", "--hard", "HEAD~1")
+
+	stdout, stderr, err := env.runInDir(pieceWT, "sync")
+	if err != nil {
+		t.Fatalf("sync failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+
+	var result map[string]any
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("invalid JSON output: %v\noutput: %s", err, stdout)
+	}
+	if result["source"] != "origin" {
+		t.Errorf("expected source \"origin\", got %v", result["source"])
+	}
+	if result["merged_ref"] != "origin/main" {
+		t.Errorf("expected merged_ref \"origin/main\", got %v", result["merged_ref"])
+	}
+	if !env.branchContainsCommit(pieceWT, originOnly) {
+		t.Error("piece should contain the origin-only main commit after sync")
+	}
+}
+
+// TestCLI_Sync_LocalFlagSkipsOrigin verifies --local merges the local parent
+// branch even when origin has a newer version.
+func TestCLI_Sync_LocalFlagSkipsOrigin(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	env.initGitRepo()
+	env.initProject("test")
+	env.addBareOrigin()
+
+	parentWT := env.createPieceForSync("parent-piece", "")
+	env.commitFile(parentWT, "parent.txt", "v1", "parent work")
+	env.gitInDir(parentWT, "push", "-u", "origin", "parent-piece")
+
+	childWT := env.createPieceForSync("child-piece", "parent-piece")
+
+	originOnly := env.commitFile(parentWT, "parent.txt", "v2", "parent origin-only work")
+	env.gitInDir(parentWT, "push", "origin", "parent-piece")
+	env.gitInDir(parentWT, "reset", "--hard", "HEAD~1")
+
+	stdout, stderr, err := env.runInDir(childWT, "sync", "--local")
+	if err != nil {
+		t.Fatalf("sync --local failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+
+	var result map[string]any
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("invalid JSON output: %v\noutput: %s", err, stdout)
+	}
+	if result["source"] != "local" {
+		t.Errorf("expected source \"local\", got %v", result["source"])
+	}
+	if env.branchContainsCommit(childWT, originOnly) {
+		t.Error("--local should not pull in origin-only parent commits")
+	}
+}
+
+// TestCLI_Sync_Schema tests mp sync --schema.
+func TestCLI_Sync_Schema(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	stdout, _, err := env.run("sync", "--schema")
+	if err != nil {
+		t.Fatalf("sync --schema failed: %v", err)
+	}
+
+	var schema map[string]any
+	if err := json.Unmarshal([]byte(stdout), &schema); err != nil {
+		t.Fatalf("invalid JSON schema: %v\noutput: %s", err, stdout)
+	}
+	for _, field := range []string{"main_branch", "from", "local"} {
+		if _, ok := schema[field]; !ok {
+			t.Errorf("schema missing %q field", field)
+		}
+	}
+}

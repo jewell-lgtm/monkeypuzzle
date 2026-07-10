@@ -711,6 +711,134 @@ func (h *Handler) UpdatePiece(ctx context.Context, workDir, mainBranch string) (
 	return result, nil
 }
 
+// SyncPiece merges the current piece's parent into the piece. The parent comes
+// from piece metadata; "main" resolves to input.MainBranch. By default origin's
+// version of the parent is preferred: origin/<parent> is fetched and merged.
+// The local parent branch is used only when origin doesn't have the branch (or
+// isn't configured), or when input.Local is set. input.From overrides the ref
+// entirely (its remote part is fetched first when configured).
+func (h *Handler) SyncPiece(ctx context.Context, workDir string, input SyncInput) (SyncResult, error) {
+	status, err := h.Status(ctx, workDir)
+	if err != nil {
+		return SyncResult{}, fmt.Errorf("failed to get piece status: %w", err)
+	}
+	if !status.InPiece {
+		return SyncResult{}, fmt.Errorf("not in a piece worktree")
+	}
+
+	if _, err := h.git.CurrentBranch(ctx, workDir); err != nil {
+		return SyncResult{}, fmt.Errorf("failed to get current branch: %w", err)
+	}
+
+	parent := "main"
+	if meta, err := ReadPieceMetadata(status.WorktreePath, h.deps.FS); err == nil && meta != nil && meta.Parent != "" {
+		parent = meta.Parent
+	}
+	parentBranch := parent
+	if parent == "main" {
+		parentBranch = input.MainBranch
+	}
+
+	mergeRef, source, err := h.resolveSyncRef(ctx, workDir, parentBranch, input)
+	if err != nil {
+		return SyncResult{}, err
+	}
+
+	hookCtx := HookContext{
+		PieceName:    status.PieceName,
+		WorktreePath: status.WorktreePath,
+		RepoRoot:     status.RepoRoot,
+		MainBranch:   parentBranch,
+	}
+
+	if err := h.hooks.RunHook(ctx, status.RepoRoot, HookBeforePieceUpdate, hookCtx); err != nil {
+		return SyncResult{}, fmt.Errorf("before-piece-update hook failed: %w", err)
+	}
+
+	if err := h.git.Merge(ctx, workDir, mergeRef); err != nil {
+		return SyncResult{}, err
+	}
+
+	if err := h.hooks.RunHook(ctx, status.RepoRoot, HookAfterPieceUpdate, hookCtx); err != nil {
+		return SyncResult{}, fmt.Errorf("after-piece-update hook failed: %w", err)
+	}
+
+	result := SyncResult{
+		PieceName: status.PieceName,
+		Parent:    parent,
+		MergedRef: mergeRef,
+		Source:    source,
+		Status:    "synced",
+	}
+
+	h.deps.Output.Write(core.Message{
+		Type:    core.MsgSuccess,
+		Content: fmt.Sprintf("Merged %s into %s", mergeRef, status.PieceName),
+		Data:    result,
+	})
+
+	return result, nil
+}
+
+// resolveSyncRef decides which ref SyncPiece merges and fetches it when remote.
+// Precedence: explicit From override, then Local, then origin/<parentBranch>
+// when origin has the branch, else the local parent branch.
+func (h *Handler) resolveSyncRef(ctx context.Context, workDir, parentBranch string, input SyncInput) (mergeRef, source string, err error) {
+	if input.From != "" {
+		if remote, ref := splitSyncRemoteRef(input.From); remote != "" && h.remoteConfigured(ctx, workDir, remote) {
+			if err := h.git.Fetch(ctx, workDir, remote, ref); err != nil {
+				return "", "", err
+			}
+		}
+		return input.From, "override", nil
+	}
+
+	if input.Local {
+		return parentBranch, "local", nil
+	}
+
+	exists, err := h.git.BranchExistsOnRemote(ctx, workDir, parentBranch)
+	if err != nil {
+		// Origin exists but couldn't be queried (e.g. offline). Fall back to the
+		// local parent rather than blocking the sync, but say so.
+		h.deps.Output.Write(core.Message{
+			Type:    core.MsgWarning,
+			Content: fmt.Sprintf("Could not reach origin (%v); syncing from local %q", err, parentBranch),
+		})
+		return parentBranch, "local", nil
+	}
+	if !exists {
+		return parentBranch, "local", nil
+	}
+	if err := h.git.Fetch(ctx, workDir, "origin", parentBranch); err != nil {
+		return "", "", err
+	}
+	return "origin/" + parentBranch, "origin", nil
+}
+
+// remoteConfigured reports whether the named remote exists in the repo.
+func (h *Handler) remoteConfigured(ctx context.Context, workDir, name string) bool {
+	remotes, err := h.git.Remotes(ctx, workDir)
+	if err != nil {
+		return false
+	}
+	for _, r := range remotes {
+		if r == name {
+			return true
+		}
+	}
+	return false
+}
+
+// splitSyncRemoteRef splits a ref like "origin/main" into remote ("origin") and
+// branch ("main") on the first "/". A ref with no "/" has no remote part.
+func splitSyncRemoteRef(from string) (remote, ref string) {
+	if i := strings.IndexByte(from, '/'); i >= 0 {
+		return from[:i], from[i+1:]
+	}
+	return "", from
+}
+
 // MergePiece squash-merges the piece branch into its target branch.
 // For root pieces (parent=main), merges into main.
 // For child pieces, merges into the parent piece's branch.

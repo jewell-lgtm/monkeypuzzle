@@ -74,6 +74,7 @@ mp completion powershell | Out-String | Invoke-Expression
 | `mp abandon --name`       | Available piece names   |
 | `mp init --pr-provider`         | `github`, `gitlab`      |
 | `mp update --main-branch` | Git branch names        |
+| `mp sync --main-branch`   | Git branch names        |
 | `mp merge --main-branch`  | Git branch names        |
 
 ---
@@ -444,6 +445,62 @@ If any hook fails, the operation is aborted.
 
 ---
 
+## mp sync
+
+Sync the current piece with its **parent** (from piece metadata — another piece,
+or main for root pieces). Defaults to **origin's version** of the parent:
+`origin/<parent>` is fetched and merged. The local parent branch is used only
+when origin doesn't have it (or no origin is configured), or with `--local`.
+
+For whole-stack syncing, see [`mp stack sync`](#mp-stack).
+
+### Usage
+
+```bash
+mp sync                        # Merge origin/<parent> into the piece
+mp sync --local                # Merge the local parent branch instead
+mp sync --from upstream/main   # Merge an explicit ref
+echo '{"local":true}' | mp sync
+```
+
+### Flags
+
+| Flag            | Description                                            | Default |
+| --------------- | ------------------------------------------------------ | ------- |
+| `--main-branch` | Trunk branch name, used when the piece's parent is main | `main`  |
+| `--from`        | Explicit ref to sync from (fetched when remote)        | —       |
+| `--local`       | Use the local parent branch, skip origin               | `false` |
+
+### Requirements
+
+- Must be run from within a piece worktree
+
+### What it does
+
+1. Reads the piece's parent from metadata (`main` → `--main-branch`)
+2. Resolves the ref: `--from` override, else `origin/<parent>` when origin has
+   the branch (fetched first), else the local parent branch
+3. Runs `before-piece-update.sh` hook (if exists)
+4. Merges the resolved ref into the current piece branch
+5. Runs `after-piece-update.sh` hook (if exists)
+
+### Output
+
+```json
+{
+  "piece_name": "auth-oauth",
+  "parent": "feature-auth",
+  "merged_ref": "origin/feature-auth",
+  "source": "origin",
+  "status": "synced"
+}
+```
+
+`source` is `origin`, `local`, or `override` (`--from`). If origin is
+configured but unreachable, `mp sync` warns and falls back to the local parent.
+
+---
+
 ## mp merge
 
 Merge piece back to main branch.
@@ -802,8 +859,8 @@ Hooks are executable shell scripts in `.monkeypuzzle/hooks/` that run at key poi
 | Hook                     | Trigger                  | Execution                        |
 | ------------------------ | ------------------------ | -------------------------------- |
 | `on-piece-create.sh`     | After piece creation     | Detached (fire-and-forget); output logged to `.monkeypuzzle/logs/` |
-| `before-piece-update.sh` | Before `mp update` | Blocking |
-| `after-piece-update.sh`  | After successful update  | Blocking |
+| `before-piece-update.sh` | Before `mp update` / `mp sync` | Blocking |
+| `after-piece-update.sh`  | After successful update/sync | Blocking |
 | `before-piece-merge.sh`  | Before `mp merge`  | Blocking (non-zero exit aborts the merge) |
 | `after-piece-merge.sh`   | After successful merge   | Blocking |
 
