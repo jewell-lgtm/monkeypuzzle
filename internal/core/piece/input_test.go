@@ -193,3 +193,50 @@ func TestParseFlattenJSON(t *testing.T) {
 		})
 	}
 }
+
+func TestParseSyncJSON(t *testing.T) {
+	input, err := piece.ParseSyncJSON([]byte(`{"main_branch":"master","from":"upstream/main","local":true}`))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if input.MainBranch != "master" || input.From != "upstream/main" || !input.Local {
+		t.Errorf("unexpected input: %+v", input)
+	}
+}
+
+func TestParseSyncJSON_Invalid(t *testing.T) {
+	if _, err := piece.ParseSyncJSON([]byte(`not json`)); err == nil {
+		t.Error("expected error for invalid JSON")
+	}
+}
+
+func TestWithSyncDefaults(t *testing.T) {
+	input := piece.WithSyncDefaults(piece.SyncInput{})
+	if input.MainBranch != "main" {
+		t.Errorf("expected main_branch default \"main\", got %q", input.MainBranch)
+	}
+	if input.From != "" || input.Local {
+		t.Errorf("expected zero from/local, got %+v", input)
+	}
+
+	input = piece.WithSyncDefaults(piece.SyncInput{MainBranch: "  master ", From: " origin/x "})
+	if input.MainBranch != "master" || input.From != "origin/x" {
+		t.Errorf("expected trimmed values, got %+v", input)
+	}
+}
+
+func TestSyncPieceSchema(t *testing.T) {
+	data, err := piece.SyncPieceSchema()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var schema map[string]any
+	if err := json.Unmarshal(data, &schema); err != nil {
+		t.Fatalf("schema is not valid JSON: %v", err)
+	}
+	for _, field := range []string{"main_branch", "from", "local"} {
+		if _, ok := schema[field]; !ok {
+			t.Errorf("schema missing %q field", field)
+		}
+	}
+}

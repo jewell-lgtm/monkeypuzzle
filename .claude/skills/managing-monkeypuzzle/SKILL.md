@@ -26,6 +26,9 @@ echo '{"flat":true}' | mp list
 # Switch to a piece (uses tmux switch-client if you're in tmux)
 echo '{"name":"my-feature"}' | mp switch
 
+# Sync piece with its parent (prefers origin/<parent>; --local for local branch)
+echo '{}' | mp sync
+
 # Sync piece with main
 echo '{}' | mp update
 
@@ -82,7 +85,7 @@ Drop executable scripts in `.monkeypuzzle/hooks/`:
 | Hook | Fires | Env beyond piece basics |
 | --- | --- | --- |
 | `on-piece-create.sh` | after worktree+session ready | `MP_SESSION_NAME` |
-| `before-piece-update.sh` / `after-piece-update.sh` | around `mp update` | `MP_MAIN_BRANCH` |
+| `before-piece-update.sh` / `after-piece-update.sh` | around `mp update` / `mp sync` | `MP_MAIN_BRANCH` |
 | `before-piece-merge.sh` / `after-piece-merge.sh` | around `mp merge` | `MP_MAIN_BRANCH` |
 | `before-pr-create.sh` / `after-pr-create.sh` | around `mp pr create` | `MP_PR_NUMBER`, `MP_PR_URL`, `MP_PR_BASE_BRANCH` |
 | `before-pr-ready.sh` / `after-pr-ready.sh` | around `mp pr ready` | same as PR create |

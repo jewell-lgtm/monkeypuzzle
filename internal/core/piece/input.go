@@ -209,6 +209,61 @@ func WithUpdateDefaults(input UpdateInput) UpdateInput {
 	return UpdateInput{MainBranch: mainBranch}
 }
 
+// SyncInput holds input for the piece sync command.
+type SyncInput struct {
+	// MainBranch is the trunk branch name, used when the piece's parent is "main".
+	MainBranch string `json:"main_branch,omitempty"`
+	// From is an explicit ref to sync from (e.g. "origin/parent-branch",
+	// "upstream/main"). Overrides the default origin/<parent> resolution.
+	From string `json:"from,omitempty"`
+	// Local syncs from the local parent branch instead of origin's version.
+	Local bool `json:"local,omitempty"`
+}
+
+// SyncResult contains the result of a sync operation.
+type SyncResult struct {
+	PieceName string `json:"piece_name"`
+	// Parent is the piece's parent as recorded in metadata ("main" for root pieces).
+	Parent string `json:"parent"`
+	// MergedRef is the ref that was merged into the piece (e.g. "origin/parent" or "parent").
+	MergedRef string `json:"merged_ref"`
+	// Source is where the parent came from: "origin", "local", or "override".
+	Source string `json:"source"`
+	Status string `json:"status"` // "synced"
+}
+
+// SyncPieceSchema returns the JSON schema for piece sync input.
+func SyncPieceSchema() ([]byte, error) {
+	schema := map[string]any{
+		"main_branch": "main",
+		"from":        "",
+		"local":       false,
+	}
+	return json.MarshalIndent(schema, "", "  ")
+}
+
+// ParseSyncJSON parses JSON input into SyncInput.
+func ParseSyncJSON(data []byte) (SyncInput, error) {
+	var input SyncInput
+	if err := json.Unmarshal(data, &input); err != nil {
+		return SyncInput{}, fmt.Errorf("invalid JSON: %w", err)
+	}
+	return input, nil
+}
+
+// WithSyncDefaults returns input with whitespace trimmed and defaults applied.
+func WithSyncDefaults(input SyncInput) SyncInput {
+	mainBranch := strings.TrimSpace(input.MainBranch)
+	if mainBranch == "" {
+		mainBranch = "main"
+	}
+	return SyncInput{
+		MainBranch: mainBranch,
+		From:       strings.TrimSpace(input.From),
+		Local:      input.Local,
+	}
+}
+
 // Reparent strategies for merging a piece that has child pieces.
 const (
 	ReparentRebase = "rebase" // rebase descendants onto the merge target (rewrites history)
