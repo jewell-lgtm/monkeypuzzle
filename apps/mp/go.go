@@ -146,7 +146,11 @@ func collectDashboard(ctx context.Context, infos []projectcmd.Info) ([]dashProje
 					})
 				}
 			}
-			dp.Branches = collectProjectBranches(ctx, git, info.Path)
+			piecePaths := make([]string, 0, len(dp.Pieces))
+			for _, pc := range dp.Pieces {
+				piecePaths = append(piecePaths, pc.WorktreePath)
+			}
+			dp.Branches = collectProjectBranches(ctx, git, info.Path, piecePaths)
 		}
 		out = append(out, dp)
 	}
@@ -154,21 +158,18 @@ func collectDashboard(ctx context.Context, infos []projectcmd.Info) ([]dashProje
 }
 
 // collectProjectBranches returns git branches that are candidates for adoption:
-// not main/master and not currently checked out in any worktree (which covers
-// both the main repo and existing piece worktrees). Local branches come first,
+// not main/master, not checked out in the main repo or an existing piece
+// worktree, and not held by a locked worktree. A branch checked out in some
+// *other* worktree (e.g. one an agent created) still qualifies — adopting it
+// relocates that worktree into the pieces dir. Local branches come first,
 // then remote-only refs (e.g. "origin/foo") that have no local branch yet —
 // adopting one fetches the remote and creates a tracking worktree.
-func collectProjectBranches(ctx context.Context, git *adapters.Git, projectPath string) []dashBranch {
+func collectProjectBranches(ctx context.Context, git *adapters.Git, projectPath string, pieceWorktrees []string) []dashBranch {
 	locals, err := git.ListLocalBranches(ctx, projectPath)
 	if err != nil {
 		return nil
 	}
-	checkedOut, err := git.CheckedOutBranches(ctx, projectPath)
-	if err != nil {
-		// On error, fall back to skipping main/master only — better to show too
-		// much than to silently hide everything.
-		checkedOut = map[string]bool{}
-	}
+	checkedOut := unadoptableBranches(ctx, git, projectPath, pieceWorktrees)
 
 	localSet := make(map[string]bool, len(locals))
 	for _, b := range locals {
@@ -207,6 +208,35 @@ func collectProjectBranches(ctx context.Context, git *adapters.Git, projectPath 
 		out = append(out, dashBranch{Name: r, Remote: true})
 		if len(out) >= maxBranchesPerProject {
 			break
+		}
+	}
+	return out
+}
+
+// unadoptableBranches returns the set of branch names `mp adopt` cannot take
+// over: those checked out in the main repo checkout, in an existing piece
+// worktree, or in a locked worktree. On probe failure it returns an empty set —
+// better to show too much than to silently hide everything.
+func unadoptableBranches(ctx context.Context, git *adapters.Git, projectPath string, pieceWorktrees []string) map[string]bool {
+	worktrees, err := git.Worktrees(ctx, projectPath)
+	if err != nil {
+		return map[string]bool{}
+	}
+	pieceSet := make(map[string]bool, len(pieceWorktrees))
+	for _, p := range pieceWorktrees {
+		pieceSet[filepath.Clean(p)] = true
+	}
+	mainPath := filepath.Clean(projectPath)
+	out := map[string]bool{}
+	for _, wt := range worktrees {
+		if wt.Branch == "" || wt.Prunable {
+			// Detached worktrees hold no branch; a prunable record's branch is
+			// still adoptable (adopt prunes it first).
+			continue
+		}
+		path := filepath.Clean(wt.Path)
+		if path == mainPath || pieceSet[path] || wt.Locked {
+			out[wt.Branch] = true
 		}
 	}
 	return out
