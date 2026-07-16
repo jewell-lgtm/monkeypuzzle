@@ -2190,3 +2190,129 @@ func TestIntegration_MergePiece_RecordsMergedMarker_MultiCommit(t *testing.T) {
 		t.Errorf("expected method %q, got %q", "recorded", status.Method)
 	}
 }
+
+// setupAdoptTestRepo creates a git repo with mp config, isolates the data dir,
+// and chdirs into the repo for the duration of the test. Returns the repo path
+// and a ready piece handler.
+func setupAdoptTestRepo(t *testing.T) (string, *piece.Handler) {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	paths.SetDataDir(t.TempDir())
+	t.Cleanup(paths.ResetDataDir)
+
+	tmpDir := t.TempDir()
+	setupGitRepo(t, tmpDir)
+	setupMonkeypuzzleConfig(t, tmpDir)
+
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get working directory: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldWd) })
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("failed to change directory: %v", err)
+	}
+
+	deps := core.Deps{
+		FS:     adapters.NewOSFS(""),
+		Output: adapters.NewBufferOutput(),
+		Exec:   adapters.NewOSExec(),
+	}
+	return tmpDir, piece.NewHandler(deps)
+}
+
+// TestIntegration_AdoptPiece_BranchInForeignWorktree covers adopting a branch
+// that is checked out in a worktree mp doesn't manage — the shape an agent's
+// worktree isolation (e.g. Claude Code) leaves behind. Adopt relocates the
+// worktree into the pieces dir, carrying uncommitted changes along.
+func TestIntegration_AdoptPiece_BranchInForeignWorktree(t *testing.T) {
+	tmpDir, handler := setupAdoptTestRepo(t)
+
+	foreignPath := filepath.Join(t.TempDir(), "agent-worktree")
+	runGit(t, tmpDir, "worktree", "add", "-b", "agent-spike", foreignPath)
+
+	// Uncommitted work in the foreign worktree must survive the adoption.
+	wipFile := filepath.Join(foreignPath, "wip.txt")
+	if err := os.WriteFile(wipFile, []byte("uncommitted"), 0644); err != nil {
+		t.Fatalf("failed to write wip file: %v", err)
+	}
+
+	info, err := handler.AdoptPiece(context.Background(), piece.AdoptPieceInput{Branch: "agent-spike"})
+	if err != nil {
+		t.Fatalf("AdoptPiece failed for branch in foreign worktree: %v", err)
+	}
+
+	wantPath := filepath.Join(tmpDir, ".monkeypuzzle", "pieces", "agent-spike")
+	if info.WorktreePath != wantPath {
+		t.Errorf("expected worktree at %s, got %s", wantPath, info.WorktreePath)
+	}
+	if data, err := os.ReadFile(filepath.Join(info.WorktreePath, "wip.txt")); err != nil {
+		t.Errorf("uncommitted change did not travel with the worktree: %v", err)
+	} else if string(data) != "uncommitted" {
+		t.Errorf("wip file content changed: %q", data)
+	}
+	if _, err := os.Stat(foreignPath); !os.IsNotExist(err) {
+		t.Errorf("foreign worktree still present at %s (err=%v)", foreignPath, err)
+	}
+}
+
+// TestIntegration_AdoptPiece_PrunableWorktree covers adopting a branch whose
+// registered worktree directory has been deleted out from under git (e.g. a
+// cleaned-up agent sandbox). Adopt prunes the stale record and proceeds.
+func TestIntegration_AdoptPiece_PrunableWorktree(t *testing.T) {
+	tmpDir, handler := setupAdoptTestRepo(t)
+
+	stalePath := filepath.Join(t.TempDir(), "stale-worktree")
+	runGit(t, tmpDir, "worktree", "add", "-b", "stale-branch", stalePath)
+	if err := os.RemoveAll(stalePath); err != nil {
+		t.Fatalf("failed to delete worktree dir: %v", err)
+	}
+
+	info, err := handler.AdoptPiece(context.Background(), piece.AdoptPieceInput{Branch: "stale-branch"})
+	if err != nil {
+		t.Fatalf("AdoptPiece failed for branch with prunable worktree: %v", err)
+	}
+	if _, err := os.Stat(info.WorktreePath); err != nil {
+		t.Errorf("worktree not created at %s: %v", info.WorktreePath, err)
+	}
+}
+
+// TestIntegration_AdoptPiece_BranchAlreadyAPiece verifies that adopting a
+// branch checked out in an existing piece worktree fails with a pointer to
+// `mp switch` rather than relocating the piece.
+func TestIntegration_AdoptPiece_BranchAlreadyAPiece(t *testing.T) {
+	_, handler := setupAdoptTestRepo(t)
+
+	if _, err := handler.CreatePiece(context.Background(), "piecey", piece.CreatePieceOptions{}); err != nil {
+		t.Fatalf("CreatePiece failed: %v", err)
+	}
+
+	_, err := handler.AdoptPiece(context.Background(), piece.AdoptPieceInput{Branch: "piecey", Name: "other"})
+	if err == nil {
+		t.Fatal("expected AdoptPiece to fail for a branch that is already a piece")
+	}
+	if !strings.Contains(err.Error(), "already a piece") {
+		t.Errorf("expected 'already a piece' error, got: %v", err)
+	}
+}
+
+// TestIntegration_AdoptPiece_LockedWorktree verifies that a branch held by a
+// locked worktree is rejected with an actionable unlock hint.
+func TestIntegration_AdoptPiece_LockedWorktree(t *testing.T) {
+	tmpDir, handler := setupAdoptTestRepo(t)
+
+	lockedPath := filepath.Join(t.TempDir(), "locked-worktree")
+	runGit(t, tmpDir, "worktree", "add", "-b", "locked-branch", lockedPath)
+	runGit(t, tmpDir, "worktree", "lock", lockedPath)
+	t.Cleanup(func() { runGit(t, tmpDir, "worktree", "unlock", lockedPath) })
+
+	_, err := handler.AdoptPiece(context.Background(), piece.AdoptPieceInput{Branch: "locked-branch"})
+	if err == nil {
+		t.Fatal("expected AdoptPiece to fail for a branch in a locked worktree")
+	}
+	if !strings.Contains(err.Error(), "worktree unlock") {
+		t.Errorf("expected unlock hint in error, got: %v", err)
+	}
+}

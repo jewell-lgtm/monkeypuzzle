@@ -139,25 +139,65 @@ func (g *Git) ListRemoteBranches(ctx context.Context, workDir string) ([]string,
 // any worktree of workDir's repository (main repo or any added worktree).
 // Detached HEADs are skipped.
 func (g *Git) CheckedOutBranches(ctx context.Context, workDir string) (map[string]bool, error) {
+	worktrees, err := g.Worktrees(ctx, workDir)
+	if err != nil {
+		return nil, err
+	}
+	checkedOut := map[string]bool{}
+	for _, wt := range worktrees {
+		if wt.Branch != "" {
+			checkedOut[wt.Branch] = true
+		}
+	}
+	return checkedOut, nil
+}
+
+// Worktree describes one entry of `git worktree list --porcelain`.
+type Worktree struct {
+	Path     string // absolute path of the worktree
+	Branch   string // checked-out branch (short name); empty when detached
+	Locked   bool   // worktree is locked (git refuses to move/remove it)
+	Prunable bool   // admin record survives but the directory is gone
+}
+
+// Worktrees lists every worktree of workDir's repository (the main repo first,
+// then added worktrees), with the branch each has checked out.
+func (g *Git) Worktrees(ctx context.Context, workDir string) ([]Worktree, error) {
 	output, err := g.exec.RunWithDir(ctx, workDir, "git", "worktree", "list", "--porcelain")
 	if err != nil {
 		return nil, fmt.Errorf("failed to list worktrees: %w", err)
 	}
-	checkedOut := map[string]bool{}
+	var worktrees []Worktree
+	var cur *Worktree
 	for _, line := range strings.Split(string(output), "\n") {
 		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(line, "branch ") {
-			continue
-		}
-		ref := strings.TrimSpace(strings.TrimPrefix(line, "branch "))
-		// Porcelain prints the fully-qualified refname; strip refs/heads/ to
-		// match what callers compare against.
-		ref = strings.TrimPrefix(ref, "refs/heads/")
-		if ref != "" {
-			checkedOut[ref] = true
+		switch {
+		case strings.HasPrefix(line, "worktree "):
+			worktrees = append(worktrees, Worktree{Path: strings.TrimPrefix(line, "worktree ")})
+			cur = &worktrees[len(worktrees)-1]
+		case cur == nil:
+			// Ignore anything before the first "worktree" line.
+		case strings.HasPrefix(line, "branch "):
+			// Porcelain prints the fully-qualified refname; strip refs/heads/ to
+			// match what callers compare against.
+			cur.Branch = strings.TrimPrefix(strings.TrimPrefix(line, "branch "), "refs/heads/")
+		case line == "locked" || strings.HasPrefix(line, "locked "):
+			cur.Locked = true
+		case line == "prunable" || strings.HasPrefix(line, "prunable "):
+			cur.Prunable = true
 		}
 	}
-	return checkedOut, nil
+	return worktrees, nil
+}
+
+// WorktreeMove relocates a worktree directory to a new path, updating git's
+// admin records. Uncommitted changes travel with the directory.
+func (g *Git) WorktreeMove(ctx context.Context, repoRoot, fromPath, toPath string) error {
+	output, err := g.exec.RunWithDir(ctx, repoRoot, "git", "worktree", "move", fromPath, toPath)
+	if err != nil {
+		return fmt.Errorf("failed to move worktree %s to %s: %s: %w", fromPath, toPath, gitErrDetail(output), err)
+	}
+	return nil
 }
 
 // WorktreeRemove removes a git worktree

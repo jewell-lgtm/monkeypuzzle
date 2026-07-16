@@ -336,17 +336,36 @@ func (h *Handler) AdoptPiece(ctx context.Context, input AdoptPieceInput) (PieceI
 		branchToAdopt = remoteBranch
 	} else {
 		// Local branch path. Git refuses to create a worktree for a branch that is
-		// already checked out elsewhere. The common case is adopting a branch you've
-		// been working on directly in the main repo: free it by returning the main
-		// worktree to its main branch (carrying any work-in-progress into the new
-		// piece), then adopt. A branch checked out in some *other* piece worktree
-		// can't be relocated safely, so that still errors.
-		resetMain, err := h.mainWorktreeHoldsBranch(ctx, repoRoot, branchToAdopt)
-		if err != nil {
-			return PieceInfo{}, err
+		// already checked out elsewhere, so first find who (if anyone) holds it:
+		//   - the main worktree: free it by returning main to its main branch,
+		//     carrying any work-in-progress into the new piece
+		//   - a foreign worktree (e.g. created by an agent's worktree isolation):
+		//     relocate the whole worktree into the pieces dir, uncommitted
+		//     changes and all
+		//   - a stale record whose directory is gone: prune it and adopt normally
+		//   - another piece worktree: error — the branch is already a piece
+		holder := h.worktreeHoldingBranch(ctx, repoRoot, branchToAdopt)
+		// "Main worktree holds it" is detected by asking the main checkout for
+		// its current branch rather than comparing paths: git reports worktree
+		// paths as registered, which may differ from repoRoot through symlinks.
+		mainHolds := false
+		if holder != nil && !holder.Prunable {
+			if cur, err := h.git.CurrentBranch(ctx, repoRoot); err == nil && cur == branchToAdopt {
+				mainHolds = true
+			}
 		}
 		movedWIP := false
-		if resetMain {
+		relocated := false
+		switch {
+		case holder == nil:
+			// Branch is free; adopt normally below.
+		case holder.Prunable:
+			if err := h.git.WorktreePrune(ctx, repoRoot); err != nil {
+				return PieceInfo{}, fmt.Errorf("branch %q was checked out in a worktree whose directory is gone, and pruning the stale record failed: %w", branchToAdopt, err)
+			}
+		case isPathInside(holder.Path, piecesDir):
+			return PieceInfo{}, fmt.Errorf("branch %q is already a piece (checked out at %s); use `mp switch` instead", branchToAdopt, holder.Path)
+		case mainHolds:
 			stashed, err := h.git.StashPush(ctx, repoRoot)
 			if err != nil {
 				return PieceInfo{}, fmt.Errorf("failed to stash main worktree changes before adopting %s: %w", branchToAdopt, err)
@@ -359,9 +378,20 @@ func (h *Handler) AdoptPiece(ctx context.Context, input AdoptPieceInput) (PieceI
 				return PieceInfo{}, fmt.Errorf("failed to reset main worktree to %s before adopting %s: %w", mainBranch, branchToAdopt, err)
 			}
 			movedWIP = stashed
+		case holder.Locked:
+			return PieceInfo{}, fmt.Errorf("branch %q is checked out in a locked worktree at %s; run `git worktree unlock %s` first, then adopt again", branchToAdopt, holder.Path, holder.Path)
+		default:
+			// Foreign worktree: move it into the pieces dir. `git worktree move`
+			// carries uncommitted changes with the directory.
+			if err := h.git.WorktreeMove(ctx, repoRoot, holder.Path, worktreePath); err != nil {
+				return PieceInfo{}, fmt.Errorf("branch %q is checked out in worktree %s and relocating it failed: %w", branchToAdopt, holder.Path, err)
+			}
+			relocated = true
 		}
-		if err := h.git.WorktreeAddExisting(ctx, repoRoot, worktreePath, branchToAdopt); err != nil {
-			return PieceInfo{}, fmt.Errorf("failed to create worktree for branch %s: %w", branchToAdopt, err)
+		if !relocated {
+			if err := h.git.WorktreeAddExisting(ctx, repoRoot, worktreePath, branchToAdopt); err != nil {
+				return PieceInfo{}, fmt.Errorf("failed to create worktree for branch %s: %w", branchToAdopt, err)
+			}
 		}
 		if movedWIP {
 			// The WIP was stashed from the main worktree; restore it into the new
@@ -1886,30 +1916,23 @@ func (h *Handler) RebaseSubtree(ctx context.Context, repoRoot, piecesDir, childN
 
 // projectName returns the project name for repoRoot from its monkeypuzzle
 // config, falling back to the directory base name.
-// ensureBranchAdoptable returns an actionable error when branchToAdopt cannot be
-// placed in a new worktree because it is already checked out elsewhere in the
-// repo. Git would otherwise fail with a bare "exit status 128". A nil return
-// means the branch is free to adopt.
-// mainWorktreeHoldsBranch reports whether branchToAdopt is currently checked out
-// in the main repo worktree (repoRoot). When it is, adopt can free the branch by
-// resetting the main worktree to its main branch. A branch checked out in some
-// other piece worktree cannot be relocated safely, so that returns an error.
-func (h *Handler) mainWorktreeHoldsBranch(ctx context.Context, repoRoot, branchToAdopt string) (bool, error) {
-	checkedOut, err := h.git.CheckedOutBranches(ctx, repoRoot)
+// worktreeHoldingBranch returns the worktree that currently has branchToAdopt
+// checked out, or nil when the branch is free. AdoptPiece decides per holder
+// whether it can free the branch (reset main, relocate a foreign worktree,
+// prune a stale record) — git alone would fail with a bare "exit status 128".
+func (h *Handler) worktreeHoldingBranch(ctx context.Context, repoRoot, branchToAdopt string) *adapters.Worktree {
+	worktrees, err := h.git.Worktrees(ctx, repoRoot)
 	if err != nil {
 		// If we can't inspect worktrees, let the worktree-add attempt surface the
 		// underlying error rather than blocking on a probe failure.
-		return false, nil
+		return nil
 	}
-	if !checkedOut[branchToAdopt] {
-		return false, nil
+	for i := range worktrees {
+		if worktrees[i].Branch == branchToAdopt {
+			return &worktrees[i]
+		}
 	}
-	if mainBranch, err := h.git.CurrentBranch(ctx, repoRoot); err == nil && mainBranch == branchToAdopt {
-		return true, nil
-	}
-	return false, fmt.Errorf(
-		"branch %q is already checked out in another worktree of this repo; a branch can only be checked out in one worktree at a time, so check it out elsewhere first or adopt a different branch",
-		branchToAdopt)
+	return nil
 }
 
 // repoMainBranch returns the branch the main worktree should return to when a

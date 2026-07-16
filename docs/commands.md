@@ -169,7 +169,7 @@ mp switch --schema
 With a terminal, opens a fuzzy-filtered list of rows across every registered project:
 
 - **Pieces** — existing worktrees, with a `[tmux]` indicator if a session is live.
-- **Branches** — local git branches not currently checked out anywhere (excludes main/master and any branch already adopted as a piece). Selecting one runs `mp adopt`.
+- **Branches** — local git branches available for adoption (excludes main/master, any branch already adopted as a piece, the branch checked out in the main repo, and branches held by locked worktrees). A branch checked out in a worktree mp doesn't manage — e.g. one created by an agent — is offered too; adopting it relocates that worktree into the pieces dir. Selecting one runs `mp adopt`.
 
 Type to filter, ↑/↓ to move, `enter` to select, `esc` to cancel. The picker caps the visible rows at 20; narrow the query to surface anything below the cut.
 
@@ -678,6 +678,8 @@ mp done --main-branch develop
 Convert an existing git branch into a piece worktree. Accepts a local branch name or a remote ref like `origin/foo` (remote refs are fetched and a tracking branch is created). Run from the main repo with no branch to adopt the current branch; from inside a piece worktree `--branch` is required.
 
 Adopt does not require a clean working directory: it always creates a *separate* worktree, so uncommitted changes in the main checkout are left untouched. When the branch being adopted is the one currently checked out in the main worktree, adopt frees it by resetting the main worktree back to its main branch (`main`, or `master`), carrying any uncommitted work-in-progress along into the new piece worktree.
+
+A branch checked out in a worktree mp doesn't manage — e.g. one created by an agent's worktree isolation (Claude Code) or a manual `git worktree add` — is adopted by relocating that whole worktree into the pieces dir (`git worktree move`), uncommitted changes and all. A stale worktree record whose directory has been deleted is pruned automatically before adopting. Two cases still refuse: a branch that is already a piece (use `mp switch`), and a branch held by a locked worktree (`git worktree unlock` it first).
 
 When run interactively from inside a tmux session, adopt creates and switches to the new piece's session (like `mp switch`). For agents/automation it leaves tmux untouched and reports the worktree path in the result JSON.
 
