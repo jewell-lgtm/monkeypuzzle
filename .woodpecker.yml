@@ -71,7 +71,7 @@ steps:
         fi;
         /kaniko/executor
         --context=dir:///woodpecker/src/website
-        --dockerfile=Dockerfile
+        --dockerfile=/woodpecker/src/website/Dockerfile
         $DESTINATIONS
         --cache=true
         --cache-repo=$${REGISTRY}/monkeypuzzle-website-cache
