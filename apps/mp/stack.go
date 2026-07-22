@@ -235,7 +235,7 @@ func runStackStatus(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	// Humans at a terminal get the tree; pipes/agents keep the JSON contract.
-	if cli.IsTerminal() && !flagStackStatusJSON {
+	if cli.IsTerminal() && cli.IsStdoutTerminal() && !flagStackStatusJSON {
 		fmt.Print(renderStackStatus(result))
 		return nil
 	}
@@ -279,7 +279,7 @@ func runStackGraph(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	if cli.IsTerminal() && !flagStackGraphJSON {
+	if cli.IsTerminal() && cli.IsStdoutTerminal() && !flagStackGraphJSON {
 		fmt.Print(renderStackGraph(result))
 		return nil
 	}
@@ -351,7 +351,7 @@ func runStackSync(cmd *cobra.Command, args []string) error {
 	}
 	if !apply {
 		// The dry-run lines already streamed to the terminal; JSON is for pipes.
-		if cli.IsTerminal() && !flagStackSyncJSON {
+		if cli.IsTerminal() && cli.IsStdoutTerminal() && !flagStackSyncJSON {
 			return nil
 		}
 		return cli.PrintJSON(previewResult)
@@ -364,7 +364,7 @@ func runStackSync(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	// The ✓ summary already streamed via Output on a terminal.
-	if cli.IsTerminal() && !flagStackSyncJSON {
+	if cli.IsTerminal() && cli.IsStdoutTerminal() && !flagStackSyncJSON {
 		return nil
 	}
 	return cli.PrintJSON(result)

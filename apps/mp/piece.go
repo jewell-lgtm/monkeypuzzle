@@ -766,7 +766,7 @@ func runPieceCleanup(cmd *cobra.Command, args []string) error {
 
 	// Humans at a terminal get a summary line (the per-piece messages already
 	// streamed via Output); pipes/agents keep the JSON contract.
-	if cli.IsTerminal() && !flagPieceCleanupJSON {
+	if cli.IsTerminal() && cli.IsStdoutTerminal() && !flagPieceCleanupJSON {
 		fmt.Println(cleanupHumanSummary(output, apply))
 		return nil
 	}
