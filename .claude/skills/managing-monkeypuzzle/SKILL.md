@@ -8,7 +8,7 @@ description: Drives the mp CLI — worktree-per-piece git-flow with lifecycle ho
 All commands accept JSON stdin (`echo '{...}' | mp <cmd>`) and emit JSON to stdout.
 Use `mp <cmd> --schema` to see the expected input shape.
 
-## Pieces (worktree + tmux session)
+## Pieces (worktree + multiplexer session)
 
 ```bash
 # Show current piece status (no piece = main repo)
@@ -23,7 +23,7 @@ echo '{"prompt":"add dark mode"}' | mp create
 mp list
 echo '{"flat":true}' | mp list
 
-# Switch to a piece (uses tmux switch-client if you're in tmux)
+# Switch to a piece (switches your multiplexer session/tab/workspace if inside one)
 echo '{"name":"my-feature"}' | mp switch
 
 # Sync piece with its parent (prefers origin/<parent>; --local for local branch)
@@ -39,7 +39,7 @@ echo '{}' | mp merge
 echo '{}' | mp adopt
 echo '{"name":"custom","parent":"main"}' | mp adopt
 
-# After merge: clean up worktree + tmux session
+# After merge: clean up worktree + multiplexer session
 echo '{}' | mp done
 
 # Sweep all merged pieces
@@ -104,7 +104,7 @@ echo '{"name":"project","pr_provider":"github"}' | mp init
 
 # User-level multiplexer choice (uses args, not stdin)
 mp config get multiplexer
-mp config set multiplexer tmux   # tmux or none
+mp config set multiplexer tmux   # tmux, zellij, cmux, or none
 
 # Relocate the .monkeypuzzle state dir (e.g. into a gitignored path)
 mp move .DONOTCOMMIT/monkeypuzzle
