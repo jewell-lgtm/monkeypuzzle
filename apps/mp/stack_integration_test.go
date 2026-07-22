@@ -86,6 +86,12 @@ func TestCLI_StackSync_PropagatesMainThroughTwoPieceStack(t *testing.T) {
 		t.Errorf("expected updated to contain both a and b, got %v", result.Updated)
 	}
 
+	// --apply must go straight to the sync: no preview pass, no "[dry-run]"
+	// lines telling the caller to pass the flag they just passed.
+	if strings.Contains(stderr, "[dry-run]") {
+		t.Errorf("--apply still ran the dry-run preview:\n%s", stderr)
+	}
+
 	// The core guarantee: main's new commit is now reachable from both pieces.
 	if !isAncestor(t, pieceA, mainCommit, "HEAD") {
 		t.Errorf("main commit %s not reachable from piece a at %s", mainCommit, pieceA)
@@ -145,6 +151,25 @@ func TestCLI_StackSync_DryRunByDefault(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(env.tmpDir, ".monkeypuzzle", "stack-snapshot.json")); err == nil {
 		t.Error("dry-run wrote an undo snapshot; it should not mutate state")
+	}
+}
+
+// TestCLI_StackSync_ApplyAndDryRunConflict: the two flags contradict each other
+// and must fail loudly rather than pick one.
+func TestCLI_StackSync_ApplyAndDryRunConflict(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	env.initGitRepo()
+	env.initProject("test")
+	createPiece(t, env, "a", "main")
+
+	stdout, stderr, err := env.run("stack", "sync", "--apply", "--dry-run")
+	if err == nil {
+		t.Fatalf("expected error for --apply --dry-run\nstdout: %s\nstderr: %s", stdout, stderr)
+	}
+	if !strings.Contains(stderr, "cannot use --apply and --dry-run together") {
+		t.Errorf("expected conflict message on stderr, got: %s", stderr)
 	}
 }
 
