@@ -14,7 +14,7 @@ import (
 // "none" is the no-op (print-the-path) fallback. Maybe one day we'll support
 // wezterm / kitty / others — drop the adapter in internal/adapters, wire it in
 // NewMultiplexer, and add the name here.
-var validMultiplexerValues = []string{"tmux", "zellij", "none"}
+var validMultiplexerValues = []string{"tmux", "zellij", "cmux", "none"}
 
 var configCmd = &cobra.Command{
 	Use:   "config",
@@ -35,7 +35,7 @@ var configSetCmd = &cobra.Command{
 	Long: `Set a configuration value.
 
 Available keys:
-  multiplexer  Terminal multiplexer to use (tmux, zellij, none)`,
+  multiplexer  Terminal multiplexer to use (tmux, zellij, cmux, none)`,
 	Args: cobra.ExactArgs(2),
 	RunE: runConfigSet,
 }
