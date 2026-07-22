@@ -15,7 +15,7 @@ const (
 
 // UserConfig represents user-level monkeypuzzle configuration.
 type UserConfig struct {
-	Multiplexer string `json:"multiplexer,omitempty"` // "tmux" or "none"
+	Multiplexer string `json:"multiplexer,omitempty"` // "tmux", "zellij", or "none"
 }
 
 // DefaultUserConfig returns config with default values.
