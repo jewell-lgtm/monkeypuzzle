@@ -17,21 +17,33 @@ var rootCmd = &cobra.Command{
 }
 
 func init() {
-	// Registered for --help only; extractRemoteTarget strips these from argv
+	// Registered for --help only; extractRemoteSpec strips these from argv
 	// before cobra ever parses, so their cobra values are never read. They
 	// only count between `mp` and the verb: `mp --host wire list`.
 	rootCmd.PersistentFlags().String("host", "", "before the verb: run the command on a remote ssh host where mp is installed (env: MP_HOST)")
-	rootCmd.PersistentFlags().String("dir", "", "before the verb: remote directory to run in (absolute, or relative to the ssh login home); requires --host (env: MP_DIR)")
+	rootCmd.PersistentFlags().String("dir", "", "before the verb: remote directory to run in (absolute, or relative to the ssh login home); requires a remote target (env: MP_DIR)")
+	rootCmd.PersistentFlags().String("project", "", "before the verb: run the command against a registered project — proxied over ssh if it has a host, from its path if local")
 }
 
 func Execute() error {
-	args, target, err := extractRemoteTarget(os.Args[1:])
+	args, spec, err := extractRemoteSpec(os.Args[1:])
+	if err != nil {
+		rootCmd.PrintErrln("Error:", err)
+		return err
+	}
+	target, chdir, err := resolveTarget(spec)
 	if err != nil {
 		rootCmd.PrintErrln("Error:", err)
 		return err
 	}
 	if target != nil {
 		os.Exit(runRemote(target, args))
+	}
+	if chdir != "" {
+		if err := os.Chdir(chdir); err != nil {
+			rootCmd.PrintErrln("Error:", err)
+			return err
+		}
 	}
 	rootCmd.SetArgs(args)
 	return rootCmd.Execute()

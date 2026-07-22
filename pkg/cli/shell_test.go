@@ -22,3 +22,16 @@ func TestShQuote(t *testing.T) {
 		}
 	}
 }
+
+func TestValidSSHDest(t *testing.T) {
+	for _, ok := range []string{"wire", "user@wire", "wire.example.com", "10.0.0.7", "box_1"} {
+		if err := ValidSSHDest(ok); err != nil {
+			t.Errorf("ValidSSHDest(%q) = %v, want nil", ok, err)
+		}
+	}
+	for _, bad := range []string{"", "-oProxyCommand=x", "host name", "host;rm", "host`x`", "a'b", `a"b`, "a$b", "a|b", "a&b", "a\\b"} {
+		if err := ValidSSHDest(bad); err == nil {
+			t.Errorf("ValidSSHDest(%q) = nil, want error", bad)
+		}
+	}
+}

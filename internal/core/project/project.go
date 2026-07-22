@@ -3,21 +3,25 @@
 package project
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/projectdir"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/registry"
+	"github.com/jewell-lgtm/monkeypuzzle/pkg/cli"
 )
 
 // Info is a registered project enriched with best-effort live state.
 type Info struct {
 	Name       string `json:"name"`
 	Path       string `json:"path"`
-	Exists     bool   `json:"exists"`     // repo root still present on disk
-	IsProject  bool   `json:"is_project"` // .monkeypuzzle/monkeypuzzle.json present
+	Host       string `json:"host,omitempty"` // ssh host where the repo lives; empty = local
+	Exists     bool   `json:"exists"`         // repo root still present on disk
+	IsProject  bool   `json:"is_project"`     // .monkeypuzzle/monkeypuzzle.json present
 	Branch     string `json:"branch,omitempty"`
 	PieceCount int    `json:"piece_count"`
 }
@@ -45,6 +49,51 @@ func Add(dir string) (registry.Project, bool, error) {
 	return p, added, nil
 }
 
+// AddRemote registers a project living on an ssh host. The directory —
+// absolute, or relative to the ssh login home (a quoted `~` never expands) —
+// is resolved to an absolute path on the host at add time, and must already
+// be an mp project there. The name is read from the remote monkeypuzzle.json.
+func AddRemote(host, dir string) (registry.Project, bool, error) {
+	if err := cli.ValidSSHDest(host); err != nil {
+		return registry.Project{}, false, err
+	}
+	probe := `root=$(readlink -f ` + cli.ShQuote(dir) + `) && test -f "$root/.monkeypuzzle/monkeypuzzle.json" && printf %s "$root"`
+	root, err := sshOutput(host, probe)
+	if err != nil {
+		return registry.Project{}, false, fmt.Errorf("%s:%s is not a monkeypuzzle project (run `mp init` there first): %w", host, dir, err)
+	}
+	root = strings.TrimSpace(root)
+
+	name := filepath.Base(root)
+	if data, err := sshOutput(host, "cat "+cli.ShQuote(root+"/.monkeypuzzle/monkeypuzzle.json")); err == nil {
+		var cfg struct {
+			Project struct {
+				Name string `json:"name"`
+			} `json:"project"`
+		}
+		if json.Unmarshal([]byte(data), &cfg) == nil && strings.TrimSpace(cfg.Project.Name) != "" {
+			name = cfg.Project.Name
+		}
+	}
+
+	reg, err := registry.Load()
+	if err != nil {
+		return registry.Project{}, false, err
+	}
+	p, added := reg.UpsertRemote(host, root, name)
+	if err := reg.Save(); err != nil {
+		return registry.Project{}, false, err
+	}
+	return p, added, nil
+}
+
+// sshOutput runs a shell command on host and returns its stdout. The command
+// is wrapped in `sh -c` so POSIX syntax survives fish/csh login shells.
+func sshOutput(host, command string) (string, error) {
+	out, err := exec.Command("ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "--", host, "sh -c "+cli.ShQuote(command)).Output()
+	return string(out), err
+}
+
 // Remove unregisters the project matching nameOrPath. The repository itself is
 // untouched.
 func Remove(nameOrPath string) (registry.Project, error) {
@@ -52,9 +101,9 @@ func Remove(nameOrPath string) (registry.Project, error) {
 	if err != nil {
 		return registry.Project{}, err
 	}
-	p, ok := reg.Remove(nameOrPath)
-	if !ok {
-		return registry.Project{}, fmt.Errorf("no registered project matching %q", nameOrPath)
+	p, err := reg.Remove(nameOrPath)
+	if err != nil {
+		return registry.Project{}, err
 	}
 	if err := reg.Save(); err != nil {
 		return registry.Project{}, err
@@ -75,7 +124,8 @@ func PruneStale(dryRun bool) ([]registry.Project, error) {
 	}
 	var removed, kept []registry.Project
 	for _, p := range reg.Projects {
-		if pathMissing(p.Path) {
+		// Remote projects can't be stat'd locally; never prune them here.
+		if p.Host == "" && pathMissing(p.Path) {
 			removed = append(removed, p)
 			continue
 		}
@@ -141,7 +191,14 @@ func Describe(root string) Info {
 }
 
 func enrich(p registry.Project) Info {
-	info := Info{Name: p.Name, Path: p.Path}
+	info := Info{Name: p.Name, Path: p.Path, Host: p.Host}
+	if p.Host != "" {
+		// Validated at add time; live state would need an ssh round-trip per
+		// project, which is too slow for list — proxy into it for detail.
+		info.Exists = true
+		info.IsProject = true
+		return info
+	}
 	fi, err := os.Stat(p.Path)
 	if err != nil || !fi.IsDir() {
 		return info
