@@ -197,20 +197,32 @@ func TestGitLab_FindMergedPRByBranch(t *testing.T) {
 	tests := []struct {
 		name       string
 		branch     string
+		mockOpen   []byte
 		mockOutput []byte
 		mockErr    error
 		wantMerged bool
 		wantNum    int
 		wantErr    bool
 	}{
-		{name: "found merged MR", branch: "feature", mockOutput: []byte(`[{"iid":42}]`), wantMerged: true, wantNum: 42},
-		{name: "no merged MR", branch: "feature", mockOutput: []byte(`[]`), wantMerged: false, wantNum: 0},
-		{name: "error", branch: "feature", mockErr: MockError("network error"), wantErr: true},
+		{name: "found merged MR", branch: "feature", mockOpen: []byte(`[]`), mockOutput: []byte(`[{"iid":42}]`), wantMerged: true, wantNum: 42},
+		{name: "no merged MR", branch: "feature", mockOpen: []byte(`[]`), mockOutput: []byte(`[]`), wantMerged: false, wantNum: 0},
+		{
+			// Regression: reused source branch — an open MR means "not
+			// merged" even when an older merged MR shares the branch name.
+			name:       "stale merged MR shadowed by open MR",
+			branch:     "feature",
+			mockOpen:   []byte(`[{"iid":6}]`),
+			mockOutput: []byte(`[{"iid":1}]`),
+			wantMerged: false,
+			wantNum:    0,
+		},
+		{name: "error", branch: "feature", mockOpen: []byte(`[]`), mockErr: MockError("network error"), wantErr: true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			exec := NewMockExec()
+			exec.AddResponse("glab", []string{"mr", "list", "--source-branch", tt.branch, "--state", "opened", "-F", "json"}, tt.mockOpen, nil)
 			exec.AddResponse("glab", []string{"mr", "list", "--source-branch", tt.branch, "--state", "merged", "-F", "json"}, tt.mockOutput, tt.mockErr)
 
 			gl := NewGitLab(exec)

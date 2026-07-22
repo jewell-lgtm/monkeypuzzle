@@ -144,31 +144,42 @@ func (g *GitHub) IsPRMerged(ctx context.Context, workDir string, prNumber int) (
 	return result.MergedAt != nil && *result.MergedAt != "", nil
 }
 
-// FindMergedPRByBranch checks if there's a merged PR for the given branch name.
-// Returns (merged, prNumber, error). If no merged PR exists, returns (false, 0, nil).
+// FindMergedPRByBranch checks whether the branch's CURRENT PR is merged.
+// Returns (merged, prNumber, error). If no PR exists, returns (false, 0, nil).
+//
+// A branch name can be reused: deleted after a merge, then recreated for new
+// work with a new PR. Only the newest PR for the head decides — asking "did
+// any merged PR ever use this name" would report the recreated branch as
+// merged and let cleanup sweep an in-progress piece.
 func (g *GitHub) FindMergedPRByBranch(ctx context.Context, workDir, branchName string) (bool, int, error) {
 	output, err := g.exec.RunWithDir(ctx, workDir, "gh", "pr", "list",
 		"--head", branchName,
-		"--state", "merged",
-		"--json", "number",
-		"--limit", "1",
+		"--state", "all",
+		"--json", "number,state",
+		"--limit", "20",
 	)
 	if err != nil {
-		return false, 0, fmt.Errorf("failed to list merged PRs: %w", err)
+		return false, 0, fmt.Errorf("failed to list PRs: %w", err)
 	}
 
 	var results []struct {
-		Number int `json:"number"`
+		Number int    `json:"number"`
+		State  string `json:"state"`
 	}
 	if err := json.Unmarshal(output, &results); err != nil {
 		return false, 0, fmt.Errorf("failed to parse PR list: %w", err)
 	}
 
-	if len(results) == 0 {
+	latest := -1
+	for i, r := range results {
+		if latest < 0 || r.Number > results[latest].Number {
+			latest = i
+		}
+	}
+	if latest < 0 || results[latest].State != "MERGED" {
 		return false, 0, nil
 	}
-
-	return true, results[0].Number, nil
+	return true, results[latest].Number, nil
 }
 
 // PRInfo is one row of `gh pr list --json …`. It encodes a stack edge:

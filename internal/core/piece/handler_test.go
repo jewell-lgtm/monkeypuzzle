@@ -1136,8 +1136,8 @@ func TestHandler_IsBranchMerged_ViaPRBranch(t *testing.T) {
 	// Mock remote branch check
 	mockExec.AddResponse("git", []string{"ls-remote", "--heads", "origin", branchName}, []byte("abc123\trefs/heads/feature-branch\n"), nil)
 
-	// Mock gh pr list --head <branch> --state merged - finds merged PR
-	mockExec.AddResponse("gh", []string{"pr", "list", "--head", branchName, "--state", "merged", "--json", "number", "--limit", "1"}, []byte(`[{"number": 42}]`), nil)
+	// Mock gh pr list --head <branch> --state all - the branch's latest PR is merged
+	mockExec.AddResponse("gh", []string{"pr", "list", "--head", branchName, "--state", "all", "--json", "number,state", "--limit", "20"}, []byte(`[{"number": 42, "state": "MERGED"}]`), nil)
 
 	status, err := handler.IsBranchMerged(context.Background(), repoRoot, branchName, "main")
 	if err != nil {
