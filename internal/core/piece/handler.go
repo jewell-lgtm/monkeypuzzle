@@ -1407,21 +1407,6 @@ func (h *Handler) removePiece(ctx context.Context, repoRoot, pieceName, worktree
 	return nil
 }
 
-// removePieceForce removes a piece worktree forcefully (for removing from inside the worktree).
-func (h *Handler) removePieceForce(ctx context.Context, repoRoot, pieceName, worktreePath string) error {
-	// Remove the worktree BEFORE killing the session: when the caller runs
-	// inside that session, kill-session terminates this very process and
-	// nothing after the kill ever executes (the worktree would survive).
-	if err := h.git.WorktreeRemoveForce(ctx, repoRoot, worktreePath); err != nil {
-		return fmt.Errorf("failed to remove worktree: %w", err)
-	}
-
-	// Kill session last (ignore errors - session may not exist)
-	_ = h.mux.Kill(ctx, h.pieceSessionName(repoRoot, pieceName))
-
-	return nil
-}
-
 // switchClientToMainIfInside moves the active multiplexer client to the main
 // repo session when the caller is running from inside the worktree about to
 // be removed. Without this, abandoning/finishing the piece you're currently
