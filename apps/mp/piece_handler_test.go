@@ -40,6 +40,17 @@ func TestChooseMultiplexer_NotInSessionIsNoop(t *testing.T) {
 	}
 }
 
+// A configured zellij multiplexer outside a zellij session must also degrade
+// to the no-op — the gate consults the adapter's own InSession, not $TMUX.
+func TestChooseMultiplexer_ZellijNotInSessionIsNoop(t *testing.T) {
+	writeUserConfig(t, `{"multiplexer":"zellij"}`)
+	t.Setenv("ZELLIJ", "")
+	t.Setenv("MP_TMUX_PLUGIN", "1") // pass the TTY gate deterministically
+	if mux := chooseMultiplexer(testExec()); !adapters.IsNoopMultiplexer(mux) {
+		t.Fatalf("outside a zellij session must yield no-op multiplexer, got %T", mux)
+	}
+}
+
 // MP_TMUX_PLUGIN=1 substitutes for the stdin-TTY requirement: the tmux plugin
 // drives mp through the stateless API (no controlling TTY) but still wants mp
 // to manage the session. With $TMUX set and a valid tmux config, the real

@@ -20,9 +20,9 @@ type Choice struct {
 }
 
 // Choices are the multiplexer options offered by the wizard, in display order.
-// Maybe one day this grows a zellij choice and friends.
 var Choices = []Choice{
 	{Value: "tmux", Label: "tmux", Description: "Manage piece sessions with tmux"},
+	{Value: "zellij", Label: "zellij", Description: "Manage pieces as zellij tabs in your current session"},
 	{Value: "none", Label: "none", Description: "No session management — print paths for `cd $(mp switch ...)`"},
 }
 
@@ -34,16 +34,22 @@ type Model struct {
 }
 
 // New returns a wizard with an initial selection inferred from the current
-// environment ($TMUX).
+// environment ($TMUX, $ZELLIJ).
 func New() Model {
 	return Model{selected: defaultSelection()}
 }
 
 func defaultSelection() int {
-	if os.Getenv("TMUX") != "" {
-		return 0
+	env := map[string]string{
+		"tmux":   "TMUX",
+		"zellij": "ZELLIJ",
 	}
-	return 1
+	for i, c := range Choices {
+		if v, ok := env[c.Value]; ok && os.Getenv(v) != "" {
+			return i
+		}
+	}
+	return len(Choices) - 1 // "none"
 }
 
 func (m Model) Init() tea.Cmd { return nil }
