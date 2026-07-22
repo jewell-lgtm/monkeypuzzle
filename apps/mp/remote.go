@@ -86,7 +86,7 @@ scan:
 				break
 			}
 			if a == "--host" || strings.HasPrefix(a, "--host=") {
-				return nil, nil, fmt.Errorf("--host must come before the command: mp --host <ssh-host> %s ...", rest[0])
+				return nil, nil, fmt.Errorf("--host must come before the command (use: mp --host <ssh-host> %s)", rest[0])
 			}
 		}
 	}
