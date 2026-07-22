@@ -37,7 +37,11 @@ func (m Model) View() string {
 
 		sessionIndicator := ""
 		if p.HasSession {
-			sessionIndicator = styles.Subtle.Render(" [tmux]")
+			label := m.SessionLabel
+			if label == "" {
+				label = "session"
+			}
+			sessionIndicator = styles.Subtle.Render(" [" + label + "]")
 		}
 
 		fmt.Fprintf(&b, "%s%s%s\n", cursor, name, sessionIndicator)

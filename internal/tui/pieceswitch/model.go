@@ -9,6 +9,10 @@ type Model struct {
 	Pieces    []piece.PieceListItem
 	Selected  int
 	Cancelled bool
+
+	// SessionLabel names the multiplexer behind HasSession pieces ("tmux",
+	// "zellij", ...); empty renders as the generic "session".
+	SessionLabel string
 }
 
 func New(pieces []piece.PieceListItem) Model {

@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/adapters"
+	"github.com/jewell-lgtm/monkeypuzzle/internal/config"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
 	projectcmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/project"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core/session"
@@ -402,7 +403,11 @@ func dashboardLoadCmd(ctx context.Context, infos []projectcmd.Info) tea.Cmd {
 // runDashboardTUI runs the interactive picker with a spinner that loads via
 // loadCmd, then dispatches the chosen row. Shared by `mp go` and `mp switch`.
 func runDashboardTUI(ctx context.Context, loadCmd tea.Cmd) error {
-	p := tea.NewProgram(dashboard.NewLoading(loadCmd))
+	initial := dashboard.NewLoading(loadCmd)
+	if cfg, err := config.LoadUserConfig(); err == nil && cfg.Multiplexer != "" && cfg.Multiplexer != "none" {
+		initial.SessionLabel = cfg.Multiplexer
+	}
+	p := tea.NewProgram(initial)
 	m, err := p.Run()
 	if err != nil {
 		return err
