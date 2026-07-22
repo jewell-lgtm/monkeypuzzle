@@ -51,6 +51,16 @@ func TestChooseMultiplexer_ZellijNotInSessionIsNoop(t *testing.T) {
 	}
 }
 
+// Same for cmux: no $CMUX_WORKSPACE_ID means no-op.
+func TestChooseMultiplexer_CmuxNotInSessionIsNoop(t *testing.T) {
+	writeUserConfig(t, `{"multiplexer":"cmux"}`)
+	t.Setenv("CMUX_WORKSPACE_ID", "")
+	t.Setenv("MP_TMUX_PLUGIN", "1") // pass the TTY gate deterministically
+	if mux := chooseMultiplexer(testExec()); !adapters.IsNoopMultiplexer(mux) {
+		t.Fatalf("outside a cmux workspace must yield no-op multiplexer, got %T", mux)
+	}
+}
+
 // MP_TMUX_PLUGIN=1 substitutes for the stdin-TTY requirement: the tmux plugin
 // drives mp through the stateless API (no controlling TTY) but still wants mp
 // to manage the session. With $TMUX set and a valid tmux config, the real
