@@ -1407,21 +1407,6 @@ func (h *Handler) removePiece(ctx context.Context, repoRoot, pieceName, worktree
 	return nil
 }
 
-// removePieceForce removes a piece worktree forcefully (for removing from inside the worktree).
-func (h *Handler) removePieceForce(ctx context.Context, repoRoot, pieceName, worktreePath string) error {
-	sessionName := h.pieceSessionName(repoRoot, pieceName)
-
-	// Kill session (ignore errors - session may not exist)
-	_ = h.mux.Kill(ctx, sessionName)
-
-	// Force remove worktree (needed when running from inside the worktree)
-	if err := h.git.WorktreeRemoveForce(ctx, repoRoot, worktreePath); err != nil {
-		return fmt.Errorf("failed to remove worktree: %w", err)
-	}
-
-	return nil
-}
-
 // switchClientToMainIfInside moves the active multiplexer client to the main
 // repo session when the caller is running from inside the worktree about to
 // be removed. Without this, abandoning/finishing the piece you're currently
@@ -1804,11 +1789,13 @@ func (h *Handler) DonePiece(ctx context.Context, workDir string, input DoneInput
 	}
 
 	// If we're running inside the worktree being removed, switch the active
-	// client to the main repo session before removePieceForce kills it.
+	// client to the main repo session before the piece session dies.
 	h.switchClientToMainIfInside(ctx, mainRepoRoot, status.WorktreePath)
 
-	// Remove the piece (force removal since we're likely inside the worktree)
-	if err := h.removePieceForce(ctx, mainRepoRoot, status.PieceName, status.WorktreePath); err != nil {
+	// Remove the worktree first and report success BEFORE killing the session:
+	// when `mp done` runs inside the piece's own session, kill-session
+	// terminates this very process, so the kill must be the final act.
+	if err := h.git.WorktreeRemoveForce(ctx, mainRepoRoot, status.WorktreePath); err != nil {
 		return result, fmt.Errorf("failed to cleanup piece: %w", err)
 	}
 
@@ -1819,6 +1806,8 @@ func (h *Handler) DonePiece(ctx context.Context, workDir string, input DoneInput
 		Content: fmt.Sprintf("Done with piece: %s", status.PieceName),
 		Data:    result,
 	})
+
+	_ = h.mux.Kill(ctx, h.pieceSessionName(mainRepoRoot, status.PieceName))
 
 	return result, nil
 }
