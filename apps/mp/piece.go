@@ -132,6 +132,9 @@ var flagPieceAdoptSchema bool
 var flagPiecePrompt string
 var flagPieceListFlat bool
 var flagPieceListAll bool
+var flagPieceCreateJSON bool
+var flagPieceDoneJSON bool
+var flagPieceAdoptJSON bool
 
 func init() {
 	pieceCreateCmd.Flags().StringVar(&flagPieceName, "name", "", "Optional piece name (default: auto-generated)")
@@ -140,6 +143,7 @@ func init() {
 	pieceCreateCmd.Flags().BoolVar(&flagSkipSwitch, "skip-switch", false, "Don't switch to the new piece after creation")
 	pieceCreateCmd.Flags().BoolVar(&flagOverwriteSession, "overwrite-session", false, "Replace existing main repo tmux session")
 	pieceCreateCmd.Flags().BoolVar(&flagPieceCreateSchema, "schema", false, "Output JSON schema and exit")
+	pieceCreateCmd.Flags().BoolVar(&flagPieceCreateJSON, "json", false, "Output JSON even on a terminal")
 	pieceUpdateCmd.Flags().StringVar(&flagMainBranch, "main-branch", "main", "Main branch name to merge (default: main)")
 	pieceUpdateCmd.Flags().BoolVar(&flagPieceUpdateSchema, "schema", false, "Output JSON schema and exit")
 	pieceMergeCmd.Flags().StringVar(&flagMainBranch, "main-branch", "main", "Main branch name to merge into (default: main)")
@@ -159,10 +163,12 @@ func init() {
 	pieceAbandonCmd.Flags().BoolVar(&flagPieceAbandonSchema, "schema", false, "Output JSON schema and exit")
 	pieceDoneCmd.Flags().StringVar(&flagMainBranch, "main-branch", "main", "Main branch to check merge status against")
 	pieceDoneCmd.Flags().BoolVar(&flagPieceDoneSchema, "schema", false, "Output JSON schema and exit")
+	pieceDoneCmd.Flags().BoolVar(&flagPieceDoneJSON, "json", false, "Output JSON even on a terminal")
 	pieceAdoptCmd.Flags().StringVarP(&flagPieceAdoptBranch, "branch", "b", "", "Branch to adopt; local name or remote ref like origin/foo (defaults to current branch when on main)")
 	pieceAdoptCmd.Flags().StringVar(&flagPieceAdoptName, "name", "", "Override piece name (defaults to branch name)")
 	pieceAdoptCmd.Flags().StringVarP(&flagPieceAdoptParent, "parent", "p", "main", "Parent piece name (default: main)")
 	pieceAdoptCmd.Flags().BoolVar(&flagPieceAdoptSchema, "schema", false, "Output JSON schema and exit")
+	pieceAdoptCmd.Flags().BoolVar(&flagPieceAdoptJSON, "json", false, "Output JSON even on a terminal")
 	pieceStatusCmd.Flags().StringVar(&flagMainBranch, "main-branch", "main", "Main branch name (default: main)")
 	pieceListCmd.Flags().BoolVar(&flagPieceListFlat, "flat", false, "Display pieces in a flat list instead of tree view")
 	pieceListCmd.Flags().BoolVar(&flagPieceListAll, "all", false, "List pieces across all registered projects")
@@ -422,12 +428,15 @@ func runPieceCreate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Output JSON to stdout
-	jsonData, err := json.MarshalIndent(info, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to marshal info: %w", err)
+	// On a terminal the handler's success line tells the story; the JSON
+	// payload is for pipes and agents (or --json).
+	if !cli.IsTerminal() || !cli.IsStdoutTerminal() || flagPieceCreateJSON {
+		jsonData, err := json.MarshalIndent(info, "", "  ")
+		if err != nil {
+			return fmt.Errorf("failed to marshal info: %w", err)
+		}
+		fmt.Println(string(jsonData))
 	}
-	fmt.Println(string(jsonData))
 
 	// Switch to the new piece (unless skip_switch is set)
 	if !input.SkipSwitch {
@@ -974,7 +983,11 @@ func runPieceDone(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Output JSON to stdout
+	// On a terminal the handler's success line tells the story; the JSON
+	// payload is for pipes and agents (or --json).
+	if cli.IsTerminal() && cli.IsStdoutTerminal() && !flagPieceDoneJSON {
+		return nil
+	}
 	jsonData, err := json.MarshalIndent(result, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal result: %w", err)
@@ -1044,12 +1057,15 @@ func runPieceAdopt(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Output JSON to stdout
-	jsonData, err := json.MarshalIndent(info, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to marshal result: %w", err)
+	// On a terminal the handler's success line tells the story; the JSON
+	// payload is for pipes and agents (or --json).
+	if !cli.IsTerminal() || !cli.IsStdoutTerminal() || flagPieceAdoptJSON {
+		jsonData, err := json.MarshalIndent(info, "", "  ")
+		if err != nil {
+			return fmt.Errorf("failed to marshal result: %w", err)
+		}
+		fmt.Println(string(jsonData))
 	}
-	fmt.Println(string(jsonData))
 
 	// Switch to the adopted piece. In an interactive session this creates and
 	// attaches the piece's tmux session; for agents/automation the multiplexer is
