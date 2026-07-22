@@ -447,7 +447,7 @@ func runStackAppend(cmd *cobra.Command, args []string) error {
 	}
 	// On a terminal the handler's success line tells the story; the JSON
 	// payload is for pipes and agents (or --json).
-	if cli.IsTerminal() && !flagStackAppendJSON {
+	if cli.IsTerminal() && cli.IsStdoutTerminal() && !flagStackAppendJSON {
 		return nil
 	}
 	return cli.PrintJSON(info)
@@ -481,7 +481,7 @@ func runStackPrepend(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	if cli.IsTerminal() && !flagStackPrependJSON {
+	if cli.IsTerminal() && cli.IsStdoutTerminal() && !flagStackPrependJSON {
 		return nil
 	}
 	return cli.PrintJSON(info)

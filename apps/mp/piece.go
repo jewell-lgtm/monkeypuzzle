@@ -430,7 +430,7 @@ func runPieceCreate(cmd *cobra.Command, args []string) error {
 
 	// On a terminal the handler's success line tells the story; the JSON
 	// payload is for pipes and agents (or --json).
-	if !cli.IsTerminal() || flagPieceCreateJSON {
+	if !cli.IsTerminal() || !cli.IsStdoutTerminal() || flagPieceCreateJSON {
 		jsonData, err := json.MarshalIndent(info, "", "  ")
 		if err != nil {
 			return fmt.Errorf("failed to marshal info: %w", err)
@@ -985,7 +985,7 @@ func runPieceDone(cmd *cobra.Command, args []string) error {
 
 	// On a terminal the handler's success line tells the story; the JSON
 	// payload is for pipes and agents (or --json).
-	if cli.IsTerminal() && !flagPieceDoneJSON {
+	if cli.IsTerminal() && cli.IsStdoutTerminal() && !flagPieceDoneJSON {
 		return nil
 	}
 	jsonData, err := json.MarshalIndent(result, "", "  ")
@@ -1059,7 +1059,7 @@ func runPieceAdopt(cmd *cobra.Command, args []string) error {
 
 	// On a terminal the handler's success line tells the story; the JSON
 	// payload is for pipes and agents (or --json).
-	if !cli.IsTerminal() || flagPieceAdoptJSON {
+	if !cli.IsTerminal() || !cli.IsStdoutTerminal() || flagPieceAdoptJSON {
 		jsonData, err := json.MarshalIndent(info, "", "  ")
 		if err != nil {
 			return fmt.Errorf("failed to marshal result: %w", err)
