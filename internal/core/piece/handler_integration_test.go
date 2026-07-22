@@ -1684,6 +1684,7 @@ func (r *recordingMux) Exists(_ context.Context, sessionName string) bool {
 
 func (r *recordingMux) InSession() bool                    { return r.inSession }
 func (r *recordingMux) IsInstalled(_ context.Context) bool { return true }
+func (r *recordingMux) Name() string                       { return "recording" }
 
 func TestIntegration_AbandonPiece_SwitchesToMainSessionWhenInsideWorktree(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {

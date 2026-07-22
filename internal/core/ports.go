@@ -76,6 +76,10 @@ type Multiplexer interface {
 
 	// IsInstalled returns true if multiplexer is available
 	IsInstalled(ctx context.Context) bool
+
+	// Name returns the provider name ("tmux", "none", ...) for labels and
+	// provider-specific gating.
+	Name() string
 }
 
 // LoadingSignal provides pub/sub for loading state.
