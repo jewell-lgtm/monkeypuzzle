@@ -1,6 +1,7 @@
 package dashboard
 
 import (
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -230,4 +231,21 @@ func indexOf(s, substr string) int {
 		}
 	}
 	return -1
+}
+
+// The session indicator names the configured multiplexer; with no label set it
+// falls back to the generic "session".
+func TestRenderRow_SessionLabel(t *testing.T) {
+	row := Row{Kind: RowPiece, Piece: "my-piece", HasSession: true}
+	if got := renderRow(row, false, "zellij"); !strings.Contains(got, "[zellij]") {
+		t.Errorf("expected [zellij] indicator, got %q", got)
+	}
+	m := Model{}
+	if m.sessionLabel() != "session" {
+		t.Errorf("empty SessionLabel should default to %q, got %q", "session", m.sessionLabel())
+	}
+	m.SessionLabel = "cmux"
+	if m.sessionLabel() != "cmux" {
+		t.Errorf("sessionLabel() = %q, want cmux", m.sessionLabel())
+	}
 }

@@ -88,6 +88,10 @@ type Model struct {
 	Selected int   // index into Filtered
 	Input    textinput.Model
 
+	// SessionLabel names the multiplexer behind HasSession rows ("tmux",
+	// "zellij", ...); empty renders as the generic "session".
+	SessionLabel string
+
 	// Scrolling. offset is the index of the first visible filtered row; height
 	// is the last known terminal height (0 until the first WindowSizeMsg).
 	offset int
@@ -407,7 +411,7 @@ func (m Model) View() string {
 					b.WriteString(styles.Subtle.Render("▾ "))
 				}
 			}
-			b.WriteString(renderRow(r, i == m.Selected))
+			b.WriteString(renderRow(r, i == m.Selected, m.sessionLabel()))
 			b.WriteString("\n")
 		}
 		if end < len(m.Filtered) {
@@ -424,7 +428,14 @@ func (m Model) View() string {
 	return b.String()
 }
 
-func renderRow(r Row, selected bool) string {
+func (m Model) sessionLabel() string {
+	if m.SessionLabel != "" {
+		return m.SessionLabel
+	}
+	return "session"
+}
+
+func renderRow(r Row, selected bool, sessionLabel string) string {
 	switch r.Kind {
 	case RowProject:
 		label := r.Project
@@ -448,7 +459,7 @@ func renderRow(r Row, selected bool) string {
 		}
 		indicator := ""
 		if r.HasSession {
-			indicator = styles.Subtle.Render(" [tmux]")
+			indicator = styles.Subtle.Render(" [" + sessionLabel + "]")
 		}
 		return fmt.Sprintf("  %s%s", name, indicator)
 	case RowBranch:
