@@ -79,3 +79,8 @@ func (t *TmuxMultiplexer) IsInstalled(ctx context.Context) bool {
 	_, err := t.exec.Run(ctx, "which", "tmux")
 	return err == nil
 }
+
+// Name returns "tmux".
+func (t *TmuxMultiplexer) Name() string {
+	return "tmux"
+}

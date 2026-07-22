@@ -12,7 +12,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/adapters"
-	"github.com/jewell-lgtm/monkeypuzzle/internal/config"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
 	projectcmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/project"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core/session"
@@ -419,31 +418,16 @@ func runDashboardTUI(ctx context.Context, loadCmd tea.Cmd) error {
 	return dispatchPickedRow(ctx, row)
 }
 
-// attachSession switches to (creating if needed) the given tmux session, using
-// the user's configured multiplexer. If no multiplexer is configured, or mp is
-// not in an interactive session context (agents/scripts, or a terminal outside
-// tmux — see interactiveSessionContext), it prints the worktree path so callers
-// can `cd` into it instead. This keeps `mp switch` / `mp go` from creating or
-// hijacking a tmux session when driven through the stateless API.
+// attachSession switches to (creating if needed) the given multiplexer session.
+// If no multiplexer is configured, or mp is not in an interactive session
+// context (agents/scripts, or a terminal outside the multiplexer — see
+// chooseMultiplexer), it prints the worktree path so callers can `cd` into it
+// instead. This keeps `mp switch` / `mp go` from creating or hijacking a
+// session when driven through the stateless API.
 func attachSession(ctx context.Context, sessionName, workDir string) error {
-	if !interactiveSessionContext() {
-		fmt.Println(workDir)
-		return nil
-	}
-	userCfg, err := config.LoadUserConfig()
-	if err != nil {
-		return err
-	}
-	if userCfg.Multiplexer == "" || userCfg.Multiplexer == "none" {
-		// No multiplexer configured: print the path for `cd $(mp switch ...)`.
-		fmt.Println(workDir)
-		return nil
-	}
-	mux, err := adapters.NewMultiplexer(userCfg.Multiplexer, adapters.NewOSExec())
-	if err != nil {
-		return err
-	}
-	if !mux.IsInstalled(ctx) {
+	mux := chooseMultiplexer(adapters.NewOSExec())
+	if adapters.IsNoopMultiplexer(mux) || !mux.IsInstalled(ctx) {
+		// No session management here: print the path for `cd $(mp switch ...)`.
 		fmt.Println(workDir)
 		return nil
 	}

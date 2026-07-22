@@ -181,46 +181,36 @@ func init() {
 	_ = pieceCleanupCmd.RegisterFlagCompletionFunc("main-branch", completeGitBranches)
 }
 
-// interactiveSessionContext reports whether mp is being driven by a human in an
-// interactive terminal inside tmux -- the only context in which mp should manage
-// terminal-multiplexer sessions (create / switch-client / attach). BOTH must hold:
-//
-//   - stdin is a TTY (cli.IsTerminal). Agents and scripts drive mp through its
-//     stateless API (flags / stdin JSON, output captured), which is never a TTY.
-//   - $TMUX is set, so `tmux switch-client` can move the user's existing client.
-//
-// $TMUX alone is NOT trusted: it is inherited by child processes, so an agent
-// spawned from inside the user's tmux still has it set. The TTY check is what
-// excludes those callers -- without it, an agent's switch-client would hijack the
-// human's terminal and new-session would litter detached sessions. Outside this
-// context, commands surface the worktree path (JSON or stdout) to cd into.
-//
-// MP_TMUX_PLUGIN=1 is an explicit opt-in that substitutes for the TTY check: the
-// companion tmux plugin (apps/tmux) drives mp through the stateless API (no
-// controlling TTY) but still wants mp to perform the switch-client/session-create.
-// It is safe against the inherited-$TMUX problem above because only the plugin
-// sets it, per invocation -- an agent never does. $TMUX is still required either
-// way, since switch-client needs a running tmux server to talk to.
-func interactiveSessionContext() bool {
-	if os.Getenv("TMUX") == "" {
-		return false
-	}
-	return cli.IsTerminal() || os.Getenv("MP_TMUX_PLUGIN") == "1"
-}
-
 // newPieceHandler creates a piece handler, choosing the multiplexer from the
 // live interactivity context.
 func newPieceHandler(deps core.Deps) *piececmd.Handler {
-	return piececmd.NewHandlerWithMultiplexer(deps, chooseMultiplexer(deps, interactiveSessionContext()))
+	return piececmd.NewHandlerWithMultiplexer(deps, chooseMultiplexer(deps.Exec))
 }
 
-// chooseMultiplexer picks the multiplexer for a piece handler. When mp is not in
-// an interactive session context (see interactiveSessionContext) it returns the
-// no-op multiplexer, so agents and scripts never get a tmux session and just
-// read the worktree path from the result JSON. Config problems also degrade to
-// no-op with a warning so piece commands keep working with a broken user config.
-func chooseMultiplexer(deps core.Deps, interactive bool) core.Multiplexer {
-	if !interactive {
+// chooseMultiplexer picks the multiplexer for the configured provider, or the
+// no-op multiplexer when mp should not manage sessions. Real session management
+// (create / switch-client / attach) happens only when ALL hold:
+//
+//   - stdin is a TTY (cli.IsTerminal). Agents and scripts drive mp through its
+//     stateless API (flags / stdin JSON, output captured), which is never a TTY.
+//     MP_TMUX_PLUGIN=1 substitutes for the TTY check: the companion tmux plugin
+//     (apps/tmux) drives mp through the stateless API (no controlling TTY) but
+//     still wants mp to perform the switch-client/session-create. Only the
+//     plugin sets it, per invocation -- an agent never does. The opt-in is
+//     tmux-specific and never enables other providers.
+//   - the configured multiplexer reports InSession() -- e.g. $TMUX set for tmux
+//     -- so switching can move the user's existing client. The env var alone is
+//     NOT trusted: it is inherited by child processes, so an agent spawned from
+//     inside the user's tmux still has it set. The TTY check is what excludes
+//     those callers -- without it, an agent's switch-client would hijack the
+//     human's terminal and session-create would litter detached sessions.
+//
+// Outside this context, commands surface the worktree path (JSON or stdout) to
+// cd into. Config problems also degrade to no-op with a warning so piece
+// commands keep working with a broken user config.
+func chooseMultiplexer(exec core.Exec) core.Multiplexer {
+	pluginDriven := os.Getenv("MP_TMUX_PLUGIN") == "1"
+	if !cli.IsTerminal() && !pluginDriven {
 		return adapters.NewNoopMultiplexer()
 	}
 
@@ -230,9 +220,18 @@ func chooseMultiplexer(deps core.Deps, interactive bool) core.Multiplexer {
 		return adapters.NewNoopMultiplexer()
 	}
 
-	mux, err := adapters.NewMultiplexer(userCfg.Multiplexer, deps.Exec)
+	mux, err := adapters.NewMultiplexer(userCfg.Multiplexer, exec)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "warning: %v; session management disabled\n", err)
+		return adapters.NewNoopMultiplexer()
+	}
+
+	if !mux.InSession() {
+		return adapters.NewNoopMultiplexer()
+	}
+
+	// The plugin opt-in stood in for the TTY check; it is only valid for tmux.
+	if !cli.IsTerminal() && mux.Name() != "tmux" {
 		return adapters.NewNoopMultiplexer()
 	}
 

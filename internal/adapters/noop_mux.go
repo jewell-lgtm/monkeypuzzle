@@ -37,3 +37,8 @@ func (n *NoopMultiplexer) InSession() bool {
 func (n *NoopMultiplexer) IsInstalled(ctx context.Context) bool {
 	return true
 }
+
+// Name returns "none".
+func (n *NoopMultiplexer) Name() string {
+	return "none"
+}
