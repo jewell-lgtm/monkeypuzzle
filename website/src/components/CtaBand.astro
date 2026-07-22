@@ -1,7 +1,7 @@
 ---
 import Badge from './Badge.astro';
 import Button from './Button.astro';
-import { GITHUB_URL } from '../config';
+import { GITHUB_URL, TURNSTILE_SITE_KEY } from '../config';
 ---
 
 <section class="section" style="padding-top:0" id="get-started">
@@ -30,6 +30,25 @@ import { GITHUB_URL } from '../config';
             aria-label="Email address"
             autocomplete="email"
           />
+          <!-- Honeypot: invisible to humans (CSS + tabindex + aria-hidden);
+               bots that autofill it get a fake success and nothing is stored. -->
+          <input
+            class="band__hp"
+            type="text"
+            name="website"
+            tabindex="-1"
+            autocomplete="off"
+            aria-hidden="true"
+          />
+          <!-- Turnstile (implicit render): injects a hidden
+               cf-turnstile-response input into this form's data.
+               interaction-only = invisible unless Cloudflare wants a check. -->
+          <div
+            class="cf-turnstile"
+            data-sitekey={TURNSTILE_SITE_KEY}
+            data-appearance="interaction-only"
+            data-size="flexible"
+          ></div>
           <Button size="lg" variant="accent" type="submit" iconTrailing="ArrowRight">
             Follow what ships next
           </Button>
@@ -46,11 +65,33 @@ import { GITHUB_URL } from '../config';
   </div>
 </section>
 
+<!-- Turnstile loader (implicit render finds .cf-turnstile). is:inline so
+     Astro doesn't try to bundle a cross-origin script. -->
+<script is:inline src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+
 <style>
   .band__form {
     display: flex;
     gap: 10px;
     flex-wrap: wrap;
+    justify-content: center;
+  }
+  /* Honeypot: visually gone, still in the DOM for autofilling bots. Not
+     display:none — some bots skip those. */
+  .band__form input.band__hp {
+    position: absolute;
+    left: -9999px;
+    width: 1px;
+    height: 1px;
+    min-width: 0;
+    opacity: 0;
+    pointer-events: none;
+  }
+  /* When Cloudflare escalates from invisible to an interactive check, give
+     the widget its own centered row instead of squeezing the flex line. */
+  .band__form .cf-turnstile {
+    flex-basis: 100%;
+    display: flex;
     justify-content: center;
   }
   .band__form input {
@@ -121,6 +162,9 @@ import { GITHUB_URL } from '../config';
     } finally {
       button.disabled = false;
       button.textContent = original;
+      // Turnstile tokens are single-use: re-arm the widget after every
+      // attempt so a retry (bot_check, network hiccup) gets a fresh token.
+      (window as { turnstile?: { reset?: () => void } }).turnstile?.reset?.();
     }
   });
 </script>
