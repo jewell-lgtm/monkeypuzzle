@@ -1,7 +1,7 @@
 # mp — the monkeypuzzle CLI
 
 The `mp` command. Each unit of work is a **piece**: a branch in its own git
-worktree (+ optional tmux session), with shell hooks fired at every lifecycle
+worktree (+ optional multiplexer session — tmux, zellij, or cmux), with shell hooks fired at every lifecycle
 transition. Pieces stack — `mp stack` operates over the whole stack — and
 `mp pr create` / `mp pr ready` open and flip forge PRs.
 

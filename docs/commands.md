@@ -25,14 +25,16 @@ ambiguous.)
 
 Output goes to stderr (human-readable) while stdout is reserved for JSON (machine-readable).
 
-**Session management is interactive-only.** mp creates, switches, or attaches a
-tmux session **only** when driven interactively — a real terminal on stdin
-(isatty) **and** `$TMUX` set. Agents and scripts (flags / stdin JSON, output
-captured) have no controlling terminal, so `create`/`switch`/`go` skip tmux and
-return the worktree path instead (in JSON, or on stdout for `cd $(mp switch …)`).
-`$TMUX` is inherited by child processes, so it is not sufficient on its own — the
-TTY check is what keeps an agent from creating a stray session or hijacking the
-human's terminal via `switch-client`.
+**Session management is interactive-only.** mp creates or switches a
+multiplexer session **only** when driven interactively — a real terminal on
+stdin (isatty) **and** running inside the configured multiplexer (`$TMUX` for
+tmux, `$ZELLIJ` for zellij, `$CMUX_WORKSPACE_ID` for cmux). Agents and scripts
+(flags / stdin JSON, output captured) have no controlling terminal, so
+`create`/`switch`/`go` skip the multiplexer and return the worktree path
+instead (in JSON, or on stdout for `cd $(mp switch …)`). The in-session env
+vars are inherited by child processes, so they are not sufficient on their
+own — the TTY check is what keeps an agent from creating a stray session or
+hijacking the human's terminal.
 
 ---
 
@@ -168,7 +170,7 @@ mp switch --schema
 
 With a terminal, opens a fuzzy-filtered list of rows across every registered project:
 
-- **Pieces** — existing worktrees, with a `[tmux]` indicator if a session is live.
+- **Pieces** — existing worktrees, with a `[<multiplexer>]` indicator if a session is live.
 - **Branches** — local git branches available for adoption (excludes main/master, any branch already adopted as a piece, the branch checked out in the main repo, and branches held by locked worktrees). A branch checked out in a worktree mp doesn't manage — e.g. one created by an agent — is offered too; adopting it relocates that worktree into the pieces dir. Selecting one runs `mp adopt`.
 
 Type to filter, ↑/↓ to move, `enter` to select, `esc` to cancel. The picker caps the visible rows at 20; narrow the query to surface anything below the cut.
@@ -177,12 +179,13 @@ Type to filter, ↑/↓ to move, `enter` to select, `esc` to cancel. The picker 
 
 1. Resolves the project from the registry.
 2. Based on the chosen selector:
-   - **piece** — locates the worktree and attaches its tmux session
+   - **piece** — locates the worktree and attaches its multiplexer session
    - **branch** — runs `AdoptPiece` with `repo_root` set to the project path, then attaches
-3. Attaching only happens when run **interactively from inside tmux** (real TTY
-   on stdin *and* `$TMUX` set). When no multiplexer is configured, or when called
-   by an agent/script or from a terminal outside tmux, it prints the worktree
-   path instead so `cd $(mp switch ...)` works.
+3. Attaching only happens when run **interactively from inside the configured
+   multiplexer** (real TTY on stdin *and* the adapter's in-session env var set).
+   When no multiplexer is configured, or when called by an agent/script or from
+   a terminal outside it, it prints the worktree path instead so
+   `cd $(mp switch ...)` works.
 
 ### Non-interactive shape
 
@@ -227,7 +230,7 @@ list of `pieces` that were moved/repaired. Human-readable summary to stderr.
 ## mp flatten
 
 Remove **all** piece worktrees for the current repository, returning it to a flat
-main-only state. Each piece's tmux session is killed and its worktree removed.
+main-only state. Each piece's multiplexer session is killed and its worktree removed.
 
 Unlike `mp cleanup` (which only removes _merged_ pieces), flatten removes every
 piece regardless of merge status. Branches are kept by default.
@@ -258,7 +261,7 @@ mp flatten --schema
 1. Lists all pieces for the repo (works from the main repo or from inside a piece)
 2. In an interactive terminal, asks for confirmation (skip with `--yes`/`--force`)
 3. For each piece: switches you to the main session if you're inside it, kills the
-   tmux session, and removes the worktree (use `--force` to discard uncommitted changes)
+   multiplexer session, and removes the worktree (use `--force` to discard uncommitted changes)
 4. Optionally deletes each piece's branch (`--delete-branches`)
 5. Continues past individual failures, reporting them under `failed`
 
@@ -309,7 +312,7 @@ Human-readable message to stderr.
 
 ## mp create
 
-Create a new piece (git worktree + tmux session).
+Create a new piece (git worktree + multiplexer session).
 
 ### Usage
 
@@ -329,7 +332,7 @@ mp create --skip-switch  # Don't auto-switch to new piece
 | `--prompt`            | Create from a prompt (name auto-generated)        | -              |
 | `-p, --parent`        | Parent piece name to branch from (stacks the piece) | `main`       |
 | `--skip-switch`       | Don't switch to the new piece after creation      | `false`        |
-| `--overwrite-session` | Replace existing main repo tmux session           | `false`        |
+| `--overwrite-session` | Replace existing main repo multiplexer session    | `false`        |
 
 ### What it does
 
@@ -348,11 +351,12 @@ path is printed when the hook starts. Only a failure to *start* the hook
 produces a warning; its exit status is not observed (check the log instead). The
 worktree is always kept regardless of how the hook fares.
 
-The auto-switch only manages a tmux session when run **interactively from inside
-tmux** (a real TTY on stdin *and* `$TMUX` set): it `switch-client`s your existing
-tmux client to the piece's session. Run by an agent or script, or from a terminal
-outside tmux, it creates no session and prints the worktree path instead — so
-`--skip-switch` is only needed to suppress switching in an interactive session.
+The auto-switch only manages a session when run **interactively from inside the
+configured multiplexer** (a real TTY on stdin *and* the adapter's in-session env
+var set): it moves your existing client/tab/workspace to the piece's session.
+Run by an agent or script, or from a terminal outside the multiplexer, it
+creates no session and prints the worktree path instead — so `--skip-switch` is
+only needed to suppress switching in an interactive session.
 
 ### Output
 
@@ -577,13 +581,13 @@ echo '{"apply":true}' | mp cleanup
 2. Checks if each piece's branch is merged (via git branch, PR, or remote)
 3. Previews the merged pieces and stale projects that would be removed
 4. With `--apply` (or an interactive confirmation): removes each worktree, kills
-   its tmux session, and prunes registry entries for deleted projects
+   its multiplexer session, and prunes registry entries for deleted projects
 
 ---
 
 ## mp abandon
 
-Remove an unmerged piece (worktree, tmux session, optionally branch).
+Remove an unmerged piece (worktree, multiplexer session, optionally branch).
 
 ### Usage
 
@@ -605,7 +609,7 @@ mp abandon --name foo --delete-branch   # Also delete git branch
 ### What it does
 
 1. Finds the piece by name (or shows TUI selector)
-2. Kills the tmux session if it exists
+2. Kills the multiplexer session if it exists
 3. Removes the git worktree (use `--force` to discard uncommitted changes)
 4. Optionally deletes the git branch (`--delete-branch`)
 
@@ -656,7 +660,7 @@ For a stacked piece, the base auto-detects to the parent piece's branch so the P
 
 ## mp done
 
-Clean up the current piece (worktree + tmux session) after its branch has been merged. Run from within a piece worktree. Verifies the piece is merged first — use [`mp abandon`](#mp-piece-abandon) for unmerged pieces.
+Clean up the current piece (worktree + multiplexer session) after its branch has been merged. Run from within a piece worktree. Verifies the piece is merged first — use [`mp abandon`](#mp-piece-abandon) for unmerged pieces.
 
 ### Usage
 
@@ -681,7 +685,7 @@ Adopt does not require a clean working directory: it always creates a *separate*
 
 A branch checked out in a worktree mp doesn't manage — e.g. one created by an agent's worktree isolation (Claude Code) or a manual `git worktree add` — is adopted by relocating that whole worktree into the pieces dir (`git worktree move`), uncommitted changes and all. A stale worktree record whose directory has been deleted is pruned automatically before adopting. Two cases still refuse: a branch that is already a piece (use `mp switch`), and a branch held by a locked worktree (`git worktree unlock` it first).
 
-When run interactively from inside a tmux session, adopt creates and switches to the new piece's session (like `mp switch`). For agents/automation it leaves tmux untouched and reports the worktree path in the result JSON.
+When run interactively from inside the configured multiplexer, adopt creates and switches to the new piece's session (like `mp switch`). For agents/automation it leaves the multiplexer untouched and reports the worktree path in the result JSON.
 
 ### Usage
 
@@ -786,7 +790,7 @@ mp stack prepend --name base-feat
 
 ## mp project
 
-Manage the global registry of monkeypuzzle projects. A "project" is any git repo initialised with `mp init` (which registers it automatically). Registering projects lets `mp` list pieces across all of them and jump between their tmux sessions. Aliases: `projects`, `proj`.
+Manage the global registry of monkeypuzzle projects. A "project" is any git repo initialised with `mp init` (which registers it automatically). Registering projects lets `mp` list pieces across all of them and jump between their multiplexer sessions. Aliases: `projects`, `proj`.
 
 ### Usage
 
@@ -841,14 +845,14 @@ Get and set user-level configuration (stored under `~/.config/monkeypuzzle/`). U
 
 ```bash
 mp config get multiplexer
-mp config set multiplexer tmux   # tmux, zellij, or none
+mp config set multiplexer tmux   # tmux, zellij, cmux, or none
 ```
 
 ### Keys
 
 | Key           | Description                                | Values                |
 | ------------- | ------------------------------------------ | --------------------- |
-| `multiplexer` | Terminal multiplexer for piece sessions    | `tmux`, `zellij`, `none` |
+| `multiplexer` | Terminal multiplexer for piece sessions    | `tmux`, `zellij`, `cmux`, `none` |
 
 ---
 
