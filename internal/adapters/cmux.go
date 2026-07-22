@@ -60,7 +60,9 @@ func (c *CmuxMultiplexer) SwitchTo(ctx context.Context, sessionName, workDir str
 		return err
 	}
 	if ref == "" {
-		_, err := c.exec.Run(ctx, "cmux", "workspace", "create", "--name", sessionName, "--cwd", workDir)
+		// --focus is explicit: the default is undocumented and SwitchTo must
+		// always land the user in the new workspace.
+		_, err := c.exec.Run(ctx, "cmux", "workspace", "create", "--name", sessionName, "--cwd", workDir, "--focus", "true")
 		if err != nil {
 			return fmt.Errorf("failed to create cmux workspace: %w", err)
 		}

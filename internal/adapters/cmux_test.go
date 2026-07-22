@@ -22,13 +22,13 @@ func TestCmuxMultiplexer_SwitchTo_CreatesWorkspace(t *testing.T) {
 	exec := NewMockExec()
 	exec.AddResponse("cmux", []string{"workspace", "list", "--json"},
 		listJSON(`{"ref":"workspace:1","custom_title":null,"title":"⠂ other"}`), nil)
-	exec.AddResponse("cmux", []string{"workspace", "create", "--name", "mp/proj/piece", "--cwd", "/work/dir"}, []byte("OK workspace:2\n"), nil)
+	exec.AddResponse("cmux", []string{"workspace", "create", "--name", "mp/proj/piece", "--cwd", "/work/dir", "--focus", "true"}, []byte("OK workspace:2\n"), nil)
 
 	mux := NewCmuxMultiplexer(exec)
 	if err := mux.SwitchTo(context.Background(), "mp/proj/piece", "/work/dir"); err != nil {
 		t.Errorf("SwitchTo() error = %v", err)
 	}
-	if !exec.WasCalled("cmux", "workspace", "create", "--name", "mp/proj/piece", "--cwd", "/work/dir") {
+	if !exec.WasCalled("cmux", "workspace", "create", "--name", "mp/proj/piece", "--cwd", "/work/dir", "--focus", "true") {
 		t.Errorf("expected workspace create, calls: %+v", exec.GetCalls())
 	}
 }
@@ -57,13 +57,13 @@ func TestCmuxMultiplexer_SwitchTo_ExactTitleMatch(t *testing.T) {
 			`{"ref":"workspace:1","custom_title":"mp/dearest-mobileapp"}`,
 			`{"ref":"workspace:2","custom_title":null,"title":"⠂ mp/dearest"}`,
 		), nil)
-	exec.AddResponse("cmux", []string{"workspace", "create", "--name", "mp/dearest", "--cwd", "/work/dir"}, []byte("OK workspace:3\n"), nil)
+	exec.AddResponse("cmux", []string{"workspace", "create", "--name", "mp/dearest", "--cwd", "/work/dir", "--focus", "true"}, []byte("OK workspace:3\n"), nil)
 
 	mux := NewCmuxMultiplexer(exec)
 	if err := mux.SwitchTo(context.Background(), "mp/dearest", "/work/dir"); err != nil {
 		t.Fatalf("SwitchTo() error = %v", err)
 	}
-	if !exec.WasCalled("cmux", "workspace", "create", "--name", "mp/dearest", "--cwd", "/work/dir") {
+	if !exec.WasCalled("cmux", "workspace", "create", "--name", "mp/dearest", "--cwd", "/work/dir", "--focus", "true") {
 		t.Errorf("expected a new mp/dearest workspace, calls: %+v", exec.GetCalls())
 	}
 }
