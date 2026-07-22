@@ -238,3 +238,73 @@ func TestCLI_LocalProjectChdir(t *testing.T) {
 		t.Error("local --project must not invoke ssh")
 	}
 }
+
+func TestCLI_RemoteDoctor(t *testing.T) {
+	e := setupTestEnv(t)
+	defer e.cleanup()
+	probe := "mp=mp version v9.9.9\ngit=yes\ntmux=yes\ngh=yes\ngh_auth=no\n"
+	_, path := sshShim(t, e, probe, 0)
+
+	stdout, stderr, err := runProxy(e, path, "", nil, "remote", "doctor", "wire")
+	if err != nil {
+		t.Fatalf("doctor failed: %v\nstderr: %s", err, stderr)
+	}
+	for _, want := range []string{`"host": "wire"`, `"reachable": true`, `"mp_version": "v9.9.9"`, `"version_match": false`, `"gh": true`, `"gh_auth": false`} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("doctor JSON missing %s\ngot: %s", want, stdout)
+		}
+	}
+	if !strings.Contains(stderr, "⚠ mp v9.9.9") {
+		t.Errorf("stderr = %q, want version-skew warning", stderr)
+	}
+
+	// Unreachable host: non-zero exit, reachable=false in JSON.
+	_, path = sshShim(t, e, "", 255)
+	stdout, _, err = runProxy(e, path, "", nil, "remote", "doctor", "wire")
+	if err == nil || !strings.Contains(stdout, `"reachable": false`) {
+		t.Errorf("unreachable: err = %v stdout = %q", err, stdout)
+	}
+}
+
+func TestCLI_RemoteDoctor_RegistryScan(t *testing.T) {
+	e := setupTestEnv(t)
+	defer e.cleanup()
+	probe := "mp=mp version v9.9.9\ngit=yes\ntmux=yes\ngh=no\ngh_auth=no\n"
+	shimDir, path := sshShim(t, e, probe, 0)
+
+	// Two remote projects on the same host + one local: doctor with no args
+	// probes the host once and skips the local entry.
+	if err := os.MkdirAll(e.dataDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	reg := `{"version":"1","projects":[
+		{"name":"api","path":"/home/u/api","host":"wire","added_at":"2026-01-01T00:00:00Z"},
+		{"name":"web","path":"/home/u/web","host":"wire","added_at":"2026-01-01T00:00:00Z"},
+		{"name":"loc","path":"/local/loc","added_at":"2026-01-01T00:00:00Z"}]}`
+	if err := os.WriteFile(filepath.Join(e.dataDir, "projects.json"), []byte(reg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, err := runProxy(e, path, "", nil, "remote", "doctor")
+	if err != nil {
+		t.Fatalf("doctor failed: %v\nstderr: %s", err, stderr)
+	}
+	if got := strings.Count(stdout, `"host": "wire"`); got != 1 {
+		t.Errorf("host wire probed %d times in JSON, want exactly 1 (dedupe)", got)
+	}
+	if got := strings.Count(stdout, `"reachable"`); got != 1 {
+		t.Errorf("doctor probed %d targets, want 1 (local projects skipped, host deduped)", got)
+	}
+	if _, err := os.Stat(filepath.Join(shimDir, "argv")); err != nil {
+		t.Error("registry scan did not probe the remote host")
+	}
+
+	// No hosts registered at all: clear error.
+	if err := os.WriteFile(filepath.Join(e.dataDir, "projects.json"), []byte(`{"version":"1","projects":[]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, stderr, err = runProxy(e, path, "", nil, "remote", "doctor")
+	if err == nil || !strings.Contains(stderr, "no remote projects registered") {
+		t.Errorf("no-hosts: err = %v stderr = %q", err, stderr)
+	}
+}
