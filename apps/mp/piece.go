@@ -113,6 +113,7 @@ var flagSkipSwitch bool
 var flagDryRun bool
 var flagForce bool
 var flagPieceCleanupApply bool
+var flagPieceCleanupJSON bool
 var flagAbandonName string
 var flagDeleteBranch bool
 var flagOverwriteSession bool
@@ -151,6 +152,7 @@ func init() {
 	pieceCleanupCmd.Flags().BoolVar(&flagDryRun, "dry-run", false, "Preview what would be cleaned without changing anything")
 	pieceCleanupCmd.Flags().BoolVar(&flagForce, "force", false, "Apply without the interactive confirmation (alias for --apply)")
 	pieceCleanupCmd.Flags().BoolVar(&flagPieceCleanupSchema, "schema", false, "Output JSON schema and exit")
+	pieceCleanupCmd.Flags().BoolVar(&flagPieceCleanupJSON, "json", false, "Output JSON even on a terminal")
 	pieceAbandonCmd.Flags().StringVar(&flagAbandonName, "name", "", "Piece name to abandon (optional if in piece)")
 	pieceAbandonCmd.Flags().BoolVar(&flagForce, "force", false, "Force removal even with uncommitted changes")
 	pieceAbandonCmd.Flags().BoolVar(&flagDeleteBranch, "delete-branch", false, "Also delete the git branch")
@@ -762,6 +764,13 @@ func runPieceCleanup(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Humans at a terminal get a summary line (the per-piece messages already
+	// streamed via Output); pipes/agents keep the JSON contract.
+	if cli.IsTerminal() && cli.IsStdoutTerminal() && !flagPieceCleanupJSON {
+		fmt.Println(cleanupHumanSummary(output, apply))
+		return nil
+	}
+
 	jsonData, err := json.MarshalIndent(output, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal results: %w", err)
@@ -769,6 +778,26 @@ func runPieceCleanup(cmd *cobra.Command, args []string) error {
 	fmt.Println(string(jsonData))
 
 	return nil
+}
+
+// cleanupHumanSummary is the one-line terminal wrap-up for `mp cleanup`.
+func cleanupHumanSummary(output cleanupOutput, applied bool) string {
+	if len(output.CleanedPieces) == 0 && len(output.RemovedProjects) == 0 {
+		return "Nothing to clean."
+	}
+	names := make([]string, 0, len(output.CleanedPieces))
+	for _, c := range output.CleanedPieces {
+		names = append(names, c.PieceName)
+	}
+	verb := "Would clean"
+	if applied {
+		verb = "Cleaned"
+	}
+	s := fmt.Sprintf("%s %d piece(s): %s", verb, len(names), strings.Join(names, ", "))
+	if n := len(output.RemovedProjects); n > 0 {
+		s += fmt.Sprintf("; pruned %d stale project(s)", n)
+	}
+	return s
 }
 
 // cleanupPass runs one cleanup pass (merged-piece removal + stale-project prune)
