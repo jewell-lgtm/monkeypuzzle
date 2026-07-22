@@ -51,46 +51,54 @@ func TestZellijMultiplexer_SwitchTo_PrefixCollision(t *testing.T) {
 	}
 }
 
-// Kill must focus the target tab before close-tab (which only acts on the
-// focused tab), in that order.
-func TestZellijMultiplexer_Kill_FocusThenClose(t *testing.T) {
+// Kill must close by stable tab ID so the user's focus never moves — plain
+// close-tab acts on the focused tab and would drag focus into the dying tab.
+func TestZellijMultiplexer_Kill_ClosesByIDWithoutFocusing(t *testing.T) {
 	exec := NewMockExec()
-	exec.AddResponse("zellij", []string{"action", "query-tab-names"}, []byte("mp/proj/piece\n"), nil)
-	exec.AddResponse("zellij", []string{"action", "go-to-tab-name", "mp/proj/piece"}, nil, nil)
-	exec.AddResponse("zellij", []string{"action", "close-tab"}, nil, nil)
+	exec.AddResponse("zellij", []string{"action", "list-tabs", "--json"},
+		[]byte(`[{"name":"main","tab_id":0},{"name":"mp/proj/piece","tab_id":3}]`), nil)
+	exec.AddResponse("zellij", []string{"action", "close-tab-by-id", "3"}, nil, nil)
 
 	mux := NewZellijMultiplexer(exec)
 	if err := mux.Kill(context.Background(), "mp/proj/piece"); err != nil {
 		t.Fatalf("Kill() error = %v", err)
 	}
-
-	calls := exec.GetCalls()
-	gotoIdx, closeIdx := -1, -1
-	for i, c := range calls {
-		if len(c.Args) > 1 && c.Args[0] == "action" {
-			switch c.Args[1] {
-			case "go-to-tab-name":
-				gotoIdx = i
-			case "close-tab":
-				closeIdx = i
-			}
+	if !exec.WasCalled("zellij", "action", "close-tab-by-id", "3") {
+		t.Errorf("expected close-tab-by-id 3, calls: %+v", exec.GetCalls())
+	}
+	for _, c := range exec.GetCalls() {
+		if len(c.Args) > 1 && (c.Args[1] == "go-to-tab-name" || c.Args[1] == "close-tab") {
+			t.Errorf("Kill must not move focus or use focused close, calls: %+v", exec.GetCalls())
 		}
 	}
-	if gotoIdx == -1 || closeIdx == -1 || gotoIdx > closeIdx {
-		t.Errorf("expected go-to-tab-name before close-tab, calls: %+v", calls)
+}
+
+// Kill matches the tab name exactly — a prefix-sharing tab must not be closed.
+func TestZellijMultiplexer_Kill_ExactNameMatch(t *testing.T) {
+	exec := NewMockExec()
+	exec.AddResponse("zellij", []string{"action", "list-tabs", "--json"},
+		[]byte(`[{"name":"mp/dearest-mobileapp","tab_id":2}]`), nil)
+
+	mux := NewZellijMultiplexer(exec)
+	if err := mux.Kill(context.Background(), "mp/dearest"); err != nil {
+		t.Errorf("Kill() of missing tab should be nil, got %v", err)
+	}
+	if exec.WasCalled("zellij", "action", "close-tab-by-id", "2") {
+		t.Error("must not close a tab whose name merely shares a prefix")
 	}
 }
 
 // Killing a tab that doesn't exist is a no-op, not an error.
 func TestZellijMultiplexer_Kill_MissingTabIsNoop(t *testing.T) {
 	exec := NewMockExec()
-	exec.AddResponse("zellij", []string{"action", "query-tab-names"}, []byte("other-tab\n"), nil)
+	exec.AddResponse("zellij", []string{"action", "list-tabs", "--json"},
+		[]byte(`[{"name":"other-tab","tab_id":1}]`), nil)
 
 	mux := NewZellijMultiplexer(exec)
 	if err := mux.Kill(context.Background(), "mp/proj/piece"); err != nil {
 		t.Errorf("Kill() of missing tab should be nil, got %v", err)
 	}
-	if exec.WasCalled("zellij", "action", "close-tab") {
+	if exec.WasCalled("zellij", "action", "close-tab-by-id", "1") {
 		t.Error("must not close-tab when the target tab doesn't exist")
 	}
 }
