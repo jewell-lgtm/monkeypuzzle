@@ -491,7 +491,18 @@ func launchAgentInPiece(ctx context.Context, deps core.Deps, info piececmd.Piece
 		repoRoot = info.WorktreePath
 	}
 	logPath := filepath.Join(projectdir.LogsDir(repoRoot), "agent-"+spec.Kind+"-"+info.Name+".log")
-	if err := deps.Exec.StartDetached(info.WorktreePath, os.Environ(), logPath, spec.Argv[0], spec.Argv[1:]...); err != nil {
+	// Strip tmux identity from the headless agent's env: inherited TMUX_PANE
+	// would be the *user's* pane, and the agent's report hooks would record it
+	// — after which `mp agent send` / the plugin's focus would target the
+	// user's own shell instead of the agent.
+	env := make([]string, 0, len(os.Environ()))
+	for _, e := range os.Environ() {
+		if strings.HasPrefix(e, "TMUX=") || strings.HasPrefix(e, "TMUX_PANE=") {
+			continue
+		}
+		env = append(env, e)
+	}
+	if err := deps.Exec.StartDetached(info.WorktreePath, env, logPath, spec.Argv[0], spec.Argv[1:]...); err != nil {
 		return err
 	}
 	fmt.Fprintf(os.Stderr, "Launched %s headless in %s; output: %s\n", spec.Kind, info.WorktreePath, logPath)

@@ -29,11 +29,13 @@ on timeout.`,
 var (
 	flagWaitInterval time.Duration
 	flagWaitTimeout  time.Duration
+	flagWaitGrace    time.Duration
 )
 
 func init() {
 	waitCmd.Flags().DurationVar(&flagWaitInterval, "interval", 2*time.Second, "Poll interval")
 	waitCmd.Flags().DurationVar(&flagWaitTimeout, "timeout", 0, "Give up after this long (0 = wait forever)")
+	waitCmd.Flags().DurationVar(&flagWaitGrace, "grace", 15*time.Second, "Keep polling an agent-less snapshot this long (covers agent startup)")
 	rootCmd.AddCommand(waitCmd)
 
 	_ = waitCmd.RegisterFlagCompletionFunc("interval", cobra.NoFileCompletions)
@@ -46,7 +48,11 @@ func runWait(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("not in a git repository")
 	}
 
-	result, err := agentcmd.NewHandler(newAgentDeps()).WaitSettled(ctx, root, args, flagWaitInterval, flagWaitTimeout)
+	result, err := agentcmd.NewHandler(newAgentDeps()).WaitSettled(ctx, root, args, agentcmd.WaitOptions{
+		Interval: flagWaitInterval,
+		Timeout:  flagWaitTimeout,
+		Grace:    flagWaitGrace,
+	})
 	if printErr := cli.PrintJSON(result); printErr != nil {
 		return printErr
 	}

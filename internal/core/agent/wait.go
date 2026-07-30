@@ -63,22 +63,42 @@ func (h *Handler) Snapshot(ctx context.Context, repoRoot string, pieces []string
 	return result, settled, nil
 }
 
+// WaitOptions tunes WaitSettled's polling.
+type WaitOptions struct {
+	Interval time.Duration
+	// Timeout gives up after this long (0 = wait forever).
+	Timeout time.Duration
+	// Grace covers the launch race: `mp create --agent` returns before the
+	// agent's first status report lands, so an immediate wait would see zero
+	// agents and settle vacuously. Until Grace elapses, an all-empty snapshot
+	// keeps polling; once any agent has been seen, normal settling applies.
+	Grace time.Duration
+}
+
 // WaitSettled polls Snapshot until no agent in the target pieces is working,
-// the context is cancelled, or timeout (0 = none) elapses.
-func (h *Handler) WaitSettled(ctx context.Context, repoRoot string, pieces []string, interval, timeout time.Duration) (WaitResult, error) {
+// the context is cancelled, or the timeout elapses.
+func (h *Handler) WaitSettled(ctx context.Context, repoRoot string, pieces []string, opts WaitOptions) (WaitResult, error) {
 	var deadline <-chan time.Time
-	if timeout > 0 {
-		timer := time.NewTimer(timeout)
+	if opts.Timeout > 0 {
+		timer := time.NewTimer(opts.Timeout)
 		defer timer.Stop()
 		deadline = timer.C
 	}
 
+	start := time.Now()
+	seenAgents := false
 	for {
 		aggregates, settled, err := h.Snapshot(ctx, repoRoot, pieces)
 		if err != nil {
 			return WaitResult{}, err
 		}
-		if settled {
+		for _, a := range aggregates {
+			if a.Aggregate != "" {
+				seenAgents = true
+			}
+		}
+		inGrace := !seenAgents && time.Since(start) < opts.Grace
+		if settled && !inGrace {
 			return WaitResult{Pieces: aggregates, Settled: true}, nil
 		}
 
@@ -86,8 +106,8 @@ func (h *Handler) WaitSettled(ctx context.Context, repoRoot string, pieces []str
 		case <-ctx.Done():
 			return WaitResult{Pieces: aggregates}, ctx.Err()
 		case <-deadline:
-			return WaitResult{Pieces: aggregates, TimedOut: true}, fmt.Errorf("timed out after %s waiting for agents to settle", timeout)
-		case <-time.After(interval):
+			return WaitResult{Pieces: aggregates, TimedOut: true}, fmt.Errorf("timed out after %s waiting for agents to settle", opts.Timeout)
+		case <-time.After(opts.Interval):
 		}
 	}
 }
