@@ -92,6 +92,42 @@ else
 	fail "source create.sh" "could not source $SCRIPTS/create.sh"
 fi
 
+# Canned `mp agent list --json` output: blocked first, one agent without a pane.
+canned_agents_json() {
+	cat <<'JSON'
+{
+  "agents": [
+    { "piece": "fix-login", "session_name": "mp/alpha/fix-login", "id": "sess-1", "kind": "claude", "status": "blocked", "pane": "%7", "updated_at": "2026-07-30T10:00:00Z" },
+    { "piece": "dark-mode", "session_name": "mp/alpha/dark-mode", "id": "codex-1", "kind": "codex", "status": "working", "updated_at": "2026-07-30T10:00:00Z" }
+  ]
+}
+JSON
+}
+
+# ---- Unit: agents.sh build_agent_rows --------------------------------------
+# shellcheck source=../scripts/agents.sh
+if source "$SCRIPTS/agents.sh" 2>/dev/null; then
+	got="$(canned_agents_json | build_agent_rows)"
+	want="$(printf '%s\n' \
+		$'🔴 fix-login · claude sess-1\tmp/alpha/fix-login\t%7\tsess-1\tfix-login' \
+		$'⚡ dark-mode · codex codex-1\tmp/alpha/dark-mode\t\tcodex-1\tdark-mode')"
+	assert_eq "agents build_agent_rows: icons, pane passthrough, empty pane" "$got" "$want"
+else
+	fail "source agents.sh" "could not source $SCRIPTS/agents.sh"
+fi
+
+# ---- Unit: blocked.sh pick_blocked -----------------------------------------
+# shellcheck source=../scripts/blocked.sh
+if source "$SCRIPTS/blocked.sh" 2>/dev/null; then
+	got="$(canned_agents_json | pick_blocked)"
+	assert_eq "blocked pick_blocked: first blocked agent" \
+		"$got" $'mp/alpha/fix-login\t%7\tfix-login'
+	got="$(printf '{"agents": []}' | pick_blocked)"
+	assert_eq "blocked pick_blocked: empty when none blocked" "$got" ""
+else
+	fail "source blocked.sh" "could not source $SCRIPTS/blocked.sh"
+fi
+
 # ---- Integration: switch happy path ----------------------------------------
 integration_switch() {
 	if ! have jq || ! have fzf; then
@@ -132,6 +168,44 @@ EOF
 	rm -rf "$tmp"
 }
 integration_switch
+
+# ---- Integration: agents picker focuses the selected pane ------------------
+integration_agents() {
+	if ! have jq || ! have fzf; then
+		skip "agents integration" "needs jq + fzf"
+		return
+	fi
+	local tmp bin log
+	tmp="$(mktemp -d)"
+	bin="$tmp/bin"
+	log="$tmp/tmux.log"
+	mkdir -p "$bin"
+
+	# Stub mp: canned agent list. Stub tmux: record every call; has-session ok.
+	cat >"$bin/mp" <<EOF
+#!/usr/bin/env bash
+[[ "\$1 \$2" == "agent list" ]] && cat "$tmp/agents.json"
+EOF
+	cat >"$bin/tmux" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "$log"
+exit 0
+EOF
+	chmod +x "$bin/mp" "$bin/tmux"
+	canned_agents_json >"$tmp/agents.json"
+
+	PATH="$bin:$PATH" TMUX="fake,1,0" MP_PLUGIN_FILTER="fix-login" \
+		bash "$SCRIPTS/agents.sh" >/dev/null 2>&1
+	if grep -q -- 'switch-client -t =mp/alpha/fix-login' "$log" 2>/dev/null &&
+		grep -q -- 'select-pane -t %7' "$log" 2>/dev/null; then
+		ok "agents flow: selection switches session and focuses pane"
+	else
+		fail "agents flow" "tmux calls: $(tr '\n' '; ' <"$log" 2>/dev/null)"
+	fi
+
+	rm -rf "$tmp"
+}
+integration_agents
 
 printf '\n%d passed, %d failed, %d skipped\n' "$PASS" "$FAIL" "$SKIP"
 [[ "$FAIL" -eq 0 ]]

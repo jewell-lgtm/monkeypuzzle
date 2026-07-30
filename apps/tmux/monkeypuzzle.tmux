@@ -6,6 +6,10 @@
 # pane layout. The popup talks to the `mp` CLI: reads via `--json`, and switch /
 # create via the stateless API plus MP_TMUX_PLUGIN=1 (set in helpers.sh) so mp
 # performs the tmux switch-client itself.
+#
+# All actions live in a "monkeypuzzle" key table entered via prefix + the
+# table key (default m), so every chord is prefix m <letter> and the plugin
+# claims exactly one key in the root prefix table.
 
 CURRENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 
@@ -20,18 +24,35 @@ tmux_opt() {
 	fi
 }
 
-switch_key="$(tmux_opt '@monkeypuzzle-switch-key' 'p')"
-create_key="$(tmux_opt '@monkeypuzzle-create-key' 'P')"
+table_key="$(tmux_opt '@monkeypuzzle-key' 'm')"
 mp_bin="$(tmux_opt '@monkeypuzzle-bin' 'mp')"
 width="$(tmux_opt '@monkeypuzzle-popup-width' '80%')"
 height="$(tmux_opt '@monkeypuzzle-popup-height' '70%')"
 
-# -E closes the popup when the script exits; -d gives the script the active
-# pane's cwd, which the create flow uses to pre-select the current project.
-tmux bind-key "$switch_key" display-popup -E -w "$width" -h "$height" \
-	-d '#{pane_current_path}' \
-	"MP_PLUGIN_BIN='$mp_bin' '$CURRENT_DIR/scripts/switch.sh'"
+# prefix + table key enters the monkeypuzzle key table; the next key fires one
+# binding below and drops back to the root table.
+tmux bind-key "$table_key" switch-client -T monkeypuzzle
 
-tmux bind-key "$create_key" display-popup -E -w "$width" -h "$height" \
-	-d '#{pane_current_path}' \
-	"MP_PLUGIN_BIN='$mp_bin' '$CURRENT_DIR/scripts/create.sh'"
+# popup binds a monkeypuzzle-table key to a script in a display-popup. -E
+# closes the popup when the script exits; -d gives the script the active
+# pane's cwd, which scopes project detection to where you're working.
+popup() {
+	tmux bind-key -T monkeypuzzle "$1" display-popup -E -w "$width" -h "$height" \
+		-d '#{pane_current_path}' \
+		"MP_PLUGIN_BIN='$mp_bin' '$CURRENT_DIR/scripts/$2'"
+}
+
+popup p switch.sh # pick a piece / project main session
+popup c create.sh # create a new piece
+popup a agents.sh # pick a live agent, focus its pane
+
+# Jump straight to the first blocked agent — no picker, no popup.
+tmux bind-key -T monkeypuzzle b run-shell \
+	"MP_PLUGIN_BIN='$mp_bin' '$CURRENT_DIR/scripts/blocked.sh' '#{pane_current_path}'"
+
+# Toggle the sidecar shell split in the current piece.
+tmux bind-key -T monkeypuzzle t run-shell \
+	"'$CURRENT_DIR/scripts/sidecar.sh' '#{pane_id}' '#{pane_current_path}'"
+
+# Cheat sheet: show this table's bindings.
+tmux bind-key -T monkeypuzzle m list-keys -T monkeypuzzle
