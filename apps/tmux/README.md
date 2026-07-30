@@ -46,24 +46,52 @@ Reload tmux (`tmux source-file ~/.tmux.conf`) and the key-bindings are live.
 
 ## Usage
 
-| Key (after prefix) | Action                                                  |
-| ------------------ | ------------------------------------------------------- |
-| `p`                | Switch: pick a piece (or a project's main session)      |
-| `P`                | Create: pick a project, name the piece, create + switch |
+Every action is a two-key chord: `prefix m`, then one of the keys below (the
+plugin claims a single key in the prefix table and puts everything in a
+`monkeypuzzle` key table).
+
+| Chord (after prefix) | Action                                                       |
+| -------------------- | ------------------------------------------------------------ |
+| `m p`                | Switch: pick a piece (or a project's main session)           |
+| `m c`                | Create: pick a project, name the piece, create + switch      |
+| `m a`                | Agents: pick a live agent (blocked first), focus its pane    |
+| `m b`                | Jump straight to the first blocked agent — no picker         |
+| `m t`                | Toggle a sidecar shell split in the current piece's worktree |
+| `m m`                | Cheat sheet: list these bindings                             |
 
 The switch picker shows `project/piece` rows with a preview pane of each piece's
 `git status` and recent commits. The create picker pre-selects the project of the
 current pane's directory; leaving the name blank lets you describe the piece as a
 free-form prompt instead (`mp create --prompt`).
 
+The agent picker and blocked-jump read `mp agent list --json` — agents show up
+once their status hooks are wired (`mp integration install claude` in the
+project). The sidecar shell is the escape hatch from keyboard-capturing agent
+TUIs: one chord to a real shell in the same worktree, `m t` again from inside
+it to close it.
+
+## Status line
+
+For ambient awareness without any always-on UI, add the agent summary to your
+status line:
+
+```tmux
+set -g status-right '#(cd "#{pane_current_path}" && mp agent summary 2>/dev/null) | %H:%M'
+```
+
+(The `cd` matters: tmux runs `#()` from the server's own cwd, which is
+usually not your project.)
+
+It renders like `🔴1 ⚡2` (blocked first) and prints nothing when no agents
+are live.
+
 ## Configuration
 
 Set these tmux options before the plugin loads (defaults shown):
 
 ```tmux
-set -g @monkeypuzzle-switch-key 'p'
-set -g @monkeypuzzle-create-key 'P'
-set -g @monkeypuzzle-bin        'mp'     # path/name of the mp binary
+set -g @monkeypuzzle-key 'm'             # prefix+<key> enters the chord table
+set -g @monkeypuzzle-bin 'mp'            # path/name of the mp binary
 set -g @monkeypuzzle-popup-width  '80%'
 set -g @monkeypuzzle-popup-height '70%'
 ```
