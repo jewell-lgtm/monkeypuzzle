@@ -64,11 +64,13 @@ The switch picker shows `project/piece` rows with a preview pane of each piece's
 current pane's directory; leaving the name blank lets you describe the piece as a
 free-form prompt instead (`mp create --prompt`).
 
-The agent picker and blocked-jump read `mp agent list --json` — agents show up
-once their status hooks are wired (`mp integration install claude` in the
-project). The sidecar shell is the escape hatch from keyboard-capturing agent
-TUIs: one chord to a real shell in the same worktree, `m t` again from inside
-it to close it.
+The agent picker and blocked-jump read `mp agent list --json`. Agents are
+detected with nothing installed into them: mp recognizes agent processes in
+each piece session's panes and reads blocked/working/idle off the screen.
+(`mp integration install claude` optionally adds hook-reported precision —
+the `done` state and lifecycle hook events.) The sidecar shell is the escape
+hatch from keyboard-capturing agent TUIs: one chord to a real shell in the
+same worktree, `m t` again from inside it to close it.
 
 ## Status line
 

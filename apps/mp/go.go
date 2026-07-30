@@ -14,6 +14,7 @@ import (
 	"github.com/jewell-lgtm/monkeypuzzle/internal/adapters"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/config"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
+	agentcmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/agent"
 	projectcmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/project"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core/session"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/registry"
@@ -163,6 +164,27 @@ func collectDashboard(ctx context.Context, infos []projectcmd.Info) ([]dashProje
 		out = append(out, dp)
 	}
 	return out, nil
+}
+
+// overlayAgentBadges replaces the metadata-derived agent badges with the live
+// merged view (hook reports + zero-install pane detection) — the same source
+// the agent picker uses, so a crashed or hook-less agent shows correctly.
+func overlayAgentBadges(ctx context.Context, deps core.Deps, projectPath string, pieces []dashPiece) {
+	items, err := newAgentHandler(deps).List(ctx, projectPath)
+	if err != nil {
+		return
+	}
+	counts := make(map[string]map[string]int)
+	for _, item := range items {
+		if counts[item.Piece] == nil {
+			counts[item.Piece] = make(map[string]int)
+		}
+		counts[item.Piece][item.Status]++
+	}
+	for i := range pieces {
+		pieces[i].AgentCounts = counts[pieces[i].Name]
+		pieces[i].AgentStatus = agentcmd.AggregateCounts(counts[pieces[i].Name])
+	}
 }
 
 // collectProjectBranches returns git branches that are candidates for adoption:
@@ -382,11 +404,20 @@ func guideOutsideProject(state cwdState, root string) error {
 }
 
 func renderDashboard(ctx context.Context, infos []projectcmd.Info) error {
-	// Non-interactive: collect synchronously and print JSON.
+	// Non-interactive: collect synchronously and print JSON. Only this path
+	// pays for the live agent-badge overlay — the interactive TUI doesn't
+	// render agent fields, so running detection there would be per-pane tmux
+	// execs for nothing.
 	if flagDashJSON || !cli.IsStdoutTerminal() || !cli.IsTerminal() {
 		projects, err := collectDashboard(ctx, infos)
 		if err != nil {
 			return err
+		}
+		deps := core.NewDeps(adapters.NewOSFS(""), adapters.NewTextOutput(os.Stderr), adapters.NewOSExec(), http.DefaultClient, adapters.SetupNoopLoading())
+		for i := range projects {
+			if projects[i].Host == "" && projects[i].Exists && projects[i].IsProject {
+				overlayAgentBadges(ctx, deps, projects[i].Path, projects[i].Pieces)
+			}
 		}
 		return cli.PrintJSON(map[string]any{"projects": projects})
 	}

@@ -947,8 +947,20 @@ go test ./... || exit 1
 Track agent processes (Claude Code, codex, …) running inside piece worktrees.
 Each piece aggregates its agents' statuses by severity — `blocked` > `working`
 > `done` > `idle` — and the aggregate surfaces as `agent_status` /
-`agent_counts` in `mp go --json` and `mp list` output. Transitions to
-`blocked` / `done` fire the `agent-blocked.sh` / `agent-done.sh` hooks.
+`agent_counts` in `mp go --json` and `mp list` output.
+
+**Zero-install by default.** `mp agent list` / `summary` recognize agent
+processes in a piece session's panes (tmux) and classify their state from the
+visible screen: an open permission dialog is `blocked`, a running spinner is
+`working`, a resting prompt is `idle`. Nothing is written into the agent's
+own configuration. Detection is deliberately strict about `blocked`, so a
+phrase in conversation text never raises a false alarm.
+
+**Optional precision.** `mp integration install claude` wires Claude Code's
+own hooks to `mp agent report`, which adds what a screen can't show: the
+`done` state, stable session ids, coverage for headless agents (no pane), and
+the `agent-blocked.sh` / `agent-done.sh` lifecycle hooks on transitions. Both
+sources merge: hook records win identity, the screen wins liveness.
 
 ```bash
 # Called by integration hooks, not usually by hand. Resolves the piece from

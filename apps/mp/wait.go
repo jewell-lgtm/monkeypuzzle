@@ -48,7 +48,7 @@ func runWait(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("not in a git repository")
 	}
 
-	result, err := agentcmd.NewHandler(newAgentDeps()).WaitSettled(ctx, root, args, agentcmd.WaitOptions{
+	result, err := newAgentHandler(newAgentDeps()).WaitSettled(ctx, root, args, agentcmd.WaitOptions{
 		Interval: flagWaitInterval,
 		Timeout:  flagWaitTimeout,
 		Grace:    flagWaitGrace,

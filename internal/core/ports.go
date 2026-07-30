@@ -95,6 +95,17 @@ type Multiplexer interface {
 	Name() string
 }
 
+// PaneInfo describes one pane in a multiplexer session.
+type PaneInfo struct {
+	// ID is the pane target (tmux: "%12").
+	ID string
+	// Command is the pane's foreground process name (tmux:
+	// pane_current_command), how agent processes are recognized.
+	Command string
+	// PID is the pane's root process id.
+	PID int
+}
+
 // PaneOps is the optional pane-level extension of Multiplexer. Callers
 // type-assert into it and treat a failed assertion as "unsupported by this
 // multiplexer" — only tmux implements it today.
@@ -107,6 +118,10 @@ type PaneOps interface {
 	// CapturePane returns the current visible contents of a pane (or a
 	// session's active pane).
 	CapturePane(ctx context.Context, target string) ([]byte, error)
+
+	// ListPanes enumerates every pane in a session — the discovery half of
+	// zero-install agent detection.
+	ListPanes(ctx context.Context, sessionName string) ([]PaneInfo, error)
 }
 
 // LoadingSignal provides pub/sub for loading state.
