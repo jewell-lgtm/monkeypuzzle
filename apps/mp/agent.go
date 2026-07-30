@@ -19,11 +19,15 @@ import (
 var agentCmd = &cobra.Command{
 	Use:   "agent",
 	Short: "Track agent processes running in pieces",
-	Long: `Agents (Claude Code, codex, ...) running inside piece worktrees report their
-status here via integration hooks (see 'mp integration install'). Each piece
-aggregates its agents' statuses (blocked > working > done > idle), fires the
-agent-blocked / agent-done lifecycle hooks on transitions, and surfaces the
-result in 'mp go --json' for pickers and status lines.`,
+	Long: `Agents (Claude Code, codex, ...) running in piece sessions are detected with
+nothing installed into the agent: mp recognizes agent processes in the
+session's panes and reads their state (blocked/working/idle) off the screen.
+Each piece aggregates its agents by severity (blocked > working > done >
+idle) and surfaces the result in 'mp go --json' for pickers and status lines.
+
+'mp integration install claude' is an optional upgrade: the agent's own hooks
+then report exact state — adding the "done" status, stable session ids, and
+the agent-blocked/agent-done lifecycle hooks — instead of screen inference.`,
 }
 
 var agentReportCmd = &cobra.Command{
@@ -103,19 +107,30 @@ func init() {
 	rootCmd.AddCommand(agentCmd)
 }
 
-// paneMultiplexer returns the configured multiplexer's pane operations.
-// Unlike chooseMultiplexer this is NOT gated on a TTY: reading a pane or
-// prompting an agent is exactly what an orchestrating script/agent does, and
-// neither steals the user's client focus.
-func paneMultiplexer(exec core.Exec) (core.PaneOps, error) {
+// configuredMultiplexer returns the user's configured multiplexer without the
+// TTY gating of chooseMultiplexer: pane reads and agent detection are exactly
+// what orchestrating scripts/agents do, and neither steals client focus.
+// Degrades to the no-op multiplexer on config problems.
+func configuredMultiplexer(exec core.Exec) core.Multiplexer {
 	userCfg, err := config.LoadUserConfig()
 	if err != nil {
-		return nil, fmt.Errorf("failed to load user config: %w", err)
+		return adapters.NewNoopMultiplexer()
 	}
 	mux, err := adapters.NewMultiplexer(userCfg.Multiplexer, exec)
 	if err != nil {
-		return nil, err
+		return adapters.NewNoopMultiplexer()
 	}
+	return mux
+}
+
+// newAgentHandler builds the agent handler with pane detection wired in.
+func newAgentHandler(deps core.Deps) *agentcmd.Handler {
+	return agentcmd.NewHandlerWithMux(deps, configuredMultiplexer(deps.Exec))
+}
+
+// paneMultiplexer returns the configured multiplexer's pane operations.
+func paneMultiplexer(exec core.Exec) (core.PaneOps, error) {
+	mux := configuredMultiplexer(exec)
 	pane, ok := mux.(core.PaneOps)
 	if !ok {
 		return nil, fmt.Errorf("pane operations are not supported by multiplexer %q (tmux only)", mux.Name())
@@ -131,7 +146,7 @@ func runAgentRead(cmd *cobra.Command, args []string) error {
 	}
 
 	deps := newAgentDeps()
-	item, err := agentcmd.NewHandler(deps).Find(ctx, root, args[0])
+	item, err := newAgentHandler(deps).Find(ctx, root, args[0])
 	if err != nil {
 		return err
 	}
@@ -155,7 +170,7 @@ func runAgentSend(cmd *cobra.Command, args []string) error {
 	}
 
 	deps := newAgentDeps()
-	item, err := agentcmd.NewHandler(deps).Find(ctx, root, args[0])
+	item, err := newAgentHandler(deps).Find(ctx, root, args[0])
 	if err != nil {
 		return err
 	}
@@ -326,5 +341,5 @@ func collectAgents(cmd *cobra.Command) ([]agentcmd.ListItem, error) {
 	if state == cwdNotRepo {
 		return nil, fmt.Errorf("not in a git repository")
 	}
-	return agentcmd.NewHandler(newAgentDeps()).List(ctx, root)
+	return newAgentHandler(newAgentDeps()).List(ctx, root)
 }

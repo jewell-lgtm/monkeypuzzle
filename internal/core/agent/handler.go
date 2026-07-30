@@ -20,21 +20,31 @@ type Location struct {
 	RepoRoot     string
 }
 
-// Handler implements agent report/list/summary over piece metadata.
+// Handler implements agent report/list/summary over piece metadata plus
+// zero-install pane detection.
 type Handler struct {
 	deps   core.Deps
 	pieces *piece.Handler
 	hooks  *piece.HookRunner
+	mux    core.Multiplexer
 	// Alive reports process liveness; swapped out in tests.
 	Alive func(pid int) bool
 }
 
-// NewHandler creates an agent handler.
+// NewHandler creates an agent handler without a multiplexer: hook-reported
+// records only, no pane detection. Prefer NewHandlerWithMux at the CLI edge.
 func NewHandler(deps core.Deps) *Handler {
+	return NewHandlerWithMux(deps, adapters.NewNoopMultiplexer())
+}
+
+// NewHandlerWithMux creates an agent handler that also detects agents from
+// the multiplexer's panes (when it supports pane operations).
+func NewHandlerWithMux(deps core.Deps, mux core.Multiplexer) *Handler {
 	return &Handler{
 		deps:   deps,
 		pieces: piece.NewHandler(deps),
 		hooks:  piece.NewHookRunner(deps),
+		mux:    mux,
 		Alive:  adapters.ProcessAlive,
 	}
 }
@@ -124,35 +134,44 @@ func (h *Handler) Report(ctx context.Context, loc Location, input ReportInput) (
 }
 
 // List returns every live agent across the project's pieces, blocked first,
-// then by recency. Records with dead PIDs are filtered (not persisted — only
-// Report writes).
+// then by recency. Hook-reported records (dead PIDs filtered) are merged with
+// zero-install pane detection; nothing is persisted — only Report writes.
 func (h *Handler) List(ctx context.Context, repoRoot string) ([]ListItem, error) {
 	pieces, err := h.pieces.ListPieces(ctx, repoRoot)
 	if err != nil {
 		return nil, err
 	}
+	paneOps, hasPaneOps := h.mux.(core.PaneOps)
 
 	var items []ListItem
 	for _, p := range pieces {
-		metadata, err := piece.ReadPieceMetadata(p.WorktreePath, h.deps.FS)
-		if err != nil {
-			continue
-		}
-		for id, rec := range metadata.Agents {
-			if rec.PID > 0 && !h.Alive(rec.PID) {
-				continue
+		var reported []ListItem
+		if metadata, err := piece.ReadPieceMetadata(p.WorktreePath, h.deps.FS); err == nil {
+			for id, rec := range metadata.Agents {
+				if rec.PID > 0 && !h.Alive(rec.PID) {
+					continue
+				}
+				reported = append(reported, ListItem{
+					Piece:       p.Name,
+					SessionName: p.SessionName,
+					ID:          id,
+					Kind:        rec.Kind,
+					Status:      rec.Status,
+					PID:         rec.PID,
+					Pane:        rec.Pane,
+					UpdatedAt:   rec.UpdatedAt,
+				})
 			}
-			items = append(items, ListItem{
-				Piece:       p.Name,
-				SessionName: p.SessionName,
-				ID:          id,
-				Kind:        rec.Kind,
-				Status:      rec.Status,
-				PID:         rec.PID,
-				Pane:        rec.Pane,
-				UpdatedAt:   rec.UpdatedAt,
-			})
 		}
+
+		var detected []ListItem
+		var agentPanes map[string]bool
+		detectionRan := false
+		if hasPaneOps && h.mux.Exists(ctx, p.SessionName) {
+			detected, agentPanes = detectSessionAgents(ctx, paneOps, p.Name, p.SessionName)
+			detectionRan = agentPanes != nil
+		}
+		items = append(items, mergeAgents(reported, detected, agentPanes, detectionRan)...)
 	}
 
 	rank := map[string]int{piece.AgentBlocked: 0, piece.AgentWorking: 1, piece.AgentDone: 2, piece.AgentIdle: 3}

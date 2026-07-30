@@ -14,6 +14,7 @@ import (
 	"github.com/jewell-lgtm/monkeypuzzle/internal/adapters"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/config"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
+	agentcmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/agent"
 	projectcmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/project"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core/session"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/registry"
@@ -153,6 +154,7 @@ func collectDashboard(ctx context.Context, infos []projectcmd.Info) ([]dashProje
 						AgentCounts:  pc.AgentCounts,
 					})
 				}
+				overlayAgentBadges(ctx, deps, info.Path, dp.Pieces)
 			}
 			piecePaths := make([]string, 0, len(dp.Pieces))
 			for _, pc := range dp.Pieces {
@@ -163,6 +165,27 @@ func collectDashboard(ctx context.Context, infos []projectcmd.Info) ([]dashProje
 		out = append(out, dp)
 	}
 	return out, nil
+}
+
+// overlayAgentBadges replaces the metadata-derived agent badges with the live
+// merged view (hook reports + zero-install pane detection) — the same source
+// the agent picker uses, so a crashed or hook-less agent shows correctly.
+func overlayAgentBadges(ctx context.Context, deps core.Deps, projectPath string, pieces []dashPiece) {
+	items, err := newAgentHandler(deps).List(ctx, projectPath)
+	if err != nil {
+		return
+	}
+	counts := make(map[string]map[string]int)
+	for _, item := range items {
+		if counts[item.Piece] == nil {
+			counts[item.Piece] = make(map[string]int)
+		}
+		counts[item.Piece][item.Status]++
+	}
+	for i := range pieces {
+		pieces[i].AgentCounts = counts[pieces[i].Name]
+		pieces[i].AgentStatus = agentcmd.AggregateCounts(counts[pieces[i].Name])
+	}
 }
 
 // collectProjectBranches returns git branches that are candidates for adoption:

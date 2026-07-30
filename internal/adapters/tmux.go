@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
 )
@@ -107,6 +109,25 @@ func (t *TmuxMultiplexer) CapturePane(ctx context.Context, target string) ([]byt
 		return nil, fmt.Errorf("failed to capture pane: %w", err)
 	}
 	return out, nil
+}
+
+// ListPanes enumerates every pane in a session (-s = all windows).
+func (t *TmuxMultiplexer) ListPanes(ctx context.Context, sessionName string) ([]core.PaneInfo, error) {
+	out, err := t.exec.Run(ctx, "tmux", "list-panes", "-s", "-t", exactTarget(sessionName),
+		"-F", "#{pane_id}\t#{pane_current_command}\t#{pane_pid}")
+	if err != nil {
+		return nil, fmt.Errorf("failed to list panes: %w", err)
+	}
+	var panes []core.PaneInfo
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		fields := strings.Split(line, "\t")
+		if len(fields) < 3 {
+			continue
+		}
+		pid, _ := strconv.Atoi(fields[2])
+		panes = append(panes, core.PaneInfo{ID: fields[0], Command: fields[1], PID: pid})
+	}
+	return panes, nil
 }
 
 // IsInstalled returns true if tmux is available.

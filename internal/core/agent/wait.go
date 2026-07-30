@@ -9,6 +9,17 @@ import (
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core/piece"
 )
 
+// AggregateCounts collapses per-status counts to one status by severity —
+// the counts-shaped sibling of piece.AggregateAgents.
+func AggregateCounts(counts map[string]int) string {
+	for _, status := range []string{piece.AgentBlocked, piece.AgentWorking, piece.AgentDone, piece.AgentIdle} {
+		if counts[status] > 0 {
+			return status
+		}
+	}
+	return ""
+}
+
 // PieceAggregate is one piece's agent state in wait/snapshot output.
 type PieceAggregate struct {
 	Piece     string `json:"piece"`
