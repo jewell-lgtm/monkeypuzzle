@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/jewell-lgtm/monkeypuzzle/internal/adapters"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
 	initcmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/init"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/projectdir"
@@ -60,6 +61,22 @@ func CountAgents(agents map[string]AgentRecord) map[string]int {
 		counts[rec.Status]++
 	}
 	return counts
+}
+
+// processAlive is swapped out in tests.
+var processAlive = adapters.ProcessAlive
+
+// LiveAgents filters records whose process has died (a SIGKILLed agent never
+// reports "gone"), so read paths don't surface stale badges forever.
+func LiveAgents(agents map[string]AgentRecord) map[string]AgentRecord {
+	live := make(map[string]AgentRecord, len(agents))
+	for id, rec := range agents {
+		if rec.PID > 0 && !processAlive(rec.PID) {
+			continue
+		}
+		live[id] = rec
+	}
+	return live
 }
 
 // PieceMetadata stores parent-child relationship metadata for a piece
@@ -148,12 +165,36 @@ func WritePieceMetadata(worktreePath string, metadata PieceMetadata, fs core.FS)
 		return fmt.Errorf("failed to marshal piece metadata: %w", err)
 	}
 
+	// Write-temp-then-rename: a reader never sees a torn file, even with
+	// concurrent writers (agent report hooks fire whenever agents feel like it).
 	metadataPath := filepath.Join(mpDir, pieceMetadataFilename)
-	if err := fs.WriteFile(metadataPath, data, initcmd.DefaultFilePerm); err != nil {
+	tmpPath := metadataPath + ".tmp"
+	if err := fs.WriteFile(tmpPath, data, initcmd.DefaultFilePerm); err != nil {
+		return fmt.Errorf("failed to write piece metadata: %w", err)
+	}
+	if err := fs.Rename(tmpPath, metadataPath); err != nil {
 		return fmt.Errorf("failed to write piece metadata: %w", err)
 	}
 
 	return nil
+}
+
+// LockPieceMetadata serializes read-modify-write cycles on a piece's metadata
+// when the FS supports locking (real filesystems; MemoryFS in tests does
+// not). Returns an unlock func, which is a no-op when locking is unavailable.
+func LockPieceMetadata(worktreePath string, fs core.FS) (func(), error) {
+	locker, ok := fs.(core.FileLocker)
+	if !ok {
+		return func() {}, nil
+	}
+	mpDir, err := projectdir.WorktreeDir(worktreePath)
+	if err != nil {
+		return nil, err
+	}
+	if err := fs.MkdirAll(mpDir, DefaultDirPerm); err != nil {
+		return nil, err
+	}
+	return locker.LockFile(filepath.Join(mpDir, pieceMetadataFilename+".lock"))
 }
 
 // GetPieceChildren returns the names of all pieces that have the given piece as their parent.

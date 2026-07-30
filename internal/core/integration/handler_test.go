@@ -40,10 +40,24 @@ func TestInstallClaude_CreatesSettings(t *testing.T) {
 	}
 
 	hooks := readSettings(t, fs)["hooks"].(map[string]any)
-	for _, event := range []string{"SessionStart", "UserPromptSubmit", "Notification", "Stop", "SessionEnd"} {
+	for _, event := range []string{"SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Notification", "Stop", "SessionEnd"} {
 		if _, ok := hooks[event]; !ok {
 			t.Errorf("missing hook event %s", event)
 		}
+	}
+}
+
+func TestInstallClaude_RejectsWrongTypedHooks(t *testing.T) {
+	h, fs := newTestHandler()
+	_ = fs.MkdirAll("/repo/.claude", 0755)
+	_ = fs.WriteFile("/repo/.claude/settings.json", []byte(`{"hooks": "nope"}`), 0644)
+	if _, err := h.InstallClaude("/repo"); err == nil {
+		t.Error("expected error when hooks is not an object")
+	}
+
+	_ = fs.WriteFile("/repo/.claude/settings.json", []byte(`{"hooks": {"Stop": {"bad": true}}}`), 0644)
+	if _, err := h.InstallClaude("/repo"); err == nil {
+		t.Error("expected error when an event is not an array")
 	}
 }
 
