@@ -5,10 +5,12 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/adapters"
+	"github.com/jewell-lgtm/monkeypuzzle/internal/config"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
 	agentcmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/agent"
 	"github.com/jewell-lgtm/monkeypuzzle/pkg/cli"
@@ -49,6 +51,29 @@ var agentSummaryCmd = &cobra.Command{
 	RunE:  runAgentSummary,
 }
 
+var agentReadCmd = &cobra.Command{
+	Use:   "read <agent-id|piece>",
+	Short: "Capture an agent's pane contents",
+	Long: `Print the current visible contents of the pane an agent runs in — check on a
+worker without switching focus to it. Accepts an agent id or a piece name (the
+piece's most attention-worthy agent wins). Requires a multiplexer with pane
+support (tmux).`,
+	Args: cobra.ExactArgs(1),
+	RunE: runAgentRead,
+}
+
+var agentSendCmd = &cobra.Command{
+	Use:   "send <agent-id|piece> <text>...",
+	Short: "Type text into an agent's pane",
+	Long: `Send text (plus Enter) to the pane an agent runs in, as if typed — answer a
+blocked agent or hand it a follow-up prompt without switching focus. Accepts
+an agent id or piece name. Requires a multiplexer with pane support (tmux).
+
+The text lands in the agent's input verbatim: you are prompting the agent.`,
+	Args: cobra.MinimumNArgs(2),
+	RunE: runAgentSend,
+}
+
 var (
 	flagAgentStatus     string
 	flagAgentID         string
@@ -73,7 +98,81 @@ func init() {
 	agentCmd.AddCommand(agentReportCmd)
 	agentCmd.AddCommand(agentListCmd)
 	agentCmd.AddCommand(agentSummaryCmd)
+	agentCmd.AddCommand(agentReadCmd)
+	agentCmd.AddCommand(agentSendCmd)
 	rootCmd.AddCommand(agentCmd)
+}
+
+// paneMultiplexer returns the configured multiplexer's pane operations.
+// Unlike chooseMultiplexer this is NOT gated on a TTY: reading a pane or
+// prompting an agent is exactly what an orchestrating script/agent does, and
+// neither steals the user's client focus.
+func paneMultiplexer(exec core.Exec) (core.PaneOps, error) {
+	userCfg, err := config.LoadUserConfig()
+	if err != nil {
+		return nil, fmt.Errorf("failed to load user config: %w", err)
+	}
+	mux, err := adapters.NewMultiplexer(userCfg.Multiplexer, exec)
+	if err != nil {
+		return nil, err
+	}
+	pane, ok := mux.(core.PaneOps)
+	if !ok {
+		return nil, fmt.Errorf("pane operations are not supported by multiplexer %q (tmux only)", mux.Name())
+	}
+	return pane, nil
+}
+
+func runAgentRead(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
+	root, state := classifyCwd(ctx)
+	if state == cwdNotRepo {
+		return fmt.Errorf("not in a git repository")
+	}
+
+	deps := newAgentDeps()
+	item, err := agentcmd.NewHandler(deps).Find(ctx, root, args[0])
+	if err != nil {
+		return err
+	}
+	pane, err := paneMultiplexer(deps.Exec)
+	if err != nil {
+		return err
+	}
+	content, err := pane.CapturePane(ctx, item.Target())
+	if err != nil {
+		return err
+	}
+	fmt.Print(string(content))
+	return nil
+}
+
+func runAgentSend(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
+	root, state := classifyCwd(ctx)
+	if state == cwdNotRepo {
+		return fmt.Errorf("not in a git repository")
+	}
+
+	deps := newAgentDeps()
+	item, err := agentcmd.NewHandler(deps).Find(ctx, root, args[0])
+	if err != nil {
+		return err
+	}
+	pane, err := paneMultiplexer(deps.Exec)
+	if err != nil {
+		return err
+	}
+	text := strings.Join(args[1:], " ")
+	if err := pane.SendText(ctx, item.Target(), text); err != nil {
+		return err
+	}
+	return cli.PrintJSON(map[string]any{
+		"sent":   text,
+		"piece":  item.Piece,
+		"agent":  item.ID,
+		"target": item.Target(),
+	})
 }
 
 func newAgentDeps() core.Deps {

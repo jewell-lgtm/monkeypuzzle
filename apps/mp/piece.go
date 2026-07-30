@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -16,8 +17,10 @@ import (
 	"github.com/jewell-lgtm/monkeypuzzle/internal/adapters"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/config"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
+	agentcmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/agent"
 	piececmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/piece"
 	projectcmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/project"
+	"github.com/jewell-lgtm/monkeypuzzle/internal/projectdir"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/registry"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/tui/chooser"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/tui/promptinput"
@@ -130,6 +133,7 @@ var flagPieceAdoptName string
 var flagPieceAdoptParent string
 var flagPieceAdoptSchema bool
 var flagPiecePrompt string
+var flagPieceAgent string
 var flagPieceListFlat bool
 var flagPieceListAll bool
 var flagPieceCreateJSON bool
@@ -144,6 +148,7 @@ func init() {
 	pieceCreateCmd.Flags().BoolVar(&flagOverwriteSession, "overwrite-session", false, "Replace existing main repo tmux session")
 	pieceCreateCmd.Flags().BoolVar(&flagPieceCreateSchema, "schema", false, "Output JSON schema and exit")
 	pieceCreateCmd.Flags().BoolVar(&flagPieceCreateJSON, "json", false, "Output JSON even on a terminal")
+	pieceCreateCmd.Flags().StringVar(&flagPieceAgent, "agent", "", "Launch an agent in the new piece: claude or codex (typed into the session, or run headless with --prompt)")
 	pieceUpdateCmd.Flags().StringVar(&flagMainBranch, "main-branch", "main", "Main branch name to merge (default: main)")
 	pieceUpdateCmd.Flags().BoolVar(&flagPieceUpdateSchema, "schema", false, "Output JSON schema and exit")
 	pieceMergeCmd.Flags().StringVar(&flagMainBranch, "main-branch", "main", "Main branch name to merge into (default: main)")
@@ -447,6 +452,49 @@ func runPieceCreate(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	if input.Agent != "" {
+		if err := launchAgentInPiece(ctx, deps, info, input); err != nil {
+			// Non-fatal: the piece exists and is usable without the agent.
+			fmt.Fprintf(os.Stderr, "Warning: failed to launch agent: %v\n", err)
+		}
+	}
+
+	return nil
+}
+
+// launchAgentInPiece starts the requested agent in a fresh piece. With a live
+// multiplexer session the launch line is typed into it (interactive TUI);
+// otherwise the agent runs headless in the worktree — which needs a prompt —
+// detached, logging under the repo's monkeypuzzle logs dir. The agent's own
+// integration hooks (mp integration install) take it from there: status
+// reports need no help from this path.
+func launchAgentInPiece(ctx context.Context, deps core.Deps, info piececmd.PieceInfo, input piececmd.NewPieceInput) error {
+	spec, err := agentcmd.BuildLaunch(input.Agent, input.Prompt)
+	if err != nil {
+		return err
+	}
+
+	mux := chooseMultiplexer(deps.Exec)
+	if pane, ok := mux.(core.PaneOps); ok && mux.Exists(ctx, info.SessionName) {
+		if err := pane.SendText(ctx, info.SessionName, spec.Line); err != nil {
+			return err
+		}
+		fmt.Fprintf(os.Stderr, "Launched %s in session %s\n", spec.Kind, info.SessionName)
+		return nil
+	}
+
+	if len(spec.Argv) == 0 {
+		return fmt.Errorf("headless %s launch needs --prompt (no multiplexer session to type into)", spec.Kind)
+	}
+	repoRoot, err := projectdir.MainRepoRoot(info.WorktreePath)
+	if err != nil {
+		repoRoot = info.WorktreePath
+	}
+	logPath := filepath.Join(projectdir.LogsDir(repoRoot), "agent-"+spec.Kind+"-"+info.Name+".log")
+	if err := deps.Exec.StartDetached(info.WorktreePath, os.Environ(), logPath, spec.Argv[0], spec.Argv[1:]...); err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "Launched %s headless in %s; output: %s\n", spec.Kind, info.WorktreePath, logPath)
 	return nil
 }
 
@@ -491,11 +539,20 @@ func getPieceCreateInput(deps core.Deps, workDir string) (piececmd.NewPieceInput
 	if flagOverwriteSession {
 		input.OverwriteSession = true
 	}
+	if flagPieceAgent != "" {
+		input.Agent = flagPieceAgent
+	}
 
 	// Apply defaults and validate inside input layer
 	input = piececmd.WithNewPieceDefaults(input)
 	if err := piececmd.ValidateNewPieceInput(input); err != nil {
 		return piececmd.NewPieceInput{}, err
+	}
+	// Fail on an unknown agent kind before the piece is created.
+	if input.Agent != "" {
+		if _, err := agentcmd.BuildLaunch(input.Agent, input.Prompt); err != nil {
+			return piececmd.NewPieceInput{}, err
+		}
 	}
 
 	return input, nil
