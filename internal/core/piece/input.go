@@ -74,6 +74,10 @@ type NewPieceInput struct {
 	Parent           string `json:"parent,omitempty"` // Parent piece name, defaults to "main"
 	SkipSwitch       bool   `json:"skip_switch,omitempty"`
 	OverwriteSession bool   `json:"overwrite_session,omitempty"`
+	// Agent launches an agent of this kind (claude, codex) in the new piece:
+	// typed into the piece's session when one is created, else run headless
+	// with the prompt. Validated at the CLI layer against agent.ValidKinds.
+	Agent string `json:"agent,omitempty"`
 }
 
 // NewPieceSchema returns the JSON schema for piece create input.
@@ -84,6 +88,7 @@ func NewPieceSchema() ([]byte, error) {
 		"parent":            "main",
 		"skip_switch":       false,
 		"overwrite_session": false,
+		"agent":             "",
 	}
 	return json.MarshalIndent(schema, "", "  ")
 }
@@ -130,6 +135,7 @@ func WithNewPieceDefaults(input NewPieceInput) NewPieceInput {
 		Parent:           parent,
 		SkipSwitch:       input.SkipSwitch,
 		OverwriteSession: input.OverwriteSession,
+		Agent:            strings.TrimSpace(input.Agent),
 	}
 }
 

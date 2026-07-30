@@ -74,6 +74,41 @@ func (t *TmuxMultiplexer) InSession() bool {
 	return os.Getenv("TMUX") != ""
 }
 
+// paneTarget formats a -t target for pane-level commands: pane ids ("%12")
+// pass through; session names get the exact-match prefix plus a trailing
+// colon. The colon matters: tmux's target-PANE parser rejects a bare
+// "=session" (unlike target-session), but accepts "=session:" as
+// session-qualified, resolving to the active pane.
+func paneTarget(target string) string {
+	if len(target) > 0 && target[0] == '%' {
+		return target
+	}
+	return exactTarget(target) + ":"
+}
+
+// SendText types text into the target pane followed by Enter. -l sends the
+// text literally (no key-name lookup) and "--" keeps leading-dash text from
+// parsing as flags; Enter goes in a second call so it is interpreted as the
+// key, not the word.
+func (t *TmuxMultiplexer) SendText(ctx context.Context, target, text string) error {
+	if _, err := t.exec.Run(ctx, "tmux", "send-keys", "-t", paneTarget(target), "-l", "--", text); err != nil {
+		return fmt.Errorf("failed to send text to pane: %w", err)
+	}
+	if _, err := t.exec.Run(ctx, "tmux", "send-keys", "-t", paneTarget(target), "Enter"); err != nil {
+		return fmt.Errorf("failed to send Enter to pane: %w", err)
+	}
+	return nil
+}
+
+// CapturePane returns the visible contents of the target pane.
+func (t *TmuxMultiplexer) CapturePane(ctx context.Context, target string) ([]byte, error) {
+	out, err := t.exec.Run(ctx, "tmux", "capture-pane", "-p", "-t", paneTarget(target))
+	if err != nil {
+		return nil, fmt.Errorf("failed to capture pane: %w", err)
+	}
+	return out, nil
+}
+
 // IsInstalled returns true if tmux is available.
 func (t *TmuxMultiplexer) IsInstalled(ctx context.Context) bool {
 	_, err := t.exec.Run(ctx, "which", "tmux")

@@ -344,6 +344,7 @@ mp create --skip-switch  # Don't auto-switch to new piece
 | `-p, --parent`        | Parent piece name to branch from (stacks the piece) | `main`       |
 | `--skip-switch`       | Don't switch to the new piece after creation      | `false`        |
 | `--overwrite-session` | Replace existing main repo multiplexer session    | `false`        |
+| `--agent`             | Launch an agent in the new piece: `claude` or `codex`. With a session, the launch line is typed into it; without one it runs headless with `--prompt` (output to `.monkeypuzzle/logs/`) | - |
 
 ### What it does
 
@@ -966,6 +967,34 @@ mp agent summary
 
 Status `gone` removes the agent's record (sent on clean exit). Records whose
 process has died are reaped lazily on the next report.
+
+```bash
+# Check on an agent without switching focus: print its pane contents.
+# Accepts an agent id or piece name (most attention-worthy agent wins).
+mp agent read my-piece
+
+# Answer a blocked agent / hand it a follow-up, as if typed into its pane
+mp agent send my-piece "yes, and add tests"
+```
+
+`read` / `send` need a multiplexer with pane support (tmux). They are not
+TTY-gated: an orchestrating agent may drive its workers with them.
+
+## mp wait
+
+Block until agents settle — no agent `working` in the target pieces.
+
+```bash
+# Fan out, then wait for the whole flock
+mp create --name a --agent claude --prompt "..." --skip-switch
+mp create --name b --agent claude --prompt "..." --skip-switch
+mp wait && mp agent list
+
+mp wait a b --timeout 30m --interval 5s
+```
+
+Exits 0 when settled; the JSON `pieces[].aggregate` distinguishes `blocked`
+from `done`. Non-zero on timeout.
 
 ## mp integration
 

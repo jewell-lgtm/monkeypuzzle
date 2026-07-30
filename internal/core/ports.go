@@ -95,6 +95,20 @@ type Multiplexer interface {
 	Name() string
 }
 
+// PaneOps is the optional pane-level extension of Multiplexer. Callers
+// type-assert into it and treat a failed assertion as "unsupported by this
+// multiplexer" — only tmux implements it today.
+type PaneOps interface {
+	// SendText types text into a pane (or a session's active pane) followed by
+	// Enter, as if the user had typed it — the way to hand a prompt to an
+	// agent TUI that owns the pane's stdin.
+	SendText(ctx context.Context, target, text string) error
+
+	// CapturePane returns the current visible contents of a pane (or a
+	// session's active pane).
+	CapturePane(ctx context.Context, target string) ([]byte, error)
+}
+
 // LoadingSignal provides pub/sub for loading state.
 // Handlers publish loading state changes, UI layers subscribe to display feedback.
 type LoadingSignal struct {
