@@ -53,6 +53,11 @@ type PieceListItem struct {
 	HasSession   bool      `json:"has_session"`
 	ModTime      time.Time `json:"mod_time"`
 	Parent       string    `json:"parent,omitempty"` // Parent piece name, or "main" for root pieces
+	// AgentStatus is the aggregate of the piece's reported agents (blocked >
+	// working > done > idle); empty when no agents have reported.
+	AgentStatus string `json:"agent_status,omitempty"`
+	// AgentCounts is the per-status agent count behind the aggregate.
+	AgentCounts map[string]int `json:"agent_counts,omitempty"`
 }
 
 // SwitchResult contains the result of a switch operation.

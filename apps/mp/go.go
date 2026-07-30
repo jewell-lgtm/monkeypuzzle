@@ -60,6 +60,10 @@ type dashPiece struct {
 	WorktreePath string `json:"worktree_path"`
 	SessionName  string `json:"session_name"`
 	HasSession   bool   `json:"has_session"`
+	// AgentStatus / AgentCounts mirror PieceListItem: the aggregate status of
+	// agents reported in the piece, for badges and blocked-first sorting.
+	AgentStatus string         `json:"agent_status,omitempty"`
+	AgentCounts map[string]int `json:"agent_counts,omitempty"`
 }
 
 // dashBranch is the JSON shape for a git branch that is not yet adopted as a
@@ -145,6 +149,8 @@ func collectDashboard(ctx context.Context, infos []projectcmd.Info) ([]dashProje
 						WorktreePath: pc.WorktreePath,
 						SessionName:  pc.SessionName,
 						HasSession:   pc.HasSession,
+						AgentStatus:  pc.AgentStatus,
+						AgentCounts:  pc.AgentCounts,
 					})
 				}
 			}

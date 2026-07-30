@@ -902,6 +902,8 @@ Hooks are executable shell scripts in `.monkeypuzzle/hooks/` that run at key poi
 | `after-piece-update.sh`  | After successful update/sync | Blocking |
 | `before-piece-merge.sh`  | Before `mp merge`  | Blocking (non-zero exit aborts the merge) |
 | `after-piece-merge.sh`   | After successful merge   | Blocking |
+| `agent-blocked.sh`       | Piece's aggregate agent status transitions to `blocked` | Detached |
+| `agent-done.sh`          | Piece's aggregate agent status transitions to `done`    | Detached |
 
 ### Environment Variables
 
@@ -914,6 +916,10 @@ All hooks receive these environment variables:
 | `MP_REPO_ROOT`     | Absolute path to main repo      |
 | `MP_MAIN_BRANCH`   | Main branch name (merge/update) |
 | `MP_SESSION_NAME`  | Tmux session name (create)      |
+| `MP_AGENT_ID`      | Reporting agent id (agent hooks) |
+| `MP_AGENT_KIND`    | Agent kind, e.g. `claude` (agent hooks) |
+| `MP_AGENT_STATUS`  | New piece aggregate status (agent hooks) |
+| `MP_AGENT_PANE`    | Multiplexer pane the agent runs in (agent hooks) |
 
 ### Behavior
 
@@ -934,6 +940,41 @@ go test ./... || exit 1
 ```
 
 ---
+
+## mp agent
+
+Track agent processes (Claude Code, codex, …) running inside piece worktrees.
+Each piece aggregates its agents' statuses by severity — `blocked` > `working`
+> `done` > `idle` — and the aggregate surfaces as `agent_status` /
+`agent_counts` in `mp go --json` and `mp list` output. Transitions to
+`blocked` / `done` fire the `agent-blocked.sh` / `agent-done.sh` hooks.
+
+```bash
+# Called by integration hooks, not usually by hand. Resolves the piece from
+# the working directory; outside a piece it is a silent no-op (exit 0).
+mp agent report --status blocked --id sess-1 --kind claude
+
+# Claude Code hook mode: derives id + status from the hook payload on stdin
+mp agent report --claude-hook --pid $PPID
+
+# Every live agent across the project's pieces, blocked first
+mp agent list --json
+
+# Compact status-line segment, e.g. "🔴1 ⚡2" (empty when no agents)
+mp agent summary
+```
+
+Status `gone` removes the agent's record (sent on clean exit). Records whose
+process has died are reaped lazily on the next report.
+
+## mp integration
+
+```bash
+# Merge mp's agent-report hooks into .claude/settings.json at the repo root.
+# Idempotent; preserves existing settings. Run in the main repo and commit so
+# every piece worktree gets it.
+mp integration install claude
+```
 
 ## AI Agent Integration
 

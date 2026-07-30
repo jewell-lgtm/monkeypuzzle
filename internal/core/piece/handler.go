@@ -2029,10 +2029,15 @@ func (h *Handler) ListPieces(ctx context.Context, repoRoot string) ([]PieceListI
 		// Check if session exists
 		hasSession := h.mux.Exists(ctx, sessionName)
 
-		// Read piece metadata for parent info
+		// Read piece metadata for parent + agent info
 		parent := "main"
+		agentStatus := ""
+		var agentCounts map[string]int
 		if metadata, err := ReadPieceMetadata(worktreePath, h.deps.FS); err == nil {
 			parent = metadata.Parent
+			live := LiveAgents(metadata.Agents)
+			agentStatus = AggregateAgents(live)
+			agentCounts = CountAgents(live)
 		}
 
 		pieces = append(pieces, PieceListItem{
@@ -2042,6 +2047,8 @@ func (h *Handler) ListPieces(ctx context.Context, repoRoot string) ([]PieceListI
 			HasSession:   hasSession,
 			ModTime:      modTime,
 			Parent:       parent,
+			AgentStatus:  agentStatus,
+			AgentCounts:  agentCounts,
 		})
 	}
 

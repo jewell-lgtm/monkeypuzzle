@@ -27,6 +27,11 @@ const (
 	// override mp's built-in git-based detection (e.g. to recognise squash-merges
 	// via a forge API) without baking forge-specific logic into core.
 	HookIsPieceDone = "is-piece-done.sh"
+	// HookAgentBlocked / HookAgentDone fire (detached) when a piece's aggregate
+	// agent status transitions to blocked / done — the notification points for
+	// "an agent needs you" / "an agent finished".
+	HookAgentBlocked = "agent-blocked.sh"
+	HookAgentDone    = "agent-done.sh"
 )
 
 // HookContext contains environment variables to pass to hooks
@@ -39,6 +44,10 @@ type HookContext struct {
 	PRNumber     int    // MP_PR_NUMBER (for PR hooks)
 	PRURL        string // MP_PR_URL (for PR hooks)
 	PRBaseBranch string // MP_PR_BASE_BRANCH (for PR hooks)
+	AgentID      string // MP_AGENT_ID (for agent hooks)
+	AgentKind    string // MP_AGENT_KIND (for agent hooks)
+	AgentStatus  string // MP_AGENT_STATUS (for agent hooks; the piece aggregate)
+	AgentPane    string // MP_AGENT_PANE (for agent hooks)
 }
 
 // HookRunner executes hook scripts from the .monkeypuzzle/hooks directory
@@ -193,6 +202,18 @@ func (h *HookRunner) buildEnv(ctx HookContext) []string {
 	}
 	if ctx.PRBaseBranch != "" {
 		env = append(env, fmt.Sprintf("MP_PR_BASE_BRANCH=%s", ctx.PRBaseBranch))
+	}
+	if ctx.AgentID != "" {
+		env = append(env, fmt.Sprintf("MP_AGENT_ID=%s", ctx.AgentID))
+	}
+	if ctx.AgentKind != "" {
+		env = append(env, fmt.Sprintf("MP_AGENT_KIND=%s", ctx.AgentKind))
+	}
+	if ctx.AgentStatus != "" {
+		env = append(env, fmt.Sprintf("MP_AGENT_STATUS=%s", ctx.AgentStatus))
+	}
+	if ctx.AgentPane != "" {
+		env = append(env, fmt.Sprintf("MP_AGENT_PANE=%s", ctx.AgentPane))
 	}
 
 	return env

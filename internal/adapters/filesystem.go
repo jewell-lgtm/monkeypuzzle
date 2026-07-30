@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
@@ -91,6 +92,27 @@ func (f *OSFS) Symlink(oldname, newname string) error {
 
 func (f *OSFS) ReadDir(name string) ([]fs.DirEntry, error) {
 	return os.ReadDir(f.path(name))
+}
+
+func (f *OSFS) Rename(oldpath, newpath string) error {
+	return os.Rename(f.path(oldpath), f.path(newpath))
+}
+
+// LockFile implements core.FileLocker with an advisory flock, serializing
+// read-modify-write cycles across processes (concurrent agent report hooks).
+func (f *OSFS) LockFile(path string) (func(), error) {
+	file, err := os.OpenFile(f.path(path), os.O_CREATE|os.O_RDWR, 0644)
+	if err != nil {
+		return nil, err
+	}
+	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX); err != nil {
+		_ = file.Close()
+		return nil, err
+	}
+	return func() {
+		_ = syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
+		_ = file.Close()
+	}, nil
 }
 
 // MemoryFS implements core.FS using an in-memory filesystem for testing
@@ -227,6 +249,30 @@ func (f *MemoryFS) Symlink(oldname, newname string) error {
 		modTime: time.Now(),
 	}
 	return nil
+}
+
+func (f *MemoryFS) Rename(oldpath, newpath string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	oldpath = memPath(oldpath)
+	newpath = memPath(newpath)
+	file, ok := f.files[oldpath]
+	if !ok {
+		return os.ErrNotExist
+	}
+	f.files[newpath] = file
+	delete(f.files, oldpath)
+	return nil
+}
+
+// memPath normalizes a path the way WriteFile/ReadFile store keys.
+func memPath(name string) string {
+	name = filepath.Clean(name)
+	if filepath.IsAbs(name) && len(name) > 1 {
+		return name[1:]
+	}
+	return name
 }
 
 func (f *MemoryFS) ReadDir(name string) ([]fs.DirEntry, error) {
