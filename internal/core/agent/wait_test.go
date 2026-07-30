@@ -71,12 +71,12 @@ func TestWaitSettled_ImmediateWhenSettled(t *testing.T) {
 	seedPiece(t, fs, "/repo", "p1", map[string]string{"a1": piece.AgentDone})
 	h := newWaitHandler(fs)
 
-	result, err := h.WaitSettled(context.Background(), "/repo", nil, time.Hour, 0)
+	result, err := h.WaitSettled(context.Background(), "/repo", nil, agent.WaitOptions{Interval: time.Hour, Grace: time.Hour})
 	if err != nil {
 		t.Fatalf("wait: %v", err)
 	}
 	if !result.Settled {
-		t.Error("expected settled")
+		t.Error("expected settled: a seen agent ends the grace window")
 	}
 }
 
@@ -85,12 +85,31 @@ func TestWaitSettled_TimesOut(t *testing.T) {
 	seedPiece(t, fs, "/repo", "p1", map[string]string{"a1": piece.AgentWorking})
 	h := newWaitHandler(fs)
 
-	result, err := h.WaitSettled(context.Background(), "/repo", nil, 10*time.Millisecond, 50*time.Millisecond)
+	result, err := h.WaitSettled(context.Background(), "/repo", nil, agent.WaitOptions{Interval: 10 * time.Millisecond, Timeout: 50 * time.Millisecond})
 	if err == nil {
 		t.Fatal("expected timeout error")
 	}
 	if !result.TimedOut || result.Settled {
 		t.Errorf("expected timed-out unsettled result, got %+v", result)
+	}
+}
+
+// The launch race: no agents have reported yet. Grace keeps the wait polling
+// instead of settling vacuously.
+func TestWaitSettled_GraceCoversEmptyStart(t *testing.T) {
+	fs := adapters.NewMemoryFS()
+	h := newWaitHandler(fs)
+
+	start := time.Now()
+	result, err := h.WaitSettled(context.Background(), "/repo", []string{"p1"}, agent.WaitOptions{Interval: 10 * time.Millisecond, Grace: 60 * time.Millisecond})
+	if err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+	if !result.Settled {
+		t.Error("expected settled after grace expires")
+	}
+	if time.Since(start) < 60*time.Millisecond {
+		t.Error("expected wait to hold for the grace window")
 	}
 }
 

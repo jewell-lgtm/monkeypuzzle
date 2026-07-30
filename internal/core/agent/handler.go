@@ -50,6 +50,14 @@ func (h *Handler) Report(ctx context.Context, loc Location, input ReportInput) (
 		input.ID = fmt.Sprintf("pid-%d", input.PID)
 	}
 
+	// Serialize the read-modify-write: two agents' hooks reporting at once
+	// must not drop each other's records (or any other metadata field).
+	unlock, err := piece.LockPieceMetadata(loc.WorktreePath, h.deps.FS)
+	if err != nil {
+		return ReportResult{}, err
+	}
+	defer unlock()
+
 	metadata, err := piece.ReadPieceMetadata(loc.WorktreePath, h.deps.FS)
 	if err != nil {
 		return ReportResult{}, err

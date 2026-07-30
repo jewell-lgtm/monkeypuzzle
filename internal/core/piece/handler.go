@@ -2035,8 +2035,9 @@ func (h *Handler) ListPieces(ctx context.Context, repoRoot string) ([]PieceListI
 		var agentCounts map[string]int
 		if metadata, err := ReadPieceMetadata(worktreePath, h.deps.FS); err == nil {
 			parent = metadata.Parent
-			agentStatus = AggregateAgents(metadata.Agents)
-			agentCounts = CountAgents(metadata.Agents)
+			live := LiveAgents(metadata.Agents)
+			agentStatus = AggregateAgents(live)
+			agentCounts = CountAgents(live)
 		}
 
 		pieces = append(pieces, PieceListItem{

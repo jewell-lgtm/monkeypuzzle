@@ -74,20 +74,24 @@ func (t *TmuxMultiplexer) InSession() bool {
 	return os.Getenv("TMUX") != ""
 }
 
-// paneTarget formats a -t target: pane ids ("%12") pass through, session
-// names get the exact-match prefix (resolving to the session's active pane).
+// paneTarget formats a -t target for pane-level commands: pane ids ("%12")
+// pass through; session names get the exact-match prefix plus a trailing
+// colon. The colon matters: tmux's target-PANE parser rejects a bare
+// "=session" (unlike target-session), but accepts "=session:" as
+// session-qualified, resolving to the active pane.
 func paneTarget(target string) string {
 	if len(target) > 0 && target[0] == '%' {
 		return target
 	}
-	return exactTarget(target)
+	return exactTarget(target) + ":"
 }
 
 // SendText types text into the target pane followed by Enter. -l sends the
-// text literally (no key-name lookup); Enter goes in a second call so it is
-// interpreted as the key, not the word.
+// text literally (no key-name lookup) and "--" keeps leading-dash text from
+// parsing as flags; Enter goes in a second call so it is interpreted as the
+// key, not the word.
 func (t *TmuxMultiplexer) SendText(ctx context.Context, target, text string) error {
-	if _, err := t.exec.Run(ctx, "tmux", "send-keys", "-t", paneTarget(target), "-l", text); err != nil {
+	if _, err := t.exec.Run(ctx, "tmux", "send-keys", "-t", paneTarget(target), "-l", "--", text); err != nil {
 		return fmt.Errorf("failed to send text to pane: %w", err)
 	}
 	if _, err := t.exec.Run(ctx, "tmux", "send-keys", "-t", paneTarget(target), "Enter"); err != nil {

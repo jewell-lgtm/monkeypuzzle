@@ -24,7 +24,11 @@ const (
 )
 
 // claudeEvents are the Claude Code hook events mp derives agent status from.
-var claudeEvents = []string{"SessionStart", "UserPromptSubmit", "Notification", "Stop", "SessionEnd"}
+// PreToolUse/PostToolUse matter for un-sticking "blocked": after a permission
+// prompt (Notification → blocked) is approved in the pane, the next tool
+// event is what flips the status back to working. They fire per tool call;
+// the report is a fast local upsert, so the overhead is fine.
+var claudeEvents = []string{"SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Notification", "Stop", "SessionEnd"}
 
 // Result is the output of an integration install.
 type Result struct {
@@ -59,15 +63,26 @@ func (h *Handler) InstallClaude(repoRoot string) (Result, error) {
 		return Result{}, err
 	}
 
-	hooks, ok := settings["hooks"].(map[string]any)
-	if !ok {
-		hooks = map[string]any{}
+	hooks := map[string]any{}
+	if raw, exists := settings["hooks"]; exists {
+		var ok bool
+		if hooks, ok = raw.(map[string]any); !ok {
+			// Never silently replace config we don't understand.
+			return Result{}, fmt.Errorf("%s: \"hooks\" is not an object; fix it and re-run", settingsPath)
+		}
+	} else {
 		settings["hooks"] = hooks
 	}
 
 	updated := false
 	for _, event := range claudeEvents {
-		groups, _ := hooks[event].([]any)
+		var groups []any
+		if raw, exists := hooks[event]; exists {
+			var ok bool
+			if groups, ok = raw.([]any); !ok {
+				return Result{}, fmt.Errorf("%s: hooks.%s is not an array; fix it and re-run", settingsPath, event)
+			}
+		}
 		if hasReportCommand(groups) {
 			continue
 		}
