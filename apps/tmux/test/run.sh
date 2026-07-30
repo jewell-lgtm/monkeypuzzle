@@ -92,13 +92,14 @@ else
 	fail "source create.sh" "could not source $SCRIPTS/create.sh"
 fi
 
-# Canned `mp agent list --json` output: blocked first, one agent without a pane.
+# Canned `mp agent list --all --json` output: blocked first, cross-project,
+# one agent without a pane.
 canned_agents_json() {
 	cat <<'JSON'
 {
   "agents": [
-    { "piece": "fix-login", "session_name": "mp/alpha/fix-login", "id": "sess-1", "kind": "claude", "status": "blocked", "pane": "%7", "updated_at": "2026-07-30T10:00:00Z" },
-    { "piece": "dark-mode", "session_name": "mp/alpha/dark-mode", "id": "codex-1", "kind": "codex", "status": "working", "updated_at": "2026-07-30T10:00:00Z" }
+    { "project": "alpha", "piece": "fix-login", "session_name": "mp/alpha/fix-login", "id": "sess-1", "kind": "claude", "status": "blocked", "pane": "%7", "updated_at": "2026-07-30T10:00:00Z" },
+    { "project": "beta", "piece": "dark-mode", "session_name": "mp/beta/dark-mode", "id": "codex-1", "kind": "codex", "status": "working", "updated_at": "2026-07-30T10:00:00Z" }
   ]
 }
 JSON
@@ -109,9 +110,9 @@ JSON
 if source "$SCRIPTS/agents.sh" 2>/dev/null; then
 	got="$(canned_agents_json | build_agent_rows)"
 	want="$(printf '%s\n' \
-		$'🔴 fix-login · claude sess-1\tmp/alpha/fix-login\t%7\tsess-1\tfix-login' \
-		$'⚡ dark-mode · codex codex-1\tmp/alpha/dark-mode\t\tcodex-1\tdark-mode')"
-	assert_eq "agents build_agent_rows: icons, pane passthrough, empty pane" "$got" "$want"
+		$'🔴 alpha/fix-login · claude sess-1\tmp/alpha/fix-login\t%7\tsess-1\tfix-login\talpha' \
+		$'⚡ beta/dark-mode · codex codex-1\tmp/beta/dark-mode\t\tcodex-1\tdark-mode\tbeta')"
+	assert_eq "agents build_agent_rows: project labels, pane passthrough" "$got" "$want"
 else
 	fail "source agents.sh" "could not source $SCRIPTS/agents.sh"
 fi
@@ -121,7 +122,7 @@ fi
 if source "$SCRIPTS/blocked.sh" 2>/dev/null; then
 	got="$(canned_agents_json | pick_blocked)"
 	assert_eq "blocked pick_blocked: first blocked agent" \
-		"$got" $'mp/alpha/fix-login\t%7\tfix-login'
+		"$got" $'mp/alpha/fix-login\t%7\tfix-login\talpha'
 	got="$(printf '{"agents": []}' | pick_blocked)"
 	assert_eq "blocked pick_blocked: empty when none blocked" "$got" ""
 else

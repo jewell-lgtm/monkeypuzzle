@@ -10,6 +10,7 @@ import (
 	"github.com/jewell-lgtm/monkeypuzzle/internal/adapters"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core/piece"
+	"github.com/jewell-lgtm/monkeypuzzle/internal/registry"
 )
 
 // Location identifies the piece an agent report targets. Resolved from cwd at
@@ -174,6 +175,12 @@ func (h *Handler) List(ctx context.Context, repoRoot string) ([]ListItem, error)
 		items = append(items, mergeAgents(reported, detected)...)
 	}
 
+	sortAgentItems(items)
+	return items, nil
+}
+
+// sortAgentItems orders blocked first, then by recency.
+func sortAgentItems(items []ListItem) {
 	rank := map[string]int{piece.AgentBlocked: 0, piece.AgentWorking: 1, piece.AgentDone: 2, piece.AgentIdle: 3}
 	sort.SliceStable(items, func(i, j int) bool {
 		if rank[items[i].Status] != rank[items[j].Status] {
@@ -181,7 +188,34 @@ func (h *Handler) List(ctx context.Context, repoRoot string) ([]ListItem, error)
 		}
 		return items[i].UpdatedAt.After(items[j].UpdatedAt)
 	})
+}
 
+// ListAll returns live agents across every locally-registered project,
+// blocked first — the fleet view for cross-project pickers and status lines
+// that run outside any repo. Remote (host-bearing) projects are skipped.
+func (h *Handler) ListAll(ctx context.Context) ([]ListItem, error) {
+	reg, err := registry.Load()
+	if err != nil {
+		return nil, err
+	}
+
+	var items []ListItem
+	for _, project := range reg.Projects {
+		if project.Host != "" {
+			continue
+		}
+		projectItems, err := h.List(ctx, project.Path)
+		if err != nil {
+			// A broken project must not hide the rest of the fleet, but say so.
+			h.deps.Output.Write(core.Message{Type: core.MsgWarning, Content: "agent list: skipping " + project.Name + ": " + err.Error()})
+			continue
+		}
+		for i := range projectItems {
+			projectItems[i].Project = project.Name
+		}
+		items = append(items, projectItems...)
+	}
+	sortAgentItems(items)
 	return items, nil
 }
 
