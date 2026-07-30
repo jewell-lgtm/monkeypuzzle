@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -199,7 +200,7 @@ func (s *Server) handleToolsList(req *Request) *Response {
 			InputSchema: JSONSchema{
 				Type: "object",
 				Properties: map[string]Property{
-					"all": {Type: "string", Description: "\"true\" to span all registered projects instead of the current one"},
+					"all": {Type: "boolean", Description: "Span all registered projects instead of the current one"},
 					"cwd": {Type: "string", Description: "Working directory (scopes the project)"},
 				},
 			},
@@ -226,14 +227,25 @@ func (s *Server) handleToolsCall(req *Request) *Response {
 		return errorResponse(req.ID, -32602, "Invalid params", err.Error())
 	}
 
-	var args map[string]string
+	// Decode loosely and stringify values: LLM clients mix types freely (a
+	// boolean true for "all", a number for a count), and one wrong-typed field
+	// must not fail the whole call the way a map[string]string decode would.
+	var raw map[string]any
 	if len(params.Arguments) > 0 {
-		if err := json.Unmarshal(params.Arguments, &args); err != nil {
+		if err := json.Unmarshal(params.Arguments, &raw); err != nil {
 			return errorResponse(req.ID, -32602, "Invalid arguments", err.Error())
 		}
 	}
-	if args == nil {
-		args = make(map[string]string)
+	args := make(map[string]string, len(raw))
+	for key, value := range raw {
+		switch v := value.(type) {
+		case string:
+			args[key] = v
+		case bool:
+			args[key] = fmt.Sprintf("%t", v)
+		case float64:
+			args[key] = strconv.FormatFloat(v, 'f', -1, 64)
+		}
 	}
 
 	result, isError := s.executeTool(params.Name, args)
