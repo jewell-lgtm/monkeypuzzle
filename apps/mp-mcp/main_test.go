@@ -2,6 +2,9 @@ package main
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -59,6 +62,8 @@ func TestHandleToolsList(t *testing.T) {
 		"mp_piece_new",
 		"mp_piece_update",
 		"mp_piece_merge",
+		"mp_agent_list",
+		"mp_wait",
 	}
 
 	if len(result.Tools) != len(expectedTools) {
@@ -74,6 +79,46 @@ func TestHandleToolsList(t *testing.T) {
 		if !toolNames[name] {
 			t.Errorf("missing expected tool: %s", name)
 		}
+	}
+}
+
+// stubMp writes an executable that echoes its argv, for asserting the exact
+// mp invocation a tool builds.
+func stubMp(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "mp")
+	script := "#!/bin/sh\necho \"$@\"\n"
+	if err := os.WriteFile(path, []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestExecuteTool_AgentList(t *testing.T) {
+	server := &Server{mpPath: stubMp(t)}
+	out, isError := server.executeTool("mp_agent_list", map[string]string{"all": "true"})
+	if isError {
+		t.Fatalf("unexpected error: %s", out)
+	}
+	if strings.TrimSpace(out) != "agent list --json --all" {
+		t.Errorf("unexpected argv: %q", out)
+	}
+}
+
+func TestExecuteTool_Wait(t *testing.T) {
+	server := &Server{mpPath: stubMp(t)}
+	out, isError := server.executeTool("mp_wait", map[string]string{"pieces": "a b", "timeout": "1m"})
+	if isError {
+		t.Fatalf("unexpected error: %s", out)
+	}
+	if strings.TrimSpace(out) != "wait --timeout 1m a b" {
+		t.Errorf("unexpected argv: %q", out)
+	}
+
+	// Default timeout keeps MCP calls bounded.
+	out, _ = server.executeTool("mp_wait", map[string]string{})
+	if strings.TrimSpace(out) != "wait --timeout 5m" {
+		t.Errorf("unexpected default argv: %q", out)
 	}
 }
 

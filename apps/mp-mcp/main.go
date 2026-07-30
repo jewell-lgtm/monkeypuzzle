@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -193,6 +194,29 @@ func (s *Server) handleToolsList(req *Request) *Response {
 				},
 			},
 		},
+		{
+			Name:        "mp_agent_list",
+			Description: "List live agents across pieces (blocked first): status working/blocked/done/idle per agent, aggregated per piece",
+			InputSchema: JSONSchema{
+				Type: "object",
+				Properties: map[string]Property{
+					"all": {Type: "boolean", Description: "Span all registered projects instead of the current one"},
+					"cwd": {Type: "string", Description: "Working directory (scopes the project)"},
+				},
+			},
+		},
+		{
+			Name:        "mp_wait",
+			Description: "Block until agents settle (no agent working) in the given pieces, or everywhere. Returns per-piece aggregates; blocked pieces need human input",
+			InputSchema: JSONSchema{
+				Type: "object",
+				Properties: map[string]Property{
+					"pieces":  {Type: "string", Description: "Space-separated piece names (empty = all pieces with agents)"},
+					"timeout": {Type: "string", Description: "Give up after this long, e.g. \"10m\" (default: \"5m\")"},
+					"cwd":     {Type: "string", Description: "Working directory (scopes the project)"},
+				},
+			},
+		},
 	}
 	return successResponse(req.ID, ToolsListResult{Tools: tools})
 }
@@ -203,14 +227,25 @@ func (s *Server) handleToolsCall(req *Request) *Response {
 		return errorResponse(req.ID, -32602, "Invalid params", err.Error())
 	}
 
-	var args map[string]string
+	// Decode loosely and stringify values: LLM clients mix types freely (a
+	// boolean true for "all", a number for a count), and one wrong-typed field
+	// must not fail the whole call the way a map[string]string decode would.
+	var raw map[string]any
 	if len(params.Arguments) > 0 {
-		if err := json.Unmarshal(params.Arguments, &args); err != nil {
+		if err := json.Unmarshal(params.Arguments, &raw); err != nil {
 			return errorResponse(req.ID, -32602, "Invalid arguments", err.Error())
 		}
 	}
-	if args == nil {
-		args = make(map[string]string)
+	args := make(map[string]string, len(raw))
+	for key, value := range raw {
+		switch v := value.(type) {
+		case string:
+			args[key] = v
+		case bool:
+			args[key] = fmt.Sprintf("%t", v)
+		case float64:
+			args[key] = strconv.FormatFloat(v, 'f', -1, 64)
+		}
 	}
 
 	result, isError := s.executeTool(params.Name, args)
@@ -260,6 +295,23 @@ func (s *Server) executeTool(name string, args map[string]string) (string, bool)
 		cmdArgs = []string{"merge"}
 		if v := args["main_branch"]; v != "" {
 			cmdArgs = append(cmdArgs, "--main-branch", v)
+		}
+
+	case "mp_agent_list":
+		cmdArgs = []string{"agent", "list", "--json"}
+		if args["all"] == "true" {
+			cmdArgs = append(cmdArgs, "--all")
+		}
+
+	case "mp_wait":
+		timeout := args["timeout"]
+		if timeout == "" {
+			// An MCP call should always come back; forever-wait is a CLI luxury.
+			timeout = "5m"
+		}
+		cmdArgs = []string{"wait", "--timeout", timeout}
+		if v := args["pieces"]; v != "" {
+			cmdArgs = append(cmdArgs, strings.Fields(v)...)
 		}
 
 	default:
