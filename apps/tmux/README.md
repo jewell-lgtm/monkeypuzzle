@@ -76,8 +76,11 @@ For ambient awareness without any always-on UI, add the agent summary to your
 status line:
 
 ```tmux
-set -g status-right '#(mp agent summary 2>/dev/null) | %H:%M'
+set -g status-right '#(cd "#{pane_current_path}" && mp agent summary 2>/dev/null) | %H:%M'
 ```
+
+(The `cd` matters: tmux runs `#()` from the server's own cwd, which is
+usually not your project.)
 
 It renders like `🔴1 ⚡2` (blocked first) and prints nothing when no agents
 are live.

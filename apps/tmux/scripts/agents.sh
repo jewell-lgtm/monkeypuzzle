@@ -32,7 +32,7 @@ main() {
 	selection="$(printf '%s\n' "$rows" | fzf_pick \
 		--with-nth=1 \
 		--prompt='agent> ' \
-		--preview='if [[ -n {3} ]]; then tmux capture-pane -p -t {3} 2>/dev/null || echo "(pane gone)"; else echo "(no pane recorded)"; fi' \
+		--preview='tmux capture-pane -p -t {3} 2>/dev/null || echo "(no live pane)"' \
 		--preview-window='right,60%')" || exit 0
 	[[ -n "$selection" ]] || exit 0
 
