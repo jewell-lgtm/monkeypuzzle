@@ -44,6 +44,17 @@ const (
 	codexWorkingPane = `
 ▌ Working (32s • esc to interrupt)
 `
+	// A quoted marker scrolled above the bottom window must not read as
+	// working: the real spinner always hugs the last lines.
+	claudeQuotedMarkerPane = `
+● The docs mention "esc to interrupt" for the spinner line.
+● Anything else?
+
+╭──────────────────────────────────────────╮
+│ >                                        │
+╰──────────────────────────────────────────╯
+  ? for shortcuts
+`
 )
 
 func TestClassifyPane(t *testing.T) {
@@ -54,6 +65,7 @@ func TestClassifyPane(t *testing.T) {
 		{"claude permission dialog", claudePermissionPane, piece.AgentBlocked},
 		{"claude idle prompt", claudeIdlePane, piece.AgentIdle},
 		{"chatty do-you-want is not blocked", claudeChattyPane, piece.AgentIdle},
+		{"quoted marker above bottom window is not working", claudeQuotedMarkerPane, piece.AgentIdle},
 		{"codex working", codexWorkingPane, piece.AgentWorking},
 		{"empty pane", "", piece.AgentIdle},
 	}
@@ -116,13 +128,15 @@ func TestList_DetectsAgentsWithoutHooks(t *testing.T) {
 func TestList_MergesHookRecordsWithDetection(t *testing.T) {
 	fs := adapters.NewMemoryFS()
 	seedPiece(t, fs, "/repo", "p1", nil)
-	// Hook-reported: one agent done in pane %2, one stale record for a pane
-	// that no longer runs an agent, one headless (no pane).
+	// Hook-reported: one agent done in pane %2; one live agent whose pane is
+	// in another tmux session (detection can't see it — must survive); one
+	// with a dead PID (reaped); one headless (no pane).
 	worktree := "/repo/.monkeypuzzle/pieces/p1"
 	metadata := piece.PieceMetadata{Parent: "main", Agents: map[string]piece.AgentRecord{
-		"sess-1":   {Kind: "claude", Status: piece.AgentDone, Pane: "%2", UpdatedAt: time.Now()},
-		"stale":    {Kind: "claude", Status: piece.AgentWorking, Pane: "%9", UpdatedAt: time.Now()},
-		"headless": {Kind: "claude", Status: piece.AgentWorking, UpdatedAt: time.Now()},
+		"sess-1":    {Kind: "claude", Status: piece.AgentDone, Pane: "%2", PID: 20, UpdatedAt: time.Now()},
+		"elsewhere": {Kind: "claude", Status: piece.AgentBlocked, Pane: "%9", PID: 30, UpdatedAt: time.Now()},
+		"dead":      {Kind: "claude", Status: piece.AgentWorking, Pane: "%5", PID: 666, UpdatedAt: time.Now()},
+		"headless":  {Kind: "claude", Status: piece.AgentWorking, PID: 40, UpdatedAt: time.Now()},
 	}}
 	if err := piece.WritePieceMetadata(worktree, metadata, fs); err != nil {
 		t.Fatal(err)
@@ -133,7 +147,7 @@ func TestList_MergesHookRecordsWithDetection(t *testing.T) {
 		captures: map[string]string{"%2": claudeIdlePane},
 	}
 	h := agent.NewHandlerWithMux(core.Deps{FS: fs, Output: adapters.NewBufferOutput(), Exec: adapters.NewMockExec()}, mux)
-	h.Alive = func(pid int) bool { return true }
+	h.Alive = func(pid int) bool { return pid != 666 }
 
 	items, err := h.List(context.Background(), "/repo")
 	if err != nil {
@@ -148,14 +162,40 @@ func TestList_MergesHookRecordsWithDetection(t *testing.T) {
 	if got["sess-1"] != piece.AgentDone {
 		t.Errorf("sess-1 = %q, want done; items: %+v", got["sess-1"], items)
 	}
-	// Stale pane record dropped; headless record untouched.
-	if _, exists := got["stale"]; exists {
-		t.Error("stale pane record should be dropped")
+	// A live agent outside the piece session is NOT dropped by detection.
+	if got["elsewhere"] != piece.AgentBlocked {
+		t.Errorf("elsewhere = %q, want blocked (must survive detection)", got["elsewhere"])
+	}
+	// Dead PID reaped by the liveness filter; headless untouched.
+	if _, exists := got["dead"]; exists {
+		t.Error("dead-PID record should be reaped")
 	}
 	if got["headless"] != piece.AgentWorking {
 		t.Errorf("headless = %q, want working", got["headless"])
 	}
-	if len(items) != 2 {
-		t.Errorf("expected 2 items, got %d: %+v", len(items), items)
+	if len(items) != 3 {
+		t.Errorf("expected 3 items, got %d: %+v", len(items), items)
+	}
+}
+
+// An agent invoking mp (its own pane = SelfPane) must not detect itself —
+// otherwise `mp wait` sees its own spinner and never settles.
+func TestList_ExcludesSelfPane(t *testing.T) {
+	fs := adapters.NewMemoryFS()
+	seedPiece(t, fs, "/repo", "p1", nil)
+	mux := &fakePaneMux{
+		panes:    []core.PaneInfo{{ID: "%1", Command: "claude", PID: 10}},
+		captures: map[string]string{"%1": claudeWorkingPane},
+	}
+	h := agent.NewHandlerWithMux(core.Deps{FS: fs, Output: adapters.NewBufferOutput(), Exec: adapters.NewMockExec()}, mux)
+	h.Alive = func(pid int) bool { return true }
+	h.SelfPane = "%1"
+
+	items, err := h.List(context.Background(), "/repo")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(items) != 0 {
+		t.Errorf("expected self pane excluded, got %+v", items)
 	}
 }

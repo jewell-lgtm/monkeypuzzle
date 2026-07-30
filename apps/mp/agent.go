@@ -125,7 +125,9 @@ func configuredMultiplexer(exec core.Exec) core.Multiplexer {
 
 // newAgentHandler builds the agent handler with pane detection wired in.
 func newAgentHandler(deps core.Deps) *agentcmd.Handler {
-	return agentcmd.NewHandlerWithMux(deps, configuredMultiplexer(deps.Exec))
+	h := agentcmd.NewHandlerWithMux(deps, configuredMultiplexer(deps.Exec))
+	h.SelfPane = os.Getenv("TMUX_PANE")
+	return h
 }
 
 // paneMultiplexer returns the configured multiplexer's pane operations.

@@ -154,7 +154,6 @@ func collectDashboard(ctx context.Context, infos []projectcmd.Info) ([]dashProje
 						AgentCounts:  pc.AgentCounts,
 					})
 				}
-				overlayAgentBadges(ctx, deps, info.Path, dp.Pieces)
 			}
 			piecePaths := make([]string, 0, len(dp.Pieces))
 			for _, pc := range dp.Pieces {
@@ -405,11 +404,20 @@ func guideOutsideProject(state cwdState, root string) error {
 }
 
 func renderDashboard(ctx context.Context, infos []projectcmd.Info) error {
-	// Non-interactive: collect synchronously and print JSON.
+	// Non-interactive: collect synchronously and print JSON. Only this path
+	// pays for the live agent-badge overlay — the interactive TUI doesn't
+	// render agent fields, so running detection there would be per-pane tmux
+	// execs for nothing.
 	if flagDashJSON || !cli.IsStdoutTerminal() || !cli.IsTerminal() {
 		projects, err := collectDashboard(ctx, infos)
 		if err != nil {
 			return err
+		}
+		deps := core.NewDeps(adapters.NewOSFS(""), adapters.NewTextOutput(os.Stderr), adapters.NewOSExec(), http.DefaultClient, adapters.SetupNoopLoading())
+		for i := range projects {
+			if projects[i].Host == "" && projects[i].Exists && projects[i].IsProject {
+				overlayAgentBadges(ctx, deps, projects[i].Path, projects[i].Pieces)
+			}
 		}
 		return cli.PrintJSON(map[string]any{"projects": projects})
 	}

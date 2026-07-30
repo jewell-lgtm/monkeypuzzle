@@ -15,35 +15,43 @@ import (
 // into the agent; `mp integration install` remains an optional upgrade that
 // adds precise session ids, the "done" state, and hook events.
 
-// agentCommandKinds maps pane_current_command values to an agent kind. node
-// covers agents distributed as node binaries whose process title isn't set;
-// kind stays generic for those.
+// agentCommandKinds maps pane_current_command values to an agent kind. The
+// allowlist is deliberately tight: "node" would make every dev server and
+// REPL an "agent" (phantom rows, and worse — a send/read target).
 var agentCommandKinds = map[string]string{
 	"claude": "claude",
 	"codex":  "codex",
-	"node":   "agent",
 }
 
-// classification markers, checked case-insensitively against the pane tail.
-// Blocked detection is deliberately strict (herdr-style): a false 🔴 trains
-// people to ignore it. "❯ 1." is the option selector of claude's permission
-// dialog; free-text like "do you want" alone never triggers.
+// classification markers, checked case-insensitively against a narrow window
+// at the bottom of the pane. The windows are what keep conversation text
+// honest: an agent *quoting* "esc to interrupt" mid-transcript scrolls that
+// text up, while the real spinner and permission dialog always hug the
+// bottom. Blocked detection is deliberately strict (herdr-style): a false 🔴
+// trains people to ignore it. "❯ 1." is the option selector of claude's
+// permission dialog; free-text like "do you want" alone never triggers.
 var (
 	blockedMarkers = []string{"❯ 1.", "allow command", "waiting for your input", "needs your permission"}
 	workingMarkers = []string{"esc to interrupt"}
 )
 
+const (
+	blockedWindow = 15 // dialog box + options + hint line
+	workingWindow = 3  // the spinner line sits at the very bottom
+)
+
 // classifyPane maps visible pane content to an agent status. Order matters:
 // an open permission dialog means blocked even if a spinner line lingers.
 func classifyPane(content string) string {
-	tail := strings.ToLower(paneTail(content, 40))
+	blockedTail := strings.ToLower(paneTail(content, blockedWindow))
 	for _, marker := range blockedMarkers {
-		if strings.Contains(tail, marker) {
+		if strings.Contains(blockedTail, marker) {
 			return piece.AgentBlocked
 		}
 	}
+	workingTail := strings.ToLower(paneTail(content, workingWindow))
 	for _, marker := range workingMarkers {
-		if strings.Contains(tail, marker) {
+		if strings.Contains(workingTail, marker) {
 			return piece.AgentWorking
 		}
 	}
@@ -64,21 +72,21 @@ func paneTail(content string, n int) string {
 }
 
 // detectSessionAgents finds agent processes in a session's panes and
-// classifies each from its screen content.
-func detectSessionAgents(ctx context.Context, pane core.PaneOps, pieceName, sessionName string) ([]ListItem, map[string]bool) {
+// classifies each from its screen content. selfPane (the pane mp itself was
+// invoked from, when inside tmux) is excluded: an agent running `mp wait`
+// would otherwise detect its own spinner and never settle.
+func detectSessionAgents(ctx context.Context, pane core.PaneOps, pieceName, sessionName, selfPane string) []ListItem {
 	panes, err := pane.ListPanes(ctx, sessionName)
 	if err != nil {
-		return nil, nil
+		return nil
 	}
 
-	agentPanes := make(map[string]bool)
 	var items []ListItem
 	for _, p := range panes {
 		kind, isAgent := agentCommandKinds[p.Command]
-		if !isAgent {
+		if !isAgent || p.ID == selfPane {
 			continue
 		}
-		agentPanes[p.ID] = true
 
 		status := piece.AgentIdle
 		if content, err := pane.CapturePane(ctx, p.ID); err == nil {
@@ -95,22 +103,20 @@ func detectSessionAgents(ctx context.Context, pane core.PaneOps, pieceName, sess
 			UpdatedAt:   time.Now(),
 		})
 	}
-	return items, agentPanes
+	return items
 }
 
 // mergeAgents combines hook-reported records with detected panes for one
 // piece. Detection is the current truth for working/blocked/idle; a hook's
 // "done" survives an idle screen (the agent finished, then sat at its
-// prompt). Pane-bearing hook records not confirmed by detection are stale
-// (the agent exited without a SessionEnd hook) and are dropped; pane-less
-// records (headless agents) pass through untouched.
-func mergeAgents(reported, detected []ListItem, agentPanes map[string]bool, detectionRan bool) []ListItem {
+// prompt). Hook records without a matching detected pane pass through
+// untouched — the PID-liveness filter already reaped dead agents, and a live
+// record may legitimately live outside the piece session (another tmux
+// session, a wrapper binary detection doesn't recognize, headless).
+func mergeAgents(reported, detected []ListItem) []ListItem {
 	byPane := make(map[string]int)
 	merged := make([]ListItem, 0, len(reported)+len(detected))
 	for _, item := range reported {
-		if detectionRan && item.Pane != "" && !agentPanes[item.Pane] {
-			continue
-		}
 		if item.Pane != "" {
 			byPane[item.Pane] = len(merged)
 		}
