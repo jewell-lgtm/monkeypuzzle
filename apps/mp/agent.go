@@ -46,7 +46,10 @@ Status "gone" removes the agent's record.`,
 var agentListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List live agents across the project's pieces",
-	RunE:  runAgentList,
+	Long: `List live agents in the current project's pieces (blocked first). --all spans
+every registered project instead; outside a git repo, --all is implied — so
+status lines and cross-project pickers work from anywhere.`,
+	RunE: runAgentList,
 }
 
 var agentSummaryCmd = &cobra.Command{
@@ -87,6 +90,7 @@ var (
 	flagAgentClaudeHook bool
 	flagAgentSchema     bool
 	flagAgentListJSON   bool
+	flagAgentListAll    bool
 )
 
 func init() {
@@ -98,6 +102,8 @@ func init() {
 	agentReportCmd.Flags().BoolVar(&flagAgentClaudeHook, "claude-hook", false, "Parse a Claude Code hook payload from stdin")
 	agentReportCmd.Flags().BoolVar(&flagAgentSchema, "schema", false, "Output JSON schema and exit")
 	agentListCmd.Flags().BoolVar(&flagAgentListJSON, "json", false, "Output JSON instead of the table")
+	agentListCmd.Flags().BoolVar(&flagAgentListAll, "all", false, "Span all registered projects (implied outside a git repo)")
+	agentSummaryCmd.Flags().BoolVar(&flagAgentListAll, "all", false, "Span all registered projects (implied outside a git repo)")
 
 	agentCmd.AddCommand(agentReportCmd)
 	agentCmd.AddCommand(agentListCmd)
@@ -319,7 +325,11 @@ func runAgentList(cmd *cobra.Command, args []string) error {
 		if kind == "" {
 			kind = "agent"
 		}
-		fmt.Printf("%-10s %-24s %s (%s)\n", item.Status, item.Piece, kind, item.ID)
+		label := item.Piece
+		if item.Project != "" {
+			label = item.Project + "/" + item.Piece
+		}
+		fmt.Printf("%-10s %-28s %s (%s)\n", item.Status, label, kind, item.ID)
 	}
 	return nil
 }
@@ -337,9 +347,12 @@ func runAgentSummary(cmd *cobra.Command, args []string) error {
 
 func collectAgents(cmd *cobra.Command) ([]agentcmd.ListItem, error) {
 	ctx := cmd.Context()
+	handler := newAgentHandler(newAgentDeps())
 	root, state := classifyCwd(ctx)
-	if state == cwdNotRepo {
-		return nil, fmt.Errorf("not in a git repository")
+	// Outside a repo the project scope doesn't exist, so span the registry —
+	// this is what makes the status-line segment work from any cwd.
+	if flagAgentListAll || state == cwdNotRepo {
+		return handler.ListAll(ctx)
 	}
-	return newAgentHandler(newAgentDeps()).List(ctx, root)
+	return handler.List(ctx, root)
 }

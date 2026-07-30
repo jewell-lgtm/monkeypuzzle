@@ -973,6 +973,10 @@ mp agent report --claude-hook --pid $PPID
 # Every live agent across the project's pieces, blocked first
 mp agent list --json
 
+# Fleet view across all registered projects (implied outside a git repo,
+# so status lines work from any cwd)
+mp agent list --all --json
+
 # Compact status-line segment, e.g. "🔴1 ⚡2" (empty when no agents)
 mp agent summary
 ```

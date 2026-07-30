@@ -70,6 +70,8 @@ type ReportResult struct {
 
 // ListItem is one agent in `mp agent list` output.
 type ListItem struct {
+	// Project is set in cross-project listings (`mp agent list --all`).
+	Project     string    `json:"project,omitempty"`
 	Piece       string    `json:"piece"`
 	SessionName string    `json:"session_name"`
 	ID          string    `json:"id"`
