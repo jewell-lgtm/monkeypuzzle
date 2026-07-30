@@ -206,6 +206,8 @@ func (h *Handler) ListAll(ctx context.Context) ([]ListItem, error) {
 		}
 		projectItems, err := h.List(ctx, project.Path)
 		if err != nil {
+			// A broken project must not hide the rest of the fleet, but say so.
+			h.deps.Output.Write(core.Message{Type: core.MsgWarning, Content: "agent list: skipping " + project.Name + ": " + err.Error()})
 			continue
 		}
 		for i := range projectItems {
