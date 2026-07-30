@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
 	initcmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/init"
@@ -12,6 +13,54 @@ import (
 )
 
 const pieceMetadataFilename = "piece-metadata.json"
+
+// Agent status values, ordered by severity for aggregation.
+const (
+	AgentBlocked = "blocked" // awaiting human input (permission prompt, question)
+	AgentWorking = "working" // actively executing
+	AgentDone    = "done"    // finished its turn/task
+	AgentIdle    = "idle"    // started but not yet asked to do anything
+)
+
+// AgentRecord is one agent process reporting status from inside a piece
+// worktree. Keyed in PieceMetadata.Agents by an integration-provided id
+// (e.g. a Claude Code session id).
+type AgentRecord struct {
+	// Kind is the agent flavor: "claude", "codex", ...
+	Kind   string `json:"kind,omitempty"`
+	Status string `json:"status"`
+	// PID is the agent process, used for lazy liveness reaping. 0 = unknown.
+	PID int `json:"pid,omitempty"`
+	// Pane is the multiplexer pane the agent runs in (tmux $TMUX_PANE),
+	// letting UIs jump focus straight to the agent.
+	Pane      string    `json:"pane,omitempty"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// AggregateAgents collapses a piece's agents to one status by severity:
+// blocked > working > done > idle. Empty map returns "".
+func AggregateAgents(agents map[string]AgentRecord) string {
+	agg := ""
+	rank := map[string]int{AgentIdle: 1, AgentDone: 2, AgentWorking: 3, AgentBlocked: 4}
+	for _, rec := range agents {
+		if rank[rec.Status] > rank[agg] {
+			agg = rec.Status
+		}
+	}
+	return agg
+}
+
+// CountAgents returns per-status counts, omitting zero statuses.
+func CountAgents(agents map[string]AgentRecord) map[string]int {
+	if len(agents) == 0 {
+		return nil
+	}
+	counts := make(map[string]int)
+	for _, rec := range agents {
+		counts[rec.Status]++
+	}
+	return counts
+}
 
 // PieceMetadata stores parent-child relationship metadata for a piece
 type PieceMetadata struct {
@@ -29,6 +78,9 @@ type PieceMetadata struct {
 	// heuristics (branch --merged, git cherry) cannot detect it. Recording at
 	// merge time sidesteps that entirely.
 	Merged bool `json:"merged,omitempty"`
+	// Agents tracks agent processes running in this piece's worktree, keyed by
+	// agent id. Maintained by `mp agent report`; reaped lazily on write.
+	Agents map[string]AgentRecord `json:"agents,omitempty"`
 }
 
 // MarkPieceMerged sets the durable merged marker on a piece's metadata so that
