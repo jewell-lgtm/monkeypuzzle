@@ -30,6 +30,9 @@ type Handler struct {
 	mux    core.Multiplexer
 	// Alive reports process liveness; swapped out in tests.
 	Alive func(pid int) bool
+	// SelfPane is the pane mp was invoked from ($TMUX_PANE at the CLI edge);
+	// detection skips it so `mp wait` run by an agent never sees itself.
+	SelfPane string
 }
 
 // NewHandler creates an agent handler without a multiplexer: hook-reported
@@ -166,13 +169,10 @@ func (h *Handler) List(ctx context.Context, repoRoot string) ([]ListItem, error)
 		}
 
 		var detected []ListItem
-		var agentPanes map[string]bool
-		detectionRan := false
 		if hasPaneOps && h.mux.Exists(ctx, p.SessionName) {
-			detected, agentPanes = detectSessionAgents(ctx, paneOps, p.Name, p.SessionName)
-			detectionRan = agentPanes != nil
+			detected = detectSessionAgents(ctx, paneOps, p.Name, p.SessionName, h.SelfPane)
 		}
-		items = append(items, mergeAgents(reported, detected, agentPanes, detectionRan)...)
+		items = append(items, mergeAgents(reported, detected)...)
 	}
 
 	sortAgentItems(items)
@@ -206,6 +206,8 @@ func (h *Handler) ListAll(ctx context.Context) ([]ListItem, error) {
 		}
 		projectItems, err := h.List(ctx, project.Path)
 		if err != nil {
+			// A broken project must not hide the rest of the fleet, but say so.
+			h.deps.Output.Write(core.Message{Type: core.MsgWarning, Content: "agent list: skipping " + project.Name + ": " + err.Error()})
 			continue
 		}
 		for i := range projectItems {
