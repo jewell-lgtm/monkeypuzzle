@@ -17,6 +17,19 @@ type FS interface {
 	Remove(name string) error
 	Symlink(oldname, newname string) error
 	ReadDir(name string) ([]fs.DirEntry, error)
+	// Rename atomically replaces newpath with oldpath (same-directory renames
+	// only, which is all callers need for atomic write-temp-then-rename).
+	Rename(oldpath, newpath string) error
+}
+
+// FileLocker is an optional FS extension providing advisory exclusive
+// locking, used to serialize read-modify-write cycles on shared state files
+// (concurrent `mp agent report` hooks). Callers type-assert; absence (e.g.
+// MemoryFS in tests) means no locking.
+type FileLocker interface {
+	// LockFile blocks until the exclusive lock on path is held and returns
+	// the unlock function.
+	LockFile(path string) (unlock func(), err error)
 }
 
 // MessageType categorizes output messages
