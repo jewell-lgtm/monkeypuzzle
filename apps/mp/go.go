@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
@@ -38,7 +39,8 @@ just press Enter on a collapsed repo to jump to its main worktree. Typing filter
 across everything (expanded or not); ↑/↓ and PgUp/PgDn scroll.
 
 With --json (or no TTY) it prints the full per-project detail so automation can
-build its own pickers.`,
+build its own pickers, plus a top-level "current" object naming the project and
+piece that contain the working directory (omitted when outside every project).`,
 	RunE: runGo,
 }
 
@@ -57,14 +59,25 @@ func init() {
 
 // dashPiece is the JSON shape for a piece worktree in the dashboard.
 type dashPiece struct {
-	Name         string `json:"name"`
-	WorktreePath string `json:"worktree_path"`
-	SessionName  string `json:"session_name"`
-	HasSession   bool   `json:"has_session"`
+	Name         string    `json:"name"`
+	WorktreePath string    `json:"worktree_path"`
+	SessionName  string    `json:"session_name"`
+	HasSession   bool      `json:"has_session"`
+	ModTime      time.Time `json:"mod_time"`
+	Parent       string    `json:"parent,omitempty"`
 	// AgentStatus / AgentCounts mirror PieceListItem: the aggregate status of
 	// agents reported in the piece, for badges and blocked-first sorting.
 	AgentStatus string         `json:"agent_status,omitempty"`
 	AgentCounts map[string]int `json:"agent_counts,omitempty"`
+}
+
+// dashCurrent names the project (and piece, when inside one) that contains the
+// caller's working directory, so JSON consumers like the tmux plugin can mark
+// "you are here" without re-deriving it. Nil when the cwd is outside every
+// registered local project.
+type dashCurrent struct {
+	Project string `json:"project"`
+	Piece   string `json:"piece,omitempty"`
 }
 
 // dashBranch is the JSON shape for a git branch that is not yet adopted as a
@@ -150,6 +163,8 @@ func collectDashboard(ctx context.Context, infos []projectcmd.Info) ([]dashProje
 						WorktreePath: pc.WorktreePath,
 						SessionName:  pc.SessionName,
 						HasSession:   pc.HasSession,
+						ModTime:      pc.ModTime,
+						Parent:       pc.Parent,
 						AgentStatus:  pc.AgentStatus,
 						AgentCounts:  pc.AgentCounts,
 					})
@@ -164,6 +179,50 @@ func collectDashboard(ctx context.Context, infos []projectcmd.Info) ([]dashProje
 		out = append(out, dp)
 	}
 	return out, nil
+}
+
+// detectCurrent resolves the caller's working directory against the collected
+// projects. Symlinks are resolved first because the registry stores resolved
+// paths (see classifyCwd). Pure path matching — no git calls — because the cwd
+// is by definition inside the worktree/project if it is anywhere.
+func detectCurrent(projects []dashProject) *dashCurrent {
+	wd, err := os.Getwd()
+	if err != nil {
+		return nil
+	}
+	if resolved, rerr := filepath.EvalSymlinks(wd); rerr == nil {
+		wd = resolved
+	}
+	return matchCurrent(wd, projects)
+}
+
+// matchCurrent finds the project/piece whose path contains wd. Piece worktrees
+// are checked before project roots so a piece nested under its project's path
+// resolves to the piece, not the project. Remote projects never match — their
+// paths live on another host.
+func matchCurrent(wd string, projects []dashProject) *dashCurrent {
+	within := func(path string) bool {
+		return path != "" && (wd == path || strings.HasPrefix(wd, path+string(filepath.Separator)))
+	}
+	for _, p := range projects {
+		if p.Host != "" {
+			continue
+		}
+		for _, pc := range p.Pieces {
+			if within(pc.WorktreePath) {
+				return &dashCurrent{Project: p.Name, Piece: pc.Name}
+			}
+		}
+	}
+	for _, p := range projects {
+		if p.Host != "" {
+			continue
+		}
+		if within(p.Path) {
+			return &dashCurrent{Project: p.Name}
+		}
+	}
+	return nil
 }
 
 // overlayAgentBadges replaces the metadata-derived agent badges with the live
@@ -419,7 +478,11 @@ func renderDashboard(ctx context.Context, infos []projectcmd.Info) error {
 				overlayAgentBadges(ctx, deps, projects[i].Path, projects[i].Pieces)
 			}
 		}
-		return cli.PrintJSON(map[string]any{"projects": projects})
+		payload := map[string]any{"projects": projects}
+		if cur := detectCurrent(projects); cur != nil {
+			payload["current"] = cur
+		}
+		return cli.PrintJSON(payload)
 	}
 
 	// Interactive: collect inside the Bubble Tea program so the spinner animates

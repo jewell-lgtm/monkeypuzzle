@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Dependency-free test runner for the monkeypuzzle tmux plugin.
 #
-# Outside-in: the first test is the happy-path integration of the switch flow
-# (canned `mp go --json` -> picker -> `mp switch` with the right selectors),
-# driven non-interactively via the MP_PLUGIN_FILTER seam and a stub `mp`. The
-# remaining tests are unit coverage of the jq row-builders.
+# Outside-in: the integration tests drive the go.sh one-stop picker end to end
+# (canned `mp go --json` -> picker -> `mp switch` / `mp create` with the right
+# selectors), non-interactively via the MP_PLUGIN_FILTER / MP_PLUGIN_KEY /
+# MP_PLUGIN_INPUT_* seams and a stub `mp`. The remaining tests are unit
+# coverage of the jq row-builders.
 #
 # Runnable anywhere with bash + jq + fzf; integration tests skip cleanly if a
 # dependency is missing. No bats/shellcheck required.
@@ -39,18 +40,26 @@ assert_eq() {
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
-# Canned `mp go --json` output: two real projects (one with pieces, one without)
-# plus a non-project entry that must be filtered out.
+# Canned `mp go --json` output exercising every row source: a current project
+# with pieces + branches + an agent badge (alpha), a piece-less project (beta),
+# a non-project entry that must be filtered (gamma), two more projects with
+# pieces whose recency ordering must flip registry order (epsilon older than
+# delta), and a remote project that gets a main row only (rho).
 canned_json() {
 	cat <<'JSON'
 {
+  "current": { "project": "alpha", "piece": "fix-login" },
   "projects": [
     {
       "name": "alpha", "path": "/repos/alpha", "exists": true, "is_project": true,
       "branch": "main", "piece_count": 2, "main_session": "mp/alpha",
       "pieces": [
-        { "name": "fix-login", "worktree_path": "/wt/alpha/fix-login", "session_name": "mp/alpha/fix-login", "has_session": true },
-        { "name": "dark-mode", "worktree_path": "/wt/alpha/dark-mode", "session_name": "mp/alpha/dark-mode", "has_session": false }
+        { "name": "fix-login", "worktree_path": "/wt/alpha/fix-login", "session_name": "mp/alpha/fix-login", "has_session": true, "mod_time": "2026-07-01T10:00:00Z", "agent_status": "blocked" },
+        { "name": "dark-mode", "worktree_path": "/wt/alpha/dark-mode", "session_name": "mp/alpha/dark-mode", "has_session": false, "mod_time": "2026-06-01T10:00:00Z" }
+      ],
+      "branches": [
+        { "name": "feature/x" },
+        { "name": "origin/hotfix", "remote": true }
       ]
     },
     {
@@ -58,38 +67,79 @@ canned_json() {
       "branch": "main", "piece_count": 0, "main_session": "mp/beta", "pieces": []
     },
     {
+      "name": "epsilon", "path": "/repos/epsilon", "exists": true, "is_project": true,
+      "branch": "main", "piece_count": 1, "main_session": "mp/epsilon",
+      "pieces": [
+        { "name": "old-work", "worktree_path": "/wt/epsilon/old-work", "session_name": "mp/epsilon/old-work", "has_session": false, "mod_time": "2026-05-01T10:00:00Z" }
+      ]
+    },
+    {
       "name": "gamma", "path": "/repos/gamma", "exists": false, "is_project": false,
       "branch": "", "piece_count": 0, "main_session": "mp/gamma", "pieces": []
+    },
+    {
+      "name": "delta", "path": "/repos/delta", "exists": true, "is_project": true,
+      "branch": "main", "piece_count": 1, "main_session": "mp/delta",
+      "pieces": [
+        { "name": "ship-it", "worktree_path": "/wt/delta/ship-it", "session_name": "mp/delta/ship-it", "has_session": true, "mod_time": "2026-07-15T10:00:00Z" }
+      ]
+    },
+    {
+      "name": "rho", "path": "/repos/rho", "host": "devbox", "exists": true, "is_project": true,
+      "branch": "", "piece_count": 0, "main_session": "mp/rho", "pieces": []
     }
   ]
 }
 JSON
 }
 
-# ---- Unit: switch.sh build_rows --------------------------------------------
-# shellcheck source=../scripts/switch.sh
-if source "$SCRIPTS/switch.sh" 2>/dev/null; then
+# canned_json_at rewrites the fixture's paths under a real base dir (and
+# creates the project dirs), so flows that cd into a project path work.
+canned_json_at() {
+	local base="$1"
+	mkdir -p "$base/repos/alpha" "$base/repos/beta" "$base/repos/epsilon" "$base/repos/delta"
+	canned_json | sed "s|/repos/|$base/repos/|g; s|/wt/|$base/wt/|g"
+}
+
+# ---- Unit: go.sh build_rows -------------------------------------------------
+# shellcheck source=../scripts/go.sh
+if source "$SCRIPTS/go.sh" 2>/dev/null; then
 	got="$(canned_json | build_rows)"
 	want="$(printf '%s\n' \
-		$'alpha/(main)\talpha\t\t/repos/alpha' \
-		$'alpha/fix-login\talpha\tfix-login\t/wt/alpha/fix-login' \
-		$'alpha/dark-mode\talpha\tdark-mode\t/wt/alpha/dark-mode' \
-		$'beta/(main)\tbeta\t\t/repos/beta')"
-	assert_eq "switch build_rows: pieces + main rows, non-project skipped" "$got" "$want"
-else
-	fail "source switch.sh" "could not source $SCRIPTS/switch.sh"
-fi
+		$'alpha/(main)\tmain\talpha\t\t/repos/alpha' \
+		$'alpha/fix-login 🔴 *\tpiece\talpha\tfix-login\t/wt/alpha/fix-login' \
+		$'alpha/dark-mode\tpiece\talpha\tdark-mode\t/wt/alpha/dark-mode' \
+		$'alpha/(+ new piece)\tcreate\talpha\t\t/repos/alpha' \
+		$'alpha/(branch: feature/x)\tbranch\talpha\tfeature/x\t/repos/alpha' \
+		$'alpha/(branch: origin/hotfix)\tbranch\talpha\torigin/hotfix\t/repos/alpha' \
+		$'delta/(main)\tmain\tdelta\t\t/repos/delta' \
+		$'delta/ship-it\tpiece\tdelta\tship-it\t/wt/delta/ship-it' \
+		$'delta/(+ new piece)\tcreate\tdelta\t\t/repos/delta' \
+		$'epsilon/(main)\tmain\tepsilon\t\t/repos/epsilon' \
+		$'epsilon/old-work\tpiece\tepsilon\told-work\t/wt/epsilon/old-work' \
+		$'epsilon/(+ new piece)\tcreate\tepsilon\t\t/repos/epsilon' \
+		$'beta/(main)\tmain\tbeta\t\t/repos/beta' \
+		$'beta/(+ new piece)\tcreate\tbeta\t\t/repos/beta' \
+		$'rho/(main)\tmain\trho\t\t/repos/rho')"
+	assert_eq "go build_rows: full taxonomy, current first, recency order, remote main-only" "$got" "$want"
 
-# ---- Unit: create.sh build_project_rows ------------------------------------
-# shellcheck source=../scripts/create.sh
-if source "$SCRIPTS/create.sh" 2>/dev/null; then
-	got="$(canned_json | build_project_rows)"
-	want="$(printf '%s\n' \
-		$'alpha\talpha\t/repos/alpha' \
-		$'beta\tbeta\t/repos/beta')"
-	assert_eq "create build_project_rows: real projects only" "$got" "$want"
+	# Without a current context: no markers, recency ordering still applies.
+	got="$(canned_json | jq 'del(.current)' | build_rows)"
+	if [[ "$got" == *' *'* ]]; then
+		fail "go build_rows: no current -> no markers" "found a * marker in [$got]"
+	else
+		ok "go build_rows: no current -> no markers"
+	fi
+	assert_eq "go build_rows: no current -> most recent project first" \
+		"$(head -n1 <<<"$got")" $'delta/(main)\tmain\tdelta\t\t/repos/delta'
+
+	assert_eq "go current_label: project/piece" "$(canned_json | current_label)" "alpha/fix-login"
+	assert_eq "go current_label: project only" \
+		"$(canned_json | jq 'del(.current.piece)' | current_label)" "alpha"
+	assert_eq "go current_label: empty without current" \
+		"$(canned_json | jq 'del(.current)' | current_label)" ""
 else
-	fail "source create.sh" "could not source $SCRIPTS/create.sh"
+	fail "source go.sh" "could not source $SCRIPTS/go.sh"
 fi
 
 # Canned `mp agent list --all --json` output: blocked first, cross-project,
@@ -129,46 +179,80 @@ else
 	fail "source blocked.sh" "could not source $SCRIPTS/blocked.sh"
 fi
 
-# ---- Integration: switch happy path ----------------------------------------
-integration_switch() {
+# ---- Integration: the go.sh one-stop picker ---------------------------------
+integration_go() {
 	if ! have jq || ! have fzf; then
-		skip "switch integration" "needs jq + fzf"
+		skip "go picker integration" "needs jq + fzf"
 		return
 	fi
 	local tmp bin log
 	tmp="$(mktemp -d)"
 	bin="$tmp/bin"
-	log="$tmp/switch.log"
+	log="$tmp/mp.log"
 	mkdir -p "$bin"
 
-	# Stub mp: emit canned JSON for `go`, record args for `switch`.
+	# Stub mp: emit canned JSON for `go`, record everything else. `create`
+	# also records $PWD — the flow selects the project by cd'ing into it.
 	cat >"$bin/mp" <<EOF
 #!/usr/bin/env bash
 case "\$1" in
   go) cat "$tmp/canned.json" ;;
   switch) printf '%s\n' "\$*" > "$log" ;;
+  create) printf '%s|%s\n' "\$PWD" "\$*" > "$log" ;;
   *) exit 2 ;;
 esac
 EOF
 	chmod +x "$bin/mp"
-	canned_json >"$tmp/canned.json"
+	canned_json_at "$tmp" >"$tmp/canned.json"
 
-	# Pick the piece row by fuzzy filter; assert mp switch got the selectors.
+	# Piece row (marker + badge in the display must not break filtering).
+	rm -f "$log"
 	PATH="$bin:$PATH" TMUX="fake,1,0" MP_PLUGIN_FILTER="fix-login" \
-		bash "$SCRIPTS/switch.sh" >/dev/null 2>&1
-	assert_eq "switch flow: piece selection calls mp switch --project --piece" \
+		bash "$SCRIPTS/go.sh" >/dev/null 2>&1
+	assert_eq "go flow: piece row -> mp switch --project --piece" \
 		"$(cat "$log" 2>/dev/null)" "switch --project alpha --piece fix-login"
 
-	# Pick a project main row (beta has no pieces); assert no --piece.
+	# Project main row.
 	rm -f "$log"
-	PATH="$bin:$PATH" TMUX="fake,1,0" MP_PLUGIN_FILTER="beta/" \
-		bash "$SCRIPTS/switch.sh" >/dev/null 2>&1
-	assert_eq "switch flow: main-row selection calls mp switch --project only" \
+	PATH="$bin:$PATH" TMUX="fake,1,0" MP_PLUGIN_FILTER="beta/(main)" \
+		bash "$SCRIPTS/go.sh" >/dev/null 2>&1
+	assert_eq "go flow: main row -> mp switch --project only" \
 		"$(cat "$log" 2>/dev/null)" "switch --project beta"
+
+	# Branch adoption row.
+	rm -f "$log"
+	PATH="$bin:$PATH" TMUX="fake,1,0" MP_PLUGIN_FILTER="feature/x" \
+		bash "$SCRIPTS/go.sh" >/dev/null 2>&1
+	assert_eq "go flow: branch row -> mp switch --branch" \
+		"$(cat "$log" 2>/dev/null)" "switch --project alpha --branch feature/x"
+
+	# Create row + typed name: cd into the project, mp create --name.
+	rm -f "$log"
+	PATH="$bin:$PATH" TMUX="fake,1,0" MP_PLUGIN_FILTER="beta/(+ new" \
+		MP_PLUGIN_INPUT_NAME="my-piece" \
+		bash "$SCRIPTS/go.sh" >/dev/null 2>&1
+	assert_eq "go flow: create row + name -> mp create --name in the project" \
+		"$(cat "$log" 2>/dev/null)" "$tmp/repos/beta|create --name my-piece"
+
+	# Create row + blank name: falls through to the free-form prompt.
+	rm -f "$log"
+	PATH="$bin:$PATH" TMUX="fake,1,0" MP_PLUGIN_FILTER="beta/(+ new" \
+		MP_PLUGIN_INPUT_NAME="" MP_PLUGIN_INPUT_PROMPT="do the thing" \
+		bash "$SCRIPTS/go.sh" >/dev/null 2>&1
+	assert_eq "go flow: create row + description -> mp create --prompt" \
+		"$(cat "$log" 2>/dev/null)" "$tmp/repos/beta|create --prompt do the thing"
+
+	# ctrl-n with no matching row: creates in the current project.
+	rm -f "$log"
+	PATH="$bin:$PATH" TMUX="fake,1,0" MP_PLUGIN_FILTER="zzz-nomatch" \
+		MP_PLUGIN_KEY="ctrl-n" MP_PLUGIN_INPUT_NAME="quick" \
+		bash "$SCRIPTS/go.sh" >/dev/null 2>&1
+	assert_eq "go flow: ctrl-n falls back to the current project" \
+		"$(cat "$log" 2>/dev/null)" "$tmp/repos/alpha|create --name quick"
 
 	rm -rf "$tmp"
 }
-integration_switch
+integration_go
 
 # ---- Integration: agents picker focuses the selected pane ------------------
 integration_agents() {

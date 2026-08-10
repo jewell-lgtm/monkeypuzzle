@@ -1,8 +1,8 @@
 # monkeypuzzle tmux plugin
 
-A lightweight tmux UI for [monkeypuzzle](../../README.md): pop up a fuzzy picker
-to **switch between pieces** across every registered project, or **create a new
-piece**, without leaving your current pane layout.
+A lightweight tmux UI for [monkeypuzzle](../../README.md): one fuzzy picker for
+**every context switch** — jump to any piece or project, adopt a branch as a
+piece, or create a new piece — without leaving your current pane layout.
 
 It is a thin layer over the `mp` CLI. It reads state with `mp go --json` and
 renders its own [fzf](https://github.com/junegunn/fzf) picker; the switch/create
@@ -52,16 +52,34 @@ plugin claims a single key in the prefix table and puts everything in a
 
 | Chord (after prefix) | Action                                                       |
 | -------------------- | ------------------------------------------------------------ |
-| `m p`                | Switch: pick a piece (or a project's main session)           |
-| `m c`                | Create: pick a project, name the piece, create + switch      |
+| `m p`                | The one-stop picker: any context switch (see below)          |
 | `m a`                | Agents: pick a live agent (blocked first), focus its pane    |
 | `m b`                | Jump straight to the first blocked agent — no picker         |
 | `m t`                | Toggle a sidecar shell split in the current piece's worktree |
 | `m m`                | Cheat sheet: list these bindings                             |
 
-The switch picker shows `project/piece` rows with a preview pane of each piece's
-`git status` and recent commits. The create picker pre-selects the project of the
-current pane's directory; leaving the name blank lets you describe the piece as a
+### The `m p` picker
+
+One list covers everything, so `prefix m p` is the muscle memory for any
+context switch. Per project it shows, in order: the `(main)` session, every
+piece (newest first), a `(+ new piece)` row, and `(branch: …)` rows for local
+or remote branches that aren't pieces yet. The preview pane shows each row's
+`git status` and recent commits.
+
+| In the picker | Action                                                          |
+| ------------- | --------------------------------------------------------------- |
+| `enter`       | Switch to the row: piece / main session / adopt branch as piece |
+| `enter` on `(+ new piece)` | Create a piece in that project (name prompt)       |
+| `ctrl-n`      | New piece in the highlighted project — typed text prefills the name |
+| `esc`         | Quit                                                            |
+
+The picker is current-aware, fed by a single `mp go --json` call: the header
+shows `current: project/piece`, the row you're in carries a `*` marker, your
+current project's block sorts first (remaining projects by most recent piece
+activity), and pieces with live agents carry the same status icons as the
+agent picker (🔴 blocked, ⚡ working, ✅ done, 💤 idle).
+
+When creating, leaving the name blank lets you describe the piece as a
 free-form prompt instead (`mp create --prompt`).
 
 The agent picker and blocked-jump read `mp agent list --json`. Agents are
@@ -105,5 +123,8 @@ make test-tmux          # run the plugin test suite (bash + jq + fzf)
 ```
 
 The scripts are structured so their `build_*` row-builders can be sourced and
-tested in isolation; the switch flow has a `MP_PLUGIN_FILTER` seam that drives
-the picker non-interactively for the integration test. See `test/run.sh`.
+tested in isolation, and the flows are drivable without a TTY through env
+seams: `MP_PLUGIN_FILTER` stands in for the fzf query, `MP_PLUGIN_KEY` for an
+`--expect` accelerator key, and `MP_PLUGIN_INPUT_NAME` / `MP_PLUGIN_INPUT_PROMPT`
+for the create flow's prompts (set-but-empty counts as "entered blank"). See
+`fzf_pick_expect` / `prompt_input` in `scripts/helpers.sh` and `test/run.sh`.
