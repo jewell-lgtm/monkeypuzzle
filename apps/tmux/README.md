@@ -118,7 +118,9 @@ set -g status-right '#{monkeypuzzle_chord}#(cd "#{pane_current_path}" && mp agen
 ```
 
 It renders as ` mp… ` (reversed) mid-chord and as nothing otherwise; restyle
-it with `@monkeypuzzle-indicator`. (tmux has no user-defined format
+it with `@monkeypuzzle-indicator` — escape any commas in style directives as
+`#,` (e.g. `#[fg=black#,bg=yellow] mp… #[default]`), since the text lands
+inside a tmux `#{?…,…,}` conditional. (tmux has no user-defined format
 variables, so this is a load-time text substitution — the same trick as
 tmux-prefix-highlight. Reload your config after changing the option.)
 
