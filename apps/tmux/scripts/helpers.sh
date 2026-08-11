@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Shared helpers for the monkeypuzzle tmux plugin scripts.
 #
-# Sourced by switch.sh and create.sh. This file defines functions and one
-# export only — it performs no work at source time — so the test runner can
-# source the scripts and call their build_* functions without tripping guards.
+# Sourced by go.sh and agents.sh. This file defines functions and one export
+# only — it performs no work at source time — so the test runner can source
+# the scripts and call their build_* functions without tripping guards.
 
 # The explicit signal that tells mp to manage the tmux session (switch-client /
 # new-session) even though the plugin drives mp through the stateless API with
@@ -68,4 +68,33 @@ fzf_pick() {
 	else
 		fzf --delimiter=$'\t' "$@"
 	fi
+}
+
+# fzf_pick_expect is fzf_pick for callers that need the typed query and an
+# accelerator key alongside the selection. The caller MUST pass --print-query
+# and --expect=... so interactive output is always three lines:
+#   <query>\n<key or empty for enter>\n<row or empty when nothing matched>
+# In test mode the same shape is synthesized: MP_PLUGIN_FILTER stands in for
+# the query, MP_PLUGIN_KEY (optional) for the pressed key.
+fzf_pick_expect() {
+	if [[ -n "${MP_PLUGIN_FILTER:-}" ]]; then
+		printf '%s\n%s\n' "$MP_PLUGIN_FILTER" "${MP_PLUGIN_KEY:-}"
+		fzf --delimiter=$'\t' --filter="$MP_PLUGIN_FILTER" | head -n1
+	else
+		fzf --delimiter=$'\t' "$@"
+	fi
+}
+
+# prompt_input prints one line of user input: the value of the env var named
+# in $1 when that var is set (even to empty — the test seam), else a readline
+# prompt with label $2 prefilled with $3. Returns non-zero on EOF so callers
+# can treat ctrl-d as cancel.
+prompt_input() {
+	local var="$1" label="$2" prefill="${3:-}" reply
+	if [[ -n "${!var+x}" ]]; then
+		printf '%s' "${!var}"
+		return 0
+	fi
+	IFS= read -r -e -p "$label" -i "$prefill" reply || return 1
+	printf '%s' "$reply"
 }
