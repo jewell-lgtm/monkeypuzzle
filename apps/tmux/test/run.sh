@@ -179,6 +179,22 @@ else
 	fail "source blocked.sh" "could not source $SCRIPTS/blocked.sh"
 fi
 
+# ---- Unit: monkeypuzzle.tmux chord indicator --------------------------------
+# shellcheck source=../monkeypuzzle.tmux
+if source "$DIR/../monkeypuzzle.tmux" 2>/dev/null; then
+	assert_eq "chord_indicator: wraps text in a key-table conditional" \
+		"$(chord_indicator '[mp]')" \
+		'#{?#{==:#{client_key_table},monkeypuzzle},[mp],}'
+	assert_eq "inject_indicator: replaces the placeholder in place" \
+		"$(inject_indicator 'left #{monkeypuzzle_chord} | %H:%M' '[IND]')" \
+		'left [IND] | %H:%M'
+	assert_eq "inject_indicator: no placeholder -> unchanged" \
+		"$(inject_indicator 'plain status | %H:%M' '[IND]')" \
+		'plain status | %H:%M'
+else
+	fail "source monkeypuzzle.tmux" "could not source $DIR/../monkeypuzzle.tmux"
+fi
+
 # ---- Integration: the go.sh one-stop picker ---------------------------------
 integration_go() {
 	if ! have jq || ! have fzf; then

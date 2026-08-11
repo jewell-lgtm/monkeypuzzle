@@ -105,6 +105,23 @@ usually not your project.)
 It renders like `🔴1 ⚡2` (blocked first) and prints nothing when no agents
 are live.
 
+### Chord indicator
+
+Entering a key table releases prefix mode, so a `#{client_prefix}`-based
+prefix indicator goes dark the moment you press `prefix m` — it looks like
+the chord was swallowed. Put `#{monkeypuzzle_chord}` anywhere in your
+`status-left` / `status-right` and the plugin swaps it at load time for an
+indicator that lights up while the chord table waits for its second key:
+
+```tmux
+set -g status-right '#{monkeypuzzle_chord}#(cd "#{pane_current_path}" && mp agent summary 2>/dev/null) | %H:%M'
+```
+
+It renders as ` mp… ` (reversed) mid-chord and as nothing otherwise; restyle
+it with `@monkeypuzzle-indicator`. (tmux has no user-defined format
+variables, so this is a load-time text substitution — the same trick as
+tmux-prefix-highlight. Reload your config after changing the option.)
+
 ## Configuration
 
 Set these tmux options before the plugin loads (defaults shown):
@@ -114,7 +131,11 @@ set -g @monkeypuzzle-key 'm'             # prefix+<key> enters the chord table
 set -g @monkeypuzzle-bin 'mp'            # path/name of the mp binary
 set -g @monkeypuzzle-popup-width  '80%'
 set -g @monkeypuzzle-popup-height '70%'
+set -g @monkeypuzzle-indicator '#[reverse] mp… #[noreverse]'  # #{monkeypuzzle_chord} text
 ```
+
+Reloading your config re-runs the plugin, so bindings (and the indicator)
+always match the checkout you load it from — re-source after updating.
 
 ## Development
 
