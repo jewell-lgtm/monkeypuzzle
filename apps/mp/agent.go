@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"github.com/jewell-lgtm/monkeypuzzle/internal/config"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
 	agentcmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/agent"
+	"github.com/jewell-lgtm/monkeypuzzle/internal/registry"
 	"github.com/jewell-lgtm/monkeypuzzle/pkg/cli"
 )
 
@@ -84,16 +86,32 @@ The text lands in the agent's input verbatim: you are prompting the agent.`,
 	RunE: runAgentSend,
 }
 
+var agentFocusCmd = &cobra.Command{
+	Use:   "focus [agent-id|piece]",
+	Short: "Switch the client to an agent's pane",
+	Long: `Move your tmux client to an agent's pane — the CLI form of the tmux plugin's
+agent picker and blocked-jump chords, so either can be one mp invocation.
+
+Accepts an agent id or piece name; with --blocked, picks the most urgent
+blocked agent instead (no selector needed) and does nothing (exit 0) if none
+are blocked. If the agent's session is no longer live, falls back to a plain
+piece switch (mp switch semantics: attaches, adopts, or creates nothing new).`,
+	Args: cobra.MaximumNArgs(1),
+	RunE: runAgentFocus,
+}
+
 var (
-	flagAgentStatus     string
-	flagAgentID         string
-	flagAgentKind       string
-	flagAgentPID        int
-	flagAgentPane       string
-	flagAgentClaudeHook bool
-	flagAgentSchema     bool
-	flagAgentListJSON   bool
-	flagAgentListAll    bool
+	flagAgentStatus       string
+	flagAgentID           string
+	flagAgentKind         string
+	flagAgentPID          int
+	flagAgentPane         string
+	flagAgentClaudeHook   bool
+	flagAgentSchema       bool
+	flagAgentListJSON     bool
+	flagAgentListAll      bool
+	flagAgentFocusBlocked bool
+	flagAgentFocusJSON    bool
 )
 
 func init() {
@@ -107,12 +125,16 @@ func init() {
 	agentListCmd.Flags().BoolVar(&flagAgentListJSON, "json", false, "Output JSON instead of the table")
 	agentListCmd.Flags().BoolVar(&flagAgentListAll, "all", false, "Span all registered projects (implied outside a git repo)")
 	agentSummaryCmd.Flags().BoolVar(&flagAgentListAll, "all", false, "Span all registered projects (implied outside a git repo)")
+	agentFocusCmd.Flags().BoolVar(&flagAgentFocusBlocked, "blocked", false, "Focus the most urgent blocked agent instead of naming one")
+	agentFocusCmd.Flags().BoolVar(&flagAgentListAll, "all", false, "Span all registered projects (implied outside a git repo)")
+	agentFocusCmd.Flags().BoolVar(&flagAgentFocusJSON, "json", false, "Output JSON even on a terminal")
 
 	agentCmd.AddCommand(agentReportCmd)
 	agentCmd.AddCommand(agentListCmd)
 	agentCmd.AddCommand(agentSummaryCmd)
 	agentCmd.AddCommand(agentReadCmd)
 	agentCmd.AddCommand(agentSendCmd)
+	agentCmd.AddCommand(agentFocusCmd)
 	rootCmd.AddCommand(agentCmd)
 }
 
@@ -199,6 +221,94 @@ func runAgentSend(cmd *cobra.Command, args []string) error {
 		"agent":  item.ID,
 		"target": item.Target(),
 	})
+}
+
+// runAgentFocus resolves a target agent (by id/piece, or the most urgent
+// blocked one) and moves the client to it: switch-client + pane select when
+// its session is still live, else a plain piece switch. This is the one mp
+// invocation behind the tmux plugin's agent picker (m a) and blocked-jump
+// (m b) chords.
+func runAgentFocus(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
+	items, err := collectAgents(cmd)
+	if err != nil {
+		return err
+	}
+
+	var item agentcmd.ListItem
+	switch {
+	case flagAgentFocusBlocked:
+		found, ok := agentcmd.FirstBlocked(items)
+		if !ok {
+			fmt.Fprintln(os.Stderr, cli.GlyphWarn+" no blocked agents")
+			return nil
+		}
+		item = found
+	case len(args) == 1:
+		found, err := agentcmd.FindInItems(items, args[0])
+		if err != nil {
+			return err
+		}
+		item = found
+	default:
+		return fmt.Errorf("no agent id or piece given; pass one, or use --blocked")
+	}
+
+	viaSwitch, err := focusOrSwitchAgent(ctx, item)
+	if err != nil {
+		return err
+	}
+	if viaSwitch {
+		// runSwitchToExistingPiece already handled all output itself (an
+		// attach message, or the worktree path for `cd $(...)`); printing our
+		// own JSON on top would double-print onto stdout.
+		return nil
+	}
+	return emitResult(map[string]any{
+		"piece":   item.Piece,
+		"project": item.Project,
+		"agent":   item.ID,
+		"target":  item.Target(),
+	}, flagAgentFocusJSON)
+}
+
+// focusOrSwitchAgent moves the client to item's pane when its session is
+// still live and the multiplexer supports pane focus (tmux); otherwise it
+// falls back to a plain piece switch — same as `mp switch --piece`, so it
+// attaches an existing worktree and never adopts or creates anything new.
+// The returned bool is true when the switch fallback ran (it owns all of its
+// own output; the caller must not also emit JSON on top of it).
+func focusOrSwitchAgent(ctx context.Context, item agentcmd.ListItem) (bool, error) {
+	exec := adapters.NewOSExec()
+	mux := configuredMultiplexer(exec)
+	if item.SessionName != "" && mux.Exists(ctx, item.SessionName) {
+		if pane, err := paneMultiplexer(exec); err == nil {
+			return false, pane.FocusPane(ctx, item.SessionName, item.Pane)
+		}
+	}
+	proj, err := focusProject(ctx, item.Project)
+	if err != nil {
+		return false, err
+	}
+	return true, runSwitchToExistingPiece(ctx, proj, item.Piece)
+}
+
+// focusProject resolves the project an agent's fallback switch targets:
+// registry lookup for a cross-project item, else the repo the caller is
+// standing in (mirrors mp switch's own --project defaulting).
+func focusProject(ctx context.Context, projectName string) (registry.Project, error) {
+	if projectName == "" {
+		return resolveSwitchProject(ctx, "")
+	}
+	reg, err := registry.Load()
+	if err != nil {
+		return registry.Project{}, err
+	}
+	proj, ok := reg.Find(projectName)
+	if !ok {
+		return registry.Project{}, fmt.Errorf("no registered project matching %q", projectName)
+	}
+	return proj, nil
 }
 
 func newAgentDeps() core.Deps {

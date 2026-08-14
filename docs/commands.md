@@ -1047,6 +1047,20 @@ mp agent send my-piece "yes, and add tests"
 `read` / `send` need a multiplexer with pane support (tmux). They are not
 TTY-gated: an orchestrating agent may drive its workers with them.
 
+```bash
+# Switch the client straight to an agent's pane — the CLI form of the tmux
+# plugin's agent picker and blocked-jump chords.
+mp agent focus my-piece            # by piece name (most attention-worthy agent)
+mp agent focus sess-1              # by agent id
+mp agent focus --blocked           # the most urgent blocked agent, no selector
+mp agent focus --blocked --all     # across every registered project
+```
+
+If the agent's session is no longer live, `focus` falls back to a plain piece
+switch (`mp switch` semantics: attaches an existing worktree, never adopts or
+creates). `--blocked` with nothing blocked exits 0 with a warning on stderr
+and no stdout output — nothing to report.
+
 ## mp wait
 
 Block until agents settle — no agent `working` in the target pieces.
