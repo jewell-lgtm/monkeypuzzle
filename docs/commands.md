@@ -125,6 +125,9 @@ recorded in `~/.config/monkeypuzzle/project-dirs.json` (it can't live in
 `monkeypuzzle.json`, which is inside the directory being relocated). To relocate
 an existing project later, use [`mp move`](#mp-move).
 
+`mp reinit` is an alias for `mp init` — same flags, same behavior — for the
+explicit "refresh scaffolding in an already-initialized repo" case.
+
 ### Example input
 
 ```json
@@ -834,6 +837,44 @@ Resume a conflicted rebase started by `mp stack sync --strategy rebase` (after r
 mp stack continue
 ```
 
+### mp stack undo
+
+Restore every piece branch to the snapshot `mp stack sync` took right before its last run. Local only — remote branches are untouched; force-push with lease afterwards if you'd already pushed. Refuses to run if an affected worktree has uncommitted changes.
+
+```bash
+mp stack undo
+```
+
+### mp stack set-parent
+
+Re-point a piece onto a different parent — metadata only; run `mp stack sync` afterwards to actually restack the branches onto the new lineage. Defaults to the current piece when run from inside one.
+
+```bash
+mp stack set-parent --parent other-piece
+mp stack set-parent --piece child-feat --parent main   # make it a root piece
+```
+
+| Flag       | Description                                   | Default        |
+| ---------- | ---------------------------------------------- | -------------- |
+| `--piece`  | Piece to re-parent                              | Current piece  |
+| `--parent` | New parent piece name, or `main`                | -              |
+
+### mp stack graph
+
+Reconstruct a repository's stacked-PR forest straight from the forge's open PRs' base→head edges — no local clone required. Auth comes from the ambient `GH_TOKEN`/`GITHUB_TOKEN` (or `GITLAB_TOKEN`) environment, so a server can run this as a specific user. This is the same forest the hosted dashboard renders — both go through the shared stackgraph builder.
+
+```bash
+mp stack graph --repo owner/name
+mp stack graph --repo owner/name --provider gitlab --default-branch develop
+```
+
+| Flag               | Description                                    | Default   |
+| ------------------ | ----------------------------------------------- | --------- |
+| `--repo`           | Repository as `owner/name` (required)           | -         |
+| `--default-branch` | Trunk branch                                    | Auto-detected from the forge |
+| `--provider`       | Forge provider: `github` or `gitlab`            | `github`  |
+| `--limit`          | Max PRs to fetch                                | `200`     |
+
 ### mp stack append / prepend
 
 `append` creates a new piece as a child of the current piece; `prepend` inserts a new piece between the current piece and its parent.
@@ -954,6 +995,9 @@ Hooks are executable shell scripts in `.monkeypuzzle/hooks/` that run at key poi
 | `after-piece-update.sh`  | After successful update/sync | Blocking |
 | `before-piece-merge.sh`  | Before `mp merge`  | Blocking (non-zero exit aborts the merge) |
 | `after-piece-merge.sh`   | After successful merge   | Blocking |
+| `before-pr-create.sh` / `after-pr-create.sh` | Around `mp pr create` | Blocking |
+| `before-pr-ready.sh` / `after-pr-ready.sh`   | Around `mp pr ready`  | Blocking |
+| `is-piece-done.sh`       | Consulted by `mp cleanup` / `mp merge`'s merge-status check | Blocking; exit 0 means "treat as merged" — use to recognise squash-merges a plain branch-ancestry check would miss |
 | `agent-blocked.sh`       | Piece's aggregate agent status transitions to `blocked` | Detached |
 | `agent-done.sh`          | Piece's aggregate agent status transitions to `done`    | Detached |
 
@@ -967,7 +1011,10 @@ All hooks receive these environment variables:
 | `MP_WORKTREE_PATH` | Absolute path to worktree       |
 | `MP_REPO_ROOT`     | Absolute path to main repo      |
 | `MP_MAIN_BRANCH`   | Main branch name (merge/update) |
-| `MP_SESSION_NAME`  | Tmux session name (create)      |
+| `MP_SESSION_NAME`  | Multiplexer session name (create) |
+| `MP_PR_NUMBER`     | PR/MR number (PR hooks)         |
+| `MP_PR_URL`        | PR/MR URL (PR hooks)            |
+| `MP_PR_BASE_BRANCH`| PR/MR base branch (PR hooks)    |
 | `MP_AGENT_ID`      | Reporting agent id (agent hooks) |
 | `MP_AGENT_KIND`    | Agent kind, e.g. `claude` (agent hooks) |
 | `MP_AGENT_STATUS`  | New piece aggregate status (agent hooks) |
