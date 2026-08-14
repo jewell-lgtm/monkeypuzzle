@@ -89,8 +89,13 @@ func TestAgentFocus_Blocked_PicksMostUrgent(t *testing.T) {
 	}
 }
 
-// TestAgentFocus_Blocked_NoneLive pins the no-blocked-agents case: exit 0,
-// a warning on stderr, and no stdout JSON (nothing to report).
+// TestAgentFocus_Blocked_NoneLive pins the no-blocked-agents case: exit 0, a
+// warning on stderr, and no stdout JSON (nothing to report). The exact
+// stderr text matters beyond this test: the tmux plugin's blocked.sh chord
+// (apps/tmux/scripts/blocked.sh) greps this command's stderr for "no blocked
+// agents" to decide whether to show its own tmux display-message — a
+// wording change here would silently break that chord with nothing to catch
+// it on the Go side, so the substring is pinned explicitly.
 func TestAgentFocus_Blocked_NoneLive(t *testing.T) {
 	e := setupTestEnv(t)
 	defer e.cleanup()
@@ -106,16 +111,17 @@ func TestAgentFocus_Blocked_NoneLive(t *testing.T) {
 	cmd := exec.Command(e.binPath, "agent", "focus", "--blocked")
 	cmd.Dir = repo
 	cmd.Env = append(os.Environ(), "MP_DATA_DIR="+dataDir, "MP_CONFIG_DIR="+e.configDir)
-	stdout, err := cmd.Output()
-	if err != nil {
-		var stderr []byte
-		if ee, ok := err.(*exec.ExitError); ok {
-			stderr = ee.Stderr
-		}
-		t.Fatalf("agent focus --blocked with none blocked should exit 0: %v\nstderr: %s", err, stderr)
+	var stdout, stderr strings.Builder
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("agent focus --blocked with none blocked should exit 0: %v\nstderr: %s", err, stderr.String())
 	}
-	if strings.TrimSpace(string(stdout)) != "" {
-		t.Errorf("no blocked agents: stdout should be empty, got: %q", stdout)
+	if strings.TrimSpace(stdout.String()) != "" {
+		t.Errorf("no blocked agents: stdout should be empty, got: %q", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "no blocked agents") {
+		t.Errorf("no blocked agents: stderr must contain the exact substring blocked.sh greps for, got: %q", stderr.String())
 	}
 }
 
