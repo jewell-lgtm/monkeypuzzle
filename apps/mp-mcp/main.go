@@ -162,7 +162,7 @@ func (s *Server) handleToolsList(req *Request) *Response {
 			},
 		},
 		{
-			Name:        "mp_piece_new",
+			Name:        "mp_piece_create",
 			Description: "Create new piece (git worktree + tmux session)",
 			InputSchema: JSONSchema{
 				Type: "object",
@@ -279,7 +279,7 @@ func (s *Server) executeTool(name string, args map[string]string) (string, bool)
 			stdin = string(data)
 		}
 
-	case "mp_piece_new":
+	case "mp_piece_create":
 		cmdArgs = []string{"create"}
 		if v := args["name"]; v != "" {
 			cmdArgs = append(cmdArgs, "--name", v)
