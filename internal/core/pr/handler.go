@@ -68,7 +68,7 @@ func (h *Handler) CreatePR(ctx context.Context, workDir string, input Input) (*P
 	}
 
 	if !status.InPiece {
-		return nil, fmt.Errorf("not in a piece worktree - run this command from within a piece")
+		return nil, piece.ErrNotInPiece
 	}
 
 	provider, _, err := h.providerForRepo(status.RepoRoot)
@@ -196,12 +196,12 @@ func (h *Handler) MarkReady(ctx context.Context, workDir string) error {
 		return fmt.Errorf("failed to get piece status: %w", err)
 	}
 	if !status.InPiece {
-		return fmt.Errorf("not in a piece worktree - run this command from within a piece")
+		return piece.ErrNotInPiece
 	}
 
 	metadata, err := piece.ReadPRMetadata(status.WorktreePath, h.deps.FS)
 	if err != nil {
-		return fmt.Errorf("no PR metadata found; run `mp piece pr create` first: %w", err)
+		return fmt.Errorf("no PR metadata found; run `mp pr create` first: %w", err)
 	}
 	if metadata.PRNumber == 0 {
 		return fmt.Errorf("PR metadata has no number")

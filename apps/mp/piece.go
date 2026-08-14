@@ -157,6 +157,11 @@ var flagPieceListAll bool
 var flagPieceCreateJSON bool
 var flagPieceDoneJSON bool
 var flagPieceAdoptJSON bool
+var flagPieceStatusJSON bool
+var flagPieceUpdateJSON bool
+var flagPieceMergeJSON bool
+var flagPieceAbandonJSON bool
+var flagPieceListJSON bool
 
 func init() {
 	pieceCreateCmd.Flags().StringVar(&flagPieceName, "name", "", "Optional piece name (default: auto-generated)")
@@ -171,6 +176,7 @@ func init() {
 	pieceUpdateCmd.Flags().StringVar(&flagMainBranchLegacy, "main-branch", "", "Deprecated alias for --main")
 	_ = pieceUpdateCmd.Flags().MarkDeprecated("main-branch", "use --main")
 	pieceUpdateCmd.Flags().BoolVar(&flagPieceUpdateSchema, "schema", false, "Output JSON schema and exit")
+	pieceUpdateCmd.Flags().BoolVar(&flagPieceUpdateJSON, "json", false, "Output JSON even on a terminal")
 	pieceMergeCmd.Flags().StringVar(&flagMainBranch, "main", "main", "Main branch name to merge into (default: main)")
 	pieceMergeCmd.Flags().StringVar(&flagMainBranchLegacy, "main-branch", "", "Deprecated alias for --main")
 	_ = pieceMergeCmd.Flags().MarkDeprecated("main-branch", "use --main")
@@ -178,6 +184,7 @@ func init() {
 	pieceMergeCmd.Flags().BoolVar(&flagForce, "force", false, "Force merge even if piece has child pieces (children are NOT re-homed)")
 	pieceMergeCmd.Flags().BoolVar(&flagPieceMergeReparent, "reparent-children", false, "Merge a piece that has child pieces: re-home them onto the merge target")
 	pieceMergeCmd.Flags().StringVar(&flagPieceMergeReparentStrategy, "reparent-strategy", "", "How to re-home children: 'rebase' (default, rewrites history) or 'merge' (no force-push)")
+	pieceMergeCmd.Flags().BoolVar(&flagPieceMergeJSON, "json", false, "Output JSON even on a terminal")
 	pieceCleanupCmd.Flags().StringVar(&flagMainBranch, "main", "main", "Main branch name to check for merged status (default: main)")
 	pieceCleanupCmd.Flags().StringVar(&flagMainBranchLegacy, "main-branch", "", "Deprecated alias for --main")
 	_ = pieceCleanupCmd.Flags().MarkDeprecated("main-branch", "use --main")
@@ -192,6 +199,7 @@ func init() {
 	pieceAbandonCmd.Flags().BoolVar(&flagForce, "force", false, "Force removal even with uncommitted changes")
 	pieceAbandonCmd.Flags().BoolVar(&flagDeleteBranch, "delete-branch", false, "Also delete the git branch")
 	pieceAbandonCmd.Flags().BoolVar(&flagPieceAbandonSchema, "schema", false, "Output JSON schema and exit")
+	pieceAbandonCmd.Flags().BoolVar(&flagPieceAbandonJSON, "json", false, "Output JSON even on a terminal")
 	pieceDoneCmd.Flags().StringVar(&flagDonePiece, "piece", "", "Piece to finish (default: the piece you're in)")
 	pieceDoneCmd.Flags().StringVar(&flagMainBranch, "main", "main", "Main branch to check merge status against")
 	pieceDoneCmd.Flags().StringVar(&flagMainBranchLegacy, "main-branch", "", "Deprecated alias for --main")
@@ -207,8 +215,10 @@ func init() {
 	pieceStatusCmd.Flags().StringVar(&flagMainBranch, "main", "main", "Main branch name (default: main)")
 	pieceStatusCmd.Flags().StringVar(&flagMainBranchLegacy, "main-branch", "", "Deprecated alias for --main")
 	_ = pieceStatusCmd.Flags().MarkDeprecated("main-branch", "use --main")
+	pieceStatusCmd.Flags().BoolVar(&flagPieceStatusJSON, "json", false, "Output JSON even on a terminal")
 	pieceListCmd.Flags().BoolVar(&flagPieceListFlat, "flat", false, "Display pieces in a flat list instead of tree view")
 	pieceListCmd.Flags().BoolVar(&flagPieceListAll, "all", false, "List pieces across all registered projects")
+	pieceListCmd.Flags().BoolVar(&flagPieceListJSON, "json", false, "Output JSON even on a terminal")
 	rootCmd.AddCommand(pieceStatusCmd)
 	rootCmd.AddCommand(pieceCreateCmd)
 	rootCmd.AddCommand(pieceUpdateCmd)
@@ -334,6 +344,16 @@ func completeGitBranches(cmd *cobra.Command, args []string, toComplete string) (
 	return filtered, cobra.ShellCompDirectiveNoFileComp
 }
 
+// emitResult honors the output contract: exactly one JSON document on stdout
+// when the caller is a pipe/agent (or forces it with --json); a human at a
+// terminal gets only the stderr messages the handlers already stream.
+func emitResult(v any, jsonFlag bool) error {
+	if jsonFlag || !cli.IsStdoutTerminal() || !cli.IsTerminal() {
+		return cli.PrintJSON(v)
+	}
+	return nil
+}
+
 // mainBranchFromFlags returns the trunk name from --main (canonical) or the
 // deprecated --main-branch alias, reporting whether either was set explicitly.
 func mainBranchFromFlags(cmd *cobra.Command) (string, bool) {
@@ -451,7 +471,7 @@ func runPieceStatus(cmd *cobra.Command, args []string) error {
 
 		// Display merge readiness
 		if !status.CanMerge && len(status.Children) > 0 {
-			fmt.Fprintf(os.Stderr, "\n⚠ Cannot merge: has unmerged children\n")
+			fmt.Fprintf(os.Stderr, "\n%s Cannot merge: has unmerged children\n", cli.GlyphWarn)
 		}
 
 		// Display the prompt the piece was created from, if any.
@@ -473,14 +493,9 @@ func runPieceStatus(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Output JSON to stdout
-	jsonData, err := json.MarshalIndent(status, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to marshal status: %w", err)
-	}
-	fmt.Println(string(jsonData))
-
-	return nil
+	// JSON is for pipes and agents (or --json); the human block above already
+	// told the story on stderr.
+	return emitResult(status, flagPieceStatusJSON)
 }
 
 func runPieceCreate(cmd *cobra.Command, args []string) error {
@@ -551,6 +566,8 @@ func runPieceCreate(cmd *cobra.Command, args []string) error {
 			// Non-fatal: the piece exists and is usable without the agent.
 			fmt.Fprintf(os.Stderr, "Warning: failed to launch agent: %v\n", err)
 		}
+	} else {
+		cli.Hint("mp pr create --draft")
 	}
 
 	return nil
@@ -722,14 +739,7 @@ func runPieceUpdate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Output JSON to stdout
-	jsonData, err := json.MarshalIndent(result, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to marshal result: %w", err)
-	}
-	fmt.Println(string(jsonData))
-
-	return nil
+	return emitResult(result, flagPieceUpdateJSON)
 }
 
 func getUpdateInput(cmd *cobra.Command) (piececmd.UpdateInput, error) {
@@ -822,14 +832,8 @@ func runPieceMerge(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Output JSON to stdout
-	jsonData, err := json.MarshalIndent(result, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to marshal result: %w", err)
-	}
-	fmt.Println(string(jsonData))
-
-	return nil
+	cli.Hint("mp done")
+	return emitResult(result, flagPieceMergeJSON)
 }
 
 func getMergeInput(cmd *cobra.Command) (piececmd.MergeInput, error) {
@@ -937,20 +941,13 @@ func runPieceCleanup(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Humans at a terminal get a summary line (the per-piece messages already
-	// streamed via Output); pipes/agents keep the JSON contract.
-	if cli.IsTerminal() && cli.IsStdoutTerminal() && !flagPieceCleanupJSON {
-		fmt.Println(cleanupHumanSummary(output, apply))
-		return nil
+	// Human summary always goes to stderr (like every other command's), so
+	// stdout stays JSON-only.
+	fmt.Fprintln(os.Stderr, cleanupHumanSummary(output, apply))
+	if !apply {
+		cli.Hint("mp cleanup --apply")
 	}
-
-	jsonData, err := json.MarshalIndent(output, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to marshal results: %w", err)
-	}
-	fmt.Println(string(jsonData))
-
-	return nil
+	return emitResult(output, flagPieceCleanupJSON)
 }
 
 // cleanupHumanSummary is the one-line terminal wrap-up for `mp cleanup`.
@@ -1104,14 +1101,7 @@ func runPieceAbandon(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Output JSON to stdout
-	jsonData, err := json.MarshalIndent(result, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to marshal result: %w", err)
-	}
-	fmt.Println(string(jsonData))
-
-	return nil
+	return emitResult(result, flagPieceAbandonJSON)
 }
 
 func runPieceDone(cmd *cobra.Command, args []string) error {
@@ -1156,18 +1146,8 @@ func runPieceDone(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// On a terminal the handler's success line tells the story; the JSON
-	// payload is for pipes and agents (or --json).
-	if cli.IsTerminal() && cli.IsStdoutTerminal() && !flagPieceDoneJSON {
-		return nil
-	}
-	jsonData, err := json.MarshalIndent(result, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to marshal result: %w", err)
-	}
-	fmt.Println(string(jsonData))
-
-	return nil
+	cli.Hint("mp create, or mp go to pick up other work")
+	return emitResult(result, flagPieceDoneJSON)
 }
 
 func getDoneInput(cmd *cobra.Command) (piececmd.DoneInput, error) {
@@ -1351,21 +1331,15 @@ func runPieceList(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Output JSON to stdout
 	if flagPieceListFlat {
-		// Flat list: just output pieces as JSON array
-		jsonData, err := json.MarshalIndent(pieces, "", "  ")
-		if err != nil {
-			return fmt.Errorf("failed to marshal result: %w", err)
-		}
-		fmt.Println(string(jsonData))
-	} else {
-		// Tree view: build tree and render
-		tree := piececmd.BuildPieceTree(pieces)
-		renderTree(tree)
+		return emitResult(pieces, flagPieceListJSON)
 	}
 
-	return nil
+	// Tree view is the human message: always stderr, like every other
+	// command's summary line, so `mp list | jq` sees only JSON on stdout
+	// (gated the same way as everywhere else) and never a tree it can't parse.
+	renderTree(piececmd.BuildPieceTree(pieces))
+	return emitResult(pieces, flagPieceListJSON)
 }
 
 // projectPieces is the per-project entry in `mp list --all` JSON output.
@@ -1394,47 +1368,43 @@ func runPieceListAll(ctx context.Context, handler *piececmd.Handler) error {
 		results = append(results, entry)
 	}
 
-	if flagPieceListFlat || !cli.IsStdoutTerminal() {
-		jsonData, err := json.MarshalIndent(map[string]any{"projects": results}, "", "  ")
-		if err != nil {
-			return fmt.Errorf("failed to marshal result: %w", err)
-		}
-		fmt.Println(string(jsonData))
-		return nil
+	if flagPieceListFlat {
+		return emitResult(map[string]any{"projects": results}, flagPieceListJSON)
 	}
 
 	if len(results) == 0 {
-		fmt.Println("No registered projects. Run `mp init` in a repo, or `mp project add <path>`.")
-		return nil
+		fmt.Fprintln(os.Stderr, "No registered projects. Run `mp init` in a repo, or `mp project add <path>`.")
 	}
 	for i, entry := range results {
 		if i > 0 {
-			fmt.Println()
+			fmt.Fprintln(os.Stderr)
 		}
-		fmt.Printf("# %s (%s)\n", entry.Name, entry.Path)
+		fmt.Fprintf(os.Stderr, "# %s (%s)\n", entry.Name, entry.Path)
 		if entry.Error != "" {
-			fmt.Printf("  error: %s\n", entry.Error)
+			fmt.Fprintf(os.Stderr, "  error: %s\n", entry.Error)
 			continue
 		}
 		renderTree(piececmd.BuildPieceTree(entry.Pieces))
 	}
-	return nil
+	return emitResult(map[string]any{"projects": results}, flagPieceListJSON)
 }
 
-// renderTree renders a piece tree to stdout in human-readable format
+// renderTree renders a piece tree in human-readable form. It writes to
+// stderr, like every other command's human summary — stdout stays JSON-only
+// (see emitResult) so `mp list | jq` never has to parse a tree.
 func renderTree(root *piececmd.TreeNode) {
 	if root == nil {
 		return
 	}
 
 	// Print "main" as root
-	fmt.Println("main")
+	fmt.Fprintln(os.Stderr, "main")
 
 	// Render children recursively
 	renderTreeNodes(root.Children, "")
 }
 
-// renderTreeNodes recursively renders tree nodes with proper indentation
+// renderTreeNodes recursively renders tree nodes with proper indentation.
 func renderTreeNodes(nodes []*piececmd.TreeNode, prefix string) {
 	for i, node := range nodes {
 		isLastChild := i == len(nodes)-1
@@ -1451,7 +1421,7 @@ func renderTreeNodes(nodes []*piececmd.TreeNode, prefix string) {
 
 		// Handle orphan node
 		if node.IsOrphan {
-			fmt.Printf("%s%s(orphaned)\n", prefix, connector)
+			fmt.Fprintf(os.Stderr, "%s%s(orphaned)\n", prefix, connector)
 			renderTreeNodes(node.Children, childPrefix)
 			continue
 		}
@@ -1459,7 +1429,7 @@ func renderTreeNodes(nodes []*piececmd.TreeNode, prefix string) {
 		// Handle regular piece node
 		if node.Piece != nil {
 			timeStr := formatTimeAgo(node.Piece.ModTime)
-			fmt.Printf("%s%s%s (%s)\n", prefix, connector, node.Piece.Name, timeStr)
+			fmt.Fprintf(os.Stderr, "%s%s%s (%s)\n", prefix, connector, node.Piece.Name, timeStr)
 			renderTreeNodes(node.Children, childPrefix)
 		}
 	}

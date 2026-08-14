@@ -709,7 +709,7 @@ func (h *Handler) UpdatePiece(ctx context.Context, workDir, mainBranch string) (
 	}
 
 	if !status.InPiece {
-		return UpdateResult{}, fmt.Errorf("not in a piece worktree")
+		return UpdateResult{}, ErrNotInPiece
 	}
 
 	// Get current branch to verify we're on a branch
@@ -768,7 +768,7 @@ func (h *Handler) SyncPiece(ctx context.Context, workDir string, input SyncInput
 		return SyncResult{}, fmt.Errorf("failed to get piece status: %w", err)
 	}
 	if !status.InPiece {
-		return SyncResult{}, fmt.Errorf("not in a piece worktree")
+		return SyncResult{}, ErrNotInPiece
 	}
 
 	if _, err := h.git.CurrentBranch(ctx, workDir); err != nil {
@@ -906,7 +906,7 @@ func (h *Handler) MergePiece(ctx context.Context, workDir string, input MergeInp
 	}
 
 	if !status.InPiece {
-		return MergeResult{}, fmt.Errorf("not in a piece worktree")
+		return MergeResult{}, ErrNotInPiece
 	}
 
 	// Get current branch (piece branch)
@@ -1772,7 +1772,7 @@ func (h *Handler) DonePiece(ctx context.Context, workDir string, input DoneInput
 	}
 
 	if !status.InPiece {
-		return DoneResult{}, fmt.Errorf("not in a piece worktree; run this from inside a piece")
+		return DoneResult{}, ErrNotInPiece
 	}
 
 	// Get main repo root

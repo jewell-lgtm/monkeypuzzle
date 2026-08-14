@@ -49,6 +49,7 @@ var (
 	flagPRBase        string
 	flagPRDraft       bool
 	flagPRSchema      bool
+	flagPRJSON        bool
 	flagPRReadySchema bool
 	flagPRReadyJSON   bool
 )
@@ -59,6 +60,7 @@ func init() {
 	prCreateCmd.Flags().StringVar(&flagPRBase, "base", "", "Base branch to merge into (default: auto-detect from parent)")
 	prCreateCmd.Flags().BoolVar(&flagPRDraft, "draft", false, "Open the PR/MR as a draft")
 	prCreateCmd.Flags().BoolVar(&flagPRSchema, "schema", false, "Output JSON schema and exit")
+	prCreateCmd.Flags().BoolVar(&flagPRJSON, "json", false, "Output JSON even on a terminal")
 	prReadyCmd.Flags().BoolVar(&flagPRReadySchema, "schema", false, "Output JSON schema and exit")
 	prReadyCmd.Flags().BoolVar(&flagPRReadyJSON, "json", false, "Output JSON even on a terminal")
 	prCmd.AddCommand(prCreateCmd)
@@ -103,8 +105,8 @@ func runPRCreate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Output JSON to stdout
-	return cli.PrintJSON(result)
+	cli.Hint("mp pr ready (when it's ready for review)")
+	return emitResult(result, flagPRJSON)
 }
 
 func runPRReady(cmd *cobra.Command, args []string) error {
@@ -145,10 +147,8 @@ func runPRReady(cmd *cobra.Command, args []string) error {
 	if err := handler.MarkReady(ctx, wd); err != nil {
 		return err
 	}
-	if flagPRReadyJSON || !cli.IsStdoutTerminal() {
-		return cli.PrintJSON(map[string]any{"status": "ready"})
-	}
-	return nil
+	cli.Hint("mp merge — or merge on the forge, then mp done")
+	return emitResult(map[string]any{"status": "ready"}, flagPRReadyJSON)
 }
 
 func getPRInput() (prcmd.Input, error) {

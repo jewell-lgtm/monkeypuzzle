@@ -1410,3 +1410,55 @@ func TestCLI_Sync_Schema(t *testing.T) {
 		}
 	}
 }
+
+// TestCLI_Cleanup_HumanSummaryAlwaysOnStderr pins the P3 output-contract fix:
+// cleanup's human summary line must never appear on stdout (previously it was
+// only reachable behind a real-TTY check that this harness can't simulate,
+// so the regression that actually matters here is observable under a plain
+// exec: the summary must now always stream to stderr, and stdout must remain
+// pure JSON with no leading text).
+func TestCLI_Cleanup_HumanSummaryAlwaysOnStderr(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	env.initGitRepo()
+	env.initProject("test")
+	setupMergedPiece(t, env, "merged-piece")
+
+	stdout, stderr, err := env.run("cleanup", "--apply")
+	if err != nil {
+		t.Fatalf("cleanup --apply failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "merged-piece") {
+		t.Errorf("expected the human summary on stderr to mention the cleaned piece, got: %q", stderr)
+	}
+	var result map[string]any
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Errorf("stdout must be pure JSON with no leading human text, got: %q (err: %v)", stdout, err)
+	}
+}
+
+// TestCLI_AgentList_HumanTableAlwaysOnStderr mirrors the same fix for
+// `mp agent list`: the human table (or "No live agents.") must never leak
+// onto stdout, which must remain pure JSON.
+func TestCLI_AgentList_HumanTableAlwaysOnStderr(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	env.initGitRepo()
+	env.initProject("test")
+
+	stdout, stderr, err := env.run("agent", "list")
+	if err != nil {
+		t.Fatalf("agent list failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "No live agents.") {
+		t.Errorf("expected the human message on stderr, got: %q", stderr)
+	}
+	var result struct {
+		Agents []any `json:"agents"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Errorf("stdout must be pure JSON with no leading human text, got: %q (err: %v)", stdout, err)
+	}
+}

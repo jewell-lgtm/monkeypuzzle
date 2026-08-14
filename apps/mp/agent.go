@@ -318,25 +318,24 @@ func runAgentList(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	if flagAgentListJSON || !cli.IsStdoutTerminal() {
-		return cli.PrintJSON(map[string]any{"agents": items})
-	}
+	// Human table always goes to stderr (like every other command's summary);
+	// stdout stays JSON-only.
 	if len(items) == 0 {
-		fmt.Println("No live agents.")
-		return nil
-	}
-	for _, item := range items {
-		kind := item.Kind
-		if kind == "" {
-			kind = "agent"
+		fmt.Fprintln(os.Stderr, "No live agents.")
+	} else {
+		for _, item := range items {
+			kind := item.Kind
+			if kind == "" {
+				kind = "agent"
+			}
+			label := item.Piece
+			if item.Project != "" {
+				label = item.Project + "/" + item.Piece
+			}
+			fmt.Fprintf(os.Stderr, "%-10s %-28s %s (%s)\n", item.Status, label, kind, item.ID)
 		}
-		label := item.Piece
-		if item.Project != "" {
-			label = item.Project + "/" + item.Piece
-		}
-		fmt.Printf("%-10s %-28s %s (%s)\n", item.Status, label, kind, item.ID)
 	}
-	return nil
+	return emitResult(map[string]any{"agents": items}, flagAgentListJSON)
 }
 
 func runAgentSummary(cmd *cobra.Command, args []string) error {

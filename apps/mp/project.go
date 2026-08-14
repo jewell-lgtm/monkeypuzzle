@@ -246,34 +246,37 @@ func runProjectList(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if flagProjectListJSON || !cli.IsStdoutTerminal() {
+	// Human table always goes to stderr (like every other command's summary);
+	// stdout stays JSON-only so `mp project list | jq` never has to skip past
+	// table text.
+	if len(projects) == 0 {
+		fmt.Fprintln(os.Stderr, "No registered projects. Run `mp init` in a repo, or `mp project add <path>`.")
+	} else {
+		w := tabwriter.NewWriter(os.Stderr, 0, 2, 2, ' ', 0)
+		_, _ = fmt.Fprintln(w, "NAME\tBRANCH\tPIECES\tPATH")
+		for _, p := range projects {
+			branch := p.Branch
+			path := p.Path
+			if p.Host != "" {
+				path = p.Host + ":" + p.Path
+			}
+			switch {
+			case !p.Exists:
+				branch = "(missing)"
+			case !p.IsProject:
+				branch = "(no .monkeypuzzle)"
+			case p.Host != "":
+				branch = "(remote)"
+			case branch == "":
+				branch = "-"
+			}
+			_, _ = fmt.Fprintf(w, "%s\t%s\t%d\t%s\n", p.Name, branch, p.PieceCount, path)
+		}
+		_ = w.Flush()
+	}
+
+	if flagProjectListJSON || !cli.IsStdoutTerminal() || !cli.IsTerminal() {
 		return cli.PrintJSON(projects)
 	}
-
-	if len(projects) == 0 {
-		fmt.Println("No registered projects. Run `mp init` in a repo, or `mp project add <path>`.")
-		return nil
-	}
-
-	w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-	_, _ = fmt.Fprintln(w, "NAME\tBRANCH\tPIECES\tPATH")
-	for _, p := range projects {
-		branch := p.Branch
-		path := p.Path
-		if p.Host != "" {
-			path = p.Host + ":" + p.Path
-		}
-		switch {
-		case !p.Exists:
-			branch = "(missing)"
-		case !p.IsProject:
-			branch = "(no .monkeypuzzle)"
-		case p.Host != "":
-			branch = "(remote)"
-		case branch == "":
-			branch = "-"
-		}
-		_, _ = fmt.Fprintf(w, "%s\t%s\t%d\t%s\n", p.Name, branch, p.PieceCount, path)
-	}
-	return w.Flush()
+	return nil
 }

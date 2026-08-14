@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -35,6 +34,7 @@ var (
 	flagSyncFrom   string
 	flagSyncLocal  bool
 	flagSyncSchema bool
+	flagSyncJSON   bool
 )
 
 func init() {
@@ -44,6 +44,7 @@ func init() {
 	pieceSyncCmd.Flags().StringVar(&flagSyncFrom, "from", "", "Explicit ref to sync from (e.g. origin/parent-branch)")
 	pieceSyncCmd.Flags().BoolVar(&flagSyncLocal, "local", false, "Sync from the local parent branch instead of origin's version")
 	pieceSyncCmd.Flags().BoolVar(&flagSyncSchema, "schema", false, "Output JSON schema and exit")
+	pieceSyncCmd.Flags().BoolVar(&flagSyncJSON, "json", false, "Output JSON even on a terminal")
 	rootCmd.AddCommand(pieceSyncCmd)
 
 	_ = pieceSyncCmd.RegisterFlagCompletionFunc("main", completeGitBranches)
@@ -85,13 +86,7 @@ func runPieceSync(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	jsonData, err := json.MarshalIndent(result, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to marshal result: %w", err)
-	}
-	fmt.Println(string(jsonData))
-
-	return nil
+	return emitResult(result, flagSyncJSON)
 }
 
 // getPieceSyncInput resolves `mp sync` input from stdin JSON, then overlays any
