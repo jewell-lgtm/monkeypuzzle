@@ -281,10 +281,10 @@ func matchesQuery(r Row, q string) bool {
 }
 
 // rowHaystack flattens the searchable text of a row into one lowercased string.
-// RowNewPiece rows match only on the project name — the literal "+ new piece"
-// label is intentionally excluded from the haystack so a stray subsequence match
-// (e.g. fuzzy "new" inside "feature-name") doesn't surface every project's
-// create row.
+// RowNewPiece rows match only on the project name — the literal "+ create
+// piece" label is intentionally excluded from the haystack so a stray
+// subsequence match (e.g. fuzzy "create" inside some other row's text)
+// doesn't surface every project's create row.
 func rowHaystack(r Row) string {
 	if r.Kind == RowNewPiece {
 		return strings.ToLower(r.Project)
@@ -473,7 +473,7 @@ func renderRow(r Row, selected bool, sessionLabel string) string {
 		}
 		return fmt.Sprintf("  %s %s", styles.Subtle.Render("["+tag+"]"), name)
 	case RowNewPiece:
-		label := "+ new piece"
+		label := "+ create piece"
 		if selected {
 			label = styles.Selected.Render(label)
 		}

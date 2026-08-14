@@ -59,7 +59,7 @@ func TestHandleToolsList(t *testing.T) {
 
 	expectedTools := []string{
 		"mp_init",
-		"mp_piece_new",
+		"mp_piece_create",
 		"mp_piece_update",
 		"mp_piece_merge",
 		"mp_agent_list",
