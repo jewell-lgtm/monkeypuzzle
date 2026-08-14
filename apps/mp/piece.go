@@ -499,7 +499,7 @@ func runPieceStatus(cmd *cobra.Command, args []string) error {
 }
 
 func runPieceCreate(cmd *cobra.Command, args []string) error {
-	// --schema mode: output JSON schema and exit
+	// --schema mode: print an example input document and exit
 	if flagPieceCreateSchema {
 		schema, err := piececmd.NewPieceSchema()
 		if err != nil {

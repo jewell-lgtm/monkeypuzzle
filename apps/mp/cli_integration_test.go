@@ -191,7 +191,7 @@ func TestCLI_Init_Schema(t *testing.T) {
 
 	var schema map[string]any
 	if err := json.Unmarshal([]byte(stdout), &schema); err != nil {
-		t.Fatalf("invalid JSON schema: %v\noutput: %s", err, stdout)
+		t.Fatalf("invalid example-input JSON: %v\noutput: %s", err, stdout)
 	}
 
 	// Should have expected fields
@@ -378,7 +378,7 @@ func TestCLI_PieceCreate_Schema(t *testing.T) {
 
 	var schema map[string]any
 	if err := json.Unmarshal([]byte(stdout), &schema); err != nil {
-		t.Fatalf("invalid JSON schema: %v\noutput: %s", err, stdout)
+		t.Fatalf("invalid example-input JSON: %v\noutput: %s", err, stdout)
 	}
 }
 
@@ -418,7 +418,7 @@ func TestCLI_PRCreate_Schema(t *testing.T) {
 
 	var schema map[string]any
 	if err := json.Unmarshal([]byte(stdout), &schema); err != nil {
-		t.Fatalf("invalid JSON schema: %v\noutput: %s", err, stdout)
+		t.Fatalf("invalid example-input JSON: %v\noutput: %s", err, stdout)
 	}
 }
 
@@ -806,7 +806,7 @@ func TestCLI_Flatten_Schema(t *testing.T) {
 
 	var schema map[string]any
 	if err := json.Unmarshal([]byte(stdout), &schema); err != nil {
-		t.Fatalf("invalid JSON schema: %v\noutput: %s", err, stdout)
+		t.Fatalf("invalid example-input JSON: %v\noutput: %s", err, stdout)
 	}
 }
 
@@ -1402,7 +1402,7 @@ func TestCLI_Sync_Schema(t *testing.T) {
 
 	var schema map[string]any
 	if err := json.Unmarshal([]byte(stdout), &schema); err != nil {
-		t.Fatalf("invalid JSON schema: %v\noutput: %s", err, stdout)
+		t.Fatalf("invalid example-input JSON: %v\noutput: %s", err, stdout)
 	}
 	for _, field := range []string{"main", "from", "local"} {
 		if _, ok := schema[field]; !ok {

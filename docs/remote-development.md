@@ -111,6 +111,6 @@ apart.
 - The dashboard lists remote projects but doesn't enumerate their pieces;
   `mp --project <name> list` proxies in for the live tree.
 - One host per project — no mirroring of a repo across hosts.
-- Version skew is tolerated (the remote's flags and schemas win — the proxy
+- Version skew is tolerated (the remote's flags and example-input defaults win — the proxy
   forwards argv verbatim without parsing it); `mp remote doctor` flags a
   mismatch.

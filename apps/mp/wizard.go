@@ -62,7 +62,7 @@ func notConfiguredError() error {
 
 // commandSkipsConfigCheck returns true for commands that must work without a
 // populated user config: the config command itself, help/completion plumbing,
-// and any invocation that's just emitting a JSON schema.
+// and any invocation that's just emitting an example input document.
 func commandSkipsConfigCheck(cmd *cobra.Command) bool {
 	if cmd == nil {
 		return true
