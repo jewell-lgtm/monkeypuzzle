@@ -27,6 +27,7 @@ var prCreateCmd = &cobra.Command{
 Pushes the branch to origin and creates a PR using the gh CLI.
 
 When no title is provided, the piece name is used as the default PR title.`,
+	Args: cobra.NoArgs,
 	RunE: runPRCreate,
 }
 
@@ -36,6 +37,7 @@ var prReadyCmd = &cobra.Command{
 	Long: `Flip the draft PR/MR for the current piece worktree to ready-for-review.
 Reads the PR number from .monkeypuzzle/pr-metadata.json. Fires the
 before-pr-ready and after-pr-ready hooks around the provider call.`,
+	Args: cobra.NoArgs,
 	RunE: runPRReady,
 }
 

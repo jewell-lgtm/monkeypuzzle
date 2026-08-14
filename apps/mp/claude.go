@@ -26,6 +26,7 @@ var claudeSkillCmd = &cobra.Command{
 
 Creates .claude/skills/managing-monkeypuzzle/SKILL.md with documentation
 for using mp commands programmatically.`,
+	Args: cobra.NoArgs,
 	RunE: runClaudeSkill,
 }
 

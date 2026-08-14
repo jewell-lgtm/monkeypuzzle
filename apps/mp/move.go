@@ -38,6 +38,7 @@ Modes:
   --schema:   Output expected JSON format
 
 Pass ".monkeypuzzle" to move back to the default (removes the mapping entry).`,
+	Args: cobra.MaximumNArgs(1),
 	RunE: runMove,
 }
 

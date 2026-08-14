@@ -28,10 +28,13 @@ import (
 )
 
 var pieceStatusCmd = &cobra.Command{
-	Use:   "status",
-	Short: "Show current piece status",
-	Long:  `Print the current piece's status (parent, children, branch) as JSON. Run from within a piece worktree, or the main repo.`,
-	RunE:  runPieceStatus,
+	Use:   "status [piece]",
+	Short: "Show a piece's status",
+	Long: `Print a piece's status (parent, children, branch) as JSON. Defaults to the
+piece you're standing in (or the main repo); name a piece positionally or with
+--piece to inspect one from anywhere in the repo.`,
+	Args: cobra.MaximumNArgs(1),
+	RunE: runPieceStatus,
 }
 
 var pieceCreateCmd = &cobra.Command{
@@ -40,6 +43,7 @@ var pieceCreateCmd = &cobra.Command{
 	Short:   "Create a new puzzle piece",
 	Long: `Create a new puzzle piece by initializing a git worktree and opening a tmux session.
 The worktree will be created in a repo-scoped directory within the platform-appropriate data directory (e.g., ~/Library/Application Support/monkeypuzzle/pieces/{repo-hash}/ on macOS, ~/.local/share/monkeypuzzle/pieces/{repo-hash}/ on Linux).`,
+	Args: cobra.NoArgs,
 	RunE: runPieceCreate,
 }
 
@@ -47,6 +51,7 @@ var pieceUpdateCmd = &cobra.Command{
 	Use:   "update",
 	Short: "Update piece with latest from main branch",
 	Long:  `Merges the main branch into the current piece's history. Must be run from within a piece worktree.`,
+	Args:  cobra.NoArgs,
 	RunE:  runPieceUpdate,
 }
 
@@ -54,6 +59,7 @@ var pieceMergeCmd = &cobra.Command{
 	Use:   "merge",
 	Short: "Merge piece back into main branch",
 	Long:  `Merges the piece branch back into main. Fails if main has commits not in the piece worktree. Must be run from within a piece worktree.`,
+	Args:  cobra.NoArgs,
 	RunE:  runPieceMerge,
 }
 
@@ -69,25 +75,30 @@ Dry-run by default: it reports what would be removed and changes nothing. Pass
 --apply to actually clean up. In an interactive terminal you are shown the
 preview and asked to confirm; non-interactive callers (flags/stdin JSON) preview
 unless --apply (or "apply": true) is given.`,
+	Args: cobra.NoArgs,
 	RunE: runPieceCleanup,
 }
 
 var pieceAbandonCmd = &cobra.Command{
-	Use:   "abandon",
+	Use:   "abandon [piece]",
 	Short: "Abandon an unmerged piece",
 	Long: `Remove a piece worktree, kill its tmux session, and optionally delete the branch.
 Use --force to discard uncommitted changes.
 Use --delete-branch to also remove the git branch.
-If no --name is provided and run from within a piece, abandons the current piece.`,
+Defaults to the piece you're standing in; name a piece positionally or with
+--piece to abandon one from anywhere in the repo.`,
+	Args: cobra.MaximumNArgs(1),
 	RunE: runPieceAbandon,
 }
 
 var pieceDoneCmd = &cobra.Command{
-	Use:   "done",
-	Short: "Cleanup current piece after merge",
-	Long: `Remove the current piece worktree and tmux session after the branch has been merged.
-Must be run from within a piece worktree. Verifies the piece is merged before cleanup.
-Use 'mp abandon' for unmerged pieces.`,
+	Use:   "done [piece]",
+	Short: "Cleanup a piece after merge",
+	Long: `Remove a piece worktree and tmux session after the branch has been merged.
+Defaults to the piece you're standing in; name a piece positionally or with
+--piece to finish one from anywhere in the repo. Verifies the piece is merged
+before cleanup. Use 'mp abandon' for unmerged pieces.`,
+	Args: cobra.MaximumNArgs(1),
 	RunE: runPieceDone,
 }
 
@@ -99,6 +110,7 @@ Accepts a local branch name, or a remote ref like "origin/foo" — remote refs a
 fetched and a new local branch is created tracking the remote. When run from the
 main repo with no branch specified, the current branch is used. From inside a
 piece worktree, --branch is required.`,
+	Args: cobra.MaximumNArgs(1),
 	RunE: runPieceAdopt,
 }
 
@@ -106,6 +118,7 @@ var pieceListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all pieces",
 	Long:  `List all pieces in a tree view showing parent/child relationships. Use --flat for a simple list.`,
+	Args:  cobra.NoArgs,
 	RunE:  runPieceList,
 }
 
@@ -118,6 +131,9 @@ var flagForce bool
 var flagPieceCleanupApply bool
 var flagPieceCleanupJSON bool
 var flagAbandonName string
+var flagAbandonPiece string
+var flagDonePiece string
+var flagStatusPiece string
 var flagDeleteBranch bool
 var flagOverwriteSession bool
 var flagPieceCreateSchema bool
@@ -162,10 +178,13 @@ func init() {
 	pieceCleanupCmd.Flags().BoolVar(&flagForce, "force", false, "Apply without the interactive confirmation (alias for --apply)")
 	pieceCleanupCmd.Flags().BoolVar(&flagPieceCleanupSchema, "schema", false, "Output JSON schema and exit")
 	pieceCleanupCmd.Flags().BoolVar(&flagPieceCleanupJSON, "json", false, "Output JSON even on a terminal")
-	pieceAbandonCmd.Flags().StringVar(&flagAbandonName, "name", "", "Piece name to abandon (optional if in piece)")
+	pieceAbandonCmd.Flags().StringVar(&flagAbandonPiece, "piece", "", "Piece to abandon (default: the piece you're in)")
+	pieceAbandonCmd.Flags().StringVar(&flagAbandonName, "name", "", "Piece name to abandon (deprecated: use --piece)")
+	_ = pieceAbandonCmd.Flags().MarkDeprecated("name", "use --piece")
 	pieceAbandonCmd.Flags().BoolVar(&flagForce, "force", false, "Force removal even with uncommitted changes")
 	pieceAbandonCmd.Flags().BoolVar(&flagDeleteBranch, "delete-branch", false, "Also delete the git branch")
 	pieceAbandonCmd.Flags().BoolVar(&flagPieceAbandonSchema, "schema", false, "Output JSON schema and exit")
+	pieceDoneCmd.Flags().StringVar(&flagDonePiece, "piece", "", "Piece to finish (default: the piece you're in)")
 	pieceDoneCmd.Flags().StringVar(&flagMainBranch, "main-branch", "main", "Main branch to check merge status against")
 	pieceDoneCmd.Flags().BoolVar(&flagPieceDoneSchema, "schema", false, "Output JSON schema and exit")
 	pieceDoneCmd.Flags().BoolVar(&flagPieceDoneJSON, "json", false, "Output JSON even on a terminal")
@@ -174,6 +193,7 @@ func init() {
 	pieceAdoptCmd.Flags().StringVarP(&flagPieceAdoptParent, "parent", "p", "main", "Parent piece name (default: main)")
 	pieceAdoptCmd.Flags().BoolVar(&flagPieceAdoptSchema, "schema", false, "Output JSON schema and exit")
 	pieceAdoptCmd.Flags().BoolVar(&flagPieceAdoptJSON, "json", false, "Output JSON even on a terminal")
+	pieceStatusCmd.Flags().StringVar(&flagStatusPiece, "piece", "", "Piece to inspect (default: the piece you're in)")
 	pieceStatusCmd.Flags().StringVar(&flagMainBranch, "main-branch", "main", "Main branch name (default: main)")
 	pieceListCmd.Flags().BoolVar(&flagPieceListFlat, "flat", false, "Display pieces in a flat list instead of tree view")
 	pieceListCmd.Flags().BoolVar(&flagPieceListAll, "all", false, "List pieces across all registered projects")
@@ -302,11 +322,59 @@ func completeGitBranches(cmd *cobra.Command, args []string, toComplete string) (
 	return filtered, cobra.ShellCompDirectiveNoFileComp
 }
 
-func runPieceStatus(cmd *cobra.Command, args []string) error {
-	ctx := cmd.Context()
+// pieceSelector merges the positional [piece] arg with a --piece flag value:
+// either alone wins, both set to different names is an error, neither is "".
+func pieceSelector(args []string, flagVal string) (string, error) {
+	positional := ""
+	if len(args) > 0 {
+		positional = strings.TrimSpace(args[0])
+	}
+	flagVal = strings.TrimSpace(flagVal)
+	if positional != "" && flagVal != "" && positional != flagVal {
+		return "", fmt.Errorf("conflicting piece selectors: %q (positional) vs %q (--piece)", positional, flagVal)
+	}
+	if positional != "" {
+		return positional, nil
+	}
+	return flagVal, nil
+}
+
+// resolvePieceWorkDir returns the directory a piece-scoped command should run
+// against: the named piece's worktree when a selector is given, else the
+// current directory (the historical run-from-inside behavior).
+func resolvePieceWorkDir(ctx context.Context, selector string) (string, error) {
 	wd, err := os.Getwd()
 	if err != nil {
-		return fmt.Errorf("failed to get working directory: %w", err)
+		return "", fmt.Errorf("failed to get working directory: %w", err)
+	}
+	if selector == "" {
+		return wd, nil
+	}
+	git := adapters.NewGit(adapters.NewOSExec())
+	root, err := git.GetMainRepoRoot(ctx, wd)
+	if err != nil {
+		return "", fmt.Errorf("not in a git repository: %w", err)
+	}
+	piecesDir, err := projectdir.PiecesDir(root)
+	if err != nil {
+		return "", err
+	}
+	piecePath := filepath.Join(piecesDir, selector)
+	if fi, err := os.Stat(piecePath); err != nil || !fi.IsDir() {
+		return "", fmt.Errorf("piece %q not found in %s", selector, root)
+	}
+	return piecePath, nil
+}
+
+func runPieceStatus(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
+	selector, err := pieceSelector(args, flagStatusPiece)
+	if err != nil {
+		return err
+	}
+	wd, err := resolvePieceWorkDir(ctx, selector)
+	if err != nil {
+		return err
 	}
 
 	deps := core.NewDeps(
@@ -987,8 +1055,15 @@ func runPieceAbandon(cmd *cobra.Command, args []string) error {
 	)
 	handler := newPieceHandler(deps)
 
-	// Get validated input
-	input, err := getAbandonInput(ctx, handler)
+	// Get validated input. --piece is canonical; --name is the deprecated alias.
+	selector, err := pieceSelector(args, flagAbandonPiece)
+	if err != nil {
+		return err
+	}
+	if selector == "" {
+		selector = flagAbandonName
+	}
+	input, err := getAbandonInput(ctx, handler, selector)
 	if err != nil {
 		return err
 	}
@@ -1025,9 +1100,13 @@ func runPieceDone(cmd *cobra.Command, args []string) error {
 	}
 
 	ctx := cmd.Context()
-	wd, err := os.Getwd()
+	selector, err := pieceSelector(args, flagDonePiece)
 	if err != nil {
-		return fmt.Errorf("failed to get working directory: %w", err)
+		return err
+	}
+	wd, err := resolvePieceWorkDir(ctx, selector)
+	if err != nil {
+		return err
 	}
 
 	deps := core.NewDeps(
@@ -1174,11 +1253,11 @@ func getAdoptInput() (piececmd.AdoptPieceInput, error) {
 	return piececmd.WithAdoptPieceDefaults(input), nil
 }
 
-func getAbandonInput(ctx context.Context, handler *piececmd.Handler) (piececmd.AbandonInput, error) {
+func getAbandonInput(ctx context.Context, handler *piececmd.Handler, selector string) (piececmd.AbandonInput, error) {
 	var input piececmd.AbandonInput
 
-	if flagAbandonName != "" {
-		input = piececmd.AbandonInput{Name: flagAbandonName}
+	if selector != "" {
+		input = piececmd.AbandonInput{Name: selector}
 	} else if cli.HasStdinData() {
 		data, err := io.ReadAll(os.Stdin)
 		if err != nil {
@@ -1213,7 +1292,7 @@ func getAbandonInput(ctx context.Context, handler *piececmd.Handler) (piececmd.A
 		if status.InPiece {
 			input.Name = status.PieceName
 		} else {
-			return piececmd.AbandonInput{}, fmt.Errorf("not inside a piece: run 'mp abandon' from within the piece to abandon, or pass --name")
+			return piececmd.AbandonInput{}, fmt.Errorf("not inside a piece; run from within the piece to abandon, or pass a piece name")
 		}
 	}
 

@@ -18,7 +18,6 @@ import (
 var (
 	flagProjectAddPath   string
 	flagProjectAddSchema bool
-	flagProjectRmTarget  string
 	flagProjectRmSchema  bool
 	flagProjectListJSON  bool
 )
@@ -61,7 +60,7 @@ var projectRemoveCmd = &cobra.Command{
 left untouched.
 
 Modes:
-  Argument/flag:  mp project rm <name|path> | mp project rm --target NAME
+  Argument:       mp project rm <name|path>
   Stdin JSON:     echo '{"target":"my-project"}' | mp project rm
   --schema:       Output expected JSON format`,
 	Args: cobra.MaximumNArgs(1),
@@ -84,7 +83,6 @@ func init() {
 	projectAddCmd.Flags().StringVar(&flagProjectAddPath, "path", "", "Path to the project repository")
 	projectAddCmd.Flags().BoolVar(&flagProjectAddSchema, "schema", false, "Output JSON schema and exit")
 
-	projectRemoveCmd.Flags().StringVar(&flagProjectRmTarget, "target", "", "Name or path of the project to remove")
 	projectRemoveCmd.Flags().BoolVar(&flagProjectRmSchema, "schema", false, "Output JSON schema and exit")
 
 	projectListCmd.Flags().BoolVar(&flagProjectListJSON, "json", false, "Output JSON instead of a table")
@@ -225,8 +223,6 @@ func resolveProjectRemoveTarget(args []string) (string, error) {
 	switch {
 	case len(args) == 1:
 		return args[0], nil
-	case flagProjectRmTarget != "":
-		return flagProjectRmTarget, nil
 	case cli.HasStdinData():
 		data, err := io.ReadAll(os.Stdin)
 		if err != nil {

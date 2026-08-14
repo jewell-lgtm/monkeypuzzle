@@ -51,6 +51,7 @@ Examples:
   mp reinit                                  # Synonym for the refresh case.
   mp init --schema | jq '.name = "foo"' | mp init  # Pipe JSON (reconfigure)
   mp init --name foo --pr-provider github  # Reconfigure`,
+	Args: cobra.NoArgs,
 	RunE: runInit,
 }
 
@@ -60,6 +61,7 @@ var reinitCmd = &cobra.Command{
 	Use:   "reinit",
 	Short: "Alias for `mp init` — refresh scaffolding in an existing repo",
 	Long:  initCmd.Long,
+	Args:  cobra.NoArgs,
 	RunE:  runInit,
 }
 

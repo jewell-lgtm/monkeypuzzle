@@ -40,6 +40,7 @@ across everything (expanded or not); ↑/↓ and PgUp/PgDn scroll.
 
 With --json (or no TTY) it prints the full per-project detail so automation can
 build its own pickers.`,
+	Args: cobra.NoArgs,
 	RunE: runGo,
 }
 

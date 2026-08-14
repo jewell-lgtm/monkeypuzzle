@@ -30,6 +30,7 @@ confirm in an interactive terminal; everything else runs straight through.`,
 var stackStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show the stack tree, PR/MR state, and drift vs the forge's PR/MR list",
+	Args:  cobra.NoArgs,
 	RunE:  runStackStatus,
 }
 
@@ -42,6 +43,7 @@ Dry-run by default: it previews which pieces would be synced and changes
 nothing. Pass --apply to actually sync. In an interactive terminal you are shown
 the preview and asked to confirm; non-interactive callers (flags/stdin JSON)
 preview unless --apply (or "apply": true) is given.`,
+	Args: cobra.NoArgs,
 	RunE: runStackSync,
 }
 
@@ -62,6 +64,7 @@ var stackPrependCmd = &cobra.Command{
 var stackContinueCmd = &cobra.Command{
 	Use:   "continue",
 	Short: "Resume a conflicted rebase started by 'mp stack sync --strategy rebase'",
+	Args:  cobra.NoArgs,
 	RunE:  runStackContinue,
 }
 
@@ -74,6 +77,7 @@ name, or "main" to make it a root piece.
 
 Only piece metadata changes; run 'mp stack sync' afterwards to restack the
 branches onto the new lineage.`,
+	Args: cobra.NoArgs,
 	RunE: runStackSetParent,
 }
 
@@ -84,6 +88,7 @@ var stackUndoCmd = &cobra.Command{
 sync. Refuses to run if an affected worktree has uncommitted changes. Local
 only: remote branches are untouched (force-push with lease afterwards if you
 had pushed).`,
+	Args: cobra.NoArgs,
 	RunE: runStackUndo,
 }
 
@@ -95,6 +100,7 @@ base->head edges — no local clone required. Auth comes from the ambient
 GH_TOKEN/GITHUB_TOKEN (or GITLAB_TOKEN) environment, so a server can run this as
 a specific user. Output is the same forest the hosted dashboard renders, because
 both call the shared stackgraph builder.`,
+	Args: cobra.NoArgs,
 	RunE: runStackGraph,
 }
 

@@ -309,12 +309,13 @@ Pieces that could not be removed (e.g. uncommitted changes without `--force`) ap
 
 ## mp status
 
-Show current piece status.
+Show a piece's status. Defaults to the piece you're standing in (or the main repo); name one positionally or with `--piece` to inspect it from anywhere in the repo.
 
 ### Usage
 
 ```bash
 mp status
+mp status my-feature
 ```
 
 ### Output
@@ -617,23 +618,24 @@ Remove an unmerged piece (worktree, multiplexer session, optionally branch).
 ### Usage
 
 ```bash
-mp abandon                              # Interactive TUI selector
-mp abandon --name my-feature            # By name
-mp abandon --name my-feature --force    # Discard uncommitted changes
-mp abandon --name foo --delete-branch   # Also delete git branch
+mp abandon                              # The piece you're standing in
+mp abandon my-feature                   # By name
+mp abandon my-feature --force           # Discard uncommitted changes
+mp abandon foo --delete-branch          # Also delete git branch
 ```
 
 ### Flags
 
-| Flag              | Description                                 | Default |
-| ----------------- | ------------------------------------------- | ------- |
-| `--name`          | Piece name to abandon                       | -       |
-| `--force`         | Force removal even with uncommitted changes | `false` |
-| `--delete-branch` | Also delete the git branch                  | `false` |
+| Flag              | Description                                    | Default |
+| ----------------- | ---------------------------------------------- | ------- |
+| `--piece`         | Piece to abandon (or pass it positionally)     | current |
+| `--name`          | Deprecated alias for `--piece`                 | -       |
+| `--force`         | Force removal even with uncommitted changes    | `false` |
+| `--delete-branch` | Also delete the git branch                     | `false` |
 
 ### What it does
 
-1. Finds the piece by name (or shows TUI selector)
+1. Finds the piece by the positional/`--piece` selector, else the piece the caller is standing in
 2. Kills the multiplexer session if it exists
 3. Removes the git worktree (use `--force` to discard uncommitted changes)
 4. Optionally deletes the git branch (`--delete-branch`)
@@ -685,20 +687,22 @@ For a stacked piece, the base auto-detects to the parent piece's branch so the P
 
 ## mp done
 
-Clean up the current piece (worktree + multiplexer session) after its branch has been merged. Run from within a piece worktree. Verifies the piece is merged first — use [`mp abandon`](#mp-piece-abandon) for unmerged pieces.
+Clean up a piece (worktree + multiplexer session) after its branch has been merged. Defaults to the piece you're standing in; name one positionally or with `--piece` to finish it from anywhere in the repo. Verifies the piece is merged first — use [`mp abandon`](#mp-abandon) for unmerged pieces.
 
 ### Usage
 
 ```bash
 mp done
+mp done my-feature
 mp done --main-branch develop
 ```
 
 ### Flags
 
-| Flag            | Description                               | Default |
-| --------------- | ----------------------------------------- | ------- |
-| `--main-branch` | Main branch to check merge status against | `main`  |
+| Flag            | Description                                   | Default |
+| --------------- | --------------------------------------------- | ------- |
+| `--piece`       | Piece to finish (or pass it positionally)     | current |
+| `--main-branch` | Main branch to check merge status against     | `main`  |
 
 ---
 

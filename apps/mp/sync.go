@@ -27,6 +27,7 @@ origin is configured), or when --local is passed. --from overrides the ref
 entirely (e.g. upstream/main).
 
 To sync a whole stack of pieces, use 'mp stack sync' instead.`,
+	Args: cobra.NoArgs,
 	RunE: runPieceSync,
 }
 

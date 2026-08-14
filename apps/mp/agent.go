@@ -40,6 +40,7 @@ hooks are safe to install globally.
 --claude-hook reads a Claude Code hook payload from stdin and derives the
 agent id and status from it; otherwise status comes from --status/stdin JSON.
 Status "gone" removes the agent's record.`,
+	Args: cobra.NoArgs,
 	RunE: runAgentReport,
 }
 
@@ -49,12 +50,14 @@ var agentListCmd = &cobra.Command{
 	Long: `List live agents in the current project's pieces (blocked first). --all spans
 every registered project instead; outside a git repo, --all is implied — so
 status lines and cross-project pickers work from anywhere.`,
+	Args: cobra.NoArgs,
 	RunE: runAgentList,
 }
 
 var agentSummaryCmd = &cobra.Command{
 	Use:   "summary",
 	Short: "Compact one-line agent summary (for status lines)",
+	Args:  cobra.NoArgs,
 	RunE:  runAgentSummary,
 }
 

@@ -42,6 +42,7 @@ Modes:
 
 In an interactive terminal you are asked to confirm before anything is removed;
 pass --yes (or --force) to skip the prompt.`,
+	Args: cobra.NoArgs,
 	RunE: runFlatten,
 }
 
