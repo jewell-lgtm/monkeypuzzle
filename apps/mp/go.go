@@ -51,8 +51,9 @@ func init() {
 	rootCmd.AddCommand(goCmd)
 
 	// Bare `mp` opens a fuzzy picker scoped to the current project (repo-local).
-	// Outside a monkeypuzzle project it prints context-aware guidance rather than
-	// falling back to a cross-project view — use `mp go` for that.
+	// Outside a monkeypuzzle project it prints context-aware guidance, then
+	// falls through to the same cross-project view `mp go` shows (when there
+	// are registered projects to jump to).
 	rootCmd.Flags().BoolVar(&flagDashJSON, "json", false, "Output JSON instead of the interactive dashboard")
 	rootCmd.RunE = runRoot
 }
@@ -336,8 +337,9 @@ func dashboardRows(projects []dashProject) []dashboard.Row {
 }
 
 // runRoot handles bare `mp`: a fuzzy picker scoped to the current monkeypuzzle
-// project. Outside a project it prints context-aware guidance (run `mp init`, or
-// `mp go` to jump to a known project) instead of falling back to anything.
+// project. Outside a project it prints context-aware guidance (run `mp init`)
+// and then falls through to the cross-project picker/JSON `mp go` shows, when
+// there are registered projects to jump to.
 func runRoot(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	root, state := classifyCwd(ctx)

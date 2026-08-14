@@ -90,7 +90,7 @@ The key rule: **non-interactive invocations (flags or JSON) fail loudly on genui
 | `mp init` / `mp reinit` | Configure project name + PR provider (first run) or refresh `.gitignore` + Claude skill (re-run) |
 | `mp` | Picker scoped to the current repo (falls through to `mp go`'s view outside one) |
 | `mp go` | Cross-project picker; `mp switch --all` under a shorter name |
-| `mp switch [target]` | Jump to a piece or branch by name — adopts or creates as needed |
+| `mp switch [target]` | Jump to a piece or branch by name — adopts an existing branch, or creates a new one with `--create` |
 | `mp create` | Spawn worktree + multiplexer session (`--name` or `--prompt`) |
 | `mp adopt <branch>` | Bring an existing branch into mp |
 | `mp list` | Show pieces (`--all` for cross-project) |
