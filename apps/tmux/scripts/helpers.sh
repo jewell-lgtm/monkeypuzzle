@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Shared helpers for the monkeypuzzle tmux plugin scripts.
 #
-# Sourced by switch.sh and create.sh. This file defines functions and one
-# export only — it performs no work at source time — so the test runner can
-# source the scripts and call their build_* functions without tripping guards.
+# Sourced by every script in this directory. This file defines functions and
+# one export only — it performs no work at source time — so the test runner
+# can source the scripts and call their build_* functions without tripping
+# guards.
 
 # The explicit signal that tells mp to manage the tmux session (switch-client /
 # new-session) even though the plugin drives mp through the stateless API with
@@ -34,27 +35,6 @@ require_cmd() {
 ensure_env() {
 	[[ -n "${TMUX:-}" ]] || die "not inside a tmux session"
 	require_cmd "$(mp_bin)" jq fzf
-}
-
-# focus_agent moves the client to an agent: straight to its recorded pane when
-# the piece session is alive, else through `mp switch` (which creates the
-# session). A pane target resolves its window too, so focus lands exactly on
-# the agent even in a split layout. The optional project arg scopes the
-# fallback for cross-project rows.
-focus_agent() {
-	local session="$1" pane="$2" piece="$3" project="${4:-}"
-	if [[ -n "$session" ]] && tmux has-session -t "=$session" 2>/dev/null; then
-		tmux switch-client -t "=$session"
-		if [[ -n "$pane" ]]; then
-			tmux select-window -t "$pane" 2>/dev/null
-			tmux select-pane -t "$pane" 2>/dev/null
-		fi
-		return 0
-	fi
-	if [[ -n "$project" ]]; then
-		exec "$(mp_bin)" switch --project "$project" --piece "$piece"
-	fi
-	exec "$(mp_bin)" switch --piece "$piece"
 }
 
 # build_project_rows reads `mp go --json` on stdin and writes TAB-separated rows:

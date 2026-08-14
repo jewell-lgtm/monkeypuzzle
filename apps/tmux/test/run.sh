@@ -109,13 +109,14 @@ else
 fi
 
 # Canned `mp agent list --all --json` output: blocked first, cross-project,
-# one agent without a pane.
+# one agent without a pane. icon comes straight from mp's JSON (the fixture
+# mirrors what internal/core/agent's statusIcons table produces).
 canned_agents_json() {
 	cat <<'JSON'
 {
   "agents": [
-    { "project": "alpha", "piece": "fix-login", "session_name": "mp/alpha/fix-login", "id": "sess-1", "kind": "claude", "status": "blocked", "pane": "%7", "updated_at": "2026-07-30T10:00:00Z" },
-    { "project": "beta", "piece": "dark-mode", "session_name": "mp/beta/dark-mode", "id": "codex-1", "kind": "codex", "status": "working", "updated_at": "2026-07-30T10:00:00Z" }
+    { "project": "alpha", "piece": "fix-login", "session_name": "mp/alpha/fix-login", "id": "sess-1", "kind": "claude", "status": "blocked", "icon": "🔴", "pane": "%7", "updated_at": "2026-07-30T10:00:00Z" },
+    { "project": "beta", "piece": "dark-mode", "session_name": "mp/beta/dark-mode", "id": "codex-1", "kind": "codex", "status": "working", "icon": "⚡", "updated_at": "2026-07-30T10:00:00Z" }
   ]
 }
 JSON
@@ -126,23 +127,11 @@ JSON
 if source "$SCRIPTS/agents.sh" 2>/dev/null; then
 	got="$(canned_agents_json | build_agent_rows)"
 	want="$(printf '%s\n' \
-		$'🔴 alpha/fix-login · claude sess-1\tmp/alpha/fix-login\t%7\tsess-1\tfix-login\talpha' \
-		$'⚡ beta/dark-mode · codex codex-1\tmp/beta/dark-mode\t\tcodex-1\tdark-mode\tbeta')"
-	assert_eq "agents build_agent_rows: project labels, pane passthrough" "$got" "$want"
+		$'🔴 alpha/fix-login · claude sess-1\tsess-1\t%7' \
+		$'⚡ beta/dark-mode · codex codex-1\tcodex-1\t')"
+	assert_eq "agents build_agent_rows: icon from JSON, id+pane only" "$got" "$want"
 else
 	fail "source agents.sh" "could not source $SCRIPTS/agents.sh"
-fi
-
-# ---- Unit: blocked.sh pick_blocked -----------------------------------------
-# shellcheck source=../scripts/blocked.sh
-if source "$SCRIPTS/blocked.sh" 2>/dev/null; then
-	got="$(canned_agents_json | pick_blocked)"
-	assert_eq "blocked pick_blocked: first blocked agent" \
-		"$got" $'mp/alpha/fix-login\t%7\tfix-login\talpha'
-	got="$(printf '{"agents": []}' | pick_blocked)"
-	assert_eq "blocked pick_blocked: empty when none blocked" "$got" ""
-else
-	fail "source blocked.sh" "could not source $SCRIPTS/blocked.sh"
 fi
 
 # ---- Integration: switch happy path ----------------------------------------
@@ -237,7 +226,7 @@ EOF
 }
 integration_branch
 
-# ---- Integration: agents picker focuses the selected pane ------------------
+# ---- Integration: agents picker hands off to `mp agent focus` -------------
 integration_agents() {
 	if ! have jq || ! have fzf; then
 		skip "agents integration" "needs jq + fzf"
@@ -246,34 +235,67 @@ integration_agents() {
 	local tmp bin log
 	tmp="$(mktemp -d)"
 	bin="$tmp/bin"
-	log="$tmp/tmux.log"
+	log="$tmp/mp.log"
 	mkdir -p "$bin"
 
-	# Stub mp: canned agent list. Stub tmux: record every call; has-session ok.
+	# Stub mp: canned agent list; record the `focus` call's args.
 	cat >"$bin/mp" <<EOF
 #!/usr/bin/env bash
-[[ "\$1 \$2" == "agent list" ]] && cat "$tmp/agents.json"
+case "\$1 \$2" in
+  "agent list") cat "$tmp/agents.json" ;;
+  "agent focus") printf '%s\n' "\$*" > "$log" ;;
+esac
 EOF
-	cat >"$bin/tmux" <<EOF
-#!/usr/bin/env bash
-printf '%s\n' "\$*" >> "$log"
-exit 0
-EOF
-	chmod +x "$bin/mp" "$bin/tmux"
+	chmod +x "$bin/mp"
 	canned_agents_json >"$tmp/agents.json"
 
 	PATH="$bin:$PATH" TMUX="fake,1,0" MP_PLUGIN_FILTER="fix-login" \
 		bash "$SCRIPTS/agents.sh" >/dev/null 2>&1
-	if grep -q -- 'switch-client -t =mp/alpha/fix-login' "$log" 2>/dev/null &&
-		grep -q -- 'select-pane -t %7' "$log" 2>/dev/null; then
-		ok "agents flow: selection switches session and focuses pane"
-	else
-		fail "agents flow" "tmux calls: $(tr '\n' '; ' <"$log" 2>/dev/null)"
-	fi
+	assert_eq "agents flow: selection hands off to mp agent focus <id> --all" \
+		"$(cat "$log" 2>/dev/null)" "agent focus sess-1 --all"
 
 	rm -rf "$tmp"
 }
 integration_agents
+
+# ---- Integration: blocked jump relays "nothing blocked" -------------------
+integration_blocked() {
+	local tmp bin
+	tmp="$(mktemp -d)"
+	bin="$tmp/bin"
+	mkdir -p "$bin"
+
+	# mp reports nothing blocked: blocked.sh must relay via tmux display-message.
+	cat >"$bin/mp" <<'EOF'
+#!/usr/bin/env bash
+[[ "$1 $2" == "agent focus" ]] || exit 2
+echo "monkeypuzzle: ⚠ no blocked agents" >&2
+exit 0
+EOF
+	cat >"$bin/tmux" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >"$tmp/tmux.log"
+EOF
+	chmod +x "$bin/mp" "$bin/tmux"
+
+	PATH="$bin:$PATH" bash "$SCRIPTS/blocked.sh" "$tmp" >/dev/null 2>&1
+	assert_eq "blocked flow: relays the no-blocked-agents message" \
+		"$(cat "$tmp/tmux.log" 2>/dev/null)" "display-message monkeypuzzle: no blocked agents"
+
+	# mp finds and focuses one: blocked.sh must NOT show any message.
+	cat >"$bin/mp" <<'EOF'
+#!/usr/bin/env bash
+[[ "$1 $2" == "agent focus" ]] || exit 2
+exit 0
+EOF
+	rm -f "$tmp/tmux.log"
+	PATH="$bin:$PATH" bash "$SCRIPTS/blocked.sh" "$tmp" >/dev/null 2>&1
+	assert_eq "blocked flow: silent when an agent was focused" \
+		"$(cat "$tmp/tmux.log" 2>/dev/null)" ""
+
+	rm -rf "$tmp"
+}
+integration_blocked
 
 printf '\n%d passed, %d failed, %d skipped\n' "$PASS" "$FAIL" "$SKIP"
 [[ "$FAIL" -eq 0 ]]

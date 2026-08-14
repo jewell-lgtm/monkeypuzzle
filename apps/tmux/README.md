@@ -71,13 +71,17 @@ create picker pre-selects the project of the current pane's directory; leaving
 the name blank lets you describe the piece as a free-form prompt instead
 (`mp create --prompt`).
 
-The agent picker and blocked-jump read `mp agent list --json`. Agents are
-detected with nothing installed into them: mp recognizes agent processes in
-each piece session's panes and reads blocked/working/idle off the screen.
-(`mp integration install claude` optionally adds hook-reported precision —
-the `done` state and lifecycle hook events.) The sidecar shell is the escape
-hatch from keyboard-capturing agent TUIs: one chord to a real shell in the
-same worktree, `m t` again from inside it to close it.
+The agent picker (`m a`) reads `mp agent list --json` to build its rows, then
+hands the selected agent's id to `mp agent focus <id>` — one mp invocation
+does all the resolving and pane-switching. `m b` is the same `mp agent focus
+--blocked` call with no picker, relaying its "nothing blocked" case to a
+`tmux display-message` since a run-shell binding has no popup to show it in.
+Agents are detected with nothing installed into them: mp recognizes agent
+processes in each piece session's panes and reads blocked/working/idle off
+the screen. (`mp integration install claude` optionally adds hook-reported
+precision — the `done` state and lifecycle hook events.) The sidecar shell is
+the escape hatch from keyboard-capturing agent TUIs: one chord to a real
+shell in the same worktree, `m t` again from inside it to close it.
 
 ## Status line
 

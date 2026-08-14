@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Agent picker: fzf over live agents across every registered project (blocked
-# first, as `mp agent list` sorts them), preview the agent's pane, and focus
-# it on selection.
+# first, as `mp agent list` sorts them), preview the agent's pane, and hand
+# focus off to `mp agent focus` on selection — the plugin only builds rows and
+# picks; mp does all the resolving and focusing.
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=./helpers.sh
@@ -9,15 +10,18 @@ source "$DIR/helpers.sh"
 
 # build_agent_rows reads `mp agent list --all --json` on stdin and writes
 # TAB-separated fzf rows:
-#   <display>\t<session>\t<pane>\t<id>\t<piece>\t<project>
-# Only <display> is shown; the rest drive preview and focus.
+#   <display>\t<id>\t<pane>
+# Only <display> is shown; <pane> feeds the preview, <id> is the sole
+# argument `mp agent focus` needs — it resolves session/pane/piece/project
+# itself. The icon comes straight from mp's own JSON (single source: the same
+# table `mp agent summary` uses), not a second jq lookup.
 build_agent_rows() {
 	jq -r '
 		(.agents // [])[]
-		| ( { blocked: "🔴", working: "⚡", done: "✅", idle: "💤" }[.status] // "?" ) as $icon
+		| (.icon // "?") as $icon
 		| ( if .project then .project + "/" + .piece else .piece end ) as $label
 		| [ ($icon + " " + $label + " · " + (.kind // "agent") + " " + .id),
-		    .session_name, (.pane // ""), .id, .piece, (.project // "") ]
+		    .id, (.pane // "") ]
 		| @tsv
 	'
 }
@@ -26,7 +30,7 @@ main() {
 	set -euo pipefail
 	ensure_env
 
-	local rows selection session pane piece project
+	local rows selection id
 	rows="$("$(mp_bin)" agent list --all --json | build_agent_rows)"
 	[[ -n "$rows" ]] || die "no live agents"
 
@@ -37,11 +41,8 @@ main() {
 		--preview-window='right,60%')" || exit 0
 	[[ -n "$selection" ]] || exit 0
 
-	session="$(cut -f2 <<<"$selection")"
-	pane="$(cut -f3 <<<"$selection")"
-	piece="$(cut -f5 <<<"$selection")"
-	project="$(cut -f6 <<<"$selection")"
-	focus_agent "$session" "$pane" "$piece" "$project"
+	id="$(cut -f2 <<<"$selection")"
+	exec "$(mp_bin)" agent focus "$id" --all
 }
 
 # Run main only when executed directly, so the test runner can source this file
