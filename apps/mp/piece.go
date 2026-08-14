@@ -1332,7 +1332,11 @@ func runPieceList(cmd *cobra.Command, args []string) error {
 	}
 
 	if flagPieceListFlat {
-		return emitResult(pieces, flagPieceListJSON)
+		// --flat has no separate human rendering — it *is* the machine format,
+		// requested explicitly — so it always prints JSON regardless of TTY.
+		// (Gating this on TTY like emitResult would leave a terminal caller
+		// looking at nothing: a real regression a review once caught here.)
+		return cli.PrintJSON(pieces)
 	}
 
 	// Tree view is the human message: always stderr, like every other
@@ -1369,7 +1373,9 @@ func runPieceListAll(ctx context.Context, handler *piececmd.Handler) error {
 	}
 
 	if flagPieceListFlat {
-		return emitResult(map[string]any{"projects": results}, flagPieceListJSON)
+		// See the matching comment in runPieceList: --flat is the machine
+		// format on request, always unconditional JSON, never TTY-gated.
+		return cli.PrintJSON(map[string]any{"projects": results})
 	}
 
 	if len(results) == 0 {
