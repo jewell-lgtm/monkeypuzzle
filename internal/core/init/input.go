@@ -50,7 +50,7 @@ type Input struct {
 	CreateSkill *bool  `json:"create_skill,omitempty"` // nil means default (true)
 }
 
-// Schema returns the JSON schema with defaults for the init command
+// Schema returns an example input document for the init command
 func Schema(workDir string) ([]byte, error) {
 	defaultName := filepath.Base(workDir)
 

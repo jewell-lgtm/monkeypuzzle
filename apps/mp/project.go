@@ -81,9 +81,9 @@ When stdout is not a terminal, JSON is printed automatically.`,
 
 func init() {
 	projectAddCmd.Flags().StringVar(&flagProjectAddPath, "path", "", "Path to the project repository")
-	projectAddCmd.Flags().BoolVar(&flagProjectAddSchema, "schema", false, "Output JSON schema and exit")
+	projectAddCmd.Flags().BoolVar(&flagProjectAddSchema, "schema", false, "Print an example input document and exit")
 
-	projectRemoveCmd.Flags().BoolVar(&flagProjectRmSchema, "schema", false, "Output JSON schema and exit")
+	projectRemoveCmd.Flags().BoolVar(&flagProjectRmSchema, "schema", false, "Print an example input document and exit")
 
 	projectListCmd.Flags().BoolVar(&flagProjectListJSON, "json", false, "Output JSON instead of a table")
 

@@ -103,7 +103,7 @@ func init() {
 	agentReportCmd.Flags().IntVar(&flagAgentPID, "pid", 0, "Agent process id (defaults to the parent pid)")
 	agentReportCmd.Flags().StringVar(&flagAgentPane, "pane", "", "Multiplexer pane the agent runs in (defaults to $TMUX_PANE)")
 	agentReportCmd.Flags().BoolVar(&flagAgentClaudeHook, "claude-hook", false, "Parse a Claude Code hook payload from stdin")
-	agentReportCmd.Flags().BoolVar(&flagAgentSchema, "schema", false, "Output JSON schema and exit")
+	agentReportCmd.Flags().BoolVar(&flagAgentSchema, "schema", false, "Print an example input document and exit")
 	agentListCmd.Flags().BoolVar(&flagAgentListJSON, "json", false, "Output JSON instead of the table")
 	agentListCmd.Flags().BoolVar(&flagAgentListAll, "all", false, "Span all registered projects (implied outside a git repo)")
 	agentSummaryCmd.Flags().BoolVar(&flagAgentListAll, "all", false, "Span all registered projects (implied outside a git repo)")

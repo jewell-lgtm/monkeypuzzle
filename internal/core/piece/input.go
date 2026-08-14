@@ -87,7 +87,7 @@ type NewPieceInput struct {
 	Agent string `json:"agent,omitempty"`
 }
 
-// NewPieceSchema returns the JSON schema for piece create input.
+// NewPieceSchema returns an example input document for piece create input.
 func NewPieceSchema() ([]byte, error) {
 	schema := map[string]any{
 		"name":              "",
@@ -188,7 +188,7 @@ type AbandonInput struct {
 	DeleteBranch bool   `json:"delete_branch,omitempty"`
 }
 
-// AbandonSchema returns the JSON schema for piece abandon input.
+// AbandonSchema returns an example input document for piece abandon input.
 func AbandonSchema() ([]byte, error) {
 	schema := map[string]any{
 		"name":          "",
@@ -239,7 +239,7 @@ type UpdateResult struct {
 	Status     string `json:"status"` // "updated", "already-up-to-date"
 }
 
-// UpdateSchema returns the JSON schema for piece update input.
+// UpdateSchema returns an example input document for piece update input.
 func UpdateSchema() ([]byte, error) {
 	schema := map[string]any{
 		"main": "main",
@@ -297,7 +297,7 @@ type SyncResult struct {
 	Status string `json:"status"` // "synced"
 }
 
-// SyncPieceSchema returns the JSON schema for piece sync input.
+// SyncPieceSchema returns an example input document for piece sync input.
 func SyncPieceSchema() ([]byte, error) {
 	schema := map[string]any{
 		"main":  "main",
@@ -358,7 +358,7 @@ type MergeResult struct {
 	ReparentedChildren []string `json:"reparented_children,omitempty"`
 }
 
-// MergeSchema returns the JSON schema for piece merge input.
+// MergeSchema returns an example input document for piece merge input.
 func MergeSchema() ([]byte, error) {
 	schema := map[string]any{
 		"main":              "main",
@@ -417,7 +417,7 @@ type CleanupInput struct {
 	Apply bool `json:"apply,omitempty"`
 }
 
-// CleanupSchema returns the JSON schema for piece cleanup input.
+// CleanupSchema returns an example input document for piece cleanup input.
 func CleanupSchema() ([]byte, error) {
 	schema := map[string]any{
 		"main":    "main",
@@ -457,7 +457,7 @@ type FlattenInput struct {
 	Apply bool `json:"apply,omitempty"`
 }
 
-// FlattenSchema returns the JSON schema for flatten input.
+// FlattenSchema returns an example input document for flatten input.
 func FlattenSchema() ([]byte, error) {
 	schema := map[string]any{
 		"force":           false,
@@ -493,7 +493,7 @@ type DoneResult struct {
 	Cleaned      bool   `json:"cleaned"`
 }
 
-// DoneSchema returns the JSON schema for piece done input.
+// DoneSchema returns an example input document for piece done input.
 func DoneSchema() ([]byte, error) {
 	schema := map[string]any{
 		"main": "main",
@@ -525,7 +525,7 @@ type AdoptPieceInput struct {
 	RepoRoot string `json:"repo_root,omitempty"` // Explicit repo root (defaults to resolving from cwd)
 }
 
-// AdoptPieceSchema returns the JSON schema for piece adopt input.
+// AdoptPieceSchema returns an example input document for piece adopt input.
 func AdoptPieceSchema() ([]byte, error) {
 	schema := map[string]any{
 		"branch":    "",

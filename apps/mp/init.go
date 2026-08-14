@@ -74,7 +74,7 @@ func init() {
 	initCmd.Flags().StringVar(&flagPRProvider, "pr-provider", "", "PR/MR provider (github, gitlab)")
 	initCmd.Flags().StringVar(&flagInitDir, "dir", "", "Directory (relative to the repo root) for monkeypuzzle state (default .monkeypuzzle); the mapping is recorded in ~/.config/monkeypuzzle/project-dirs.json")
 	initCmd.Flags().BoolVarP(&flagYes, "yes", "y", false, "Overwrite existing config without prompting")
-	initCmd.Flags().BoolVar(&flagSchema, "schema", false, "Output JSON schema with defaults and exit")
+	initCmd.Flags().BoolVar(&flagSchema, "schema", false, "Print an example input document and exit")
 	initCmd.Flags().BoolVar(&flagInitGitignore, "gitignore", false, "Regenerate .monkeypuzzle/.gitignore only")
 
 	// Register completion functions (errors ignored - completion is optional)

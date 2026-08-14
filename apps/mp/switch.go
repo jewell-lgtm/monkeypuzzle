@@ -67,7 +67,7 @@ func init() {
 	switchCmd.Flags().StringVar(&flagSwitchBranch, "branch", "", "Git branch; adopts as a piece if needed, then attaches")
 	switchCmd.Flags().BoolVar(&flagSwitchCreate, "create", false, "Create a new piece when the target matches nothing")
 	switchCmd.Flags().BoolVar(&flagSwitchAll, "all", false, "Interactive picker across all registered projects")
-	switchCmd.Flags().BoolVar(&flagSwitchAllSchema, "schema", false, "Output JSON schema and exit")
+	switchCmd.Flags().BoolVar(&flagSwitchAllSchema, "schema", false, "Print an example input document and exit")
 	rootCmd.AddCommand(switchCmd)
 }
 

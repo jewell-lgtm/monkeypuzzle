@@ -107,7 +107,7 @@ See [docs/commands.md](docs/commands.md) for full reference.
 
 - [Getting started](docs/getting-started.md) — install + first piece
 - [Workflow guide](docs/workflow.md) — lifecycle, hook patterns
-- [Commands reference](docs/commands.md) — flags, JSON schemas
+- [Commands reference](docs/commands.md) — flags, example inputs
 - [Remote development](docs/remote-development.md) — drive a project on another machine over ssh
 - [Architecture](docs/architecture.md) — how it's built
 - [Self-hosting](docs/self-hosting.md) — run the server on your own infra via Helm

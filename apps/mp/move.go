@@ -44,7 +44,7 @@ Pass ".monkeypuzzle" to move back to the default (removes the mapping entry).`,
 
 func init() {
 	moveCmd.Flags().StringVar(&flagMovePath, "path", "", "New monkeypuzzle directory, relative to the repo root")
-	moveCmd.Flags().BoolVar(&flagMoveSchema, "schema", false, "Output JSON schema and exit")
+	moveCmd.Flags().BoolVar(&flagMoveSchema, "schema", false, "Print an example input document and exit")
 	rootCmd.AddCommand(moveCmd)
 }
 

@@ -151,7 +151,7 @@ func init() {
 	_ = stackStatusCmd.Flags().MarkDeprecated("from-github", "use --from-remote")
 	_ = stackStatusCmd.Flags().MarkHidden("from-github")
 	stackStatusCmd.Flags().BoolVar(&flagStackApplyBases, "apply-bases", false, "Edit PR/MR bases on the forge to match local lineage")
-	stackStatusCmd.Flags().BoolVar(&flagStackStatusSchema, "schema", false, "Output JSON schema and exit")
+	stackStatusCmd.Flags().BoolVar(&flagStackStatusSchema, "schema", false, "Print an example input document and exit")
 	stackStatusCmd.Flags().BoolVar(&flagStackStatusJSON, "json", false, "Output JSON even on a terminal")
 
 	stackSyncCmd.Flags().StringVar(&flagStackMain, "main", "main", "Main branch name")
@@ -162,30 +162,30 @@ func init() {
 	stackSyncCmd.Flags().BoolVar(&flagStackSyncApply, "apply", false, "Apply the sync (default is a dry-run preview)")
 	stackSyncCmd.Flags().BoolVarP(&flagStackSyncYes, "yes", "y", false, "Skip the interactive confirmation prompt (implies --apply)")
 	stackSyncCmd.Flags().BoolVar(&flagStackSyncDryRun, "dry-run", false, "Preview which pieces would be synced without changing anything")
-	stackSyncCmd.Flags().BoolVar(&flagStackSyncSchema, "schema", false, "Output JSON schema and exit")
+	stackSyncCmd.Flags().BoolVar(&flagStackSyncSchema, "schema", false, "Print an example input document and exit")
 	stackSyncCmd.Flags().BoolVar(&flagStackSyncJSON, "json", false, "Output JSON even on a terminal")
 
 	stackAppendCmd.Flags().StringVar(&flagStackName, "name", "", "Piece name")
 	stackAppendCmd.Flags().StringVar(&flagStackPrompt, "prompt", "", "Piece prompt (recorded in piece metadata; used to name the piece)")
-	stackAppendCmd.Flags().BoolVar(&flagStackAppendSchema, "schema", false, "Output JSON schema and exit")
+	stackAppendCmd.Flags().BoolVar(&flagStackAppendSchema, "schema", false, "Print an example input document and exit")
 	stackAppendCmd.Flags().BoolVar(&flagStackAppendJSON, "json", false, "Output JSON even on a terminal")
 
 	stackPrependCmd.Flags().StringVar(&flagStackName, "name", "", "Piece name")
 	stackPrependCmd.Flags().StringVar(&flagStackPrompt, "prompt", "", "Piece prompt (recorded in piece metadata; used to name the piece)")
-	stackPrependCmd.Flags().BoolVar(&flagStackPrependSchema, "schema", false, "Output JSON schema and exit")
+	stackPrependCmd.Flags().BoolVar(&flagStackPrependSchema, "schema", false, "Print an example input document and exit")
 	stackPrependCmd.Flags().BoolVar(&flagStackPrependJSON, "json", false, "Output JSON even on a terminal")
 
-	stackContinueCmd.Flags().BoolVar(&flagStackContinueSchema, "schema", false, "Output JSON schema and exit")
+	stackContinueCmd.Flags().BoolVar(&flagStackContinueSchema, "schema", false, "Print an example input document and exit")
 
 	stackSetParentCmd.Flags().StringVar(&flagStackSetParentPiece, "piece", "", "Piece to re-parent (default: current piece)")
 	stackSetParentCmd.Flags().StringVar(&flagStackSetParentParent, "parent", "", "New parent piece name, or \"main\"")
-	stackSetParentCmd.Flags().BoolVar(&flagStackSetParentSchema, "schema", false, "Output JSON schema and exit")
+	stackSetParentCmd.Flags().BoolVar(&flagStackSetParentSchema, "schema", false, "Print an example input document and exit")
 
 	stackGraphCmd.Flags().StringVar(&flagStackGraphRepo, "repo", "", "Repository as owner/name (required)")
 	stackGraphCmd.Flags().StringVar(&flagStackGraphBranch, "default-branch", "", "Trunk branch (auto-detected from the forge if omitted)")
 	stackGraphCmd.Flags().StringVar(&flagStackGraphProvider, "provider", "github", "Forge provider: github (default) or gitlab")
 	stackGraphCmd.Flags().IntVar(&flagStackGraphLimit, "limit", 200, "Max PRs to fetch")
-	stackGraphCmd.Flags().BoolVar(&flagStackGraphSchema, "schema", false, "Output JSON schema and exit")
+	stackGraphCmd.Flags().BoolVar(&flagStackGraphSchema, "schema", false, "Print an example input document and exit")
 	stackGraphCmd.Flags().BoolVar(&flagStackGraphJSON, "json", false, "Output JSON even on a terminal")
 
 	stackCmd.AddCommand(stackStatusCmd)

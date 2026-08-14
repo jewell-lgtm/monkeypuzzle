@@ -55,7 +55,7 @@ func init() {
 	flattenCmd.Flags().BoolVar(&flagFlattenDryRun, "dry-run", false, "Show what would be removed without making changes")
 	flattenCmd.Flags().BoolVar(&flagFlattenApply, "apply", false, "Apply the flatten (default is a dry-run preview)")
 	flattenCmd.Flags().BoolVarP(&flagFlattenYes, "yes", "y", false, "Skip the interactive confirmation prompt (implies --apply)")
-	flattenCmd.Flags().BoolVar(&flagFlattenSchema, "schema", false, "Output JSON schema and exit")
+	flattenCmd.Flags().BoolVar(&flagFlattenSchema, "schema", false, "Print an example input document and exit")
 	rootCmd.AddCommand(flattenCmd)
 }
 

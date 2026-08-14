@@ -33,7 +33,7 @@ for using mp commands programmatically.`,
 var flagClaudeSkillSchema bool
 
 func init() {
-	claudeSkillCmd.Flags().BoolVar(&flagClaudeSkillSchema, "schema", false, "Output JSON schema and exit")
+	claudeSkillCmd.Flags().BoolVar(&flagClaudeSkillSchema, "schema", false, "Print an example input document and exit")
 	claudeCmd.AddCommand(claudeSkillCmd)
 	rootCmd.AddCommand(claudeCmd)
 }

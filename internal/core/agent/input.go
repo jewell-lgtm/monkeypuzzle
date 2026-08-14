@@ -22,7 +22,7 @@ type ReportInput struct {
 // StatusGone removes the agent's record instead of updating it (clean exit).
 const StatusGone = "gone"
 
-// ReportSchema returns the JSON schema for agent report input.
+// ReportSchema returns an example input document for agent report input.
 func ReportSchema() ([]byte, error) {
 	schema := map[string]any{
 		"id":     "",

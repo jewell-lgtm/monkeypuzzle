@@ -9,14 +9,17 @@ Every command follows the same interaction contract, in priority order:
 | Interactive | TTY detected (default)      | Run command with no args |
 | Flags       | One or more flags provided  | `mp <cmd> --flag value`  |
 | Stdin JSON  | Piped input                 | `echo '{}' \| mp <cmd>`  |
-| Schema      | `--schema` flag             | `mp <cmd> --schema`      |
+| Example     | `--schema` flag             | `mp <cmd> --schema`      |
 
 In interactive mode a Bubble Tea wizard walks you through the decisions, using
 defaults inferred from detected state; commands with several decisions are
 multi-step wizards. **Flags skip the corresponding wizard steps** — pass enough
 flags and the command runs straight through with no wizard. Stdin JSON is the
 fully programmatic path (JSON in, JSON out): there is no separate "agent mode",
-the same CLI is the API.
+the same CLI is the API. `--schema` prints an example input document in the
+same shape stdin JSON expects — edit it and pipe it right back in
+(`mp init --schema | jq '.name = "x"' | mp init`); it is not a formal JSON
+Schema document.
 
 **Ambiguity rule:** non-interactive invocations (flags or JSON) **fail loudly on
 genuine ambiguity** rather than prompting or guessing — there is no human to ask.
@@ -113,7 +116,7 @@ mp init --schema               # Output schema
 | `--pr-provider`      | PR provider (`github`, `gitlab`)                                  | `github`       |
 | `--dir`              | Directory (relative to repo root) for monkeypuzzle state          | `.monkeypuzzle`|
 | `--gitignore`        | Regenerate `<dir>/.gitignore` only (no other changes)             | `false`        |
-| `--schema`           | Output JSON schema and exit                                       | -              |
+| `--schema`           | Print an example input document and exit                          | -              |
 | `-y, --yes`          | Overwrite existing config                                         | `false`        |
 
 `--dir` lets you keep all monkeypuzzle state somewhere already ignored by git,
@@ -122,7 +125,7 @@ recorded in `~/.config/monkeypuzzle/project-dirs.json` (it can't live in
 `monkeypuzzle.json`, which is inside the directory being relocated). To relocate
 an existing project later, use [`mp move`](#mp-move).
 
-### JSON Schema
+### Example input
 
 ```json
 {
@@ -185,7 +188,7 @@ Creation is gated: on a terminal you're asked to confirm; non-interactively an u
 | `--branch`  | Git branch to adopt as a piece (attaches if it already is one)         |
 | `--create`  | Allow an unmatched target to create a new piece                        |
 | `--all`     | Interactive picker across all registered projects                      |
-| `--schema`  | Print the JSON-stdin schema and exit                                   |
+| `--schema`  | Print an example input document and exit                              |
 
 `TARGET`, `--piece`, and `--branch` are mutually exclusive. Omit all of them (with `--project`) to attach that project's main worktree. Without `--project`, mp resolves the project from the current directory — any init'd repo works, registered or not.
 
@@ -712,7 +715,7 @@ mp pr ready --schema        # prints {} — ready takes no input
 | Flag       | Description                          |
 | ---------- | ------------------------------------ |
 | `--json`   | Output `{"status":"ready"}` even on a terminal |
-| `--schema` | Print the JSON-stdin schema and exit |
+| `--schema` | Print an example input document and exit |
 
 ---
 
