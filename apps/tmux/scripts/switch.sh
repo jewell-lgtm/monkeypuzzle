@@ -7,19 +7,30 @@ DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$DIR/helpers.sh"
 
 # build_rows reads `mp go --json` on stdin and writes TAB-separated fzf rows:
-#   <display>\t<project>\t<piece>\t<worktree>
-# One "(main)" row per existing project, followed by one row per piece. Only the
-# <display> column is shown by fzf; <project>/<piece> drive the mp switch call
-# and <worktree> feeds the preview. Non-project / missing entries are skipped.
+#   <display>\t<project>\t<piece>\t<worktree>\t<branch>
+# One "(main)" row per existing project, then one row per piece, then one row
+# per adoptable branch (matching the `mp go` TUI's branch rows). Only the
+# <display> column is shown by fzf; <project> plus <piece>/<branch> drive the
+# mp switch call and <worktree> feeds the preview. A piece checked out on a
+# branch that differs from its name shows the branch in its label. Non-project
+# / missing entries are skipped.
 build_rows() {
 	jq -r '
 		.projects[]
 		| select(.exists and .is_project)
 		| .name as $proj
-		| ( [ { label: "(main)", piece: "", worktree: .path } ]
-		    + ( (.pieces // []) | map({ label: .name, piece: .name, worktree: .worktree_path }) ) )
+		| .path as $path
+		| ( [ { label: "(main)", piece: "", worktree: $path, branch: "" } ]
+		    + ( (.pieces // []) | map({
+		          label: (if (.branch // "") != "" and .branch != .name then .name + "  [" + .branch + "]" else .name end),
+		          piece: .name, worktree: .worktree_path, branch: ""
+		        }) )
+		    + ( (.branches // []) | map({
+		          label: (.name + "  (branch)"),
+		          piece: "", worktree: $path, branch: .name
+		        }) ) )
 		| .[]
-		| [ ($proj + "/" + .label), $proj, .piece, .worktree ]
+		| [ ($proj + "/" + .label), $proj, .piece, .worktree, .branch ]
 		| @tsv
 	'
 }
@@ -28,7 +39,7 @@ main() {
 	set -euo pipefail
 	ensure_env
 
-	local rows selection proj piece
+	local rows selection proj piece branch
 	rows="$("$(mp_bin)" go --json | build_rows)"
 	[[ -n "$rows" ]] || die "no pieces or projects found"
 
@@ -41,7 +52,11 @@ main() {
 
 	proj="$(cut -f2 <<<"$selection")"
 	piece="$(cut -f3 <<<"$selection")"
+	branch="$(cut -f5 <<<"$selection")"
 
+	if [[ -n "$branch" ]]; then
+		exec "$(mp_bin)" switch --project "$proj" --branch "$branch"
+	fi
 	if [[ -n "$piece" ]]; then
 		exec "$(mp_bin)" switch --project "$proj" --piece "$piece"
 	fi

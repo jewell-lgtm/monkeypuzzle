@@ -50,19 +50,26 @@ Every action is a two-key chord: `prefix m`, then one of the keys below (the
 plugin claims a single key in the prefix table and puts everything in a
 `monkeypuzzle` key table).
 
-| Chord (after prefix) | Action                                                       |
-| -------------------- | ------------------------------------------------------------ |
-| `m p`                | Switch: pick a piece (or a project's main session)           |
-| `m c`                | Create: pick a project, name the piece, create + switch      |
-| `m a`                | Agents: pick a live agent (blocked first), focus its pane    |
-| `m b`                | Jump straight to the first blocked agent — no picker         |
-| `m t`                | Toggle a sidecar shell split in the current piece's worktree |
-| `m m`                | Cheat sheet: list these bindings                             |
+| Chord (after prefix) | Action                                                        |
+| -------------------- | ------------------------------------------------------------- |
+| `m p`                | Switch: pick a piece, branch, or a project's main session     |
+| `m g`                | Go to a branch: paste a name — switch, adopt, or create it    |
+| `m c`                | Create: pick a project, name the piece, create + switch       |
+| `m a`                | Agents: pick a live agent (blocked first), focus its pane     |
+| `m b`                | Jump straight to the first blocked agent — no picker          |
+| `m t`                | Toggle a sidecar shell split in the current piece's worktree  |
+| `m m`                | Cheat sheet: list these bindings                              |
 
-The switch picker shows `project/piece` rows with a preview pane of each piece's
-`git status` and recent commits. The create picker pre-selects the project of the
-current pane's directory; leaving the name blank lets you describe the piece as a
-free-form prompt instead (`mp create --prompt`).
+The switch picker shows `project/piece` rows (plus each project's adoptable
+branches) with a preview pane of each piece's `git status` and recent commits.
+The branch jump (`m g`) is repo-aware: it scopes to the project of the current
+pane's directory and takes whatever you paste — an existing piece attaches, an
+existing local or remote branch is adopted as a piece, and a brand-new name
+creates a piece whose branch is the pasted name verbatim (all one
+`mp switch --create` call; outside a project it first asks which project). The
+create picker pre-selects the project of the current pane's directory; leaving
+the name blank lets you describe the piece as a free-form prompt instead
+(`mp create --prompt`).
 
 The agent picker and blocked-jump read `mp agent list --json`. Agents are
 detected with nothing installed into them: mp recognizes agent processes in

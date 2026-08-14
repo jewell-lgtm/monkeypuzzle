@@ -57,6 +57,33 @@ focus_agent() {
 	exec "$(mp_bin)" switch --piece "$piece"
 }
 
+# build_project_rows reads `mp go --json` on stdin and writes TAB-separated rows:
+#   <display>\t<project>\t<path>
+# one per existing, initialised project. Missing / non-project entries skipped.
+# Shared by create.sh (picker) and branch.sh (cwd scoping + fallback picker).
+build_project_rows() {
+	jq -r '
+		.projects[]
+		| select(.exists and .is_project)
+		| [ .name, .name, .path ]
+		| @tsv
+	'
+}
+
+# project_for_cwd prints the name of the project whose path is a prefix of the
+# cwd (passed in $1), given project rows in $2. Empty if none match. The popup
+# runs with -d '#{pane_current_path}', so $PWD is the invoking pane's cwd.
+project_for_cwd() {
+	local cwd="$1" rows="$2" name path
+	while IFS=$'\t' read -r _ name path; do
+		[[ -n "$path" ]] || continue
+		if [[ "$cwd" == "$path" || "$cwd" == "$path"/* ]]; then
+			printf '%s' "$name"
+			return
+		fi
+	done <<<"$rows"
+}
+
 # fzf_pick reads TAB-delimited rows on stdin and prints the chosen row verbatim
 # (all fields, including hidden ones used to act on the selection). Extra args
 # are forwarded to fzf for display/preview tuning. When MP_PLUGIN_FILTER is set

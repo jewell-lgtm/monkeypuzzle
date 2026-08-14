@@ -153,33 +153,45 @@ Creates the monkeypuzzle directory (default `.monkeypuzzle/`):
 
 ## mp switch
 
-Cross-project picker. Attach an existing piece (or main worktree), or create a piece on the fly by adopting a stray local branch.
+The single switching entry point. Give it whatever you have in your head or clipboard — a piece name, a branch (local, remote, or already adopted), or a brand-new name — and it attaches, adopts, or creates as needed.
 
 ### Usage
 
 ```bash
-mp switch                                          # Interactive: fuzzy-filter all rows
+mp switch                                          # Interactive: picker scoped to the current project
+mp switch --all                                    # Interactive: every registered project (same as `mp go`)
+mp switch fix-x                                    # Piece or branch name; resolves in the current repo
+mp switch feat/new-idea --create                   # Brand-new name: create piece "new-idea" on that branch
 mp switch --project app                            # Attach app's main worktree
-mp switch --project app --piece fix-x              # Attach an existing piece
-mp switch --project app --branch spike-token-rotate  # Adopt branch as piece, then attach
-echo '{"project":"app","piece":"fix-x"}' | mp switch
+mp switch --project app --piece fix-x              # Attach an existing piece (skips resolution)
+mp switch --project app --branch spike-token-rotate  # Adopt branch as piece (or attach if already one)
+echo '{"target":"fix-x"}' | mp switch
+echo '{"target":"feat/new-idea","create":true}' | mp switch
 mp switch --schema
 ```
+
+### Target resolution
+
+A positional `TARGET` resolves in order: `main`/`master` (attach the main worktree) → an existing **piece** by name, sanitized name, or the branch checked out in it (attach) → a local **branch** (adopt, then attach) → a **remote** ref, pasted verbatim (`origin/foo`) or by bare name (fetch + adopt tracking) → **nothing** (create a piece whose branch is `TARGET` verbatim and whose name is derived from it). A piece always beats an unadopted branch of the same name, so switching stays idempotent; `--piece`/`--branch` bypass resolution when you need to be explicit.
+
+Creation is gated: on a terminal you're asked to confirm; non-interactively an unmatched target is an error unless `--create` (or `"create": true` on stdin) is passed — a typo never silently mints a piece.
 
 ### Flags
 
 | Flag        | Description                                                            |
 | ----------- | ---------------------------------------------------------------------- |
-| `--project` | Project name or path (required for non-interactive modes)              |
-| `--piece`   | Existing piece to attach                                               |
-| `--branch`  | Local git branch to adopt as a piece                                   |
+| `--project` | Project name or path (defaults to the repo you're standing in)         |
+| `--piece`   | Existing piece to attach (skips target resolution)                     |
+| `--branch`  | Git branch to adopt as a piece (attaches if it already is one)         |
+| `--create`  | Allow an unmatched target to create a new piece                        |
+| `--all`     | Interactive picker across all registered projects                      |
 | `--schema`  | Print the JSON-stdin schema and exit                                   |
 
-`--piece` and `--branch` are mutually exclusive. Omit both to attach the project's main worktree.
+`TARGET`, `--piece`, and `--branch` are mutually exclusive. Omit all of them (with `--project`) to attach that project's main worktree. Without `--project`, mp resolves the project from the current directory — any init'd repo works, registered or not.
 
 ### Interactive picker
 
-With a terminal, opens a fuzzy-filtered list of rows across every registered project:
+With a terminal and no selectors, opens a fuzzy-filtered list scoped to the current project (bare `mp` is the same view); `--all` or running outside a project widens it to every registered project:
 
 - **Pieces** — existing worktrees, with a `[<multiplexer>]` indicator if a session is live.
 - **Branches** — local git branches available for adoption (excludes main/master, any branch already adopted as a piece, the branch checked out in the main repo, and branches held by locked worktrees). A branch checked out in a worktree mp doesn't manage — e.g. one created by an agent — is offered too; adopting it relocates that worktree into the pieces dir. Selecting one runs `mp adopt`.
@@ -188,10 +200,11 @@ Type to filter, ↑/↓ to move, `enter` to select, `esc` to cancel. The picker 
 
 ### What it does
 
-1. Resolves the project from the registry.
+1. Resolves the project: the registry for an explicit `--project`, else the repo the caller is standing in.
 2. Based on the chosen selector:
+   - **target** — runs the resolution above, then attaches / adopts / creates
    - **piece** — locates the worktree and attaches its multiplexer session
-   - **branch** — runs `AdoptPiece` with `repo_root` set to the project path, then attaches
+   - **branch** — attaches the piece holding that branch, else runs `AdoptPiece` with `repo_root` set to the project path, then attaches
 3. Attaching only happens when run **interactively from inside the configured
    multiplexer** (real TTY on stdin *and* the adapter's in-session env var set).
    When no multiplexer is configured, or when called by an agent/script or from
@@ -830,13 +843,13 @@ A **repo switcher**: jump to any registered project's worktree from anywhere. Wi
 
 With `--json` (or no TTY) it prints the **full per-project detail** (`pieces`, `branches`) so automation can build its own pickers.
 
-Bare `mp` opens a fuzzy picker **scoped to the current project** (repo-local) — it shows the pieces and branches of the project you're standing in. When run **outside** a monkeypuzzle project, bare `mp` does *not* fall back to the cross-project view; instead it prints context-aware guidance:
+Bare `mp` opens a fuzzy picker **scoped to the current project** (repo-local) — it shows the pieces and branches of the project you're standing in. When run **outside** a monkeypuzzle project, bare `mp` prints context-aware guidance to stderr and then falls through to the cross-project picker (when you have registered projects to jump to):
 
-- Inside a git repo that hasn't been initialised → suggests `mp init`.
-- Outside any git repo → suggests cd-ing into a repo and running `mp init`.
-- Either way, if you have registered projects it points you at `mp go`.
+- Inside a git repo that hasn't been initialised → suggests `mp init`, then shows the picker.
+- Outside any git repo → suggests cd-ing into a repo and running `mp init`, then shows the picker.
+- In JSON / non-TTY mode the guidance and the full project detail arrive in one object, with a loud `"in_project": false` plus `reason`/`suggestion` fields.
 
-Use `mp go` for the explicit all-projects view from anywhere.
+Use `mp go` (or `mp switch --all`) for the explicit all-projects view from anywhere.
 
 ### Usage
 
@@ -847,7 +860,7 @@ mp go --json     # force JSON output
 mp --json        # JSON for the current project
 ```
 
-The JSON form includes per-project `pieces` and `branches` arrays so callers can build their own pickers (see [`mp switch`](#mp-switch)). The `branches` array includes both local branches and remote-only refs (e.g. `origin/foo`, marked `"remote": true`) that have no local branch yet — selecting one fetches the remote and adopts it as a piece.
+The JSON form includes per-project `pieces` and `branches` arrays so callers can build their own pickers (see [`mp switch`](#mp-switch)). Each piece carries a `branch` field (the branch checked out in its worktree — differs from the name for adopted branches), and the top level carries `in_project` / `current_project` so consumers can hard-scope to the caller's repo. The `branches` array includes both local branches and remote-only refs (e.g. `origin/foo`, marked `"remote": true`) that have no local branch yet — selecting one fetches the remote and adopts it as a piece.
 
 ---
 

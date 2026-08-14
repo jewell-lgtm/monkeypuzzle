@@ -47,12 +47,16 @@ type PieceHierarchyStatus struct {
 
 // PieceListItem represents a piece available for switching.
 type PieceListItem struct {
-	Name         string    `json:"name"`
-	WorktreePath string    `json:"worktree_path"`
-	SessionName  string    `json:"session_name"`
-	HasSession   bool      `json:"has_session"`
-	ModTime      time.Time `json:"mod_time"`
-	Parent       string    `json:"parent,omitempty"` // Parent piece name, or "main" for root pieces
+	Name         string `json:"name"`
+	WorktreePath string `json:"worktree_path"`
+	SessionName  string `json:"session_name"`
+	HasSession   bool   `json:"has_session"`
+	// Branch is the git branch checked out in the piece worktree. It usually
+	// equals Name, but differs for adopted branches (e.g. "feat/add-foo" →
+	// piece "add-foo") and pieces created with an explicit branch name.
+	Branch  string    `json:"branch,omitempty"`
+	ModTime time.Time `json:"mod_time"`
+	Parent  string    `json:"parent,omitempty"` // Parent piece name, or "main" for root pieces
 	// AgentStatus is the aggregate of the piece's reported agents (blocked >
 	// working > done > idle); empty when no agents have reported.
 	AgentStatus string `json:"agent_status,omitempty"`
@@ -69,9 +73,12 @@ type SwitchResult struct {
 // NewPieceInput holds input for the piece create command.
 // Must provide one of: Name or Prompt. Name can coexist with Prompt.
 type NewPieceInput struct {
-	Name             string `json:"name,omitempty"`
-	Prompt           string `json:"prompt,omitempty"`
-	Parent           string `json:"parent,omitempty"` // Parent piece name, defaults to "main"
+	Name   string `json:"name,omitempty"`
+	Prompt string `json:"prompt,omitempty"`
+	Parent string `json:"parent,omitempty"` // Parent piece name, defaults to "main"
+	// Branch names the new git branch verbatim (slashes allowed). Defaults to
+	// the piece name, preserving the historical branch == piece invariant.
+	Branch           string `json:"branch,omitempty"`
 	SkipSwitch       bool   `json:"skip_switch,omitempty"`
 	OverwriteSession bool   `json:"overwrite_session,omitempty"`
 	// Agent launches an agent of this kind (claude, codex) in the new piece:
@@ -86,6 +93,7 @@ func NewPieceSchema() ([]byte, error) {
 		"name":              "",
 		"prompt":            "",
 		"parent":            "main",
+		"branch":            "",
 		"skip_switch":       false,
 		"overwrite_session": false,
 		"agent":             "",
@@ -133,10 +141,44 @@ func WithNewPieceDefaults(input NewPieceInput) NewPieceInput {
 		Name:             name,
 		Prompt:           prompt,
 		Parent:           parent,
+		Branch:           strings.TrimSpace(input.Branch),
 		SkipSwitch:       input.SkipSwitch,
 		OverwriteSession: input.OverwriteSession,
 		Agent:            strings.TrimSpace(input.Agent),
 	}
+}
+
+// SwitchTargetKind classifies what a free-form switch target resolved to.
+type SwitchTargetKind int
+
+const (
+	// TargetMain means the target names the trunk ("main"/"master"): attach the
+	// project's main worktree session.
+	TargetMain SwitchTargetKind = iota
+	// TargetPiece means an existing piece matched (by name, sanitized name, or
+	// the branch checked out in its worktree): attach it.
+	TargetPiece
+	// TargetAdoptLocal means a local branch exists but is not a piece yet:
+	// adopt it, then attach.
+	TargetAdoptLocal
+	// TargetAdoptRemote means only a remote ref matched (e.g. "origin/foo"):
+	// fetch + adopt with a tracking branch, then attach.
+	TargetAdoptRemote
+	// TargetNew means nothing matched: creating a piece (with the target as the
+	// verbatim branch name) is the only remaining interpretation.
+	TargetNew
+)
+
+// SwitchTarget is the result of resolving a free-form switch target.
+type SwitchTarget struct {
+	Kind SwitchTargetKind
+	// Piece is the matched piece; set only for TargetPiece.
+	Piece *PieceListItem
+	// Branch is the branch to adopt (verbatim, including any remote prefix) or
+	// to create; empty for TargetMain and TargetPiece.
+	Branch string
+	// PieceName is the piece name an adopt/create would derive from Branch.
+	PieceName string
 }
 
 // AbandonInput holds input for the piece abandon command.

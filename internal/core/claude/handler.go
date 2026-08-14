@@ -81,8 +81,11 @@ echo '{"prompt":"add dark mode"}' | mp create
 mp list
 echo '{"flat":true}' | mp list
 
-# Switch to a piece (switches your multiplexer session/tab/workspace if inside one)
-echo '{"name":"my-feature"}' | mp switch
+# Switch to anything by name: a piece, a branch (adopted on the fly), or —
+# with "create":true — a brand-new piece. Project defaults to the current repo.
+echo '{"target":"my-feature"}' | mp switch
+echo '{"target":"feat/new-thing","create":true}' | mp switch
+mp switch feat/new-thing --create
 
 # Sync piece with main
 echo '{}' | mp update

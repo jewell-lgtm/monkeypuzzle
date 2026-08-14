@@ -39,8 +39,9 @@ assert_eq() {
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
-# Canned `mp go --json` output: two real projects (one with pieces, one without)
-# plus a non-project entry that must be filtered out.
+# Canned `mp go --json` output: two real projects (one with pieces and
+# adoptable branches, one bare) plus a non-project entry that must be filtered
+# out. dark-mode is an adopted branch whose name differs from the piece name.
 canned_json() {
 	cat <<'JSON'
 {
@@ -49,8 +50,12 @@ canned_json() {
       "name": "alpha", "path": "/repos/alpha", "exists": true, "is_project": true,
       "branch": "main", "piece_count": 2, "main_session": "mp/alpha",
       "pieces": [
-        { "name": "fix-login", "worktree_path": "/wt/alpha/fix-login", "session_name": "mp/alpha/fix-login", "has_session": true },
-        { "name": "dark-mode", "worktree_path": "/wt/alpha/dark-mode", "session_name": "mp/alpha/dark-mode", "has_session": false }
+        { "name": "fix-login", "worktree_path": "/wt/alpha/fix-login", "session_name": "mp/alpha/fix-login", "has_session": true, "branch": "fix-login" },
+        { "name": "dark-mode", "worktree_path": "/wt/alpha/dark-mode", "session_name": "mp/alpha/dark-mode", "has_session": false, "branch": "feat/dark-mode" }
+      ],
+      "branches": [
+        { "name": "spike-idea" },
+        { "name": "origin/review-fixes", "remote": true }
       ]
     },
     {
@@ -71,25 +76,36 @@ JSON
 if source "$SCRIPTS/switch.sh" 2>/dev/null; then
 	got="$(canned_json | build_rows)"
 	want="$(printf '%s\n' \
-		$'alpha/(main)\talpha\t\t/repos/alpha' \
-		$'alpha/fix-login\talpha\tfix-login\t/wt/alpha/fix-login' \
-		$'alpha/dark-mode\talpha\tdark-mode\t/wt/alpha/dark-mode' \
-		$'beta/(main)\tbeta\t\t/repos/beta')"
-	assert_eq "switch build_rows: pieces + main rows, non-project skipped" "$got" "$want"
+		$'alpha/(main)\talpha\t\t/repos/alpha\t' \
+		$'alpha/fix-login\talpha\tfix-login\t/wt/alpha/fix-login\t' \
+		$'alpha/dark-mode  [feat/dark-mode]\talpha\tdark-mode\t/wt/alpha/dark-mode\t' \
+		$'alpha/spike-idea  (branch)\talpha\t\t/repos/alpha\tspike-idea' \
+		$'alpha/origin/review-fixes  (branch)\talpha\t\t/repos/alpha\torigin/review-fixes' \
+		$'beta/(main)\tbeta\t\t/repos/beta\t')"
+	assert_eq "switch build_rows: main + piece + branch rows, non-project skipped" "$got" "$want"
 else
 	fail "source switch.sh" "could not source $SCRIPTS/switch.sh"
 fi
 
-# ---- Unit: create.sh build_project_rows ------------------------------------
-# shellcheck source=../scripts/create.sh
-if source "$SCRIPTS/create.sh" 2>/dev/null; then
-	got="$(canned_json | build_project_rows)"
+# ---- Unit: helpers.sh build_project_rows + project_for_cwd ------------------
+# shellcheck source=../scripts/helpers.sh
+if source "$SCRIPTS/helpers.sh" 2>/dev/null; then
+	rows="$(canned_json | build_project_rows)"
 	want="$(printf '%s\n' \
 		$'alpha\talpha\t/repos/alpha' \
 		$'beta\tbeta\t/repos/beta')"
-	assert_eq "create build_project_rows: real projects only" "$got" "$want"
+	assert_eq "helpers build_project_rows: real projects only" "$rows" "$want"
+
+	assert_eq "project_for_cwd: repo root matches" \
+		"$(project_for_cwd "/repos/alpha" "$rows")" "alpha"
+	assert_eq "project_for_cwd: nested path matches" \
+		"$(project_for_cwd "/repos/beta/src/deep" "$rows")" "beta"
+	assert_eq "project_for_cwd: sibling prefix does not match" \
+		"$(project_for_cwd "/repos/alphabet" "$rows")" ""
+	assert_eq "project_for_cwd: outside any project is empty" \
+		"$(project_for_cwd "/home/nobody" "$rows")" ""
 else
-	fail "source create.sh" "could not source $SCRIPTS/create.sh"
+	fail "source helpers.sh" "could not source $SCRIPTS/helpers.sh"
 fi
 
 # Canned `mp agent list --all --json` output: blocked first, cross-project,
@@ -166,9 +182,60 @@ EOF
 	assert_eq "switch flow: main-row selection calls mp switch --project only" \
 		"$(cat "$log" 2>/dev/null)" "switch --project beta"
 
+	# Pick an adoptable-branch row; assert dispatch through --branch.
+	rm -f "$log"
+	PATH="$bin:$PATH" TMUX="fake,1,0" MP_PLUGIN_FILTER="spike" \
+		bash "$SCRIPTS/switch.sh" >/dev/null 2>&1
+	assert_eq "switch flow: branch-row selection calls mp switch --branch" \
+		"$(cat "$log" 2>/dev/null)" "switch --project alpha --branch spike-idea"
+
 	rm -rf "$tmp"
 }
 integration_switch
+
+# ---- Integration: branch jump (paste a target) ------------------------------
+integration_branch() {
+	if ! have jq || ! have fzf; then
+		skip "branch integration" "needs jq + fzf"
+		return
+	fi
+	local tmp bin log
+	tmp="$(mktemp -d)"
+	bin="$tmp/bin"
+	log="$tmp/switch.log"
+	mkdir -p "$bin" "$tmp/repos/alpha/src"
+
+	# Stub mp with canned JSON whose alpha path is a real directory, so
+	# project_for_cwd can hard-scope from the cwd.
+	sed "s|/repos/alpha|$tmp/repos/alpha|g" >"$tmp/canned.json" < <(canned_json)
+	cat >"$bin/mp" <<EOF
+#!/usr/bin/env bash
+case "\$1" in
+  go) cat "$tmp/canned.json" ;;
+  switch) printf '%s\n' "\$*" > "$log" ;;
+  *) exit 2 ;;
+esac
+EOF
+	chmod +x "$bin/mp"
+
+	# Inside alpha (nested dir): the target goes straight to mp switch --create,
+	# scoped to alpha with no project picker.
+	(cd "$tmp/repos/alpha/src" && PATH="$bin:$PATH" TMUX="fake,1,0" \
+		bash "$SCRIPTS/branch.sh" "feat/my-spike" >/dev/null 2>&1)
+	assert_eq "branch flow: in-repo target hard-scopes to the pane's project" \
+		"$(cat "$log" 2>/dev/null)" "switch --project alpha --create -- feat/my-spike"
+
+	# Outside any project: falls back to the project picker (via the filter
+	# seam), then passes the target through.
+	rm -f "$log"
+	(cd "$tmp" && PATH="$bin:$PATH" TMUX="fake,1,0" MP_PLUGIN_FILTER="beta" \
+		bash "$SCRIPTS/branch.sh" "my-spike" >/dev/null 2>&1)
+	assert_eq "branch flow: outside a project falls back to the picker" \
+		"$(cat "$log" 2>/dev/null)" "switch --project beta --create -- my-spike"
+
+	rm -rf "$tmp"
+}
+integration_branch
 
 # ---- Integration: agents picker focuses the selected pane ------------------
 integration_agents() {

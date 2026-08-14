@@ -165,7 +165,8 @@ mp create --name feature-a            # worktree A + session mp/<proj>/feature-a
 mp create --name feature-b            # worktree B + session mp/<proj>/feature-b
 
 mp switch                             # TUI selector across pieces
-mp switch --name feature-a            # by name (uses tmux switch-client if you're in tmux)
+mp switch feature-a                   # by name (uses tmux switch-client if you're in tmux)
+mp switch feat/new-idea --create      # brand-new name: create the piece on that branch
 ```
 
 Long-running processes survive switching — each piece's session keeps its own dev server, log tail, REPL.
@@ -185,7 +186,7 @@ Sessions are namespaced `mp/<project>/<piece>` so worktrees from different repos
 
 ```bash
 mp switch                             # TUI selector (works with/without tmux)
-mp switch --name foo                  # by name
+mp switch foo                         # by piece or branch name
 tmux ls | grep "^mp/"                       # all mp sessions
 tmux attach -t mp/<project>/<piece>         # raw tmux attach
 ```
@@ -195,9 +196,11 @@ When you're already inside tmux, `mp switch` calls `switch-client` so you stay a
 ### tmux plugin
 
 For an in-tmux UI that doesn't take over your current pane, the companion plugin
-in [`apps/tmux`](../apps/tmux/README.md) binds keys to a fuzzy `fzf` popup
-for switching between pieces (`prefix + p`) and creating a new one
-(`prefix + P`). It reads state with `mp go --json` and delegates the actual
+in [`apps/tmux`](../apps/tmux/README.md) binds a `prefix m` chord table: a fuzzy
+`fzf` popup for switching between pieces and branches (`prefix m p`), a
+paste-a-branch jump scoped to the current repo (`prefix m g`), piece creation
+(`prefix m c`), agent focus (`prefix m a` / `m b`), and more — see its README
+for the full table. It reads state with `mp go --json` and delegates the actual
 session work back to `mp`.
 
 ### Sessions are interactive-only
@@ -230,7 +233,7 @@ If you've never used tmux, the essentials:
 | `Ctrl+b c` | new window |
 | `Ctrl+b %` / `Ctrl+b "` | split pane |
 
-Sessions persist after detaching — your dev server keeps running, your terminal state survives reattach. If tmux isn't installed, mp falls back to printing the worktree path (use `cd $(mp switch --name <p>)`).
+Sessions persist after detaching — your dev server keeps running, your terminal state survives reattach. If tmux isn't installed, mp falls back to printing the worktree path (use `cd $(mp switch <p>)`).
 
 ## Troubleshooting
 

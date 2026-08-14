@@ -28,9 +28,10 @@ const maxBranchesPerProject = 10
 
 var goCmd = &cobra.Command{
 	Use:   "go",
-	Short: "Switch between registered repos (and drill into their worktrees)",
+	Short: "Switch across all registered repos (the cross-project form of `mp switch`)",
 	Long: `Pick a registered monkeypuzzle project and jump to its worktree session — from
-anywhere, regardless of the current repo.
+anywhere, regardless of the current repo. This is ` + "`mp switch --all`" + ` under a
+shorter name; bare ` + "`mp`" + ` is the same picker scoped to the current project.
 
 With a terminal, opens an interactive fuzzy picker. Each repo starts collapsed
 (one row per repo); press → to expand it and reveal its pieces and branches, or
@@ -61,6 +62,9 @@ type dashPiece struct {
 	WorktreePath string `json:"worktree_path"`
 	SessionName  string `json:"session_name"`
 	HasSession   bool   `json:"has_session"`
+	// Branch is the branch checked out in the piece worktree; differs from Name
+	// for adopted branches (e.g. "feat/add-foo" → piece "add-foo").
+	Branch string `json:"branch,omitempty"`
 	// AgentStatus / AgentCounts mirror PieceListItem: the aggregate status of
 	// agents reported in the piece, for badges and blocked-first sorting.
 	AgentStatus string         `json:"agent_status,omitempty"`
@@ -150,6 +154,7 @@ func collectDashboard(ctx context.Context, infos []projectcmd.Info) ([]dashProje
 						WorktreePath: pc.WorktreePath,
 						SessionName:  pc.SessionName,
 						HasSession:   pc.HasSession,
+						Branch:       pc.Branch,
 						AgentStatus:  pc.AgentStatus,
 						AgentCounts:  pc.AgentCounts,
 					})
@@ -336,7 +341,7 @@ func runRoot(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	root, state := classifyCwd(ctx)
 	if state != cwdInProject {
-		return guideOutsideProject(state, root)
+		return guideOutsideProject(ctx, state, root)
 	}
 	return renderDashboard(ctx, []projectcmd.Info{projectcmd.Describe(root)})
 }
@@ -355,16 +360,18 @@ func runGo(cmd *cobra.Command, args []string) error {
 	return renderDashboard(ctx, infos)
 }
 
-// guideOutsideProject prints context-aware guidance when bare `mp` runs outside
-// a monkeypuzzle project. It points an un-init'd git repo at `mp init`, and a
-// non-repo directory at cloning/cd-ing into one; both mention `mp go` when there
-// are registered projects to jump to. In JSON / non-TTY mode the same guidance
-// is emitted as a structured object so automation gets a loud, parseable signal.
-func guideOutsideProject(state cwdState, root string) error {
-	hasProjects := false
-	if infos, err := projectcmd.List(); err == nil {
-		hasProjects = len(infos) > 0
+// guideOutsideProject handles bare `mp` outside a monkeypuzzle project: it
+// prints context-aware guidance (run `mp init` for an un-init'd repo, cd/clone
+// for a non-repo) to stderr, then falls through to the cross-project picker —
+// the same view as `mp go` — when there are registered projects to jump to.
+// In JSON / non-TTY mode the guidance and the project list are merged into one
+// structured object so automation gets a loud, parseable signal.
+func guideOutsideProject(ctx context.Context, state cwdState, root string) error {
+	infos, err := projectcmd.List()
+	if err != nil {
+		infos = nil
 	}
+	hasProjects := len(infos) > 0
 
 	var reason, action string
 	switch state {
@@ -375,25 +382,28 @@ func guideOutsideProject(state cwdState, root string) error {
 		reason = "You're not inside a git repository."
 		action = "cd into a repo and run `mp init`, or clone one first."
 	}
-	goHint := ""
-	if hasProjects {
-		goHint = "Run `mp go` to jump to one of your registered projects."
-	}
 
 	// Human-readable guidance always goes to stderr (per the output convention),
-	// regardless of TTY — there is nothing to render and nothing to attach to.
+	// regardless of TTY, so it never mixes into the JSON on stdout.
 	fmt.Fprintln(os.Stderr, reason)
 	fmt.Fprintln(os.Stderr, action)
-	if goHint != "" {
-		fmt.Fprintln(os.Stderr, goHint)
+	if hasProjects && cli.IsTerminal() && cli.IsStdoutTerminal() && !flagDashJSON {
+		fmt.Fprintln(os.Stderr, "Pick a registered project to jump to instead:")
+		// Fall through to the cross-project picker (the `mp go` view).
+		return runDashboardTUI(ctx, dashboardLoadCmd(ctx, infos))
 	}
 
-	// In explicit JSON mode, also emit a structured, parseable signal on stdout
-	// so automation gets a loud "no project here" answer instead of an empty list
-	// it might mistake for "no projects exist".
-	if flagDashJSON {
+	// JSON / non-TTY: emit the guidance and the full project detail in one
+	// object, so "no project here" and "here's everywhere you could go" arrive
+	// together instead of an empty list automation might mistake for "no
+	// projects exist".
+	if flagDashJSON || !cli.IsStdoutTerminal() || !cli.IsTerminal() {
+		projects, err := collectDashboard(ctx, infos)
+		if err != nil {
+			return err
+		}
 		return cli.PrintJSON(map[string]any{
-			"projects":     []any{},
+			"projects":     projects,
 			"in_project":   false,
 			"reason":       reason,
 			"suggestion":   action,
@@ -419,7 +429,16 @@ func renderDashboard(ctx context.Context, infos []projectcmd.Info) error {
 				overlayAgentBadges(ctx, deps, projects[i].Path, projects[i].Pieces)
 			}
 		}
-		return cli.PrintJSON(map[string]any{"projects": projects})
+		payload := map[string]any{"projects": projects}
+		// Tell consumers (the tmux plugin's pickers, agents) which project the
+		// caller is standing in, so they can hard-scope without path arithmetic.
+		if root, state := classifyCwd(ctx); state == cwdInProject {
+			payload["in_project"] = true
+			payload["current_project"] = projectcmd.Describe(root).Name
+		} else {
+			payload["in_project"] = false
+		}
+		return cli.PrintJSON(payload)
 	}
 
 	// Interactive: collect inside the Bubble Tea program so the spinner animates

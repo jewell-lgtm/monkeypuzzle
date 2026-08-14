@@ -44,6 +44,7 @@ popup() {
 
 popup p switch.sh # pick a piece / project main session
 popup c create.sh # create a new piece
+popup g branch.sh # paste a branch/piece name: switch, adopt, or create
 popup a agents.sh # pick a live agent, focus its pane
 
 # Jump straight to the first blocked agent — no picker, no popup.
