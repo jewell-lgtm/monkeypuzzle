@@ -116,6 +116,7 @@ var (
 	flagStackPush       bool
 	flagStackStackScope bool
 	flagStackSyncApply  bool
+	flagStackSyncYes    bool
 	flagStackSyncDryRun bool
 	flagStackSyncSchema bool
 
@@ -159,6 +160,7 @@ func init() {
 	stackSyncCmd.Flags().BoolVar(&flagStackPush, "push", false, "Push each branch after syncing")
 	stackSyncCmd.Flags().BoolVar(&flagStackStackScope, "stack", false, "Limit to the current piece's stack (run from a piece worktree)")
 	stackSyncCmd.Flags().BoolVar(&flagStackSyncApply, "apply", false, "Apply the sync (default is a dry-run preview)")
+	stackSyncCmd.Flags().BoolVarP(&flagStackSyncYes, "yes", "y", false, "Skip the interactive confirmation prompt (implies --apply)")
 	stackSyncCmd.Flags().BoolVar(&flagStackSyncDryRun, "dry-run", false, "Preview which pieces would be synced without changing anything")
 	stackSyncCmd.Flags().BoolVar(&flagStackSyncSchema, "schema", false, "Output JSON schema and exit")
 	stackSyncCmd.Flags().BoolVar(&flagStackSyncJSON, "json", false, "Output JSON even on a terminal")
@@ -356,7 +358,7 @@ func runStackSync(cmd *cobra.Command, args []string) error {
 			return err
 		}
 
-		apply, err := resolveApply(false, input.DryRun, len(previewResult.Updated) > 0, func() (bool, error) {
+		apply, err := resolveApply(flagStackSyncYes, input.DryRun, len(previewResult.Updated) > 0, func() (bool, error) {
 			return confirmApply(
 				"Sync the stack?",
 				fmt.Sprintf("Would sync %d piece(s) via %s: %s",

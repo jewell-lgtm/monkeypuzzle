@@ -38,13 +38,15 @@ var (
 )
 
 func init() {
-	pieceSyncCmd.Flags().StringVar(&flagMainBranch, "main-branch", "main", "Trunk branch name, used when the piece's parent is main")
+	pieceSyncCmd.Flags().StringVar(&flagMainBranch, "main", "main", "Trunk branch name, used when the piece's parent is main")
+	pieceSyncCmd.Flags().StringVar(&flagMainBranchLegacy, "main-branch", "", "Deprecated alias for --main")
+	_ = pieceSyncCmd.Flags().MarkDeprecated("main-branch", "use --main")
 	pieceSyncCmd.Flags().StringVar(&flagSyncFrom, "from", "", "Explicit ref to sync from (e.g. origin/parent-branch)")
 	pieceSyncCmd.Flags().BoolVar(&flagSyncLocal, "local", false, "Sync from the local parent branch instead of origin's version")
 	pieceSyncCmd.Flags().BoolVar(&flagSyncSchema, "schema", false, "Output JSON schema and exit")
 	rootCmd.AddCommand(pieceSyncCmd)
 
-	_ = pieceSyncCmd.RegisterFlagCompletionFunc("main-branch", completeGitBranches)
+	_ = pieceSyncCmd.RegisterFlagCompletionFunc("main", completeGitBranches)
 }
 
 func runPieceSync(cmd *cobra.Command, args []string) error {
@@ -109,8 +111,9 @@ func getPieceSyncInput(cmd *cobra.Command) (piececmd.SyncInput, error) {
 		}
 	}
 
-	if cmd.Flags().Changed("main-branch") {
-		input.MainBranch = flagMainBranch
+	if v, ok := mainBranchFromFlags(cmd); ok {
+		input.Main = v
+		input.MainBranch = v
 	}
 	if cmd.Flags().Changed("from") {
 		input.From = flagSyncFrom

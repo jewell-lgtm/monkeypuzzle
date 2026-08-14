@@ -123,6 +123,8 @@ var pieceListCmd = &cobra.Command{
 }
 
 var flagMainBranch string
+var flagMainBranchLegacy string
+var flagPieceCleanupYes bool
 var flagPieceName string
 var flagParent string
 var flagSkipSwitch bool
@@ -165,17 +167,23 @@ func init() {
 	pieceCreateCmd.Flags().BoolVar(&flagPieceCreateSchema, "schema", false, "Output JSON schema and exit")
 	pieceCreateCmd.Flags().BoolVar(&flagPieceCreateJSON, "json", false, "Output JSON even on a terminal")
 	pieceCreateCmd.Flags().StringVar(&flagPieceAgent, "agent", "", "Launch an agent in the new piece: claude or codex (typed into the session, or run headless with --prompt)")
-	pieceUpdateCmd.Flags().StringVar(&flagMainBranch, "main-branch", "main", "Main branch name to merge (default: main)")
+	pieceUpdateCmd.Flags().StringVar(&flagMainBranch, "main", "main", "Main branch name to merge (default: main)")
+	pieceUpdateCmd.Flags().StringVar(&flagMainBranchLegacy, "main-branch", "", "Deprecated alias for --main")
+	_ = pieceUpdateCmd.Flags().MarkDeprecated("main-branch", "use --main")
 	pieceUpdateCmd.Flags().BoolVar(&flagPieceUpdateSchema, "schema", false, "Output JSON schema and exit")
-	pieceMergeCmd.Flags().StringVar(&flagMainBranch, "main-branch", "main", "Main branch name to merge into (default: main)")
+	pieceMergeCmd.Flags().StringVar(&flagMainBranch, "main", "main", "Main branch name to merge into (default: main)")
+	pieceMergeCmd.Flags().StringVar(&flagMainBranchLegacy, "main-branch", "", "Deprecated alias for --main")
+	_ = pieceMergeCmd.Flags().MarkDeprecated("main-branch", "use --main")
 	pieceMergeCmd.Flags().BoolVar(&flagPieceMergeSchema, "schema", false, "Output JSON schema and exit")
 	pieceMergeCmd.Flags().BoolVar(&flagForce, "force", false, "Force merge even if piece has child pieces (children are NOT re-homed)")
 	pieceMergeCmd.Flags().BoolVar(&flagPieceMergeReparent, "reparent-children", false, "Merge a piece that has child pieces: re-home them onto the merge target")
 	pieceMergeCmd.Flags().StringVar(&flagPieceMergeReparentStrategy, "reparent-strategy", "", "How to re-home children: 'rebase' (default, rewrites history) or 'merge' (no force-push)")
-	pieceCleanupCmd.Flags().StringVar(&flagMainBranch, "main-branch", "", "Main branch name to check for merged status (default: main)")
+	pieceCleanupCmd.Flags().StringVar(&flagMainBranch, "main", "main", "Main branch name to check for merged status (default: main)")
+	pieceCleanupCmd.Flags().StringVar(&flagMainBranchLegacy, "main-branch", "", "Deprecated alias for --main")
+	_ = pieceCleanupCmd.Flags().MarkDeprecated("main-branch", "use --main")
 	pieceCleanupCmd.Flags().BoolVar(&flagPieceCleanupApply, "apply", false, "Apply the cleanup (default is a dry-run preview)")
 	pieceCleanupCmd.Flags().BoolVar(&flagDryRun, "dry-run", false, "Preview what would be cleaned without changing anything")
-	pieceCleanupCmd.Flags().BoolVar(&flagForce, "force", false, "Apply without the interactive confirmation (alias for --apply)")
+	pieceCleanupCmd.Flags().BoolVarP(&flagPieceCleanupYes, "yes", "y", false, "Skip the interactive confirmation prompt (implies --apply)")
 	pieceCleanupCmd.Flags().BoolVar(&flagPieceCleanupSchema, "schema", false, "Output JSON schema and exit")
 	pieceCleanupCmd.Flags().BoolVar(&flagPieceCleanupJSON, "json", false, "Output JSON even on a terminal")
 	pieceAbandonCmd.Flags().StringVar(&flagAbandonPiece, "piece", "", "Piece to abandon (default: the piece you're in)")
@@ -185,7 +193,9 @@ func init() {
 	pieceAbandonCmd.Flags().BoolVar(&flagDeleteBranch, "delete-branch", false, "Also delete the git branch")
 	pieceAbandonCmd.Flags().BoolVar(&flagPieceAbandonSchema, "schema", false, "Output JSON schema and exit")
 	pieceDoneCmd.Flags().StringVar(&flagDonePiece, "piece", "", "Piece to finish (default: the piece you're in)")
-	pieceDoneCmd.Flags().StringVar(&flagMainBranch, "main-branch", "main", "Main branch to check merge status against")
+	pieceDoneCmd.Flags().StringVar(&flagMainBranch, "main", "main", "Main branch to check merge status against")
+	pieceDoneCmd.Flags().StringVar(&flagMainBranchLegacy, "main-branch", "", "Deprecated alias for --main")
+	_ = pieceDoneCmd.Flags().MarkDeprecated("main-branch", "use --main")
 	pieceDoneCmd.Flags().BoolVar(&flagPieceDoneSchema, "schema", false, "Output JSON schema and exit")
 	pieceDoneCmd.Flags().BoolVar(&flagPieceDoneJSON, "json", false, "Output JSON even on a terminal")
 	pieceAdoptCmd.Flags().StringVarP(&flagPieceAdoptBranch, "branch", "b", "", "Branch to adopt; local name or remote ref like origin/foo (defaults to current branch when on main)")
@@ -194,7 +204,9 @@ func init() {
 	pieceAdoptCmd.Flags().BoolVar(&flagPieceAdoptSchema, "schema", false, "Output JSON schema and exit")
 	pieceAdoptCmd.Flags().BoolVar(&flagPieceAdoptJSON, "json", false, "Output JSON even on a terminal")
 	pieceStatusCmd.Flags().StringVar(&flagStatusPiece, "piece", "", "Piece to inspect (default: the piece you're in)")
-	pieceStatusCmd.Flags().StringVar(&flagMainBranch, "main-branch", "main", "Main branch name (default: main)")
+	pieceStatusCmd.Flags().StringVar(&flagMainBranch, "main", "main", "Main branch name (default: main)")
+	pieceStatusCmd.Flags().StringVar(&flagMainBranchLegacy, "main-branch", "", "Deprecated alias for --main")
+	_ = pieceStatusCmd.Flags().MarkDeprecated("main-branch", "use --main")
 	pieceListCmd.Flags().BoolVar(&flagPieceListFlat, "flat", false, "Display pieces in a flat list instead of tree view")
 	pieceListCmd.Flags().BoolVar(&flagPieceListAll, "all", false, "List pieces across all registered projects")
 	rootCmd.AddCommand(pieceStatusCmd)
@@ -322,6 +334,18 @@ func completeGitBranches(cmd *cobra.Command, args []string, toComplete string) (
 	return filtered, cobra.ShellCompDirectiveNoFileComp
 }
 
+// mainBranchFromFlags returns the trunk name from --main (canonical) or the
+// deprecated --main-branch alias, reporting whether either was set explicitly.
+func mainBranchFromFlags(cmd *cobra.Command) (string, bool) {
+	if cmd.Flags().Changed("main") {
+		return flagMainBranch, true
+	}
+	if cmd.Flags().Changed("main-branch") {
+		return flagMainBranchLegacy, true
+	}
+	return "", false
+}
+
 // pieceSelector merges the positional [piece] arg with a --piece flag value:
 // either alone wins, both set to different names is an error, neither is "".
 func pieceSelector(args []string, flagVal string) (string, error) {
@@ -388,7 +412,9 @@ func runPieceStatus(cmd *cobra.Command, args []string) error {
 
 	// Get main branch (default to "main")
 	mainBranch := "main"
-	if flagMainBranch != "" {
+	if v, ok := mainBranchFromFlags(cmd); ok && v != "" {
+		mainBranch = v
+	} else if flagMainBranch != "" {
 		mainBranch = flagMainBranch
 	}
 
@@ -723,8 +749,9 @@ func getUpdateInput(cmd *cobra.Command) (piececmd.UpdateInput, error) {
 		}
 	}
 
-	if cmd.Flags().Changed("main-branch") {
-		input.MainBranch = flagMainBranch
+	if v, ok := mainBranchFromFlags(cmd); ok {
+		input.Main = v
+		input.MainBranch = v
 	}
 
 	return piececmd.WithUpdateDefaults(input), nil
@@ -819,10 +846,11 @@ func getMergeInput(cmd *cobra.Command) (piececmd.MergeInput, error) {
 		}
 	}
 
-	// Flags override JSON input. --main-branch defaults to "main", so only apply
-	// it when the user explicitly set it (otherwise a stdin main_branch is lost).
-	if cmd.Flags().Changed("main-branch") {
-		input.MainBranch = flagMainBranch
+	// Flags override JSON input. The trunk flag defaults to "main", so only
+	// apply it when the user explicitly set it (otherwise a stdin value is lost).
+	if v, ok := mainBranchFromFlags(cmd); ok {
+		input.Main = v
+		input.MainBranch = v
 	}
 	if flagForce {
 		input.Force = true
@@ -896,7 +924,7 @@ func runPieceCleanup(cmd *cobra.Command, args []string) error {
 	}
 
 	anythingToDo := len(output.CleanedPieces) > 0 || len(output.RemovedProjects) > 0
-	apply, err := resolveApply(input.Apply || input.Force, input.DryRun, anythingToDo, func() (bool, error) {
+	apply, err := resolveApply(input.Apply || flagPieceCleanupYes, input.DryRun, anythingToDo, func() (bool, error) {
 		return confirmApply("Clean up merged pieces?", cleanupSummary(output))
 	})
 	if err != nil {
@@ -1016,19 +1044,17 @@ func getCleanupInput(cmd *cobra.Command) (piececmd.CleanupInput, error) {
 		}
 	}
 
-	// Flags override stdin. Gate --main-branch on Changed() so a stdin main_branch
+	// Flags override stdin. Gate the trunk flag on Changed() so a stdin value
 	// is preserved when the flag was left at its "main" default.
-	if cmd.Flags().Changed("main-branch") {
-		input.MainBranch = flagMainBranch
+	if v, ok := mainBranchFromFlags(cmd); ok {
+		input.Main = v
+		input.MainBranch = v
 	}
 	if flagDryRun {
 		input.DryRun = true
 	}
 	if flagPieceCleanupApply {
 		input.Apply = true
-	}
-	if flagForce {
-		input.Force = true
 	}
 
 	return piececmd.WithCleanupDefaults(input), nil
@@ -1158,10 +1184,11 @@ func getDoneInput(cmd *cobra.Command) (piececmd.DoneInput, error) {
 		}
 	}
 
-	// Flags override stdin. --main-branch defaults to "main", so only apply it when
-	// explicitly set to avoid clobbering a stdin main_branch value.
-	if cmd.Flags().Changed("main-branch") {
-		input.MainBranch = flagMainBranch
+	// Flags override stdin. The trunk flag defaults to "main", so only apply it
+	// when explicitly set to avoid clobbering a stdin value.
+	if v, ok := mainBranchFromFlags(cmd); ok {
+		input.Main = v
+		input.MainBranch = v
 	}
 
 	return piececmd.WithDoneDefaults(input), nil

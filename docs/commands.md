@@ -86,9 +86,9 @@ mp completion powershell | Out-String | Invoke-Expression
 | ------------------------------- | ----------------------- |
 | `mp abandon --name`       | Available piece names   |
 | `mp init --pr-provider`         | `github`, `gitlab`      |
-| `mp update --main-branch` | Git branch names        |
-| `mp sync --main-branch`   | Git branch names        |
-| `mp merge --main-branch`  | Git branch names        |
+| `mp update --main`        | Git branch names        |
+| `mp sync --main`          | Git branch names        |
+| `mp merge --main`         | Git branch names        |
 
 ---
 
@@ -259,31 +259,37 @@ main-only state. Each piece's multiplexer session is killed and its worktree rem
 Unlike `mp cleanup` (which only removes _merged_ pieces), flatten removes every
 piece regardless of merge status. Branches are kept by default.
 
+Dry-run by default, like the other sweep operations (`mp cleanup`,
+`mp stack sync`): it previews what would be removed and changes nothing. Pass
+`--apply` to actually flatten; in an interactive terminal you see the preview
+and confirm (`--yes`/`-y` skips the prompt and applies).
+
 ### Usage
 
 ```bash
-mp flatten                       # Interactive confirmation, then remove all pieces
-mp flatten --yes                 # Remove all (skip confirmation)
-mp flatten --force               # Discard uncommitted changes while removing
-mp flatten --delete-branches     # Also delete each piece's git branch
-mp flatten --dry-run             # Show what would be removed without changes
-echo '{"force":true}' | mp flatten
+mp flatten                       # Preview (interactive terminal: preview + confirm)
+mp flatten --apply               # Remove all pieces
+mp flatten -y                    # Remove all (skip confirmation)
+mp flatten --apply --force       # Also discard uncommitted changes
+mp flatten --delete-branches     # Also delete each piece's git branch (with --apply)
+echo '{"apply":true}' | mp flatten
 mp flatten --schema
 ```
 
 ### Flags
 
-| Flag                | Description                                  | Default |
-| ------------------- | -------------------------------------------- | ------- |
-| `--force`           | Force removal even with uncommitted changes  | `false` |
-| `--delete-branches` | Also delete each piece's git branch          | `false` |
-| `--dry-run`         | Show what would be removed without changes   | `false` |
-| `--yes`             | Skip the interactive confirmation prompt     | `false` |
+| Flag                | Description                                       | Default |
+| ------------------- | ------------------------------------------------- | ------- |
+| `--apply`           | Apply the flatten (default is a dry-run preview)  | `false` |
+| `--yes`, `-y`       | Skip the confirmation prompt (implies `--apply`)  | `false` |
+| `--force`           | Force removal even with uncommitted changes       | `false` |
+| `--delete-branches` | Also delete each piece's git branch               | `false` |
+| `--dry-run`         | Force a preview even with `--apply`-style stdin   | `false` |
 
 ### What it does
 
 1. Lists all pieces for the repo (works from the main repo or from inside a piece)
-2. In an interactive terminal, asks for confirmation (skip with `--yes`/`--force`)
+2. Previews; in an interactive terminal, asks for confirmation (skip with `--yes`), and non-interactive callers only apply with `--apply` / `"apply": true`
 3. For each piece: switches you to the main session if you're inside it, kills the
    multiplexer session, and removes the worktree (use `--force` to discard uncommitted changes)
 4. Optionally deletes each piece's branch (`--delete-branches`)
@@ -450,14 +456,14 @@ Merge main branch into current piece.
 
 ```bash
 mp update                  # Merge from 'main'
-mp update --main-branch develop  # Merge from 'develop'
+mp update --main develop  # Merge from 'develop'
 ```
 
 ### Flags
 
 | Flag            | Description          | Default |
 | --------------- | -------------------- | ------- |
-| `--main-branch` | Branch to merge from | `main`  |
+| `--main` | Branch to merge from (`--main-branch` is a deprecated alias) | `main`  |
 
 ### Requirements
 
@@ -497,7 +503,7 @@ echo '{"local":true}' | mp sync
 
 | Flag            | Description                                            | Default |
 | --------------- | ------------------------------------------------------ | ------- |
-| `--main-branch` | Trunk branch name, used when the piece's parent is main | `main`  |
+| `--main` | Trunk branch name, used when the piece's parent is main (`--main-branch` is a deprecated alias) | `main`  |
 | `--from`        | Explicit ref to sync from (fetched when remote)        | —       |
 | `--local`       | Use the local parent branch, skip origin               | `false` |
 
@@ -507,7 +513,7 @@ echo '{"local":true}' | mp sync
 
 ### What it does
 
-1. Reads the piece's parent from metadata (`main` → `--main-branch`)
+1. Reads the piece's parent from metadata (`main` → `--main`)
 2. Resolves the ref: `--from` override, else `origin/<parent>` when origin has
    the branch (fetched first), else the local parent branch
 3. Runs `before-piece-update.sh` hook (if exists)
@@ -539,14 +545,14 @@ Merge piece back to main branch.
 
 ```bash
 mp merge                   # Merge to 'main'
-mp merge --main-branch develop  # Merge to 'develop'
+mp merge --main develop  # Merge to 'develop'
 ```
 
 ### Flags
 
 | Flag                   | Description                                                              | Default |
 | ---------------------- | ------------------------------------------------------------------------ | ------- |
-| `--main-branch`        | Branch to merge into                                                     | `main`  |
+| `--main`                | Branch to merge into (`--main-branch` is a deprecated alias)             | `main`  |
 | `--force`              | Merge even if the piece has child pieces (children are **not** re-homed) | `false` |
 | `--reparent-children`  | Merge a piece with children, re-homing them onto the merge target        | `false` |
 | `--reparent-strategy`  | How to re-home children: `rebase` (rewrites history) or `merge` (no force-push) | `rebase` |
@@ -597,9 +603,12 @@ echo '{"apply":true}' | mp cleanup
 | Flag            | Description                                       | Default |
 | --------------- | ------------------------------------------------- | ------- |
 | `--apply`       | Apply the cleanup (default is a dry-run preview)  | `false` |
+| `--yes`, `-y`   | Skip the confirmation prompt (implies `--apply`)  | `false` |
 | `--dry-run`     | Preview only; never prompt, never change anything | `false` |
-| `--force`       | Apply without the interactive confirmation (alias for `--apply`) | `false` |
-| `--main-branch` | Main branch to check merge status against         | `main`  |
+| `--main` | Main branch to check merge status against (`--main-branch` deprecated) | `main`  |
+
+`--force` was removed: on cleanup it used to mean "apply", clashing with its
+meaning everywhere else (override a safety check). Use `--apply` or `--yes`.
 
 ### What it does
 
@@ -685,6 +694,28 @@ For a stacked piece, the base auto-detects to the parent piece's branch so the P
 
 ---
 
+## mp pr ready
+
+Flip the current piece's draft PR/MR to ready-for-review. Reads the PR number
+from `.monkeypuzzle/pr-metadata.json` and fires the `before-pr-ready` /
+`after-pr-ready` hooks around the provider call. Run from within a piece
+worktree.
+
+### Usage
+
+```bash
+mp pr ready
+echo '{}' | mp pr ready     # stdin accepted for uniformity (no fields)
+mp pr ready --schema        # prints {} — ready takes no input
+```
+
+| Flag       | Description                          |
+| ---------- | ------------------------------------ |
+| `--json`   | Output `{"status":"ready"}` even on a terminal |
+| `--schema` | Print the JSON-stdin schema and exit |
+
+---
+
 ## mp done
 
 Clean up a piece (worktree + multiplexer session) after its branch has been merged. Defaults to the piece you're standing in; name one positionally or with `--piece` to finish it from anywhere in the repo. Verifies the piece is merged first — use [`mp abandon`](#mp-abandon) for unmerged pieces.
@@ -694,7 +725,7 @@ Clean up a piece (worktree + multiplexer session) after its branch has been merg
 ```bash
 mp done
 mp done my-feature
-mp done --main-branch develop
+mp done --main develop
 ```
 
 ### Flags
@@ -702,7 +733,7 @@ mp done --main-branch develop
 | Flag            | Description                                   | Default |
 | --------------- | --------------------------------------------- | ------- |
 | `--piece`       | Piece to finish (or pass it positionally)     | current |
-| `--main-branch` | Main branch to check merge status against     | `main`  |
+| `--main` | Main branch to check merge status against (`--main-branch` deprecated) | `main`  |
 
 ---
 

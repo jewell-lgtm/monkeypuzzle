@@ -45,9 +45,9 @@ echo '{"name":"custom","parent":"main"}' | mp adopt
 # After merge: clean up worktree + multiplexer session
 echo '{}' | mp done
 
-# Sweep all merged pieces
-echo '{"dry_run":true}' | mp cleanup
-echo '{"force":true}' | mp cleanup
+# Sweep all merged pieces (dry-run by default; --apply / "apply":true to remove)
+mp cleanup                           # preview what would be cleaned
+echo '{"apply":true}' | mp cleanup
 
 # Discard an unmerged piece
 echo '{"force":true,"delete_branch":true}' | mp abandon

@@ -288,13 +288,13 @@ func (s *Server) executeTool(name string, args map[string]string) (string, bool)
 	case "mp_piece_update":
 		cmdArgs = []string{"update"}
 		if v := args["main_branch"]; v != "" {
-			cmdArgs = append(cmdArgs, "--main-branch", v)
+			cmdArgs = append(cmdArgs, "--main", v)
 		}
 
 	case "mp_piece_merge":
 		cmdArgs = []string{"merge"}
 		if v := args["main_branch"]; v != "" {
-			cmdArgs = append(cmdArgs, "--main-branch", v)
+			cmdArgs = append(cmdArgs, "--main", v)
 		}
 
 	case "mp_agent_list":

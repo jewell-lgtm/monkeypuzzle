@@ -752,7 +752,7 @@ func TestCLI_Flatten_RemovesAllPieces(t *testing.T) {
 	}
 
 	// Flatten via stdin JSON (non-interactive; skips the confirmation prompt).
-	stdout, stderr, err := env.runWithStdin(`{"force":true}`, "flatten")
+	stdout, stderr, err := env.runWithStdin(`{"force":true,"apply":true}`, "flatten")
 	if err != nil {
 		t.Fatalf("flatten failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
 	}
@@ -1023,17 +1023,18 @@ func TestCLI_Cleanup_Apply(t *testing.T) {
 	}
 }
 
-// TestCLI_Cleanup_AppliesViaForceAndStdin covers the two non-flag mutation entry
-// points the dry-run-by-default redesign must keep working: the `--force`
-// back-compat alias, and the agent-facing `{"apply":true}` over stdin. Both must
-// actually remove the merged worktree, not just preview.
-func TestCLI_Cleanup_AppliesViaForceAndStdin(t *testing.T) {
+// TestCLI_Cleanup_AppliesViaYesAndStdin covers the two non---apply mutation
+// entry points of the dry-run-by-default design: `--yes` (skip confirm, imply
+// apply), and the agent-facing `{"apply":true}` over stdin. Both must actually
+// remove the merged worktree, not just preview. (`--force` was removed from
+// cleanup: everywhere else it means "override a safety check", not "apply".)
+func TestCLI_Cleanup_AppliesViaYesAndStdin(t *testing.T) {
 	cases := []struct {
 		name  string
 		stdin string
 		args  []string
 	}{
-		{name: "force flag alias", args: []string{"cleanup", "--force"}},
+		{name: "yes flag", args: []string{"cleanup", "--yes"}},
 		{name: "apply over stdin", stdin: `{"apply":true}`, args: []string{"cleanup"}},
 	}
 	for _, tc := range cases {
@@ -1403,7 +1404,7 @@ func TestCLI_Sync_Schema(t *testing.T) {
 	if err := json.Unmarshal([]byte(stdout), &schema); err != nil {
 		t.Fatalf("invalid JSON schema: %v\noutput: %s", err, stdout)
 	}
-	for _, field := range []string{"main_branch", "from", "local"} {
+	for _, field := range []string{"main", "from", "local"} {
 		if _, ok := schema[field]; !ok {
 			t.Errorf("schema missing %q field", field)
 		}
