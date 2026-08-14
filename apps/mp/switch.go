@@ -288,8 +288,14 @@ func runSwitchToExistingPiece(ctx context.Context, proj registry.Project, pieceN
 func runSwitchFromBranch(ctx context.Context, proj registry.Project, branch string) error {
 	_, handler := pieceHandlerForSwitch()
 	// Resolve first: a branch that is already a piece attaches instead of
-	// erroring out of AdoptPiece, keeping --branch idempotent.
-	if piece, err := handler.PieceForBranch(ctx, proj.Path, branch); err == nil && piece != nil {
+	// erroring out of AdoptPiece, keeping --branch idempotent. A lookup
+	// failure (e.g. can't read the pieces dir) must surface, not silently
+	// fall through to adopt.
+	piece, err := handler.PieceForBranch(ctx, proj.Path, branch)
+	if err != nil {
+		return err
+	}
+	if piece != nil {
 		return attachSession(ctx, piece.SessionName, piece.WorktreePath)
 	}
 	info, err := handler.AdoptPiece(ctx, piececmd.AdoptPieceInput{
