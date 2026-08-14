@@ -92,10 +92,14 @@ var agentFocusCmd = &cobra.Command{
 	Long: `Move your tmux client to an agent's pane — the CLI form of the tmux plugin's
 agent picker and blocked-jump chords, so either can be one mp invocation.
 
-Accepts an agent id or piece name; with --blocked, picks the most urgent
-blocked agent instead (no selector needed) and does nothing (exit 0) if none
-are blocked. If the agent's session is no longer live, falls back to a plain
-piece switch (mp switch semantics: attaches, adopts, or creates nothing new).`,
+Accepts an agent id or piece name (mutually exclusive with --blocked); with
+--blocked, picks the most urgent blocked agent instead and does nothing
+(exit 0, warning on stderr) if none are blocked. If the agent's session is no
+longer live, falls back to a plain piece switch — mp switch's own contract:
+attach, never adopt or create. --json only applies to a direct pane focus;
+the switch fallback always follows mp switch's fixed output (an attach
+message on stderr, or the bare worktree path on stdout for
+cd $(mp agent focus ...)), regardless of --json.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runAgentFocus,
 }
@@ -127,7 +131,7 @@ func init() {
 	agentSummaryCmd.Flags().BoolVar(&flagAgentListAll, "all", false, "Span all registered projects (implied outside a git repo)")
 	agentFocusCmd.Flags().BoolVar(&flagAgentFocusBlocked, "blocked", false, "Focus the most urgent blocked agent instead of naming one")
 	agentFocusCmd.Flags().BoolVar(&flagAgentListAll, "all", false, "Span all registered projects (implied outside a git repo)")
-	agentFocusCmd.Flags().BoolVar(&flagAgentFocusJSON, "json", false, "Output JSON even on a terminal")
+	agentFocusCmd.Flags().BoolVar(&flagAgentFocusJSON, "json", false, "Output JSON even on a terminal (direct pane focus only; see Long help)")
 
 	agentCmd.AddCommand(agentReportCmd)
 	agentCmd.AddCommand(agentListCmd)
@@ -235,6 +239,10 @@ func runAgentFocus(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	if flagAgentFocusBlocked && len(args) == 1 {
+		return fmt.Errorf("--blocked and a positional selector are mutually exclusive")
+	}
+
 	var item agentcmd.ListItem
 	switch {
 	case flagAgentFocusBlocked:
@@ -277,13 +285,27 @@ func runAgentFocus(cmd *cobra.Command, args []string) error {
 // falls back to a plain piece switch — same as `mp switch --piece`, so it
 // attaches an existing worktree and never adopts or creates anything new.
 // The returned bool is true when the switch fallback ran (it owns all of its
-// own output; the caller must not also emit JSON on top of it).
+// own output — including its own fixed contract of "attach message on
+// stderr, or a bare worktree path on stdout" from mp switch, regardless of
+// --json — so the caller must not also emit JSON on top of it).
 func focusOrSwitchAgent(ctx context.Context, item agentcmd.ListItem) (bool, error) {
 	exec := adapters.NewOSExec()
 	mux := configuredMultiplexer(exec)
 	if item.SessionName != "" && mux.Exists(ctx, item.SessionName) {
 		if pane, err := paneMultiplexer(exec); err == nil {
-			return false, pane.FocusPane(ctx, item.SessionName, item.Pane)
+			if focusErr := pane.FocusPane(ctx, item.SessionName, item.Pane); focusErr != nil {
+				// The session may have died in the gap between the Exists
+				// check above and this call (TOCTOU) — only treat that as
+				// the "session is gone" case and fall through to the switch
+				// fallback; any other failure (no client attached to
+				// switch, a permissions error) still surfaces as-is rather
+				// than being silently swallowed into a different codepath.
+				if mux.Exists(ctx, item.SessionName) {
+					return false, focusErr
+				}
+			} else {
+				return false, nil
+			}
 		}
 	}
 	proj, err := focusProject(ctx, item.Project)

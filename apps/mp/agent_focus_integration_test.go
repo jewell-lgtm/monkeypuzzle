@@ -137,6 +137,24 @@ func TestAgentFocus_NoSelectorErrors(t *testing.T) {
 	}
 }
 
+// TestAgentFocus_BlockedAndPositionalConflict pins a fix from external
+// review: --blocked and a positional selector together used to silently pick
+// --blocked and drop the positional; now it's a rejected conflict.
+func TestAgentFocus_BlockedAndPositionalConflict(t *testing.T) {
+	e := setupTestEnv(t)
+	defer e.cleanup()
+
+	dataDir := filepath.Join(e.tmpDir, "data")
+	repo := projectTestRepo(t, e, dataDir, filepath.Join(e.tmpDir, "repos"), "alpha")
+
+	cmd := exec.Command(e.binPath, "agent", "focus", "some-piece", "--blocked")
+	cmd.Dir = repo
+	cmd.Env = append(os.Environ(), "MP_DATA_DIR="+dataDir, "MP_CONFIG_DIR="+e.configDir)
+	if out, err := cmd.CombinedOutput(); err == nil {
+		t.Errorf("--blocked plus a positional should be rejected, got success\n%s", out)
+	}
+}
+
 // TestAgentList_IconField pins the single-sourced icon field: `mp agent list
 // --json` items carry an icon matching their status (blocked -> the same
 // glyph as mp agent summary's 🔴).
