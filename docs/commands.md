@@ -1077,7 +1077,7 @@ mp integration install claude
 Monkeypuzzle is designed for programmatic use:
 
 ```bash
-# Schema-based workflow
+# Example-input workflow
 mp init --schema | jq '.name = "myproject"' | mp init
 
 # Check status programmatically

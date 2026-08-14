@@ -55,7 +55,7 @@ mp init --name myproject --pr-provider github
 # Via JSON stdin
 echo '{"name":"myproject","pr_provider":"github"}' | mp init
 
-# Get schema with defaults, modify, pipe back
+# Get an example input document, fill in a value, pipe it back
 mp init --schema | jq '.name = "custom-name"' | mp init
 ```
 

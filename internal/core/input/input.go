@@ -23,7 +23,7 @@ type Field struct {
 	Type string `json:"type,omitempty"`
 }
 
-// GenerateSchema creates a JSON schema from field definitions.
+// GenerateSchema creates an example input document from field definitions.
 // Returns a map of field names to their (typed) default values.
 func GenerateSchema(fields []Field) ([]byte, error) {
 	schema := make(map[string]any)
@@ -34,7 +34,7 @@ func GenerateSchema(fields []Field) ([]byte, error) {
 }
 
 // typedDefault converts a field's string Default into a value of its declared
-// Type so the generated schema marshals to the correct JSON type.
+// Type so the generated example document marshals to the correct JSON type.
 func typedDefault(f Field) any {
 	switch f.Type {
 	case "bool":
