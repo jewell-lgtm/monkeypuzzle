@@ -28,6 +28,7 @@ echo '{"flat":true}' | mp list
 echo '{"target":"my-feature"}' | mp switch
 echo '{"target":"feat/new-thing","create":true}' | mp switch
 mp switch feat/new-thing --create
+mp go --json                         # same picker, across every registered project
 
 # Sync piece with its parent (prefers origin/<parent>; --local for local branch)
 echo '{}' | mp sync

@@ -8,8 +8,9 @@ It is a thin layer over the `mp` CLI. It reads state with `mp go --json` and
 renders its own [fzf](https://github.com/junegunn/fzf) picker; the switch/create
 actions call `mp` through its stateless API. The plugin exports
 `MP_TMUX_PLUGIN=1`, which tells `mp` to perform the tmux `switch-client` /
-session-create itself (see the "No tmux sessions for agents" note in the repo
-`AGENTS.md`) — so `mp` stays the single source of truth for session naming.
+session-create itself (see "Sessions are interactive-only" in the
+[workflow guide](../../docs/workflow.md#sessions-are-interactive-only)) — so
+`mp` stays the single source of truth for session naming.
 
 ## Requirements
 

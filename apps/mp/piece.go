@@ -41,7 +41,7 @@ var pieceCreateCmd = &cobra.Command{
 	Use:     "create",
 	Aliases: []string{"new"},
 	Short:   "Create a new puzzle piece",
-	Long: `Create a new puzzle piece by initializing a git worktree and opening a tmux session.
+	Long: `Create a new puzzle piece by initializing a git worktree and opening a multiplexer session.
 The worktree will be created in a repo-scoped directory within the platform-appropriate data directory (e.g., ~/Library/Application Support/monkeypuzzle/pieces/{repo-hash}/ on macOS, ~/.local/share/monkeypuzzle/pieces/{repo-hash}/ on Linux).`,
 	Args: cobra.NoArgs,
 	RunE: runPieceCreate,
@@ -82,7 +82,7 @@ unless --apply (or "apply": true) is given.`,
 var pieceAbandonCmd = &cobra.Command{
 	Use:   "abandon [piece]",
 	Short: "Abandon an unmerged piece",
-	Long: `Remove a piece worktree, kill its tmux session, and optionally delete the branch.
+	Long: `Remove a piece worktree, kill its multiplexer session, and optionally delete the branch.
 Use --force to discard uncommitted changes.
 Use --delete-branch to also remove the git branch.
 Defaults to the piece you're standing in; name a piece positionally or with
@@ -94,7 +94,7 @@ Defaults to the piece you're standing in; name a piece positionally or with
 var pieceDoneCmd = &cobra.Command{
 	Use:   "done [piece]",
 	Short: "Cleanup a piece after merge",
-	Long: `Remove a piece worktree and tmux session after the branch has been merged.
+	Long: `Remove a piece worktree and multiplexer session after the branch has been merged.
 Defaults to the piece you're standing in; name a piece positionally or with
 --piece to finish one from anywhere in the repo. Verifies the piece is merged
 before cleanup. Use 'mp abandon' for unmerged pieces.`,
@@ -168,7 +168,7 @@ func init() {
 	pieceCreateCmd.Flags().StringVar(&flagPiecePrompt, "prompt", "", "Create piece from prompt (e.g., \"add dark mode\")")
 	pieceCreateCmd.Flags().StringVarP(&flagParent, "parent", "p", "", "Parent piece name to branch from (default: main)")
 	pieceCreateCmd.Flags().BoolVar(&flagSkipSwitch, "skip-switch", false, "Don't switch to the new piece after creation")
-	pieceCreateCmd.Flags().BoolVar(&flagOverwriteSession, "overwrite-session", false, "Replace existing main repo tmux session")
+	pieceCreateCmd.Flags().BoolVar(&flagOverwriteSession, "overwrite-session", false, "Replace existing main repo multiplexer session")
 	pieceCreateCmd.Flags().BoolVar(&flagPieceCreateSchema, "schema", false, "Print an example input document and exit")
 	pieceCreateCmd.Flags().BoolVar(&flagPieceCreateJSON, "json", false, "Output JSON even on a terminal")
 	pieceCreateCmd.Flags().StringVar(&flagPieceAgent, "agent", "", "Launch an agent in the new piece: claude or codex (typed into the session, or run headless with --prompt)")
@@ -1222,7 +1222,7 @@ func runPieceAdopt(cmd *cobra.Command, args []string) error {
 	}
 
 	// Switch to the adopted piece. In an interactive session this creates and
-	// attaches the piece's tmux session; for agents/automation the multiplexer is
+	// attaches the piece's multiplexer session; for agents/automation the multiplexer is
 	// the no-op (see chooseMultiplexer), so this does nothing and the caller reads
 	// the worktree path from the JSON above.
 	if _, err := handler.SwitchPiece(ctx, info.Name); err != nil {

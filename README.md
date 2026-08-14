@@ -88,18 +88,20 @@ The key rule: **non-interactive invocations (flags or JSON) fail loudly on genui
 | Command | What it does |
 | --- | --- |
 | `mp init` / `mp reinit` | Configure project name + PR provider (first run) or refresh `.gitignore` + Claude skill (re-run) |
-| `mp` / `mp dash` | Cross-project dashboard |
-| `mp create` | Spawn worktree + tmux session (`--name` or `--prompt`) |
+| `mp` | Picker scoped to the current repo (falls through to `mp go`'s view outside one) |
+| `mp go` | Cross-project picker; `mp switch --all` under a shorter name |
+| `mp switch [target]` | Jump to a piece or branch by name — adopts or creates as needed |
+| `mp create` | Spawn worktree + multiplexer session (`--name` or `--prompt`) |
 | `mp adopt <branch>` | Bring an existing branch into mp |
 | `mp list` | Show pieces (`--all` for cross-project) |
-| `mp switch` | Jump to a piece (tmux switch-client when in tmux) |
 | `mp update` | Sync piece with main |
 | `mp sync` | Sync piece with its parent (prefers origin's version) |
 | `mp merge` | Merge piece back to main |
 | `mp pr create [--draft]` | Push + open PR/MR via configured provider |
 | `mp pr ready` | Flip a draft PR/MR to ready |
 | `mp done` | After merge: clean up worktree + session |
-| `mp config get/set multiplexer` | tmux / none |
+| `mp agent focus [id\|piece] [--blocked]` | Switch the client to an agent's pane, or fall back to a piece switch |
+| `mp config get/set multiplexer` | tmux / zellij / cmux / none |
 
 See [docs/commands.md](docs/commands.md) for full reference.
 

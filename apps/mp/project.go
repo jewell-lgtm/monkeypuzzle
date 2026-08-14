@@ -30,7 +30,7 @@ var projectCmd = &cobra.Command{
 
 A "project" is any git repository that has been initialised with 'mp init'.
 Registering projects lets mp list pieces across all of them and jump
-between their tmux sessions.`,
+between their multiplexer sessions.`,
 }
 
 var projectAddCmd = &cobra.Command{
