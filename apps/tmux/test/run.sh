@@ -260,15 +260,17 @@ integration_agents
 
 # ---- Integration: blocked jump relays "nothing blocked" -------------------
 integration_blocked() {
-	local tmp bin
+	local tmp bin mplog
 	tmp="$(mktemp -d)"
 	bin="$tmp/bin"
+	mplog="$tmp/mp.log"
 	mkdir -p "$bin"
 
 	# mp reports nothing blocked: blocked.sh must relay via tmux display-message.
-	cat >"$bin/mp" <<'EOF'
+	cat >"$bin/mp" <<EOF
 #!/usr/bin/env bash
-[[ "$1 $2" == "agent focus" ]] || exit 2
+printf '%s\n' "\$*" >"$mplog"
+[[ "\$1 \$2" == "agent focus" ]] || exit 2
 echo "monkeypuzzle: ⚠ no blocked agents" >&2
 exit 0
 EOF
@@ -281,17 +283,38 @@ EOF
 	PATH="$bin:$PATH" bash "$SCRIPTS/blocked.sh" "$tmp" >/dev/null 2>&1
 	assert_eq "blocked flow: relays the no-blocked-agents message" \
 		"$(cat "$tmp/tmux.log" 2>/dev/null)" "display-message monkeypuzzle: no blocked agents"
+	assert_eq "blocked flow: invokes mp agent focus --blocked --all" \
+		"$(cat "$mplog" 2>/dev/null)" "agent focus --blocked --all"
 
-	# mp finds and focuses one: blocked.sh must NOT show any message.
-	cat >"$bin/mp" <<'EOF'
+	# mp finds and focuses one: blocked.sh must NOT show any message. The stub
+	# still records its own invocation so a bug dropping --blocked/--all from
+	# the exec call can't pass this vacuously.
+	cat >"$bin/mp" <<EOF
 #!/usr/bin/env bash
-[[ "$1 $2" == "agent focus" ]] || exit 2
+printf '%s\n' "\$*" >"$mplog"
+[[ "\$1 \$2" == "agent focus" ]] || exit 2
 exit 0
 EOF
-	rm -f "$tmp/tmux.log"
+	rm -f "$tmp/tmux.log" "$mplog"
 	PATH="$bin:$PATH" bash "$SCRIPTS/blocked.sh" "$tmp" >/dev/null 2>&1
+	assert_eq "blocked flow: still invokes mp agent focus --blocked --all" \
+		"$(cat "$mplog" 2>/dev/null)" "agent focus --blocked --all"
 	assert_eq "blocked flow: silent when an agent was focused" \
 		"$(cat "$tmp/tmux.log" 2>/dev/null)" ""
+
+	# A genuine failure (anything other than the known "no blocked agents"
+	# case) must still surface — not vanish silently — since a run-shell
+	# binding has no other way to signal something went wrong.
+	cat >"$bin/mp" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >"$mplog"
+echo "registry unreadable" >&2
+exit 1
+EOF
+	rm -f "$tmp/tmux.log" "$mplog"
+	PATH="$bin:$PATH" bash "$SCRIPTS/blocked.sh" "$tmp" >/dev/null 2>&1
+	assert_eq "blocked flow: relays a genuine failure verbatim" \
+		"$(cat "$tmp/tmux.log" 2>/dev/null)" "display-message monkeypuzzle: registry unreadable"
 
 	rm -rf "$tmp"
 }

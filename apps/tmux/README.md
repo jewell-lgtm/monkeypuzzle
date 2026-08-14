@@ -74,8 +74,10 @@ the name blank lets you describe the piece as a free-form prompt instead
 The agent picker (`m a`) reads `mp agent list --json` to build its rows, then
 hands the selected agent's id to `mp agent focus <id>` — one mp invocation
 does all the resolving and pane-switching. `m b` is the same `mp agent focus
---blocked` call with no picker, relaying its "nothing blocked" case to a
-`tmux display-message` since a run-shell binding has no popup to show it in.
+--blocked` call with no picker; since a run-shell binding has no popup to
+show anything in, it relays any stderr the call produces to a `tmux
+display-message` — "no blocked agents" when there's nothing to do, or the
+error verbatim if the call fails outright.
 Agents are detected with nothing installed into them: mp recognizes agent
 processes in each piece session's panes and reads blocked/working/idle off
 the screen. (`mp integration install claude` optionally adds hook-reported

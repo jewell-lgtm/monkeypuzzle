@@ -16,8 +16,16 @@ main() {
 
 	local err
 	err="$("$(mp_bin)" agent focus --blocked --all 2>&1 1>/dev/null)"
+	[[ -n "$err" ]] || return 0
+
+	# The known soft case gets its own friendly wording; any other stderr
+	# (a real failure — mp missing, registry unreadable, ...) is relayed
+	# verbatim rather than vanishing silently, since a run-shell binding has
+	# no other way to tell the user something went wrong.
 	if [[ "$err" == *"no blocked agents"* ]]; then
 		tmux display-message "monkeypuzzle: no blocked agents"
+	else
+		tmux display-message "monkeypuzzle: $err"
 	fi
 }
 
