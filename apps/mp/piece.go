@@ -220,9 +220,13 @@ func init() {
 	rootCmd.AddCommand(pieceListCmd)
 
 	// Register completion functions (errors ignored - completion is optional)
+	_ = pieceAbandonCmd.RegisterFlagCompletionFunc("piece", completePieceNames)
 	_ = pieceAbandonCmd.RegisterFlagCompletionFunc("name", completePieceNames)
+	_ = pieceUpdateCmd.RegisterFlagCompletionFunc("main", completeGitBranches)
 	_ = pieceUpdateCmd.RegisterFlagCompletionFunc("main-branch", completeGitBranches)
+	_ = pieceMergeCmd.RegisterFlagCompletionFunc("main", completeGitBranches)
 	_ = pieceMergeCmd.RegisterFlagCompletionFunc("main-branch", completeGitBranches)
+	_ = pieceCleanupCmd.RegisterFlagCompletionFunc("main", completeGitBranches)
 	_ = pieceCleanupCmd.RegisterFlagCompletionFunc("main-branch", completeGitBranches)
 }
 
