@@ -322,21 +322,44 @@ func completeGitBranches(cmd *cobra.Command, args []string, toComplete string) (
 	return filtered, cobra.ShellCompDirectiveNoFileComp
 }
 
-// pieceSelector merges the positional [piece] arg with a --piece flag value:
-// either alone wins, both set to different names is an error, neither is "".
-func pieceSelector(args []string, flagVal string) (string, error) {
-	positional := ""
+// selectorFlag names one flag-based piece selector source (e.g. --piece, or
+// the deprecated --name alias) for pieceSelector's conflict detection.
+type selectorFlag struct {
+	label string
+	value string
+}
+
+// pieceSelector merges the positional [piece] arg with one or more flag
+// values. An omitted positional (no arg at all) is fine; an explicitly given
+// but blank/whitespace one is a malformed-input error, not a silent fallback
+// to "the piece you're standing in". All non-empty candidates — positional
+// and every flag — must agree; disagreement names every conflicting source.
+func pieceSelector(args []string, flags ...selectorFlag) (string, error) {
+	type candidate struct{ label, value string }
+	var candidates []candidate
+
 	if len(args) > 0 {
-		positional = strings.TrimSpace(args[0])
+		v := strings.TrimSpace(args[0])
+		if v == "" {
+			return "", fmt.Errorf("piece name cannot be blank")
+		}
+		candidates = append(candidates, candidate{"positional", v})
 	}
-	flagVal = strings.TrimSpace(flagVal)
-	if positional != "" && flagVal != "" && positional != flagVal {
-		return "", fmt.Errorf("conflicting piece selectors: %q (positional) vs %q (--piece)", positional, flagVal)
+	for _, f := range flags {
+		if v := strings.TrimSpace(f.value); v != "" {
+			candidates = append(candidates, candidate{f.label, v})
+		}
 	}
-	if positional != "" {
-		return positional, nil
+	if len(candidates) == 0 {
+		return "", nil
 	}
-	return flagVal, nil
+	first := candidates[0]
+	for _, c := range candidates[1:] {
+		if c.value != first.value {
+			return "", fmt.Errorf("conflicting piece selectors: %q (%s) vs %q (%s)", first.value, first.label, c.value, c.label)
+		}
+	}
+	return first.value, nil
 }
 
 // resolvePieceWorkDir returns the directory a piece-scoped command should run
@@ -350,6 +373,12 @@ func resolvePieceWorkDir(ctx context.Context, selector string) (string, error) {
 	if selector == "" {
 		return wd, nil
 	}
+	// A piece name is always a single path component. Reject anything that
+	// could escape piecesDir (slashes, "." or "..") before it ever reaches
+	// filepath.Join.
+	if selector != filepath.Base(selector) || selector == "." || selector == ".." {
+		return "", fmt.Errorf("invalid piece name %q", selector)
+	}
 	git := adapters.NewGit(adapters.NewOSExec())
 	root, err := git.GetMainRepoRoot(ctx, wd)
 	if err != nil {
@@ -359,7 +388,14 @@ func resolvePieceWorkDir(ctx context.Context, selector string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	piecesDir = filepath.Clean(piecesDir)
 	piecePath := filepath.Join(piecesDir, selector)
+	// Defense in depth: confirm the resolved path is still a direct child of
+	// piecesDir, guarding against any future selector source that skips the
+	// single-component check above.
+	if filepath.Dir(piecePath) != piecesDir {
+		return "", fmt.Errorf("invalid piece name %q", selector)
+	}
 	if fi, err := os.Stat(piecePath); err != nil || !fi.IsDir() {
 		return "", fmt.Errorf("piece %q not found in %s", selector, root)
 	}
@@ -368,7 +404,7 @@ func resolvePieceWorkDir(ctx context.Context, selector string) (string, error) {
 
 func runPieceStatus(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
-	selector, err := pieceSelector(args, flagStatusPiece)
+	selector, err := pieceSelector(args, selectorFlag{"--piece", flagStatusPiece})
 	if err != nil {
 		return err
 	}
@@ -1055,13 +1091,14 @@ func runPieceAbandon(cmd *cobra.Command, args []string) error {
 	)
 	handler := newPieceHandler(deps)
 
-	// Get validated input. --piece is canonical; --name is the deprecated alias.
-	selector, err := pieceSelector(args, flagAbandonPiece)
+	// Get validated input. --piece is canonical; --name is the deprecated
+	// alias, and now participates in the same conflict check as everything else.
+	selector, err := pieceSelector(args,
+		selectorFlag{"--piece", flagAbandonPiece},
+		selectorFlag{"--name", flagAbandonName},
+	)
 	if err != nil {
 		return err
-	}
-	if selector == "" {
-		selector = flagAbandonName
 	}
 	input, err := getAbandonInput(ctx, handler, selector)
 	if err != nil {
@@ -1100,7 +1137,7 @@ func runPieceDone(cmd *cobra.Command, args []string) error {
 	}
 
 	ctx := cmd.Context()
-	selector, err := pieceSelector(args, flagDonePiece)
+	selector, err := pieceSelector(args, selectorFlag{"--piece", flagDonePiece})
 	if err != nil {
 		return err
 	}

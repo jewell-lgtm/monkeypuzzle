@@ -76,6 +76,7 @@ var projectListCmd = &cobra.Command{
 
 By default a human-readable table is printed; use --json for machine output.
 When stdout is not a terminal, JSON is printed automatically.`,
+	Args: cobra.NoArgs,
 	RunE: runProjectList,
 }
 
