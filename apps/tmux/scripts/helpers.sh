@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Shared helpers for the monkeypuzzle tmux plugin scripts.
 #
-# Sourced by switch.sh and create.sh. This file defines functions and one
-# export only — it performs no work at source time — so the test runner can
-# source the scripts and call their build_* functions without tripping guards.
+# Sourced by every script in this directory. This file defines functions and
+# one export only — it performs no work at source time — so the test runner
+# can source the scripts and call their build_* functions without tripping
+# guards.
 
 # The explicit signal that tells mp to manage the tmux session (switch-client /
 # new-session) even though the plugin drives mp through the stateless API with
@@ -36,25 +37,31 @@ ensure_env() {
 	require_cmd "$(mp_bin)" jq fzf
 }
 
-# focus_agent moves the client to an agent: straight to its recorded pane when
-# the piece session is alive, else through `mp switch` (which creates the
-# session). A pane target resolves its window too, so focus lands exactly on
-# the agent even in a split layout. The optional project arg scopes the
-# fallback for cross-project rows.
-focus_agent() {
-	local session="$1" pane="$2" piece="$3" project="${4:-}"
-	if [[ -n "$session" ]] && tmux has-session -t "=$session" 2>/dev/null; then
-		tmux switch-client -t "=$session"
-		if [[ -n "$pane" ]]; then
-			tmux select-window -t "$pane" 2>/dev/null
-			tmux select-pane -t "$pane" 2>/dev/null
+# build_project_rows reads `mp go --json` on stdin and writes TAB-separated rows:
+#   <display>\t<project>\t<path>
+# one per existing, initialised project. Missing / non-project entries skipped.
+# Shared by create.sh (picker) and branch.sh (cwd scoping + fallback picker).
+build_project_rows() {
+	jq -r '
+		.projects[]
+		| select(.exists and .is_project)
+		| [ .name, .name, .path ]
+		| @tsv
+	'
+}
+
+# project_for_cwd prints the name of the project whose path is a prefix of the
+# cwd (passed in $1), given project rows in $2. Empty if none match. The popup
+# runs with -d '#{pane_current_path}', so $PWD is the invoking pane's cwd.
+project_for_cwd() {
+	local cwd="$1" rows="$2" name path
+	while IFS=$'\t' read -r _ name path; do
+		[[ -n "$path" ]] || continue
+		if [[ "$cwd" == "$path" || "$cwd" == "$path"/* ]]; then
+			printf '%s' "$name"
+			return
 		fi
-		return 0
-	fi
-	if [[ -n "$project" ]]; then
-		exec "$(mp_bin)" switch --project "$project" --piece "$piece"
-	fi
-	exec "$(mp_bin)" switch --piece "$piece"
+	done <<<"$rows"
 }
 
 # fzf_pick reads TAB-delimited rows on stdin and prints the chosen row verbatim

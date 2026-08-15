@@ -53,6 +53,9 @@ type CreatePieceOptions struct {
 	// from inside a worktree (e.g. `mp stack append`) without scoping the pieces
 	// dir to the worktree.
 	RepoRoot string
+	// Branch, when set, names the new git branch verbatim (slashes allowed)
+	// instead of defaulting to the piece name.
+	Branch string
 }
 
 // CreatePieceWithInput creates a piece from validated input.
@@ -62,6 +65,9 @@ func (h *Handler) CreatePieceWithInput(ctx context.Context, input NewPieceInput,
 	opts.Parent = input.Parent
 	if opts.Parent == "" {
 		opts.Parent = "main"
+	}
+	if opts.Branch == "" {
+		opts.Branch = input.Branch
 	}
 
 	if input.Prompt != "" {
@@ -138,6 +144,15 @@ func (h *Handler) CreatePiece(ctx context.Context, pieceName string, opts Create
 		parent = "main"
 	}
 
+	// The new branch defaults to the piece name; an explicit opts.Branch names
+	// it verbatim instead (e.g. "feat/login-rework" → piece "login-rework").
+	newBranch := strings.TrimSpace(opts.Branch)
+	if newBranch == "" {
+		newBranch = pieceName
+	} else if h.git.LocalBranchExists(ctx, repoRoot, newBranch) {
+		return PieceInfo{}, fmt.Errorf("branch %q already exists; adopt it instead (mp adopt %s)", newBranch, newBranch)
+	}
+
 	// Create worktree
 	worktreePath := filepath.Join(piecesDir, pieceName)
 	if parent != "main" {
@@ -147,8 +162,8 @@ func (h *Handler) CreatePiece(ctx context.Context, pieceName string, opts Create
 			return PieceInfo{}, fmt.Errorf("parent piece %q not found", parent)
 		}
 		// The parent's branch name is the same as the parent piece name; the new
-		// piece gets its own branch named after the piece.
-		if err := h.git.WorktreeAddFrom(ctx, repoRoot, worktreePath, pieceName, parent); err != nil {
+		// piece gets its own branch (defaulting to the piece name).
+		if err := h.git.WorktreeAddFrom(ctx, repoRoot, worktreePath, newBranch, parent); err != nil {
 			return PieceInfo{}, fmt.Errorf("failed to create worktree from parent %s: %w", parent, err)
 		}
 	} else {
@@ -164,7 +179,7 @@ func (h *Handler) CreatePiece(ctx context.Context, pieceName string, opts Create
 			}
 			startPoint = remote + "/" + trunk
 		}
-		if err := h.git.WorktreeAddFrom(ctx, repoRoot, worktreePath, pieceName, startPoint); err != nil {
+		if err := h.git.WorktreeAddFrom(ctx, repoRoot, worktreePath, newBranch, startPoint); err != nil {
 			return PieceInfo{}, fmt.Errorf("failed to create worktree at %s from %s: %w", worktreePath, startPoint, err)
 		}
 	}
@@ -694,7 +709,7 @@ func (h *Handler) UpdatePiece(ctx context.Context, workDir, mainBranch string) (
 	}
 
 	if !status.InPiece {
-		return UpdateResult{}, fmt.Errorf("not in a piece worktree")
+		return UpdateResult{}, ErrNotInPiece
 	}
 
 	// Get current branch to verify we're on a branch
@@ -753,7 +768,7 @@ func (h *Handler) SyncPiece(ctx context.Context, workDir string, input SyncInput
 		return SyncResult{}, fmt.Errorf("failed to get piece status: %w", err)
 	}
 	if !status.InPiece {
-		return SyncResult{}, fmt.Errorf("not in a piece worktree")
+		return SyncResult{}, ErrNotInPiece
 	}
 
 	if _, err := h.git.CurrentBranch(ctx, workDir); err != nil {
@@ -891,7 +906,7 @@ func (h *Handler) MergePiece(ctx context.Context, workDir string, input MergeInp
 	}
 
 	if !status.InPiece {
-		return MergeResult{}, fmt.Errorf("not in a piece worktree")
+		return MergeResult{}, ErrNotInPiece
 	}
 
 	// Get current branch (piece branch)
@@ -1757,7 +1772,7 @@ func (h *Handler) DonePiece(ctx context.Context, workDir string, input DoneInput
 	}
 
 	if !status.InPiece {
-		return DoneResult{}, fmt.Errorf("not in a piece worktree; run this from inside a piece")
+		return DoneResult{}, ErrNotInPiece
 	}
 
 	// Get main repo root
@@ -2009,6 +2024,17 @@ func (h *Handler) ListPieces(ctx context.Context, repoRoot string) ([]PieceListI
 		return nil, fmt.Errorf("failed to read pieces directory: %w", err)
 	}
 
+	// One worktree listing serves every piece: the branch checked out in each
+	// piece worktree (usually == piece name, but not for adopted branches).
+	branchByPath := map[string]string{}
+	if worktrees, err := h.git.Worktrees(ctx, repoRoot); err == nil {
+		for _, wt := range worktrees {
+			if wt.Branch != "" {
+				branchByPath[filepath.Clean(wt.Path)] = wt.Branch
+			}
+		}
+	}
+
 	var pieces []PieceListItem
 	for _, entry := range entries {
 		if !entry.IsDir() {
@@ -2032,12 +2058,18 @@ func (h *Handler) ListPieces(ctx context.Context, repoRoot string) ([]PieceListI
 		// Read piece metadata for parent + agent info
 		parent := "main"
 		agentStatus := ""
+		branch := branchByPath[filepath.Clean(worktreePath)]
 		var agentCounts map[string]int
 		if metadata, err := ReadPieceMetadata(worktreePath, h.deps.FS); err == nil {
 			parent = metadata.Parent
 			live := LiveAgents(metadata.Agents)
 			agentStatus = AggregateAgents(live)
 			agentCounts = CountAgents(live)
+			// Detached or unreadable worktrees fall back to the branch the piece
+			// was adopted from.
+			if branch == "" {
+				branch = metadata.CreatedFromBranch
+			}
 		}
 
 		pieces = append(pieces, PieceListItem{
@@ -2045,6 +2077,7 @@ func (h *Handler) ListPieces(ctx context.Context, repoRoot string) ([]PieceListI
 			WorktreePath: worktreePath,
 			SessionName:  sessionName,
 			HasSession:   hasSession,
+			Branch:       branch,
 			ModTime:      modTime,
 			Parent:       parent,
 			AgentStatus:  agentStatus,
@@ -2109,7 +2142,8 @@ func BuildPieceTree(pieces []PieceListItem) *TreeNode {
 }
 
 // SwitchPiece switches to a piece by name.
-// Uses multiplexer to switch/attach, falls back to printing path.
+// Returns a SwitchResult naming the method used ("multiplexer" or "path");
+// the caller presents the path itself when there's no session to attach.
 // Special case: "main" or "master" switches to the main repo session.
 func (h *Handler) SwitchPiece(ctx context.Context, name string) (SwitchResult, error) {
 	// Detect repo root from current working directory or piece worktree
@@ -2224,4 +2258,126 @@ func (h *Handler) switchToMain(ctx context.Context, mainRepoRoot, name string) (
 		Data:    result,
 	})
 	return result, nil
+}
+
+// PieceForBranch returns the piece whose worktree has the given branch checked
+// out (falling back to created_from_branch metadata for detached worktrees), or
+// nil when no piece holds it. This is the branch → piece reverse lookup: an
+// adopted "feat/add-foo" lives in piece "add-foo", and switching by either name
+// must find the same piece.
+func (h *Handler) PieceForBranch(ctx context.Context, repoRoot, branch string) (*PieceListItem, error) {
+	pieces, err := h.ListPieces(ctx, repoRoot)
+	if err != nil {
+		return nil, err
+	}
+	for i := range pieces {
+		if pieces[i].Branch == branch {
+			return &pieces[i], nil
+		}
+	}
+	return nil, nil
+}
+
+// ResolveSwitchTarget classifies a free-form switch target — a piece name, a
+// branch (local, remote, or already adopted), or a brand-new name — without
+// side effects. Precedence: trunk, existing piece (by name, then sanitized
+// name, then checked-out branch), local branch, remote ref, new. A piece always
+// beats an unadopted branch of the same name so switching stays idempotent;
+// explicit --branch/--piece selectors bypass this resolver.
+func (h *Handler) ResolveSwitchTarget(ctx context.Context, repoRoot, target string) (SwitchTarget, error) {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return SwitchTarget{}, fmt.Errorf("empty switch target")
+	}
+	if target == "main" || target == "master" {
+		return SwitchTarget{Kind: TargetMain}, nil
+	}
+
+	pieces, err := h.ListPieces(ctx, repoRoot)
+	if err != nil {
+		return SwitchTarget{}, err
+	}
+	// Exact piece name first; the sanitized form only when nothing matches raw,
+	// so a piece literally named like the paste always wins.
+	for i := range pieces {
+		if pieces[i].Name == target {
+			return SwitchTarget{Kind: TargetPiece, Piece: &pieces[i]}, nil
+		}
+	}
+	if sanitized := SanitizePieceName(target); sanitized != target {
+		for i := range pieces {
+			if pieces[i].Name == sanitized {
+				return SwitchTarget{Kind: TargetPiece, Piece: &pieces[i]}, nil
+			}
+		}
+	}
+	// Branch → piece reverse lookup: the target may be the branch checked out
+	// in a piece whose name differs (adopted "feat/x" → piece "x").
+	for i := range pieces {
+		if pieces[i].Branch == target {
+			return SwitchTarget{Kind: TargetPiece, Piece: &pieces[i]}, nil
+		}
+	}
+
+	derivedName := SanitizePieceName(StripBranchPrefix(target))
+	if h.git.LocalBranchExists(ctx, repoRoot, target) {
+		return SwitchTarget{Kind: TargetAdoptLocal, Branch: target, PieceName: derivedName}, nil
+	}
+
+	// Remote form pasted verbatim ("origin/foo")? detectRemoteRef only checks
+	// that "origin" is a configured remote name — verify the branch actually
+	// exists there too, so a typo'd remote ref (origin/typo-branch) falls
+	// through to TargetNew (create-gated) instead of TargetAdoptRemote, which
+	// would fail later with a raw `git fetch` error instead of the
+	// --create hint.
+	remotes, remotesErr := h.git.ListRemoteBranches(ctx, repoRoot)
+	if remoteName, remoteBranch := h.detectRemoteRef(ctx, repoRoot, target); remoteName != "" {
+		if remotesErr == nil && remoteRefExists(remotes, target) {
+			return SwitchTarget{
+				Kind:      TargetAdoptRemote,
+				Branch:    target,
+				PieceName: SanitizePieceName(StripBranchPrefix(remoteBranch)),
+			}, nil
+		}
+	} else if remotesErr == nil {
+		// Bare name that only exists on a remote ("foo" → "origin/foo")?
+		// Prefer origin when the name exists on more than one remote, so
+		// resolution is deterministic in multi-remote setups.
+		if match := bestRemoteMatch(remotes, target); match != "" {
+			return SwitchTarget{Kind: TargetAdoptRemote, Branch: match, PieceName: derivedName}, nil
+		}
+	}
+
+	return SwitchTarget{Kind: TargetNew, Branch: target, PieceName: derivedName}, nil
+}
+
+// remoteRefExists reports whether ref (e.g. "origin/foo") is present among
+// remote-tracking branches.
+func remoteRefExists(remotes []string, ref string) bool {
+	for _, r := range remotes {
+		if r == ref {
+			return true
+		}
+	}
+	return false
+}
+
+// bestRemoteMatch finds a remote-tracking ref whose branch name (the part
+// after the first "/") equals name, preferring "origin" when the name exists
+// on more than one remote so resolution stays deterministic.
+func bestRemoteMatch(remotes []string, name string) string {
+	match := ""
+	for _, r := range remotes {
+		idx := strings.IndexByte(r, '/')
+		if idx <= 0 || r[idx+1:] != name {
+			continue
+		}
+		if match == "" {
+			match = r
+		}
+		if strings.HasPrefix(r, "origin/") {
+			return r
+		}
+	}
+	return match
 }

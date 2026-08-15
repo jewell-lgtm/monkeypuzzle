@@ -153,23 +153,23 @@ func probeHost(host string) doctorReport {
 func printDoctorHuman(r doctorReport) {
 	tick := func(b bool) string {
 		if b {
-			return "✓"
+			return cli.GlyphOK
 		}
-		return "✗"
+		return cli.GlyphFail
 	}
 	fmt.Fprintf(os.Stderr, "%s:\n", r.Host)
 	if !r.Reachable {
-		fmt.Fprintf(os.Stderr, "  ✗ ssh (BatchMode): %s\n", r.SSHError)
+		fmt.Fprintf(os.Stderr, "  %s ssh (BatchMode): %s\n", cli.GlyphFail, r.SSHError)
 		fmt.Fprintf(os.Stderr, "    fix: check `ssh %s` works with key auth, no prompt\n", r.Host)
 		return
 	}
-	fmt.Fprintf(os.Stderr, "  ✓ ssh (BatchMode)\n")
+	fmt.Fprintf(os.Stderr, "  %s ssh (BatchMode)\n", cli.GlyphOK)
 	if r.MPVersion == "missing" {
-		fmt.Fprintf(os.Stderr, "  ✗ mp: not found on PATH or ~/.local/bin (install it there)\n")
+		fmt.Fprintf(os.Stderr, "  %s mp: not found on PATH or ~/.local/bin (install it there)\n", cli.GlyphFail)
 	} else if !r.VersionMatch {
-		fmt.Fprintf(os.Stderr, "  ⚠ mp %s (local is %s — remote flags/schemas win)\n", r.MPVersion, r.LocalVersion)
+		fmt.Fprintf(os.Stderr, "  %s mp %s (local is %s — remote flags/schemas win)\n", cli.GlyphWarn, r.MPVersion, r.LocalVersion)
 	} else {
-		fmt.Fprintf(os.Stderr, "  ✓ mp %s = local\n", r.MPVersion)
+		fmt.Fprintf(os.Stderr, "  %s mp %s = local\n", cli.GlyphOK, r.MPVersion)
 	}
 	fmt.Fprintf(os.Stderr, "  %s git  %s tmux  %s gh", tick(r.Git), tick(r.Tmux), tick(r.Gh))
 	if r.Gh {

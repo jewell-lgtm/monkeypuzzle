@@ -30,6 +30,7 @@ confirm in an interactive terminal; everything else runs straight through.`,
 var stackStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show the stack tree, PR/MR state, and drift vs the forge's PR/MR list",
+	Args:  cobra.NoArgs,
 	RunE:  runStackStatus,
 }
 
@@ -42,6 +43,7 @@ Dry-run by default: it previews which pieces would be synced and changes
 nothing. Pass --apply to actually sync. In an interactive terminal you are shown
 the preview and asked to confirm; non-interactive callers (flags/stdin JSON)
 preview unless --apply (or "apply": true) is given.`,
+	Args: cobra.NoArgs,
 	RunE: runStackSync,
 }
 
@@ -62,6 +64,7 @@ var stackPrependCmd = &cobra.Command{
 var stackContinueCmd = &cobra.Command{
 	Use:   "continue",
 	Short: "Resume a conflicted rebase started by 'mp stack sync --strategy rebase'",
+	Args:  cobra.NoArgs,
 	RunE:  runStackContinue,
 }
 
@@ -74,6 +77,7 @@ name, or "main" to make it a root piece.
 
 Only piece metadata changes; run 'mp stack sync' afterwards to restack the
 branches onto the new lineage.`,
+	Args: cobra.NoArgs,
 	RunE: runStackSetParent,
 }
 
@@ -84,6 +88,7 @@ var stackUndoCmd = &cobra.Command{
 sync. Refuses to run if an affected worktree has uncommitted changes. Local
 only: remote branches are untouched (force-push with lease afterwards if you
 had pushed).`,
+	Args: cobra.NoArgs,
 	RunE: runStackUndo,
 }
 
@@ -95,6 +100,7 @@ base->head edges — no local clone required. Auth comes from the ambient
 GH_TOKEN/GITHUB_TOKEN (or GITLAB_TOKEN) environment, so a server can run this as
 a specific user. Output is the same forest the hosted dashboard renders, because
 both call the shared stackgraph builder.`,
+	Args: cobra.NoArgs,
 	RunE: runStackGraph,
 }
 
@@ -110,6 +116,7 @@ var (
 	flagStackPush       bool
 	flagStackStackScope bool
 	flagStackSyncApply  bool
+	flagStackSyncYes    bool
 	flagStackSyncDryRun bool
 	flagStackSyncSchema bool
 
@@ -144,7 +151,7 @@ func init() {
 	_ = stackStatusCmd.Flags().MarkDeprecated("from-github", "use --from-remote")
 	_ = stackStatusCmd.Flags().MarkHidden("from-github")
 	stackStatusCmd.Flags().BoolVar(&flagStackApplyBases, "apply-bases", false, "Edit PR/MR bases on the forge to match local lineage")
-	stackStatusCmd.Flags().BoolVar(&flagStackStatusSchema, "schema", false, "Output JSON schema and exit")
+	stackStatusCmd.Flags().BoolVar(&flagStackStatusSchema, "schema", false, "Print an example input document and exit")
 	stackStatusCmd.Flags().BoolVar(&flagStackStatusJSON, "json", false, "Output JSON even on a terminal")
 
 	stackSyncCmd.Flags().StringVar(&flagStackMain, "main", "main", "Main branch name")
@@ -153,31 +160,32 @@ func init() {
 	stackSyncCmd.Flags().BoolVar(&flagStackPush, "push", false, "Push each branch after syncing")
 	stackSyncCmd.Flags().BoolVar(&flagStackStackScope, "stack", false, "Limit to the current piece's stack (run from a piece worktree)")
 	stackSyncCmd.Flags().BoolVar(&flagStackSyncApply, "apply", false, "Apply the sync (default is a dry-run preview)")
+	stackSyncCmd.Flags().BoolVarP(&flagStackSyncYes, "yes", "y", false, "Skip the interactive confirmation prompt (implies --apply)")
 	stackSyncCmd.Flags().BoolVar(&flagStackSyncDryRun, "dry-run", false, "Preview which pieces would be synced without changing anything")
-	stackSyncCmd.Flags().BoolVar(&flagStackSyncSchema, "schema", false, "Output JSON schema and exit")
+	stackSyncCmd.Flags().BoolVar(&flagStackSyncSchema, "schema", false, "Print an example input document and exit")
 	stackSyncCmd.Flags().BoolVar(&flagStackSyncJSON, "json", false, "Output JSON even on a terminal")
 
 	stackAppendCmd.Flags().StringVar(&flagStackName, "name", "", "Piece name")
 	stackAppendCmd.Flags().StringVar(&flagStackPrompt, "prompt", "", "Piece prompt (recorded in piece metadata; used to name the piece)")
-	stackAppendCmd.Flags().BoolVar(&flagStackAppendSchema, "schema", false, "Output JSON schema and exit")
+	stackAppendCmd.Flags().BoolVar(&flagStackAppendSchema, "schema", false, "Print an example input document and exit")
 	stackAppendCmd.Flags().BoolVar(&flagStackAppendJSON, "json", false, "Output JSON even on a terminal")
 
 	stackPrependCmd.Flags().StringVar(&flagStackName, "name", "", "Piece name")
 	stackPrependCmd.Flags().StringVar(&flagStackPrompt, "prompt", "", "Piece prompt (recorded in piece metadata; used to name the piece)")
-	stackPrependCmd.Flags().BoolVar(&flagStackPrependSchema, "schema", false, "Output JSON schema and exit")
+	stackPrependCmd.Flags().BoolVar(&flagStackPrependSchema, "schema", false, "Print an example input document and exit")
 	stackPrependCmd.Flags().BoolVar(&flagStackPrependJSON, "json", false, "Output JSON even on a terminal")
 
-	stackContinueCmd.Flags().BoolVar(&flagStackContinueSchema, "schema", false, "Output JSON schema and exit")
+	stackContinueCmd.Flags().BoolVar(&flagStackContinueSchema, "schema", false, "Print an example input document and exit")
 
 	stackSetParentCmd.Flags().StringVar(&flagStackSetParentPiece, "piece", "", "Piece to re-parent (default: current piece)")
 	stackSetParentCmd.Flags().StringVar(&flagStackSetParentParent, "parent", "", "New parent piece name, or \"main\"")
-	stackSetParentCmd.Flags().BoolVar(&flagStackSetParentSchema, "schema", false, "Output JSON schema and exit")
+	stackSetParentCmd.Flags().BoolVar(&flagStackSetParentSchema, "schema", false, "Print an example input document and exit")
 
 	stackGraphCmd.Flags().StringVar(&flagStackGraphRepo, "repo", "", "Repository as owner/name (required)")
 	stackGraphCmd.Flags().StringVar(&flagStackGraphBranch, "default-branch", "", "Trunk branch (auto-detected from the forge if omitted)")
 	stackGraphCmd.Flags().StringVar(&flagStackGraphProvider, "provider", "github", "Forge provider: github (default) or gitlab")
 	stackGraphCmd.Flags().IntVar(&flagStackGraphLimit, "limit", 200, "Max PRs to fetch")
-	stackGraphCmd.Flags().BoolVar(&flagStackGraphSchema, "schema", false, "Output JSON schema and exit")
+	stackGraphCmd.Flags().BoolVar(&flagStackGraphSchema, "schema", false, "Print an example input document and exit")
 	stackGraphCmd.Flags().BoolVar(&flagStackGraphJSON, "json", false, "Output JSON even on a terminal")
 
 	stackCmd.AddCommand(stackStatusCmd)
@@ -350,7 +358,7 @@ func runStackSync(cmd *cobra.Command, args []string) error {
 			return err
 		}
 
-		apply, err := resolveApply(false, input.DryRun, len(previewResult.Updated) > 0, func() (bool, error) {
+		apply, err := resolveApply(flagStackSyncYes, input.DryRun, len(previewResult.Updated) > 0, func() (bool, error) {
 			return confirmApply(
 				"Sync the stack?",
 				fmt.Sprintf("Would sync %d piece(s) via %s: %s",

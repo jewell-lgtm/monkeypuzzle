@@ -22,7 +22,7 @@ type ReportInput struct {
 // StatusGone removes the agent's record instead of updating it (clean exit).
 const StatusGone = "gone"
 
-// ReportSchema returns the JSON schema for agent report input.
+// ReportSchema returns an example input document for agent report input.
 func ReportSchema() ([]byte, error) {
 	schema := map[string]any{
 		"id":     "",
@@ -77,6 +77,10 @@ type ListItem struct {
 	ID          string    `json:"id"`
 	Kind        string    `json:"kind,omitempty"`
 	Status      string    `json:"status"`
+	// Icon is the single-glyph rendering of Status (🔴/⚡/✅/💤) — the same
+	// mapping Summary uses, so every consumer (this JSON, the tmux plugin)
+	// renders identical icons from one source instead of a second lookup table.
+	Icon string `json:"icon,omitempty"`
 	PID         int       `json:"pid,omitempty"`
 	Pane        string    `json:"pane,omitempty"`
 	UpdatedAt   time.Time `json:"updated_at"`

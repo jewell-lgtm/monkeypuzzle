@@ -23,6 +23,7 @@ has live agents. The fan-out pattern:
 
 Exits 0 when settled (the JSON says which pieces are blocked vs done), non-zero
 on timeout.`,
+	Args: cobra.ArbitraryArgs,
 	RunE: runWait,
 }
 

@@ -23,8 +23,12 @@ echo '{"prompt":"add dark mode"}' | mp create
 mp list
 echo '{"flat":true}' | mp list
 
-# Switch to a piece (switches your multiplexer session/tab/workspace if inside one)
-echo '{"name":"my-feature"}' | mp switch
+# Switch to anything by name: a piece, a branch (adopted on the fly), or —
+# with "create":true — a brand-new piece. Project defaults to the current repo.
+echo '{"target":"my-feature"}' | mp switch
+echo '{"target":"feat/new-thing","create":true}' | mp switch
+mp switch feat/new-thing --create
+mp go --json                         # same picker, across every registered project
 
 # Sync piece with its parent (prefers origin/<parent>; --local for local branch)
 echo '{}' | mp sync
@@ -42,9 +46,9 @@ echo '{"name":"custom","parent":"main"}' | mp adopt
 # After merge: clean up worktree + multiplexer session
 echo '{}' | mp done
 
-# Sweep all merged pieces
-echo '{"dry_run":true}' | mp cleanup
-echo '{"force":true}' | mp cleanup
+# Sweep all merged pieces (dry-run by default; --apply / "apply":true to remove)
+mp cleanup                           # preview what would be cleaned
+echo '{"apply":true}' | mp cleanup
 
 # Discard an unmerged piece
 echo '{"force":true,"delete_branch":true}' | mp abandon

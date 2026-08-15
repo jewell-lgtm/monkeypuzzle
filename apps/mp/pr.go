@@ -1,10 +1,12 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -27,6 +29,7 @@ var prCreateCmd = &cobra.Command{
 Pushes the branch to origin and creates a PR using the gh CLI.
 
 When no title is provided, the piece name is used as the default PR title.`,
+	Args: cobra.NoArgs,
 	RunE: runPRCreate,
 }
 
@@ -36,15 +39,19 @@ var prReadyCmd = &cobra.Command{
 	Long: `Flip the draft PR/MR for the current piece worktree to ready-for-review.
 Reads the PR number from .monkeypuzzle/pr-metadata.json. Fires the
 before-pr-ready and after-pr-ready hooks around the provider call.`,
+	Args: cobra.NoArgs,
 	RunE: runPRReady,
 }
 
 var (
-	flagPRTitle  string
-	flagPRBody   string
-	flagPRBase   string
-	flagPRDraft  bool
-	flagPRSchema bool
+	flagPRTitle       string
+	flagPRBody        string
+	flagPRBase        string
+	flagPRDraft       bool
+	flagPRSchema      bool
+	flagPRJSON        bool
+	flagPRReadySchema bool
+	flagPRReadyJSON   bool
 )
 
 func init() {
@@ -52,7 +59,10 @@ func init() {
 	prCreateCmd.Flags().StringVar(&flagPRBody, "body", "", "PR description")
 	prCreateCmd.Flags().StringVar(&flagPRBase, "base", "", "Base branch to merge into (default: auto-detect from parent)")
 	prCreateCmd.Flags().BoolVar(&flagPRDraft, "draft", false, "Open the PR/MR as a draft")
-	prCreateCmd.Flags().BoolVar(&flagPRSchema, "schema", false, "Output JSON schema and exit")
+	prCreateCmd.Flags().BoolVar(&flagPRSchema, "schema", false, "Print an example input document and exit")
+	prCreateCmd.Flags().BoolVar(&flagPRJSON, "json", false, "Output JSON even on a terminal")
+	prReadyCmd.Flags().BoolVar(&flagPRReadySchema, "schema", false, "Print an example input document and exit")
+	prReadyCmd.Flags().BoolVar(&flagPRReadyJSON, "json", false, "Output JSON even on a terminal")
 	prCmd.AddCommand(prCreateCmd)
 	prCmd.AddCommand(prReadyCmd)
 	rootCmd.AddCommand(prCmd)
@@ -95,11 +105,31 @@ func runPRCreate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Output JSON to stdout
-	return cli.PrintJSON(result)
+	cli.Hint("mp pr ready (when it's ready for review)")
+	return emitResult(result, flagPRJSON)
 }
 
 func runPRReady(cmd *cobra.Command, args []string) error {
+	// --schema mode: ready takes no input fields, but the quad (flags / stdin /
+	// --schema / interactive) holds for every command so agents can introspect
+	// them uniformly.
+	if flagPRReadySchema {
+		fmt.Println("{}")
+		return nil
+	}
+	if cli.HasStdinData() {
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return fmt.Errorf("failed to read stdin: %w", err)
+		}
+		if len(strings.TrimSpace(string(data))) > 0 {
+			var empty map[string]any
+			if err := json.Unmarshal(data, &empty); err != nil {
+				return fmt.Errorf("invalid JSON: %w", err)
+			}
+		}
+	}
+
 	ctx := cmd.Context()
 	wd, err := os.Getwd()
 	if err != nil {
@@ -114,7 +144,11 @@ func runPRReady(cmd *cobra.Command, args []string) error {
 		adapters.SetupCLILoading(os.Stderr),
 	)
 	handler := prcmd.NewHandler(deps)
-	return handler.MarkReady(ctx, wd)
+	if err := handler.MarkReady(ctx, wd); err != nil {
+		return err
+	}
+	cli.Hint("mp merge — or merge on the forge, then mp done")
+	return emitResult(map[string]any{"status": "ready"}, flagPRReadyJSON)
 }
 
 func getPRInput() (prcmd.Input, error) {

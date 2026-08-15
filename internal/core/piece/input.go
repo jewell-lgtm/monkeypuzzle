@@ -47,12 +47,16 @@ type PieceHierarchyStatus struct {
 
 // PieceListItem represents a piece available for switching.
 type PieceListItem struct {
-	Name         string    `json:"name"`
-	WorktreePath string    `json:"worktree_path"`
-	SessionName  string    `json:"session_name"`
-	HasSession   bool      `json:"has_session"`
-	ModTime      time.Time `json:"mod_time"`
-	Parent       string    `json:"parent,omitempty"` // Parent piece name, or "main" for root pieces
+	Name         string `json:"name"`
+	WorktreePath string `json:"worktree_path"`
+	SessionName  string `json:"session_name"`
+	HasSession   bool   `json:"has_session"`
+	// Branch is the git branch checked out in the piece worktree. It usually
+	// equals Name, but differs for adopted branches (e.g. "feat/add-foo" →
+	// piece "add-foo") and pieces created with an explicit branch name.
+	Branch  string    `json:"branch,omitempty"`
+	ModTime time.Time `json:"mod_time"`
+	Parent  string    `json:"parent,omitempty"` // Parent piece name, or "main" for root pieces
 	// AgentStatus is the aggregate of the piece's reported agents (blocked >
 	// working > done > idle); empty when no agents have reported.
 	AgentStatus string `json:"agent_status,omitempty"`
@@ -69,9 +73,12 @@ type SwitchResult struct {
 // NewPieceInput holds input for the piece create command.
 // Must provide one of: Name or Prompt. Name can coexist with Prompt.
 type NewPieceInput struct {
-	Name             string `json:"name,omitempty"`
-	Prompt           string `json:"prompt,omitempty"`
-	Parent           string `json:"parent,omitempty"` // Parent piece name, defaults to "main"
+	Name   string `json:"name,omitempty"`
+	Prompt string `json:"prompt,omitempty"`
+	Parent string `json:"parent,omitempty"` // Parent piece name, defaults to "main"
+	// Branch names the new git branch verbatim (slashes allowed). Defaults to
+	// the piece name, preserving the historical branch == piece invariant.
+	Branch           string `json:"branch,omitempty"`
 	SkipSwitch       bool   `json:"skip_switch,omitempty"`
 	OverwriteSession bool   `json:"overwrite_session,omitempty"`
 	// Agent launches an agent of this kind (claude, codex) in the new piece:
@@ -80,12 +87,13 @@ type NewPieceInput struct {
 	Agent string `json:"agent,omitempty"`
 }
 
-// NewPieceSchema returns the JSON schema for piece create input.
+// NewPieceSchema returns an example input document for piece create input.
 func NewPieceSchema() ([]byte, error) {
 	schema := map[string]any{
 		"name":              "",
 		"prompt":            "",
 		"parent":            "main",
+		"branch":            "",
 		"skip_switch":       false,
 		"overwrite_session": false,
 		"agent":             "",
@@ -133,10 +141,44 @@ func WithNewPieceDefaults(input NewPieceInput) NewPieceInput {
 		Name:             name,
 		Prompt:           prompt,
 		Parent:           parent,
+		Branch:           strings.TrimSpace(input.Branch),
 		SkipSwitch:       input.SkipSwitch,
 		OverwriteSession: input.OverwriteSession,
 		Agent:            strings.TrimSpace(input.Agent),
 	}
+}
+
+// SwitchTargetKind classifies what a free-form switch target resolved to.
+type SwitchTargetKind int
+
+const (
+	// TargetMain means the target names the trunk ("main"/"master"): attach the
+	// project's main worktree session.
+	TargetMain SwitchTargetKind = iota
+	// TargetPiece means an existing piece matched (by name, sanitized name, or
+	// the branch checked out in its worktree): attach it.
+	TargetPiece
+	// TargetAdoptLocal means a local branch exists but is not a piece yet:
+	// adopt it, then attach.
+	TargetAdoptLocal
+	// TargetAdoptRemote means only a remote ref matched (e.g. "origin/foo"):
+	// fetch + adopt with a tracking branch, then attach.
+	TargetAdoptRemote
+	// TargetNew means nothing matched: creating a piece (with the target as the
+	// verbatim branch name) is the only remaining interpretation.
+	TargetNew
+)
+
+// SwitchTarget is the result of resolving a free-form switch target.
+type SwitchTarget struct {
+	Kind SwitchTargetKind
+	// Piece is the matched piece; set only for TargetPiece.
+	Piece *PieceListItem
+	// Branch is the branch to adopt (verbatim, including any remote prefix) or
+	// to create; empty for TargetMain and TargetPiece.
+	Branch string
+	// PieceName is the piece name an adopt/create would derive from Branch.
+	PieceName string
 }
 
 // AbandonInput holds input for the piece abandon command.
@@ -146,7 +188,7 @@ type AbandonInput struct {
 	DeleteBranch bool   `json:"delete_branch,omitempty"`
 }
 
-// AbandonSchema returns the JSON schema for piece abandon input.
+// AbandonSchema returns an example input document for piece abandon input.
 func AbandonSchema() ([]byte, error) {
 	schema := map[string]any{
 		"name":          "",
@@ -184,6 +226,9 @@ func WithAbandonDefaults(input AbandonInput) AbandonInput {
 
 // UpdateInput holds input for the piece update command.
 type UpdateInput struct {
+	// Main is the trunk branch name (canonical key).
+	Main string `json:"main,omitempty"`
+	// MainBranch is the deprecated alias for Main.
 	MainBranch string `json:"main_branch,omitempty"`
 }
 
@@ -194,10 +239,10 @@ type UpdateResult struct {
 	Status     string `json:"status"` // "updated", "already-up-to-date"
 }
 
-// UpdateSchema returns the JSON schema for piece update input.
+// UpdateSchema returns an example input document for piece update input.
 func UpdateSchema() ([]byte, error) {
 	schema := map[string]any{
-		"main_branch": "main",
+		"main": "main",
 	}
 	return json.MarshalIndent(schema, "", "  ")
 }
@@ -213,16 +258,25 @@ func ParseUpdateJSON(data []byte) (UpdateInput, error) {
 
 // WithUpdateDefaults returns input with defaults applied.
 func WithUpdateDefaults(input UpdateInput) UpdateInput {
-	mainBranch := strings.TrimSpace(input.MainBranch)
-	if mainBranch == "" {
-		mainBranch = "main"
+	mainBranch := firstNonEmpty(input.Main, input.MainBranch, "main")
+	return UpdateInput{Main: mainBranch, MainBranch: mainBranch}
+}
+
+// firstNonEmpty returns the first value that isn't blank after trimming.
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if s := strings.TrimSpace(v); s != "" {
+			return s
+		}
 	}
-	return UpdateInput{MainBranch: mainBranch}
+	return ""
 }
 
 // SyncInput holds input for the piece sync command.
 type SyncInput struct {
-	// MainBranch is the trunk branch name, used when the piece's parent is "main".
+	// Main is the trunk branch name, used when the piece's parent is "main".
+	Main string `json:"main,omitempty"`
+	// MainBranch is the deprecated alias for Main.
 	MainBranch string `json:"main_branch,omitempty"`
 	// From is an explicit ref to sync from (e.g. "origin/parent-branch",
 	// "upstream/main"). Overrides the default origin/<parent> resolution.
@@ -243,12 +297,12 @@ type SyncResult struct {
 	Status string `json:"status"` // "synced"
 }
 
-// SyncPieceSchema returns the JSON schema for piece sync input.
+// SyncPieceSchema returns an example input document for piece sync input.
 func SyncPieceSchema() ([]byte, error) {
 	schema := map[string]any{
-		"main_branch": "main",
-		"from":        "",
-		"local":       false,
+		"main":  "main",
+		"from":  "",
+		"local": false,
 	}
 	return json.MarshalIndent(schema, "", "  ")
 }
@@ -264,11 +318,9 @@ func ParseSyncJSON(data []byte) (SyncInput, error) {
 
 // WithSyncDefaults returns input with whitespace trimmed and defaults applied.
 func WithSyncDefaults(input SyncInput) SyncInput {
-	mainBranch := strings.TrimSpace(input.MainBranch)
-	if mainBranch == "" {
-		mainBranch = "main"
-	}
+	mainBranch := firstNonEmpty(input.Main, input.MainBranch, "main")
 	return SyncInput{
+		Main:       mainBranch,
 		MainBranch: mainBranch,
 		From:       strings.TrimSpace(input.From),
 		Local:      input.Local,
@@ -283,6 +335,9 @@ const (
 
 // MergeInput holds input for the piece merge command.
 type MergeInput struct {
+	// Main is the trunk branch name (canonical key).
+	Main string `json:"main,omitempty"`
+	// MainBranch is the deprecated alias for Main.
 	MainBranch string `json:"main_branch,omitempty"`
 	Force      bool   `json:"force,omitempty"` // Force merge even if piece has children (children are NOT re-homed)
 	// ReparentChildren, when true, allows merging a piece that has child pieces:
@@ -303,10 +358,10 @@ type MergeResult struct {
 	ReparentedChildren []string `json:"reparented_children,omitempty"`
 }
 
-// MergeSchema returns the JSON schema for piece merge input.
+// MergeSchema returns an example input document for piece merge input.
 func MergeSchema() ([]byte, error) {
 	schema := map[string]any{
-		"main_branch":       "main",
+		"main":              "main",
 		"force":             false,
 		"reparent_children": false,
 		"reparent_strategy": ReparentRebase,
@@ -335,15 +390,13 @@ func ParseMergeJSON(data []byte) (MergeInput, error) {
 
 // WithMergeDefaults returns input with defaults applied.
 func WithMergeDefaults(input MergeInput) MergeInput {
-	mainBranch := strings.TrimSpace(input.MainBranch)
-	if mainBranch == "" {
-		mainBranch = "main"
-	}
+	mainBranch := firstNonEmpty(input.Main, input.MainBranch, "main")
 	strategy := strings.TrimSpace(input.ReparentStrategy)
 	if input.ReparentChildren && strategy == "" {
 		strategy = ReparentRebase
 	}
 	return MergeInput{
+		Main:             mainBranch,
 		MainBranch:       mainBranch,
 		Force:            input.Force,
 		ReparentChildren: input.ReparentChildren,
@@ -353,23 +406,23 @@ func WithMergeDefaults(input MergeInput) MergeInput {
 
 // CleanupInput holds input for the piece cleanup command.
 type CleanupInput struct {
+	// Main is the trunk branch name (canonical key).
+	Main string `json:"main,omitempty"`
+	// MainBranch is the deprecated alias for Main.
 	MainBranch string `json:"main_branch,omitempty"`
 	DryRun     bool   `json:"dry_run,omitempty"`
 	// Apply performs the cleanup for real (the opt-in to remove worktrees and
 	// prune projects). Cleanup is dry-run by default; without Apply a
 	// non-interactive invocation only previews.
 	Apply bool `json:"apply,omitempty"`
-	// Force is a back-compat alias for Apply (it predates the dry-run default).
-	Force bool `json:"force,omitempty"`
 }
 
-// CleanupSchema returns the JSON schema for piece cleanup input.
+// CleanupSchema returns an example input document for piece cleanup input.
 func CleanupSchema() ([]byte, error) {
 	schema := map[string]any{
-		"main_branch": "main",
-		"dry_run":     false,
-		"apply":       false,
-		"force":       false,
+		"main":    "main",
+		"dry_run": false,
+		"apply":   false,
 	}
 	return json.MarshalIndent(schema, "", "  ")
 }
@@ -385,15 +438,12 @@ func ParseCleanupJSON(data []byte) (CleanupInput, error) {
 
 // WithCleanupDefaults returns input with defaults applied.
 func WithCleanupDefaults(input CleanupInput) CleanupInput {
-	mainBranch := strings.TrimSpace(input.MainBranch)
-	if mainBranch == "" {
-		mainBranch = "main"
-	}
+	mainBranch := firstNonEmpty(input.Main, input.MainBranch, "main")
 	return CleanupInput{
+		Main:       mainBranch,
 		MainBranch: mainBranch,
 		DryRun:     input.DryRun,
 		Apply:      input.Apply,
-		Force:      input.Force,
 	}
 }
 
@@ -402,14 +452,18 @@ type FlattenInput struct {
 	Force          bool `json:"force,omitempty"`
 	DeleteBranches bool `json:"delete_branches,omitempty"`
 	DryRun         bool `json:"dry_run,omitempty"`
+	// Apply performs the flatten for real. Flatten is dry-run by default for
+	// non-interactive callers; without Apply they only preview.
+	Apply bool `json:"apply,omitempty"`
 }
 
-// FlattenSchema returns the JSON schema for flatten input.
+// FlattenSchema returns an example input document for flatten input.
 func FlattenSchema() ([]byte, error) {
 	schema := map[string]any{
 		"force":           false,
 		"delete_branches": false,
 		"dry_run":         false,
+		"apply":           false,
 	}
 	return json.MarshalIndent(schema, "", "  ")
 }
@@ -425,6 +479,9 @@ func ParseFlattenJSON(data []byte) (FlattenInput, error) {
 
 // DoneInput holds input for the piece done command.
 type DoneInput struct {
+	// Main is the trunk branch name (canonical key).
+	Main string `json:"main,omitempty"`
+	// MainBranch is the deprecated alias for Main.
 	MainBranch string `json:"main_branch,omitempty"`
 }
 
@@ -436,10 +493,10 @@ type DoneResult struct {
 	Cleaned      bool   `json:"cleaned"`
 }
 
-// DoneSchema returns the JSON schema for piece done input.
+// DoneSchema returns an example input document for piece done input.
 func DoneSchema() ([]byte, error) {
 	schema := map[string]any{
-		"main_branch": "main",
+		"main": "main",
 	}
 	return json.MarshalIndent(schema, "", "  ")
 }
@@ -455,11 +512,8 @@ func ParseDoneJSON(data []byte) (DoneInput, error) {
 
 // WithDoneDefaults returns input with defaults applied.
 func WithDoneDefaults(input DoneInput) DoneInput {
-	mainBranch := strings.TrimSpace(input.MainBranch)
-	if mainBranch == "" {
-		mainBranch = "main"
-	}
-	return DoneInput{MainBranch: mainBranch}
+	mainBranch := firstNonEmpty(input.Main, input.MainBranch, "main")
+	return DoneInput{Main: mainBranch, MainBranch: mainBranch}
 }
 
 // AdoptPieceInput holds input for the piece adopt command.
@@ -471,7 +525,7 @@ type AdoptPieceInput struct {
 	RepoRoot string `json:"repo_root,omitempty"` // Explicit repo root (defaults to resolving from cwd)
 }
 
-// AdoptPieceSchema returns the JSON schema for piece adopt input.
+// AdoptPieceSchema returns an example input document for piece adopt input.
 func AdoptPieceSchema() ([]byte, error) {
 	schema := map[string]any{
 		"branch":    "",

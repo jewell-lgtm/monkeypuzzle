@@ -9,14 +9,17 @@ Every command follows the same interaction contract, in priority order:
 | Interactive | TTY detected (default)      | Run command with no args |
 | Flags       | One or more flags provided  | `mp <cmd> --flag value`  |
 | Stdin JSON  | Piped input                 | `echo '{}' \| mp <cmd>`  |
-| Schema      | `--schema` flag             | `mp <cmd> --schema`      |
+| Example     | `--schema` flag             | `mp <cmd> --schema`      |
 
 In interactive mode a Bubble Tea wizard walks you through the decisions, using
 defaults inferred from detected state; commands with several decisions are
 multi-step wizards. **Flags skip the corresponding wizard steps** — pass enough
 flags and the command runs straight through with no wizard. Stdin JSON is the
 fully programmatic path (JSON in, JSON out): there is no separate "agent mode",
-the same CLI is the API.
+the same CLI is the API. `--schema` prints an example input document in the
+same shape stdin JSON expects — edit it and pipe it right back in
+(`mp init --schema | jq '.name = "x"' | mp init`); it is not a formal JSON
+Schema document.
 
 **Ambiguity rule:** non-interactive invocations (flags or JSON) **fail loudly on
 genuine ambiguity** rather than prompting or guessing — there is no human to ask.
@@ -86,9 +89,9 @@ mp completion powershell | Out-String | Invoke-Expression
 | ------------------------------- | ----------------------- |
 | `mp abandon --name`       | Available piece names   |
 | `mp init --pr-provider`         | `github`, `gitlab`      |
-| `mp update --main-branch` | Git branch names        |
-| `mp sync --main-branch`   | Git branch names        |
-| `mp merge --main-branch`  | Git branch names        |
+| `mp update --main`        | Git branch names        |
+| `mp sync --main`          | Git branch names        |
+| `mp merge --main`         | Git branch names        |
 
 ---
 
@@ -113,7 +116,7 @@ mp init --schema               # Output schema
 | `--pr-provider`      | PR provider (`github`, `gitlab`)                                  | `github`       |
 | `--dir`              | Directory (relative to repo root) for monkeypuzzle state          | `.monkeypuzzle`|
 | `--gitignore`        | Regenerate `<dir>/.gitignore` only (no other changes)             | `false`        |
-| `--schema`           | Output JSON schema and exit                                       | -              |
+| `--schema`           | Print an example input document and exit                          | -              |
 | `-y, --yes`          | Overwrite existing config                                         | `false`        |
 
 `--dir` lets you keep all monkeypuzzle state somewhere already ignored by git,
@@ -122,7 +125,10 @@ recorded in `~/.config/monkeypuzzle/project-dirs.json` (it can't live in
 `monkeypuzzle.json`, which is inside the directory being relocated). To relocate
 an existing project later, use [`mp move`](#mp-move).
 
-### JSON Schema
+`mp reinit` is an alias for `mp init` — same flags, same behavior — for the
+explicit "refresh scaffolding in an already-initialized repo" case.
+
+### Example input
 
 ```json
 {
@@ -153,33 +159,45 @@ Creates the monkeypuzzle directory (default `.monkeypuzzle/`):
 
 ## mp switch
 
-Cross-project picker. Attach an existing piece (or main worktree), or create a piece on the fly by adopting a stray local branch.
+The single switching entry point. Give it whatever you have in your head or clipboard — a piece name, a branch (local, remote, or already adopted), or a brand-new name — and it attaches, adopts, or creates as needed.
 
 ### Usage
 
 ```bash
-mp switch                                          # Interactive: fuzzy-filter all rows
+mp switch                                          # Interactive: picker scoped to the current project
+mp switch --all                                    # Interactive: every registered project (same as `mp go`)
+mp switch fix-x                                    # Piece or branch name; resolves in the current repo
+mp switch feat/new-idea --create                   # Brand-new name: create piece "new-idea" on that branch
 mp switch --project app                            # Attach app's main worktree
-mp switch --project app --piece fix-x              # Attach an existing piece
-mp switch --project app --branch spike-token-rotate  # Adopt branch as piece, then attach
-echo '{"project":"app","piece":"fix-x"}' | mp switch
+mp switch --project app --piece fix-x              # Attach an existing piece (skips resolution)
+mp switch --project app --branch spike-token-rotate  # Adopt branch as piece (or attach if already one)
+echo '{"target":"fix-x"}' | mp switch
+echo '{"target":"feat/new-idea","create":true}' | mp switch
 mp switch --schema
 ```
+
+### Target resolution
+
+A positional `TARGET` resolves in order: `main`/`master` (attach the main worktree) → an existing **piece** by name, sanitized name, or the branch checked out in it (attach) → a local **branch** (adopt, then attach) → a **remote** ref, pasted verbatim (`origin/foo`) or by bare name (fetch + adopt tracking) → **nothing** (create a piece whose branch is `TARGET` verbatim and whose name is derived from it). A piece always beats an unadopted branch of the same name, so switching stays idempotent; `--piece`/`--branch` bypass resolution when you need to be explicit.
+
+Creation is gated: on a terminal you're asked to confirm; non-interactively an unmatched target is an error unless `--create` (or `"create": true` on stdin) is passed — a typo never silently mints a piece.
 
 ### Flags
 
 | Flag        | Description                                                            |
 | ----------- | ---------------------------------------------------------------------- |
-| `--project` | Project name or path (required for non-interactive modes)              |
-| `--piece`   | Existing piece to attach                                               |
-| `--branch`  | Local git branch to adopt as a piece                                   |
-| `--schema`  | Print the JSON-stdin schema and exit                                   |
+| `--project` | Project name or path (defaults to the repo you're standing in)         |
+| `--piece`   | Existing piece to attach (skips target resolution)                     |
+| `--branch`  | Git branch to adopt as a piece (attaches if it already is one)         |
+| `--create`  | Allow an unmatched target to create a new piece                        |
+| `--all`     | Interactive picker across all registered projects                      |
+| `--schema`  | Print an example input document and exit                              |
 
-`--piece` and `--branch` are mutually exclusive. Omit both to attach the project's main worktree.
+`TARGET`, `--piece`, and `--branch` are mutually exclusive. Omit all of them (with `--project`) to attach that project's main worktree. Without `--project`, mp resolves the project from the current directory — any init'd repo works, registered or not.
 
 ### Interactive picker
 
-With a terminal, opens a fuzzy-filtered list of rows across every registered project:
+With a terminal and no selectors, opens a fuzzy-filtered list scoped to the current project (bare `mp` is the same view); `--all` or running outside a project widens it to every registered project:
 
 - **Pieces** — existing worktrees, with a `[<multiplexer>]` indicator if a session is live.
 - **Branches** — local git branches available for adoption (excludes main/master, any branch already adopted as a piece, the branch checked out in the main repo, and branches held by locked worktrees). A branch checked out in a worktree mp doesn't manage — e.g. one created by an agent — is offered too; adopting it relocates that worktree into the pieces dir. Selecting one runs `mp adopt`.
@@ -188,10 +206,11 @@ Type to filter, ↑/↓ to move, `enter` to select, `esc` to cancel. The picker 
 
 ### What it does
 
-1. Resolves the project from the registry.
+1. Resolves the project: the registry for an explicit `--project`, else the repo the caller is standing in.
 2. Based on the chosen selector:
+   - **target** — runs the resolution above, then attaches / adopts / creates
    - **piece** — locates the worktree and attaches its multiplexer session
-   - **branch** — runs `AdoptPiece` with `repo_root` set to the project path, then attaches
+   - **branch** — attaches the piece holding that branch, else runs `AdoptPiece` with `repo_root` set to the project path, then attaches
 3. Attaching only happens when run **interactively from inside the configured
    multiplexer** (real TTY on stdin *and* the adapter's in-session env var set).
    When no multiplexer is configured, or when called by an agent/script or from
@@ -246,31 +265,37 @@ main-only state. Each piece's multiplexer session is killed and its worktree rem
 Unlike `mp cleanup` (which only removes _merged_ pieces), flatten removes every
 piece regardless of merge status. Branches are kept by default.
 
+Dry-run by default, like the other sweep operations (`mp cleanup`,
+`mp stack sync`): it previews what would be removed and changes nothing. Pass
+`--apply` to actually flatten; in an interactive terminal you see the preview
+and confirm (`--yes`/`-y` skips the prompt and applies).
+
 ### Usage
 
 ```bash
-mp flatten                       # Interactive confirmation, then remove all pieces
-mp flatten --yes                 # Remove all (skip confirmation)
-mp flatten --force               # Discard uncommitted changes while removing
-mp flatten --delete-branches     # Also delete each piece's git branch
-mp flatten --dry-run             # Show what would be removed without changes
-echo '{"force":true}' | mp flatten
+mp flatten                       # Preview (interactive terminal: preview + confirm)
+mp flatten --apply               # Remove all pieces
+mp flatten -y                    # Remove all (skip confirmation)
+mp flatten --apply --force       # Also discard uncommitted changes
+mp flatten --delete-branches     # Also delete each piece's git branch (with --apply)
+echo '{"apply":true}' | mp flatten
 mp flatten --schema
 ```
 
 ### Flags
 
-| Flag                | Description                                  | Default |
-| ------------------- | -------------------------------------------- | ------- |
-| `--force`           | Force removal even with uncommitted changes  | `false` |
-| `--delete-branches` | Also delete each piece's git branch          | `false` |
-| `--dry-run`         | Show what would be removed without changes   | `false` |
-| `--yes`             | Skip the interactive confirmation prompt     | `false` |
+| Flag                | Description                                       | Default |
+| ------------------- | ------------------------------------------------- | ------- |
+| `--apply`           | Apply the flatten (default is a dry-run preview)  | `false` |
+| `--yes`, `-y`       | Skip the confirmation prompt (implies `--apply`)  | `false` |
+| `--force`           | Force removal even with uncommitted changes       | `false` |
+| `--delete-branches` | Also delete each piece's git branch               | `false` |
+| `--dry-run`         | Force a preview even with `--apply`-style stdin   | `false` |
 
 ### What it does
 
 1. Lists all pieces for the repo (works from the main repo or from inside a piece)
-2. In an interactive terminal, asks for confirmation (skip with `--yes`/`--force`)
+2. Previews; in an interactive terminal, asks for confirmation (skip with `--yes`), and non-interactive callers only apply with `--apply` / `"apply": true`
 3. For each piece: switches you to the main session if you're inside it, kills the
    multiplexer session, and removes the worktree (use `--force` to discard uncommitted changes)
 4. Optionally deletes each piece's branch (`--delete-branches`)
@@ -296,12 +321,13 @@ Pieces that could not be removed (e.g. uncommitted changes without `--force`) ap
 
 ## mp status
 
-Show current piece status.
+Show a piece's status. Defaults to the piece you're standing in (or the main repo); name one positionally or with `--piece` to inspect it from anywhere in the repo.
 
 ### Usage
 
 ```bash
 mp status
+mp status my-feature
 ```
 
 ### Output
@@ -436,14 +462,14 @@ Merge main branch into current piece.
 
 ```bash
 mp update                  # Merge from 'main'
-mp update --main-branch develop  # Merge from 'develop'
+mp update --main develop  # Merge from 'develop'
 ```
 
 ### Flags
 
 | Flag            | Description          | Default |
 | --------------- | -------------------- | ------- |
-| `--main-branch` | Branch to merge from | `main`  |
+| `--main` | Branch to merge from (`--main-branch` is a deprecated alias) | `main`  |
 
 ### Requirements
 
@@ -483,7 +509,7 @@ echo '{"local":true}' | mp sync
 
 | Flag            | Description                                            | Default |
 | --------------- | ------------------------------------------------------ | ------- |
-| `--main-branch` | Trunk branch name, used when the piece's parent is main | `main`  |
+| `--main` | Trunk branch name, used when the piece's parent is main (`--main-branch` is a deprecated alias) | `main`  |
 | `--from`        | Explicit ref to sync from (fetched when remote)        | —       |
 | `--local`       | Use the local parent branch, skip origin               | `false` |
 
@@ -493,7 +519,7 @@ echo '{"local":true}' | mp sync
 
 ### What it does
 
-1. Reads the piece's parent from metadata (`main` → `--main-branch`)
+1. Reads the piece's parent from metadata (`main` → `--main`)
 2. Resolves the ref: `--from` override, else `origin/<parent>` when origin has
    the branch (fetched first), else the local parent branch
 3. Runs `before-piece-update.sh` hook (if exists)
@@ -525,14 +551,14 @@ Merge piece back to main branch.
 
 ```bash
 mp merge                   # Merge to 'main'
-mp merge --main-branch develop  # Merge to 'develop'
+mp merge --main develop  # Merge to 'develop'
 ```
 
 ### Flags
 
 | Flag                   | Description                                                              | Default |
 | ---------------------- | ------------------------------------------------------------------------ | ------- |
-| `--main-branch`        | Branch to merge into                                                     | `main`  |
+| `--main`                | Branch to merge into (`--main-branch` is a deprecated alias)             | `main`  |
 | `--force`              | Merge even if the piece has child pieces (children are **not** re-homed) | `false` |
 | `--reparent-children`  | Merge a piece with children, re-homing them onto the merge target        | `false` |
 | `--reparent-strategy`  | How to re-home children: `rebase` (rewrites history) or `merge` (no force-push) | `rebase` |
@@ -583,9 +609,12 @@ echo '{"apply":true}' | mp cleanup
 | Flag            | Description                                       | Default |
 | --------------- | ------------------------------------------------- | ------- |
 | `--apply`       | Apply the cleanup (default is a dry-run preview)  | `false` |
+| `--yes`, `-y`   | Skip the confirmation prompt (implies `--apply`)  | `false` |
 | `--dry-run`     | Preview only; never prompt, never change anything | `false` |
-| `--force`       | Apply without the interactive confirmation (alias for `--apply`) | `false` |
-| `--main-branch` | Main branch to check merge status against         | `main`  |
+| `--main` | Main branch to check merge status against (`--main-branch` deprecated) | `main`  |
+
+`--force` was removed: on cleanup it used to mean "apply", clashing with its
+meaning everywhere else (override a safety check). Use `--apply` or `--yes`.
 
 ### What it does
 
@@ -604,23 +633,24 @@ Remove an unmerged piece (worktree, multiplexer session, optionally branch).
 ### Usage
 
 ```bash
-mp abandon                              # Interactive TUI selector
-mp abandon --name my-feature            # By name
-mp abandon --name my-feature --force    # Discard uncommitted changes
-mp abandon --name foo --delete-branch   # Also delete git branch
+mp abandon                              # The piece you're standing in
+mp abandon my-feature                   # By name
+mp abandon my-feature --force           # Discard uncommitted changes
+mp abandon foo --delete-branch          # Also delete git branch
 ```
 
 ### Flags
 
-| Flag              | Description                                 | Default |
-| ----------------- | ------------------------------------------- | ------- |
-| `--name`          | Piece name to abandon                       | -       |
-| `--force`         | Force removal even with uncommitted changes | `false` |
-| `--delete-branch` | Also delete the git branch                  | `false` |
+| Flag              | Description                                    | Default |
+| ----------------- | ---------------------------------------------- | ------- |
+| `--piece`         | Piece to abandon (or pass it positionally)     | current |
+| `--name`          | Deprecated alias for `--piece`                 | -       |
+| `--force`         | Force removal even with uncommitted changes    | `false` |
+| `--delete-branch` | Also delete the git branch                     | `false` |
 
 ### What it does
 
-1. Finds the piece by name (or shows TUI selector)
+1. Finds the piece by the positional/`--piece` selector, else the piece the caller is standing in
 2. Kills the multiplexer session if it exists
 3. Removes the git worktree (use `--force` to discard uncommitted changes)
 4. Optionally deletes the git branch (`--delete-branch`)
@@ -670,22 +700,46 @@ For a stacked piece, the base auto-detects to the parent piece's branch so the P
 
 ---
 
+## mp pr ready
+
+Flip the current piece's draft PR/MR to ready-for-review. Reads the PR number
+from `.monkeypuzzle/pr-metadata.json` and fires the `before-pr-ready` /
+`after-pr-ready` hooks around the provider call. Run from within a piece
+worktree.
+
+### Usage
+
+```bash
+mp pr ready
+echo '{}' | mp pr ready     # stdin accepted for uniformity (no fields)
+mp pr ready --schema        # prints {} — ready takes no input
+```
+
+| Flag       | Description                          |
+| ---------- | ------------------------------------ |
+| `--json`   | Output `{"status":"ready"}` even on a terminal |
+| `--schema` | Print an example input document and exit |
+
+---
+
 ## mp done
 
-Clean up the current piece (worktree + multiplexer session) after its branch has been merged. Run from within a piece worktree. Verifies the piece is merged first — use [`mp abandon`](#mp-piece-abandon) for unmerged pieces.
+Clean up a piece (worktree + multiplexer session) after its branch has been merged. Defaults to the piece you're standing in; name one positionally or with `--piece` to finish it from anywhere in the repo. Verifies the piece is merged first — use [`mp abandon`](#mp-abandon) for unmerged pieces.
 
 ### Usage
 
 ```bash
 mp done
-mp done --main-branch develop
+mp done my-feature
+mp done --main develop
 ```
 
 ### Flags
 
-| Flag            | Description                               | Default |
-| --------------- | ----------------------------------------- | ------- |
-| `--main-branch` | Main branch to check merge status against | `main`  |
+| Flag            | Description                                   | Default |
+| --------------- | --------------------------------------------- | ------- |
+| `--piece`       | Piece to finish (or pass it positionally)     | current |
+| `--main` | Main branch to check merge status against (`--main-branch` deprecated) | `main`  |
 
 ---
 
@@ -783,6 +837,44 @@ Resume a conflicted rebase started by `mp stack sync --strategy rebase` (after r
 mp stack continue
 ```
 
+### mp stack undo
+
+Restore every piece branch to the snapshot `mp stack sync` took right before its last run. Local only — remote branches are untouched; force-push with lease afterwards if you'd already pushed. Refuses to run if an affected worktree has uncommitted changes.
+
+```bash
+mp stack undo
+```
+
+### mp stack set-parent
+
+Re-point a piece onto a different parent — metadata only; run `mp stack sync` afterwards to actually restack the branches onto the new lineage. Defaults to the current piece when run from inside one.
+
+```bash
+mp stack set-parent --parent other-piece
+mp stack set-parent --piece child-feat --parent main   # make it a root piece
+```
+
+| Flag       | Description                                   | Default        |
+| ---------- | ---------------------------------------------- | -------------- |
+| `--piece`  | Piece to re-parent                              | Current piece  |
+| `--parent` | New parent piece name, or `main`                | -              |
+
+### mp stack graph
+
+Reconstruct a repository's stacked-PR forest straight from the forge's open PRs' base→head edges — no local clone required. Auth comes from the ambient `GH_TOKEN`/`GITHUB_TOKEN` (or `GITLAB_TOKEN`) environment, so a server can run this as a specific user. This is the same forest the hosted dashboard renders — both go through the shared stackgraph builder.
+
+```bash
+mp stack graph --repo owner/name
+mp stack graph --repo owner/name --provider gitlab --default-branch develop
+```
+
+| Flag               | Description                                    | Default   |
+| ------------------ | ----------------------------------------------- | --------- |
+| `--repo`           | Repository as `owner/name` (required)           | -         |
+| `--default-branch` | Trunk branch                                    | Auto-detected from the forge |
+| `--provider`       | Forge provider: `github` or `gitlab`            | `github`  |
+| `--limit`          | Max PRs to fetch                                | `200`     |
+
 ### mp stack append / prepend
 
 `append` creates a new piece as a child of the current piece; `prepend` inserts a new piece between the current piece and its parent.
@@ -830,13 +922,13 @@ A **repo switcher**: jump to any registered project's worktree from anywhere. Wi
 
 With `--json` (or no TTY) it prints the **full per-project detail** (`pieces`, `branches`) so automation can build its own pickers.
 
-Bare `mp` opens a fuzzy picker **scoped to the current project** (repo-local) — it shows the pieces and branches of the project you're standing in. When run **outside** a monkeypuzzle project, bare `mp` does *not* fall back to the cross-project view; instead it prints context-aware guidance:
+Bare `mp` opens a fuzzy picker **scoped to the current project** (repo-local) — it shows the pieces and branches of the project you're standing in. When run **outside** a monkeypuzzle project, bare `mp` prints context-aware guidance to stderr and then falls through to the cross-project picker (when you have registered projects to jump to):
 
-- Inside a git repo that hasn't been initialised → suggests `mp init`.
-- Outside any git repo → suggests cd-ing into a repo and running `mp init`.
-- Either way, if you have registered projects it points you at `mp go`.
+- Inside a git repo that hasn't been initialised → suggests `mp init`, then shows the picker.
+- Outside any git repo → suggests cd-ing into a repo and running `mp init`, then shows the picker.
+- In JSON / non-TTY mode the guidance and the full project detail arrive in one object, with a loud `"in_project": false` plus `reason`/`suggestion` fields.
 
-Use `mp go` for the explicit all-projects view from anywhere.
+Use `mp go` (or `mp switch --all`) for the explicit all-projects view from anywhere.
 
 ### Usage
 
@@ -847,7 +939,7 @@ mp go --json     # force JSON output
 mp --json        # JSON for the current project
 ```
 
-The JSON form includes per-project `pieces` and `branches` arrays so callers can build their own pickers (see [`mp switch`](#mp-switch)). The `branches` array includes both local branches and remote-only refs (e.g. `origin/foo`, marked `"remote": true`) that have no local branch yet — selecting one fetches the remote and adopts it as a piece.
+The JSON form includes per-project `pieces` and `branches` arrays so callers can build their own pickers (see [`mp switch`](#mp-switch)). Each piece carries a `branch` field (the branch checked out in its worktree — differs from the name for adopted branches), and the top level carries `in_project` / `current_project` so consumers can hard-scope to the caller's repo. The `branches` array includes both local branches and remote-only refs (e.g. `origin/foo`, marked `"remote": true`) that have no local branch yet — selecting one fetches the remote and adopts it as a piece.
 
 ---
 
@@ -903,6 +995,9 @@ Hooks are executable shell scripts in `.monkeypuzzle/hooks/` that run at key poi
 | `after-piece-update.sh`  | After successful update/sync | Blocking |
 | `before-piece-merge.sh`  | Before `mp merge`  | Blocking (non-zero exit aborts the merge) |
 | `after-piece-merge.sh`   | After successful merge   | Blocking |
+| `before-pr-create.sh` / `after-pr-create.sh` | Around `mp pr create` | Blocking |
+| `before-pr-ready.sh` / `after-pr-ready.sh`   | Around `mp pr ready`  | Blocking |
+| `is-piece-done.sh`       | Consulted by `mp cleanup` / `mp merge`'s merge-status check | Blocking; exit 0 means "treat as merged" — use to recognise squash-merges a plain branch-ancestry check would miss |
 | `agent-blocked.sh`       | Piece's aggregate agent status transitions to `blocked` | Detached |
 | `agent-done.sh`          | Piece's aggregate agent status transitions to `done`    | Detached |
 
@@ -916,7 +1011,10 @@ All hooks receive these environment variables:
 | `MP_WORKTREE_PATH` | Absolute path to worktree       |
 | `MP_REPO_ROOT`     | Absolute path to main repo      |
 | `MP_MAIN_BRANCH`   | Main branch name (merge/update) |
-| `MP_SESSION_NAME`  | Tmux session name (create)      |
+| `MP_SESSION_NAME`  | Multiplexer session name (create) |
+| `MP_PR_NUMBER`     | PR/MR number (PR hooks)         |
+| `MP_PR_URL`        | PR/MR URL (PR hooks)            |
+| `MP_PR_BASE_BRANCH`| PR/MR base branch (PR hooks)    |
 | `MP_AGENT_ID`      | Reporting agent id (agent hooks) |
 | `MP_AGENT_KIND`    | Agent kind, e.g. `claude` (agent hooks) |
 | `MP_AGENT_STATUS`  | New piece aggregate status (agent hooks) |
@@ -996,6 +1094,20 @@ mp agent send my-piece "yes, and add tests"
 `read` / `send` need a multiplexer with pane support (tmux). They are not
 TTY-gated: an orchestrating agent may drive its workers with them.
 
+```bash
+# Switch the client straight to an agent's pane — the CLI form of the tmux
+# plugin's agent picker and blocked-jump chords.
+mp agent focus my-piece            # by piece name (most attention-worthy agent)
+mp agent focus sess-1              # by agent id
+mp agent focus --blocked           # the most urgent blocked agent, no selector
+mp agent focus --blocked --all     # across every registered project
+```
+
+If the agent's session is no longer live, `focus` falls back to a plain piece
+switch (`mp switch` semantics: attaches an existing worktree, never adopts or
+creates). `--blocked` with nothing blocked exits 0 with a warning on stderr
+and no stdout output — nothing to report.
+
 ## mp wait
 
 Block until agents settle — no agent `working` in the target pieces.
@@ -1026,7 +1138,7 @@ mp integration install claude
 Monkeypuzzle is designed for programmatic use:
 
 ```bash
-# Schema-based workflow
+# Example-input workflow
 mp init --schema | jq '.name = "myproject"' | mp init
 
 # Check status programmatically

@@ -130,6 +130,23 @@ func (t *TmuxMultiplexer) ListPanes(ctx context.Context, sessionName string) ([]
 	return panes, nil
 }
 
+// FocusPane switches the client to sessionName, then (if pane is given)
+// selects that pane's window and the pane itself. Mirrors the tmux plugin's
+// shell-level focus_agent helper. Best-effort past the switch-client call:
+// select-window/select-pane failures (e.g. a pane that closed) are not fatal
+// — the client still lands in the right session.
+func (t *TmuxMultiplexer) FocusPane(ctx context.Context, sessionName, pane string) error {
+	if _, err := t.exec.Run(ctx, "tmux", "switch-client", "-t", exactTarget(sessionName)); err != nil {
+		return fmt.Errorf("failed to switch tmux client: %w", err)
+	}
+	if pane == "" {
+		return nil
+	}
+	_, _ = t.exec.Run(ctx, "tmux", "select-window", "-t", paneTarget(pane))
+	_, _ = t.exec.Run(ctx, "tmux", "select-pane", "-t", paneTarget(pane))
+	return nil
+}
+
 // IsInstalled returns true if tmux is available.
 func (t *TmuxMultiplexer) IsInstalled(ctx context.Context) bool {
 	_, err := t.exec.Run(ctx, "which", "tmux")

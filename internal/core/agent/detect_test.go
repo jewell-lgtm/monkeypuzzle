@@ -90,7 +90,8 @@ func (f *fakePaneMux) ListPanes(ctx context.Context, sessionName string) ([]core
 func (f *fakePaneMux) CapturePane(ctx context.Context, target string) ([]byte, error) {
 	return []byte(f.captures[target]), nil
 }
-func (f *fakePaneMux) SendText(ctx context.Context, target, text string) error { return nil }
+func (f *fakePaneMux) SendText(ctx context.Context, target, text string) error       { return nil }
+func (f *fakePaneMux) FocusPane(ctx context.Context, sessionName, pane string) error { return nil }
 
 func TestList_DetectsAgentsWithoutHooks(t *testing.T) {
 	fs := adapters.NewMemoryFS()

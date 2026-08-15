@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
+	"github.com/jewell-lgtm/monkeypuzzle/pkg/cli"
 )
 
 // Ensure implementations satisfy interface
@@ -30,11 +31,11 @@ func (o *TextOutput) Write(msg core.Message) {
 	prefix := ""
 	switch msg.Type {
 	case core.MsgSuccess:
-		prefix = "✓ "
+		prefix = cli.GlyphOK + " "
 	case core.MsgWarning:
-		prefix = "⚠ "
+		prefix = cli.GlyphWarn + " "
 	case core.MsgError:
-		prefix = "✗ "
+		prefix = cli.GlyphFail + " "
 	}
 	_, _ = fmt.Fprintf(o.w, "%s%s\n", prefix, msg.Content)
 }

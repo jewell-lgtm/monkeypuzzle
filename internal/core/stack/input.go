@@ -34,7 +34,7 @@ func (in StatusInput) fromRemote() bool {
 	return in.FromRemote || in.FromGitHub
 }
 
-// StatusSchema returns the JSON schema for stack status input.
+// StatusSchema returns an example input document for stack status input.
 func StatusSchema() ([]byte, error) {
 	return json.MarshalIndent(map[string]any{
 		"main_branch": "main",
@@ -81,7 +81,7 @@ type GraphInput struct {
 	Limit int `json:"limit,omitempty"`
 }
 
-// GraphSchema returns the JSON schema for stack graph input.
+// GraphSchema returns an example input document for stack graph input.
 func GraphSchema() ([]byte, error) {
 	return json.MarshalIndent(map[string]any{
 		"repo":           "",
@@ -137,7 +137,7 @@ type SyncInput struct {
 	Apply bool `json:"apply,omitempty"`
 }
 
-// SyncSchema returns the JSON schema for stack sync input.
+// SyncSchema returns an example input document for stack sync input.
 func SyncSchema() ([]byte, error) {
 	return json.MarshalIndent(map[string]any{
 		"main_branch": "main",
@@ -199,7 +199,7 @@ type PrependInput struct {
 	Prompt string `json:"prompt,omitempty"`
 }
 
-// AppendSchema returns the JSON schema for stack append/prepend input.
+// AppendSchema returns an example input document for stack append/prepend input.
 func AppendSchema() ([]byte, error) {
 	return json.MarshalIndent(map[string]any{
 		"name":   "",
@@ -244,7 +244,7 @@ type SetParentInput struct {
 	Parent string `json:"parent"`          // new parent piece name, or "main"
 }
 
-// SetParentSchema returns the JSON schema for stack set-parent input.
+// SetParentSchema returns an example input document for stack set-parent input.
 func SetParentSchema() ([]byte, error) {
 	return json.MarshalIndent(map[string]any{
 		"piece":  "",

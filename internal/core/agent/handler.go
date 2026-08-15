@@ -176,7 +176,22 @@ func (h *Handler) List(ctx context.Context, repoRoot string) ([]ListItem, error)
 	}
 
 	sortAgentItems(items)
+	for i := range items {
+		items[i].Icon = StatusIcon(items[i].Status)
+	}
 	return items, nil
+}
+
+// StatusIcon returns the single-glyph icon for a status ("?" if unknown) —
+// the same mapping Summary uses, exported so every icon comes from this one
+// table instead of a second, independently-maintained lookup.
+func StatusIcon(status string) string {
+	for _, si := range statusIcons {
+		if si.status == status {
+			return si.icon
+		}
+	}
+	return "?"
 }
 
 // sortAgentItems orders blocked first, then by recency.

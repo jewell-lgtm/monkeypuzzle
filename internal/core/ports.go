@@ -122,6 +122,13 @@ type PaneOps interface {
 	// ListPanes enumerates every pane in a session — the discovery half of
 	// zero-install agent detection.
 	ListPanes(ctx context.Context, sessionName string) ([]PaneInfo, error)
+
+	// FocusPane switches the client to sessionName and, when pane is
+	// non-empty, selects that pane's window and the pane itself — landing
+	// focus exactly on it even in a split layout. The session must already
+	// exist; callers check that (via Multiplexer.Exists) and fall back to a
+	// plain piece switch when it doesn't.
+	FocusPane(ctx context.Context, sessionName, pane string) error
 }
 
 // LoadingSignal provides pub/sub for loading state.

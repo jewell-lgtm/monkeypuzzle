@@ -191,7 +191,7 @@ func TestCLI_Init_Schema(t *testing.T) {
 
 	var schema map[string]any
 	if err := json.Unmarshal([]byte(stdout), &schema); err != nil {
-		t.Fatalf("invalid JSON schema: %v\noutput: %s", err, stdout)
+		t.Fatalf("invalid example-input JSON: %v\noutput: %s", err, stdout)
 	}
 
 	// Should have expected fields
@@ -378,7 +378,7 @@ func TestCLI_PieceCreate_Schema(t *testing.T) {
 
 	var schema map[string]any
 	if err := json.Unmarshal([]byte(stdout), &schema); err != nil {
-		t.Fatalf("invalid JSON schema: %v\noutput: %s", err, stdout)
+		t.Fatalf("invalid example-input JSON: %v\noutput: %s", err, stdout)
 	}
 }
 
@@ -418,7 +418,7 @@ func TestCLI_PRCreate_Schema(t *testing.T) {
 
 	var schema map[string]any
 	if err := json.Unmarshal([]byte(stdout), &schema); err != nil {
-		t.Fatalf("invalid JSON schema: %v\noutput: %s", err, stdout)
+		t.Fatalf("invalid example-input JSON: %v\noutput: %s", err, stdout)
 	}
 }
 
@@ -752,7 +752,7 @@ func TestCLI_Flatten_RemovesAllPieces(t *testing.T) {
 	}
 
 	// Flatten via stdin JSON (non-interactive; skips the confirmation prompt).
-	stdout, stderr, err := env.runWithStdin(`{"force":true}`, "flatten")
+	stdout, stderr, err := env.runWithStdin(`{"force":true,"apply":true}`, "flatten")
 	if err != nil {
 		t.Fatalf("flatten failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
 	}
@@ -806,7 +806,7 @@ func TestCLI_Flatten_Schema(t *testing.T) {
 
 	var schema map[string]any
 	if err := json.Unmarshal([]byte(stdout), &schema); err != nil {
-		t.Fatalf("invalid JSON schema: %v\noutput: %s", err, stdout)
+		t.Fatalf("invalid example-input JSON: %v\noutput: %s", err, stdout)
 	}
 }
 
@@ -1023,17 +1023,18 @@ func TestCLI_Cleanup_Apply(t *testing.T) {
 	}
 }
 
-// TestCLI_Cleanup_AppliesViaForceAndStdin covers the two non-flag mutation entry
-// points the dry-run-by-default redesign must keep working: the `--force`
-// back-compat alias, and the agent-facing `{"apply":true}` over stdin. Both must
-// actually remove the merged worktree, not just preview.
-func TestCLI_Cleanup_AppliesViaForceAndStdin(t *testing.T) {
+// TestCLI_Cleanup_AppliesViaYesAndStdin covers the two non---apply mutation
+// entry points of the dry-run-by-default design: `--yes` (skip confirm, imply
+// apply), and the agent-facing `{"apply":true}` over stdin. Both must actually
+// remove the merged worktree, not just preview. (`--force` was removed from
+// cleanup: everywhere else it means "override a safety check", not "apply".)
+func TestCLI_Cleanup_AppliesViaYesAndStdin(t *testing.T) {
 	cases := []struct {
 		name  string
 		stdin string
 		args  []string
 	}{
-		{name: "force flag alias", args: []string{"cleanup", "--force"}},
+		{name: "yes flag", args: []string{"cleanup", "--yes"}},
 		{name: "apply over stdin", stdin: `{"apply":true}`, args: []string{"cleanup"}},
 	}
 	for _, tc := range cases {
@@ -1401,11 +1402,63 @@ func TestCLI_Sync_Schema(t *testing.T) {
 
 	var schema map[string]any
 	if err := json.Unmarshal([]byte(stdout), &schema); err != nil {
-		t.Fatalf("invalid JSON schema: %v\noutput: %s", err, stdout)
+		t.Fatalf("invalid example-input JSON: %v\noutput: %s", err, stdout)
 	}
-	for _, field := range []string{"main_branch", "from", "local"} {
+	for _, field := range []string{"main", "from", "local"} {
 		if _, ok := schema[field]; !ok {
 			t.Errorf("schema missing %q field", field)
 		}
+	}
+}
+
+// TestCLI_Cleanup_HumanSummaryAlwaysOnStderr pins the P3 output-contract fix:
+// cleanup's human summary line must never appear on stdout (previously it was
+// only reachable behind a real-TTY check that this harness can't simulate,
+// so the regression that actually matters here is observable under a plain
+// exec: the summary must now always stream to stderr, and stdout must remain
+// pure JSON with no leading text).
+func TestCLI_Cleanup_HumanSummaryAlwaysOnStderr(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	env.initGitRepo()
+	env.initProject("test")
+	setupMergedPiece(t, env, "merged-piece")
+
+	stdout, stderr, err := env.run("cleanup", "--apply")
+	if err != nil {
+		t.Fatalf("cleanup --apply failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "merged-piece") {
+		t.Errorf("expected the human summary on stderr to mention the cleaned piece, got: %q", stderr)
+	}
+	var result map[string]any
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Errorf("stdout must be pure JSON with no leading human text, got: %q (err: %v)", stdout, err)
+	}
+}
+
+// TestCLI_AgentList_HumanTableAlwaysOnStderr mirrors the same fix for
+// `mp agent list`: the human table (or "No live agents.") must never leak
+// onto stdout, which must remain pure JSON.
+func TestCLI_AgentList_HumanTableAlwaysOnStderr(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	env.initGitRepo()
+	env.initProject("test")
+
+	stdout, stderr, err := env.run("agent", "list")
+	if err != nil {
+		t.Fatalf("agent list failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "No live agents.") {
+		t.Errorf("expected the human message on stderr, got: %q", stderr)
+	}
+	var result struct {
+		Agents []any `json:"agents"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Errorf("stdout must be pure JSON with no leading human text, got: %q (err: %v)", stdout, err)
 	}
 }

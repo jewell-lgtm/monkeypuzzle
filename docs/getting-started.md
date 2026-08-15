@@ -55,9 +55,33 @@ mp init --name myproject --pr-provider github
 # Via JSON stdin
 echo '{"name":"myproject","pr_provider":"github"}' | mp init
 
-# Get schema with defaults, modify, pipe back
+# Get an example input document, fill in a value, pipe it back
 mp init --schema | jq '.name = "custom-name"' | mp init
 ```
+
+## Your first piece
+
+This is the whole lifecycle — creating a unit of work, shipping it, cleaning up
+— in one pass:
+
+```bash
+mp create --name my-feature   # worktree + session, branched off main
+
+# ... make your changes in the new worktree ...
+
+mp pr create --draft          # push the branch, open a draft PR/MR
+mp pr ready                   # flip it to ready for review
+mp merge                      # merge the branch back into main
+mp done                       # remove the worktree/session now it's merged
+```
+
+Each step fires the matching lifecycle hook if you've dropped one in
+`.monkeypuzzle/hooks/` — see [Hooks](commands.md#hooks) and the
+[Workflow Guide](workflow.md).
+
+To jump back to work you've already started, run `mp` (scoped to the current
+repo) or `mp go` (across every registered project) for a fuzzy picker — or
+`mp switch <piece-or-branch-name>` to go straight there by name.
 
 ## Next steps
 

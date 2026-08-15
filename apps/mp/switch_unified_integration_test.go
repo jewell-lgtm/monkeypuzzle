@@ -146,9 +146,11 @@ func TestDash_BareMpScopesToCurrentProject(t *testing.T) {
 }
 
 // TestGo_BareMpOutsideProjectGuides verifies bare `mp` outside a monkeypuzzle
-// project prints context-aware guidance instead of falling back to a
-// cross-project view: an un-init'd git repo is pointed at `mp init`, a non-repo
-// directory at cd-ing into one, and both mention `mp go` when projects exist.
+// project prints context-aware guidance and then falls through to the
+// cross-project view: an un-init'd git repo is pointed at `mp init`, a
+// non-repo directory at cd-ing into one, and in both cases the structured
+// output carries the registered projects (the `mp go` data) plus a loud
+// in_project:false signal so nothing mistakes "not here" for "nowhere".
 func TestGo_BareMpOutsideProjectGuides(t *testing.T) {
 	e := setupTestEnv(t)
 	defer e.cleanup()
@@ -165,16 +167,25 @@ func TestGo_BareMpOutsideProjectGuides(t *testing.T) {
 		return string(out), err
 	}
 
+	assertGuidedDashboard := func(out string, wantGuidance string) {
+		t.Helper()
+		if !strings.Contains(out, wantGuidance) {
+			t.Errorf("bare mp guidance should contain %q, got: %s", wantGuidance, out)
+		}
+		if !strings.Contains(out, "\"in_project\": false") {
+			t.Errorf("bare mp outside a project should emit in_project:false, got: %s", out)
+		}
+		// The cross-project detail must ride along so the caller can still jump.
+		if !strings.Contains(out, "\"alpha\"") {
+			t.Errorf("bare mp outside a project should fall through to the project list, got: %s", out)
+		}
+	}
+
 	// A git repo that hasn't been `mp init`-ed: guide to `mp init`.
 	plainRepo := filepath.Join(e.tmpDir, "plain")
 	gitCmd(t, e.tmpDir, "init", plainRepo)
 	repoOut, _ := run(plainRepo)
-	if !strings.Contains(repoOut, "mp init") {
-		t.Errorf("bare mp in an un-init'd repo should suggest `mp init`, got: %s", repoOut)
-	}
-	if !strings.Contains(repoOut, "mp go") {
-		t.Errorf("bare mp should mention `mp go` when projects exist, got: %s", repoOut)
-	}
+	assertGuidedDashboard(repoOut, "mp init")
 
 	// A directory that is not a git repo at all: guide to cd-ing into one.
 	nonRepo := filepath.Join(e.tmpDir, "elsewhere")
@@ -182,17 +193,7 @@ func TestGo_BareMpOutsideProjectGuides(t *testing.T) {
 		t.Fatalf("mkdir nonRepo: %v", err)
 	}
 	nonOut, _ := run(nonRepo)
-	if !strings.Contains(nonOut, "git repository") {
-		t.Errorf("bare mp outside a repo should say it's not in a git repo, got: %s", nonOut)
-	}
-	if !strings.Contains(nonOut, "mp init") {
-		t.Errorf("bare mp outside a repo should still suggest `mp init`, got: %s", nonOut)
-	}
-
-	// Neither case should leak the cross-project project list into stdout.
-	if strings.Contains(repoOut, "\"alpha\"") || strings.Contains(nonOut, "\"alpha\"") {
-		t.Errorf("bare mp outside a project must not fall back to the project list")
-	}
+	assertGuidedDashboard(nonOut, "git repository")
 }
 
 // TestDash_RemoteOnlyBranchSurfaces verifies that a branch that exists only on
@@ -323,5 +324,110 @@ func TestSwitchUnified_MutuallyExclusiveSelectors(t *testing.T) {
 	}
 	if !strings.Contains(string(out), "mutually exclusive") {
 		t.Errorf("expected 'mutually exclusive' in error, got: %s", out)
+	}
+}
+
+// TestSwitchUnified_TargetResolution exercises the positional-target surface
+// end to end in one repo: an existing piece attaches by name AND by its
+// checked-out branch (the reverse lookup), an unadopted branch adopts, a
+// brand-new name is refused without --create and created with it (branch
+// verbatim, piece name derived), and --branch on an already-adopted branch
+// attaches instead of erroring (the idempotence regression fix).
+func TestSwitchUnified_TargetResolution(t *testing.T) {
+	e := setupTestEnv(t)
+	defer e.cleanup()
+
+	dataDir := filepath.Join(e.tmpDir, "data")
+	repo := projectTestRepo(t, e, dataDir, filepath.Join(e.tmpDir, "repos"), "alpha")
+	gitCmd(t, repo, "add", ".claude")
+	gitCmd(t, repo, "commit", "-m", "chore: claude")
+
+	// Adopt a slash-named branch: piece name gets the prefix stripped.
+	gitCmd(t, repo, "branch", "feat/dark-mode", "main")
+	out := mpRun(t, e, e.tmpDir, dataDir, "switch", "--project", "alpha", "feat/dark-mode")
+	if !strings.Contains(out, "dark-mode") {
+		t.Fatalf("adopting via target should mention the piece, got: %q", out)
+	}
+
+	// Same target again: must attach the existing piece, not error out of adopt.
+	out = mpRun(t, e, e.tmpDir, dataDir, "switch", "--project", "alpha", "feat/dark-mode")
+	if !strings.Contains(out, "dark-mode") {
+		t.Errorf("re-switching by branch should attach the piece, got: %q", out)
+	}
+	// And by piece name.
+	out = mpRun(t, e, e.tmpDir, dataDir, "switch", "--project", "alpha", "dark-mode")
+	if !strings.Contains(out, "dark-mode") {
+		t.Errorf("switching by piece name should attach, got: %q", out)
+	}
+	// Explicit --branch on the adopted branch: attach, not the old adopt error.
+	out = mpRun(t, e, e.tmpDir, dataDir, "switch", "--project", "alpha", "--branch", "feat/dark-mode")
+	if !strings.Contains(out, "dark-mode") {
+		t.Errorf("--branch on an adopted branch should attach, got: %q", out)
+	}
+
+	// A brand-new name without --create: refuse with a hint (non-TTY).
+	cmd := exec.Command(e.binPath, "switch", "--project", "alpha", "feat/brand-new")
+	cmd.Dir = e.tmpDir
+	cmd.Env = append(os.Environ(), "MP_DATA_DIR="+dataDir, "MP_CONFIG_DIR="+e.configDir)
+	rawOut, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("expected error for unmatched target without --create, got success\n%s", rawOut)
+	}
+	if !strings.Contains(string(rawOut), "--create") {
+		t.Errorf("unmatched-target error should hint at --create, got: %s", rawOut)
+	}
+
+	// With --create: piece name derived, branch created verbatim.
+	out = mpRun(t, e, e.tmpDir, dataDir, "switch", "--project", "alpha", "--create", "feat/brand-new")
+	if !strings.Contains(out, "brand-new") {
+		t.Fatalf("--create should mint the piece, got: %q", out)
+	}
+	branchOut := exec.Command("git", "-C", repo, "branch", "--list", "feat/brand-new")
+	bo, _ := branchOut.CombinedOutput()
+	if !strings.Contains(string(bo), "feat/brand-new") {
+		t.Errorf("expected verbatim branch feat/brand-new to exist, got: %s", bo)
+	}
+}
+
+// TestSwitchUnified_ProjectDefaultsToCwd verifies --project is optional inside
+// a repo: both a piece selector and a positional target resolve against the
+// project the caller is standing in, including from inside a piece worktree.
+func TestSwitchUnified_ProjectDefaultsToCwd(t *testing.T) {
+	e := setupTestEnv(t)
+	defer e.cleanup()
+
+	dataDir := filepath.Join(e.tmpDir, "data")
+	repo := projectTestRepo(t, e, dataDir, filepath.Join(e.tmpDir, "repos"), "alpha")
+	gitCmd(t, repo, "add", ".claude")
+	gitCmd(t, repo, "commit", "-m", "chore: claude")
+
+	mpRun(t, e, repo, dataDir, "create", "--name", "fix-x", "--skip-switch")
+
+	// From the repo root, no --project.
+	out := mpRun(t, e, repo, dataDir, "switch", "--piece", "fix-x")
+	if !strings.Contains(out, "fix-x") {
+		t.Errorf("switch --piece without --project should resolve from cwd, got: %q", out)
+	}
+	out = mpRun(t, e, repo, dataDir, "switch", "fix-x")
+	if !strings.Contains(out, "fix-x") {
+		t.Errorf("positional target without --project should resolve from cwd, got: %q", out)
+	}
+	// From inside the piece worktree itself (main repo root resolution).
+	wt := filepath.Join(repo, ".monkeypuzzle", "pieces", "fix-x")
+	out = mpRun(t, e, wt, dataDir, "switch", "fix-x")
+	if !strings.Contains(out, "fix-x") {
+		t.Errorf("target from inside a piece worktree should resolve, got: %q", out)
+	}
+
+	// Outside any repo with no --project: a clear error.
+	cmd := exec.Command(e.binPath, "switch", "fix-x")
+	cmd.Dir = e.tmpDir
+	cmd.Env = append(os.Environ(), "MP_DATA_DIR="+dataDir, "MP_CONFIG_DIR="+e.configDir)
+	rawOut, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("expected error outside a project without --project, got success\n%s", rawOut)
+	}
+	if !strings.Contains(string(rawOut), "--project") {
+		t.Errorf("outside-project error should hint at --project, got: %s", rawOut)
 	}
 }

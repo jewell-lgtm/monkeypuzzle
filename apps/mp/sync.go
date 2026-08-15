@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -27,6 +26,7 @@ origin is configured), or when --local is passed. --from overrides the ref
 entirely (e.g. upstream/main).
 
 To sync a whole stack of pieces, use 'mp stack sync' instead.`,
+	Args: cobra.NoArgs,
 	RunE: runPieceSync,
 }
 
@@ -34,16 +34,20 @@ var (
 	flagSyncFrom   string
 	flagSyncLocal  bool
 	flagSyncSchema bool
+	flagSyncJSON   bool
 )
 
 func init() {
-	pieceSyncCmd.Flags().StringVar(&flagMainBranch, "main-branch", "main", "Trunk branch name, used when the piece's parent is main")
+	pieceSyncCmd.Flags().StringVar(&flagMainBranch, "main", "main", "Trunk branch name, used when the piece's parent is main")
+	pieceSyncCmd.Flags().StringVar(&flagMainBranchLegacy, "main-branch", "", "Deprecated alias for --main")
+	_ = pieceSyncCmd.Flags().MarkDeprecated("main-branch", "use --main")
 	pieceSyncCmd.Flags().StringVar(&flagSyncFrom, "from", "", "Explicit ref to sync from (e.g. origin/parent-branch)")
 	pieceSyncCmd.Flags().BoolVar(&flagSyncLocal, "local", false, "Sync from the local parent branch instead of origin's version")
-	pieceSyncCmd.Flags().BoolVar(&flagSyncSchema, "schema", false, "Output JSON schema and exit")
+	pieceSyncCmd.Flags().BoolVar(&flagSyncSchema, "schema", false, "Print an example input document and exit")
+	pieceSyncCmd.Flags().BoolVar(&flagSyncJSON, "json", false, "Output JSON even on a terminal")
 	rootCmd.AddCommand(pieceSyncCmd)
 
-	_ = pieceSyncCmd.RegisterFlagCompletionFunc("main-branch", completeGitBranches)
+	_ = pieceSyncCmd.RegisterFlagCompletionFunc("main", completeGitBranches)
 }
 
 func runPieceSync(cmd *cobra.Command, args []string) error {
@@ -82,18 +86,13 @@ func runPieceSync(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	jsonData, err := json.MarshalIndent(result, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to marshal result: %w", err)
-	}
-	fmt.Println(string(jsonData))
-
-	return nil
+	return emitResult(result, flagSyncJSON)
 }
 
 // getPieceSyncInput resolves `mp sync` input from stdin JSON, then overlays any
-// explicitly-set flags (flags win over stdin). --main-branch defaults to "main",
-// so it is gated on Changed() to avoid clobbering a stdin main_branch.
+// explicitly-set flags (flags win over stdin). The trunk flag (--main, or the
+// deprecated --main-branch) defaults to "main", so it is gated via
+// mainBranchFromFlags to avoid clobbering a stdin value.
 func getPieceSyncInput(cmd *cobra.Command) (piececmd.SyncInput, error) {
 	var input piececmd.SyncInput
 
@@ -108,8 +107,9 @@ func getPieceSyncInput(cmd *cobra.Command) (piececmd.SyncInput, error) {
 		}
 	}
 
-	if cmd.Flags().Changed("main-branch") {
-		input.MainBranch = flagMainBranch
+	if v, ok := mainBranchFromFlags(cmd); ok {
+		input.Main = v
+		input.MainBranch = v
 	}
 	if cmd.Flags().Changed("from") {
 		input.From = flagSyncFrom

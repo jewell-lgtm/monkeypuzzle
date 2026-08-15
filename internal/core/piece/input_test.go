@@ -234,7 +234,7 @@ func TestSyncPieceSchema(t *testing.T) {
 	if err := json.Unmarshal(data, &schema); err != nil {
 		t.Fatalf("schema is not valid JSON: %v", err)
 	}
-	for _, field := range []string{"main_branch", "from", "local"} {
+	for _, field := range []string{"main", "from", "local"} {
 		if _, ok := schema[field]; !ok {
 			t.Errorf("schema missing %q field", field)
 		}

@@ -131,6 +131,13 @@ func (h *Handler) Find(ctx context.Context, repoRoot, query string) (ListItem, e
 	if err != nil {
 		return ListItem{}, err
 	}
+	return FindInItems(items, query)
+}
+
+// FindInItems resolves query (an agent id, falling back to piece name) against
+// an already-collected item list — the scope-independent half of Find, reused
+// by callers that collect once (e.g. cross-project) and resolve locally.
+func FindInItems(items []ListItem, query string) (ListItem, error) {
 	for _, item := range items {
 		if item.ID == query {
 			return item, nil
@@ -142,6 +149,18 @@ func (h *Handler) Find(ctx context.Context, repoRoot, query string) (ListItem, e
 		}
 	}
 	return ListItem{}, fmt.Errorf("no live agent matching %q (try 'mp agent list')", query)
+}
+
+// FirstBlocked returns the first blocked-status agent in items (List/ListAll
+// already sort blocked first, so this is just the first match), or ok=false
+// if none are blocked.
+func FirstBlocked(items []ListItem) (ListItem, bool) {
+	for _, item := range items {
+		if item.Status == "blocked" {
+			return item, true
+		}
+	}
+	return ListItem{}, false
 }
 
 // Target returns where pane operations should aim: the recorded pane if the

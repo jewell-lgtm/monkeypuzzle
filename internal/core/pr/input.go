@@ -44,7 +44,7 @@ type Input struct {
 	Draft bool   `json:"draft"`
 }
 
-// Schema returns the JSON schema with defaults for PR create
+// Schema returns an example input document for PR create
 func Schema() ([]byte, error) {
 	return input.GenerateSchema(fields)
 }

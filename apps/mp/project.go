@@ -18,7 +18,6 @@ import (
 var (
 	flagProjectAddPath   string
 	flagProjectAddSchema bool
-	flagProjectRmTarget  string
 	flagProjectRmSchema  bool
 	flagProjectListJSON  bool
 )
@@ -31,7 +30,7 @@ var projectCmd = &cobra.Command{
 
 A "project" is any git repository that has been initialised with 'mp init'.
 Registering projects lets mp list pieces across all of them and jump
-between their tmux sessions.`,
+between their multiplexer sessions.`,
 }
 
 var projectAddCmd = &cobra.Command{
@@ -61,7 +60,7 @@ var projectRemoveCmd = &cobra.Command{
 left untouched.
 
 Modes:
-  Argument/flag:  mp project rm <name|path> | mp project rm --target NAME
+  Argument:       mp project rm <name|path>
   Stdin JSON:     echo '{"target":"my-project"}' | mp project rm
   --schema:       Output expected JSON format`,
 	Args: cobra.MaximumNArgs(1),
@@ -77,15 +76,15 @@ var projectListCmd = &cobra.Command{
 
 By default a human-readable table is printed; use --json for machine output.
 When stdout is not a terminal, JSON is printed automatically.`,
+	Args: cobra.NoArgs,
 	RunE: runProjectList,
 }
 
 func init() {
 	projectAddCmd.Flags().StringVar(&flagProjectAddPath, "path", "", "Path to the project repository")
-	projectAddCmd.Flags().BoolVar(&flagProjectAddSchema, "schema", false, "Output JSON schema and exit")
+	projectAddCmd.Flags().BoolVar(&flagProjectAddSchema, "schema", false, "Print an example input document and exit")
 
-	projectRemoveCmd.Flags().StringVar(&flagProjectRmTarget, "target", "", "Name or path of the project to remove")
-	projectRemoveCmd.Flags().BoolVar(&flagProjectRmSchema, "schema", false, "Output JSON schema and exit")
+	projectRemoveCmd.Flags().BoolVar(&flagProjectRmSchema, "schema", false, "Print an example input document and exit")
 
 	projectListCmd.Flags().BoolVar(&flagProjectListJSON, "json", false, "Output JSON instead of a table")
 
@@ -149,7 +148,7 @@ func warnNameCollision(p registry.Project) {
 	}
 	for _, other := range reg.Projects {
 		if other.Name == p.Name && other.Location() != p.Location() {
-			fmt.Fprintf(os.Stderr, "⚠ name %q is also registered at %s — `--project %s` will need the path or host:path\n", p.Name, other.Location(), p.Name)
+			fmt.Fprintf(os.Stderr, "%s name %q is also registered at %s — `--project %s` will need the path or host:path\n", cli.GlyphWarn, p.Name, other.Location(), p.Name)
 			return
 		}
 	}
@@ -225,8 +224,6 @@ func resolveProjectRemoveTarget(args []string) (string, error) {
 	switch {
 	case len(args) == 1:
 		return args[0], nil
-	case flagProjectRmTarget != "":
-		return flagProjectRmTarget, nil
 	case cli.HasStdinData():
 		data, err := io.ReadAll(os.Stdin)
 		if err != nil {
@@ -250,34 +247,37 @@ func runProjectList(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if flagProjectListJSON || !cli.IsStdoutTerminal() {
+	// Human table always goes to stderr (like every other command's summary);
+	// stdout stays JSON-only so `mp project list | jq` never has to skip past
+	// table text.
+	if len(projects) == 0 {
+		fmt.Fprintln(os.Stderr, "No registered projects. Run `mp init` in a repo, or `mp project add <path>`.")
+	} else {
+		w := tabwriter.NewWriter(os.Stderr, 0, 2, 2, ' ', 0)
+		_, _ = fmt.Fprintln(w, "NAME\tBRANCH\tPIECES\tPATH")
+		for _, p := range projects {
+			branch := p.Branch
+			path := p.Path
+			if p.Host != "" {
+				path = p.Host + ":" + p.Path
+			}
+			switch {
+			case !p.Exists:
+				branch = "(missing)"
+			case !p.IsProject:
+				branch = "(no .monkeypuzzle)"
+			case p.Host != "":
+				branch = "(remote)"
+			case branch == "":
+				branch = "-"
+			}
+			_, _ = fmt.Fprintf(w, "%s\t%s\t%d\t%s\n", p.Name, branch, p.PieceCount, path)
+		}
+		_ = w.Flush()
+	}
+
+	if flagProjectListJSON || !cli.IsStdoutTerminal() || !cli.IsTerminal() {
 		return cli.PrintJSON(projects)
 	}
-
-	if len(projects) == 0 {
-		fmt.Println("No registered projects. Run `mp init` in a repo, or `mp project add <path>`.")
-		return nil
-	}
-
-	w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-	_, _ = fmt.Fprintln(w, "NAME\tBRANCH\tPIECES\tPATH")
-	for _, p := range projects {
-		branch := p.Branch
-		path := p.Path
-		if p.Host != "" {
-			path = p.Host + ":" + p.Path
-		}
-		switch {
-		case !p.Exists:
-			branch = "(missing)"
-		case !p.IsProject:
-			branch = "(no .monkeypuzzle)"
-		case p.Host != "":
-			branch = "(remote)"
-		case branch == "":
-			branch = "-"
-		}
-		_, _ = fmt.Fprintf(w, "%s\t%s\t%d\t%s\n", p.Name, branch, p.PieceCount, path)
-	}
-	return w.Flush()
+	return nil
 }

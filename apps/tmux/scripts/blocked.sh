@@ -1,34 +1,32 @@
 #!/usr/bin/env bash
 # Jump straight to the first blocked agent across every registered project —
 # the "answer whoever needs me" chord. No picker: bound to run-shell, so
-# feedback goes through tmux display-message.
+# feedback goes through tmux display-message. One mp invocation does all the
+# work (selection + focus/switch); this script only relays its "nothing
+# blocked" case to a visible message, since a run-shell binding has no popup.
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=./helpers.sh
 source "$DIR/helpers.sh"
-
-# pick_blocked reads `mp agent list --all --json` on stdin and prints the
-# first blocked agent as <session>\t<pane>\t<piece>\t<project>, or nothing.
-pick_blocked() {
-	jq -r '
-		first((.agents // [])[] | select(.status == "blocked")) // empty
-		| [ .session_name, (.pane // ""), .piece, (.project // "") ]
-		| @tsv
-	'
-}
 
 main() {
 	set -uo pipefail
 	# $1 is the invoking pane's cwd — kept as a sane cwd for mp.
 	cd "${1:-.}" 2>/dev/null || true
 
-	local row
-	row="$("$(mp_bin)" agent list --all --json 2>/dev/null | pick_blocked)"
-	if [[ -z "$row" ]]; then
+	local err
+	err="$("$(mp_bin)" agent focus --blocked --all 2>&1 1>/dev/null)"
+	[[ -n "$err" ]] || return 0
+
+	# The known soft case gets its own friendly wording; any other stderr
+	# (a real failure — mp missing, registry unreadable, ...) is relayed
+	# verbatim rather than vanishing silently, since a run-shell binding has
+	# no other way to tell the user something went wrong.
+	if [[ "$err" == *"no blocked agents"* ]]; then
 		tmux display-message "monkeypuzzle: no blocked agents"
-		exit 0
+	else
+		tmux display-message "monkeypuzzle: $err"
 	fi
-	focus_agent "$(cut -f1 <<<"$row")" "$(cut -f2 <<<"$row")" "$(cut -f3 <<<"$row")" "$(cut -f4 <<<"$row")"
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then

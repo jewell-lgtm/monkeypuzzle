@@ -6,6 +6,7 @@ import (
 
 	stackcmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/stack"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/stackgraph"
+	"github.com/jewell-lgtm/monkeypuzzle/pkg/cli"
 )
 
 // renderStackStatus renders a StackStatusResult as the human tree shown on a
@@ -22,7 +23,7 @@ func renderStackStatus(result stackcmd.StackStatusResult) string {
 		renderStatusNodes(&b, result.Tree.Children, "")
 	}
 	if !result.ForgeChecked {
-		b.WriteString("\n! forge unreachable — PR/MR state not checked\n")
+		b.WriteString("\n" + cli.GlyphWarn + " forge unreachable — PR/MR state not checked\n")
 	}
 	if len(result.Reconstructed) > 0 {
 		b.WriteString(fmt.Sprintf("\nreconstructed from forge: %s\n", strings.Join(result.Reconstructed, ", ")))
@@ -38,7 +39,7 @@ func renderStatusNodes(b *strings.Builder, nodes []*stackcmd.StackNode, prefix s
 		connector, childPrefix := treeBranch(prefix, i == len(nodes)-1)
 		b.WriteString(prefix + connector + statusNodeLabel(node) + "\n")
 		for _, d := range node.Drift {
-			b.WriteString(childPrefix + "! " + d + "\n")
+			b.WriteString(childPrefix + cli.GlyphWarn + " " + d + "\n")
 		}
 		renderStatusNodes(b, node.Children, childPrefix)
 	}

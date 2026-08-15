@@ -33,7 +33,7 @@ func TestRenderStackStatus_TreeWithPRsAndDrift(t *testing.T) {
 	want := `main
 ├── api-rate-limit  PR #6 OPEN → main
 │   └── api-rate-limit-cli  PR #7 OPEN → api-rate-limit
-│       ! PR #7 base on forge is main, local parent is api-rate-limit
+│       ⚠ PR #7 base on forge is main, local parent is api-rate-limit
 ├── fix-flaky-retry  PR #9 OPEN → main
 └── no-pr-yet  (no PR)
 `
@@ -48,7 +48,7 @@ func TestRenderStackStatus_ForgeUnreachable(t *testing.T) {
 		Tree:       &stackcmd.StackNode{},
 	}
 	got := renderStackStatus(result)
-	want := "main\n\n! forge unreachable — PR/MR state not checked\n"
+	want := "main\n\n⚠ forge unreachable — PR/MR state not checked\n"
 	if got != want {
 		t.Errorf("got:\n%q\nwant:\n%q", got, want)
 	}
