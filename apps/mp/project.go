@@ -148,7 +148,7 @@ func warnNameCollision(p registry.Project) {
 	}
 	for _, other := range reg.Projects {
 		if other.Name == p.Name && other.Location() != p.Location() {
-			fmt.Fprintf(os.Stderr, "⚠ name %q is also registered at %s — `--project %s` will need the path or host:path\n", p.Name, other.Location(), p.Name)
+			fmt.Fprintf(os.Stderr, "%s name %q is also registered at %s — `--project %s` will need the path or host:path\n", cli.GlyphWarn, p.Name, other.Location(), p.Name)
 			return
 		}
 	}

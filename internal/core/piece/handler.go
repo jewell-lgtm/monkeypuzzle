@@ -2142,7 +2142,8 @@ func BuildPieceTree(pieces []PieceListItem) *TreeNode {
 }
 
 // SwitchPiece switches to a piece by name.
-// Uses multiplexer to switch/attach, falls back to printing path.
+// Returns a SwitchResult naming the method used ("multiplexer" or "path");
+// the caller presents the path itself when there's no session to attach.
 // Special case: "main" or "master" switches to the main repo session.
 func (h *Handler) SwitchPiece(ctx context.Context, name string) (SwitchResult, error) {
 	// Detect repo root from current working directory or piece worktree
