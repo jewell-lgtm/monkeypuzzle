@@ -2323,22 +2323,60 @@ func (h *Handler) ResolveSwitchTarget(ctx context.Context, repoRoot, target stri
 		return SwitchTarget{Kind: TargetAdoptLocal, Branch: target, PieceName: derivedName}, nil
 	}
 
-	// Remote form pasted verbatim ("origin/foo")?
+	// Remote form pasted verbatim ("origin/foo")? detectRemoteRef only checks
+	// that "origin" is a configured remote name — verify the branch actually
+	// exists there too, so a typo'd remote ref (origin/typo-branch) falls
+	// through to TargetNew (create-gated) instead of TargetAdoptRemote, which
+	// would fail later with a raw `git fetch` error instead of the
+	// --create hint.
+	remotes, remotesErr := h.git.ListRemoteBranches(ctx, repoRoot)
 	if remoteName, remoteBranch := h.detectRemoteRef(ctx, repoRoot, target); remoteName != "" {
-		return SwitchTarget{
-			Kind:      TargetAdoptRemote,
-			Branch:    target,
-			PieceName: SanitizePieceName(StripBranchPrefix(remoteBranch)),
-		}, nil
-	}
-	// Bare name that only exists on a remote ("foo" → "origin/foo")?
-	if remotes, err := h.git.ListRemoteBranches(ctx, repoRoot); err == nil {
-		for _, r := range remotes {
-			if idx := strings.IndexByte(r, '/'); idx > 0 && r[idx+1:] == target {
-				return SwitchTarget{Kind: TargetAdoptRemote, Branch: r, PieceName: derivedName}, nil
-			}
+		if remotesErr == nil && remoteRefExists(remotes, target) {
+			return SwitchTarget{
+				Kind:      TargetAdoptRemote,
+				Branch:    target,
+				PieceName: SanitizePieceName(StripBranchPrefix(remoteBranch)),
+			}, nil
+		}
+	} else if remotesErr == nil {
+		// Bare name that only exists on a remote ("foo" → "origin/foo")?
+		// Prefer origin when the name exists on more than one remote, so
+		// resolution is deterministic in multi-remote setups.
+		if match := bestRemoteMatch(remotes, target); match != "" {
+			return SwitchTarget{Kind: TargetAdoptRemote, Branch: match, PieceName: derivedName}, nil
 		}
 	}
 
 	return SwitchTarget{Kind: TargetNew, Branch: target, PieceName: derivedName}, nil
+}
+
+// remoteRefExists reports whether ref (e.g. "origin/foo") is present among
+// remote-tracking branches.
+func remoteRefExists(remotes []string, ref string) bool {
+	for _, r := range remotes {
+		if r == ref {
+			return true
+		}
+	}
+	return false
+}
+
+// bestRemoteMatch finds a remote-tracking ref whose branch name (the part
+// after the first "/") equals name, preferring "origin" when the name exists
+// on more than one remote so resolution stays deterministic.
+func bestRemoteMatch(remotes []string, name string) string {
+	match := ""
+	for _, r := range remotes {
+		idx := strings.IndexByte(r, '/')
+		if idx <= 0 || r[idx+1:] != name {
+			continue
+		}
+		if match == "" {
+			match = r
+		}
+		if strings.HasPrefix(r, "origin/") {
+			return r
+		}
+	}
+	return match
 }

@@ -145,3 +145,51 @@ func TestPRReady_Quad(t *testing.T) {
 		t.Errorf("pr ready should accept stdin {}, got: %s", raw)
 	}
 }
+
+// TestMainFlag_LegacyAliasValueNotDropped strengthens TestMainFlag_CanonicalAndAlias
+// per Sol's review: that test only exercised the default value "main" for
+// both flag spellings, which wouldn't catch a regression where the deprecated
+// --main-branch alias's *value* gets silently dropped in favor of the "main"
+// default instead of being honored. Here --main-branch names a real,
+// non-default branch and the JSON result must echo that exact value back.
+func TestMainFlag_LegacyAliasValueNotDropped(t *testing.T) {
+	e := setupTestEnv(t)
+	defer e.cleanup()
+
+	dataDir := filepath.Join(e.tmpDir, "data")
+	repo := projectTestRepo(t, e, dataDir, filepath.Join(e.tmpDir, "repos"), "alpha")
+	gitCmd(t, repo, "add", ".claude")
+	gitCmd(t, repo, "commit", "-m", "chore: claude")
+	gitCmd(t, repo, "branch", "develop", "main")
+	mpRun(t, e, repo, dataDir, "create", "--name", "fix-x", "--skip-switch")
+	wt := filepath.Join(repo, ".monkeypuzzle", "pieces", "fix-x")
+
+	for _, tc := range []struct {
+		flag string
+		args []string
+	}{
+		{"--main", []string{"update", "--main", "develop"}},
+		{"--main-branch", []string{"update", "--main-branch", "develop"}},
+	} {
+		cmd := exec.Command(e.binPath, tc.args...)
+		cmd.Dir = wt
+		cmd.Env = append(os.Environ(), "MP_DATA_DIR="+dataDir, "MP_CONFIG_DIR="+e.configDir)
+		out, err := cmd.Output()
+		if err != nil {
+			var stderr []byte
+			if ee, ok := err.(*exec.ExitError); ok {
+				stderr = ee.Stderr
+			}
+			t.Fatalf("update %s develop: %v\nstderr: %s", tc.flag, err, stderr)
+		}
+		var result struct {
+			MainBranch string `json:"main_branch"`
+		}
+		if err := json.Unmarshal(out, &result); err != nil {
+			t.Fatalf("update %s develop: invalid JSON: %v\n%s", tc.flag, err, out)
+		}
+		if result.MainBranch != "develop" {
+			t.Errorf("update %s develop: result main_branch = %q, want %q (value silently dropped to the default)", tc.flag, result.MainBranch, "develop")
+		}
+	}
+}

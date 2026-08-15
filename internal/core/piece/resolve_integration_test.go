@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"testing"
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/adapters"
@@ -214,5 +215,119 @@ func TestIntegration_CreatePiece_VerbatimBranch(t *testing.T) {
 		piece.CreatePieceOptions{RepoRoot: repo})
 	if err == nil {
 		t.Errorf("creating over an existing branch should error")
+	}
+}
+
+// TestIntegration_ResolveSwitchTarget_RemoteRequiresRealBranch pins the fix
+// for a bug Sol's review caught: a remote-shaped target only resolves to
+// TargetAdoptRemote when the branch genuinely exists there. A remote name
+// that matches but a nonexistent branch (a typo) must fall through to
+// TargetNew instead of failing later with a raw `git fetch` error.
+func TestIntegration_ResolveSwitchTarget_RemoteRequiresRealBranch(t *testing.T) {
+	handler, repo := resolveTestHandler(t)
+	ctx := context.Background()
+
+	// A bare "origin" with one real branch, cloned in as the remote.
+	bareDir, err := os.MkdirTemp("", "mp-bare-*")
+	if err != nil {
+		t.Fatalf("mkdir bare: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(bareDir) })
+	gitIn(t, bareDir, "init", "--bare")
+	gitIn(t, repo, "remote", "add", "origin", bareDir)
+	gitIn(t, repo, "checkout", "-b", "real-remote-branch")
+	gitIn(t, repo, "push", "origin", "real-remote-branch")
+	gitIn(t, repo, "checkout", "main")
+	gitIn(t, repo, "branch", "-D", "real-remote-branch")
+	gitIn(t, repo, "fetch", "origin")
+
+	// A branch that genuinely exists on origin resolves to adopt.
+	res, err := handler.ResolveSwitchTarget(ctx, repo, "origin/real-remote-branch")
+	if err != nil {
+		t.Fatalf("resolve origin/real-remote-branch: %v", err)
+	}
+	if res.Kind != piece.TargetAdoptRemote {
+		t.Errorf("real remote branch: kind = %v, want TargetAdoptRemote", res.Kind)
+	}
+
+	// A typo'd branch on a real remote must NOT resolve to adopt — it should
+	// fall through to TargetNew (create-gated), not attempt a doomed fetch.
+	res, err = handler.ResolveSwitchTarget(ctx, repo, "origin/typo-branch")
+	if err != nil {
+		t.Fatalf("resolve origin/typo-branch: %v", err)
+	}
+	if res.Kind != piece.TargetNew {
+		t.Errorf("typo'd remote branch: kind = %v, want TargetNew", res.Kind)
+	}
+	if res.Branch != "origin/typo-branch" {
+		t.Errorf("typo'd remote branch: Branch = %q, want verbatim target", res.Branch)
+	}
+
+	// A bare name that only exists on origin resolves to the qualified ref.
+	res, err = handler.ResolveSwitchTarget(ctx, repo, "real-remote-branch")
+	if err != nil {
+		t.Fatalf("resolve real-remote-branch: %v", err)
+	}
+	if res.Kind != piece.TargetAdoptRemote || res.Branch != "origin/real-remote-branch" {
+		t.Errorf("bare remote-only name: got kind=%v branch=%q, want TargetAdoptRemote origin/real-remote-branch", res.Kind, res.Branch)
+	}
+}
+
+// TestIntegration_ResolveSwitchTarget_PrefersOriginAmongRemotes pins the
+// determinism fix: a bare name present on more than one remote resolves to
+// origin's copy rather than whichever ListRemoteBranches happens to list
+// first.
+func TestIntegration_ResolveSwitchTarget_PrefersOriginAmongRemotes(t *testing.T) {
+	handler, repo := resolveTestHandler(t)
+	ctx := context.Background()
+
+	for _, remote := range []string{"upstream", "origin"} {
+		bareDir, err := os.MkdirTemp("", "mp-bare-*")
+		if err != nil {
+			t.Fatalf("mkdir bare: %v", err)
+		}
+		t.Cleanup(func() { os.RemoveAll(bareDir) })
+		gitIn(t, bareDir, "init", "--bare")
+		gitIn(t, repo, "remote", "add", remote, bareDir)
+	}
+	gitIn(t, repo, "checkout", "-b", "shared-name")
+	gitIn(t, repo, "push", "upstream", "shared-name")
+	gitIn(t, repo, "push", "origin", "shared-name")
+	gitIn(t, repo, "checkout", "main")
+	gitIn(t, repo, "branch", "-D", "shared-name")
+	gitIn(t, repo, "fetch", "--all")
+
+	res, err := handler.ResolveSwitchTarget(ctx, repo, "shared-name")
+	if err != nil {
+		t.Fatalf("resolve shared-name: %v", err)
+	}
+	if res.Branch != "origin/shared-name" {
+		t.Errorf("ambiguous remote name should prefer origin, got branch=%q", res.Branch)
+	}
+}
+
+// TestIntegration_RunSwitchFromBranch_PropagatesLookupError is a CLI-level
+// pin (not just the handler) that a PieceForBranch failure surfaces instead
+// of silently falling through to AdoptPiece. Exercised via `mp switch
+// --branch` against a repo whose pieces dir is unreadable.
+func TestIntegration_PieceForBranch_ErrorPropagates(t *testing.T) {
+	handler, repo := resolveTestHandler(t)
+	ctx := context.Background()
+
+	piecesDir := filepath.Join(repo, ".monkeypuzzle", "pieces")
+	if err := os.MkdirAll(piecesDir, 0o755); err != nil {
+		t.Fatalf("mkdir piecesDir: %v", err)
+	}
+	// A regular file where a directory entry is expected inside ReadDir's
+	// path breaks nothing by itself; instead make piecesDir unreadable to
+	// force ListPieces (and therefore PieceForBranch) to fail.
+	if err := os.Chmod(piecesDir, 0o000); err != nil {
+		t.Skipf("cannot chmod piecesDir on this platform: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(piecesDir, 0o755) })
+
+	_, err := handler.PieceForBranch(ctx, repo, "any-branch")
+	if err == nil {
+		t.Errorf("PieceForBranch should propagate a ListPieces failure, got nil error")
 	}
 }

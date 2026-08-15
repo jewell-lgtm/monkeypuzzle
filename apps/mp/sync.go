@@ -90,8 +90,9 @@ func runPieceSync(cmd *cobra.Command, args []string) error {
 }
 
 // getPieceSyncInput resolves `mp sync` input from stdin JSON, then overlays any
-// explicitly-set flags (flags win over stdin). --main-branch defaults to "main",
-// so it is gated on Changed() to avoid clobbering a stdin main_branch.
+// explicitly-set flags (flags win over stdin). The trunk flag (--main, or the
+// deprecated --main-branch) defaults to "main", so it is gated via
+// mainBranchFromFlags to avoid clobbering a stdin value.
 func getPieceSyncInput(cmd *cobra.Command) (piececmd.SyncInput, error) {
 	var input piececmd.SyncInput
 
