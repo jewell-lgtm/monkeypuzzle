@@ -183,7 +183,12 @@ tmux.NewSession(sessionName, workDir)
 tmux.KillSession(sessionName)
 ```
 
-**HookRunner** - Executes shell scripts with environment variables:
+**HookRunner** - Executes shell scripts with environment variables. It
+strips inherited `MP_*` from the hook env, so the box-side identity of a
+placed piece (`MP_PLACEMENT_HOST`, `MP_REMOTE`, exported by the controller's
+ssh proxy) is read once in `NewHookRunner` and re-added to every hook. The
+one controller-side hook, `on-box-connect.sh`, runs through the same runner
+with the local repo as root:
 
 ```go
 hooks := piece.NewHookRunner(deps)

@@ -143,27 +143,34 @@ What happens, in order:
 2. **Link** — `.monkeypuzzle/placements.json` gets
    `{"fix-auth": {"box": "wire", "pending": true}}` *before* anything touches
    the box, so a crash can never leave a box-side worktree nobody can find.
-3. **Connect** (first piece of this project on this box only): over ssh, the
-   repo's `origin` is cloned to `$HOME/.local/share/mp/<project>` (skipped if
-   the directory already has a `.git`), `mp init --name <project>` runs there
-   (skipped if already a project), and the controller's
-   `.monkeypuzzle/hooks/` is rsynced across — hooks only exist on the box if
-   shipped. The path is resolved **on the box** (`readlink -f`), so `$HOME`
-   never has to expand on the controller. The box is recorded as a hidden
-   registry row `<project>@<box>` (`mp project list --all`), which is what
-   "connected" means — later pieces skip this step.
+3. **Connect** (first piece of this project on this box only): if the
+   controller has `.monkeypuzzle/hooks/on-box-connect.sh`, it runs — on the
+   controller, blocking — and owns this step (see [Hooks](#hooks)).
+   Otherwise, over ssh, the repo's `origin` is cloned to
+   `$HOME/.local/share/mp/<project>` (skipped if the directory already has a
+   `.git`), `mp init --name <project>` runs there (skipped if already a
+   project), and the controller's `.monkeypuzzle/hooks/` is rsynced across —
+   hooks only exist on the box if shipped. Either way the path is then
+   resolved **on the box** (`readlink -f`), so `$HOME` never has to expand on
+   the controller. The box is recorded as a hidden registry row
+   `<project>@<box>` (`mp project list --all`), which is what "connected"
+   means — later pieces skip this step, and a failed connect (hook or
+   built-in) is retried next time.
 4. **Doctor** the clone: ssh, `mp` on the box, and `init=yes` for that path.
 5. **Create** by proxy: `mp --host wire --dir <clone> create --name fix-auth
    [--parent …] [--prompt …] [--branch …] [--agent …] --skip-switch --json` —
-   an ordinary create on the box, hooks and all.
+   an ordinary create on the box, hooks and all. The proxy exports
+   `MP_PLACEMENT_HOST=wire MP_REMOTE=1` into that call so box-side hooks
+   know they are serving a placement.
 6. **Placed**: the link flips to `pending: false` with the box-side
    `remote_path`.
 
 Any failure after step 2 removes the pending link; the registry row stays
 once the box passed doctor (it *is* connected). Named errors: `piece already
 exists`, `parent must be main or a piece on the same box`, `box unreachable
-over ssh` (ssh exit 255), `box connect failed` (clone/init/rsync stderr),
-`box clone is not an mp project`, `mp is not installed on the box`.
+over ssh` (ssh exit 255), `box connect failed` (clone/init/rsync or
+`on-box-connect.sh` stderr), `box clone is not an mp project`, `mp is not
+installed on the box`.
 
 The origin URL is forwarded to the box verbatim by the built-in connect —
 use ssh remotes rather than URLs with embedded credentials.
@@ -193,6 +200,42 @@ drops **stale** links (piece gone on the box, e.g. merged from inside the box
 worktree); unreachable boxes keep their links. Its JSON carries the verdicts
 under `links`.
 
+### Hooks
+
+Two hook moments sit at the controller/box boundary; everything else is the
+ordinary lifecycle, just running on the box.
+
+**`on-box-connect.sh` — controller-side, blocking, once per (project, box).**
+Fires from step 3 above the first time a project places a piece on a box,
+and replaces the built-in connect entirely: clone, `mp init`, toolchain,
+credentials, shipping hooks — whatever the box needs is the hook's job. mp
+only resolves the clone path afterwards (`cd <path> && readlink -f .`) and
+runs the doctor probe; non-zero exit is `box connect failed` with the hook's
+stderr, the pending link is removed and nothing is registered, so the next
+`mp create --remote` runs it again. Its env:
+
+| Variable | Value |
+| --- | --- |
+| `MP_BOX` | the ssh destination (`wire`) |
+| `MP_REMOTE_PATH` | where the clone must end up: `$HOME/.local/share/mp/<project>`, **unexpanded** — pass it to the box, don't expand it here |
+| `MP_REPO_URL` | the controller's `origin` URL |
+| `MP_PROJECT` | project name (`mp init --name` must match) |
+| `MP_HOOKS_DIR` | the controller's `.monkeypuzzle/hooks/`, if you want them on the box too |
+
+It runs with the controller repo as cwd. A worked recipe (clone + toolchain
++ `gh auth`) is in the [workflow guide](workflow.md#per-box-setup).
+
+**Box-side hooks of a placed piece** — `on-piece-create.sh`,
+`before-pr-create.sh`, all of them — run on the box as usual, from the clone
+the hook or built-in connect made, and see two extra variables:
+`MP_PLACEMENT_HOST=<box>` (the box's name as the controller addresses it)
+and `MP_REMOTE=1`. The controller's proxy exports both into every placement
+call (`create --remote`, and verbs routed to a placed piece); plain
+`mp --host <box> …` proxying does not, and `MP_HOST` is never set on the box
+(it is the reroute variable and would make the box proxy onward). An older
+`mp` on the box simply ignores the two variables — `mp remote doctor` already
+flags the version skew.
+
 ### Preparing a box by hand
 
 The built-in connect needs only ssh + git + `mp` on the box. To control the
@@ -210,6 +253,8 @@ gh auth login                 # PRs are created on the box
 
 Back on the controller, `mp remote doctor wire` should be all green; the
 first `mp create --remote=wire` then finds the clone and only ships hooks.
+To do the same thing repeatably, put it in `on-box-connect.sh` instead
+([Hooks](#hooks)).
 
 ## Known limits (v1)
 

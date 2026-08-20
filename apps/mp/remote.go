@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	piececmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/piece"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/registry"
 	"github.com/jewell-lgtm/monkeypuzzle/pkg/cli"
 )
@@ -33,6 +34,12 @@ type remoteTarget struct {
 	host    string
 	dir     string // remote working directory; empty = ssh login dir
 	fromEnv bool   // target came from MP_HOST, not an explicit flag
+	// placement marks a call made on behalf of a placed piece (create
+	// --remote, verbs routed to a placement). The box-side mp is told so via
+	// MP_PLACEMENT_HOST / MP_REMOTE (D4); plain `mp --host` proxying is not
+	// a placement and exports nothing. MP_HOST is never set: it would make
+	// the box re-proxy.
+	placement bool
 }
 
 // remoteSpec is the raw routing input parsed out of argv/env, before the
@@ -170,10 +177,14 @@ func remoteBin() string {
 // wrapped in `sh -c` so it runs under a POSIX shell regardless of the remote
 // user's login shell (sshd hands the command string to fish/csh verbatim).
 // Non-interactive ssh gets a bare sshd PATH that omits ~/.local/bin — mp's
-// own install location — so it is prepended before the lookup.
+// own install location — so it is prepended before the lookup. Placement
+// calls also export the controller's view of the box for box-side hooks.
 func remoteCommand(target *remoteTarget, args []string) string {
 	var b strings.Builder
 	b.WriteString(`export PATH="$HOME/.local/bin:$PATH"; `)
+	if target.placement {
+		b.WriteString("export " + piececmd.EnvPlacementHost + "=" + cli.ShQuote(target.host) + " " + piececmd.EnvRemote + "=1; ")
+	}
 	if target.dir != "" {
 		b.WriteString("cd " + cli.ShQuote(target.dir) + " && ")
 	}
