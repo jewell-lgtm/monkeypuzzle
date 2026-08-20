@@ -158,3 +158,55 @@ func TestFindUniqueAmbiguity(t *testing.T) {
 		t.Errorf("wrong entry removed: %+v", r.Projects)
 	}
 }
+
+func TestHiddenRows(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("MP_DATA_DIR", dir)
+
+	r := Registry{}
+	r.Upsert("/local/api", "api")
+	p, added := r.UpsertHidden("wire", "/home/u/.local/share/mp/api", "api@wire", "/local/api")
+	if !added || !p.Hidden || p.LinkedFrom != "/local/api" {
+		t.Fatalf("UpsertHidden = %+v added=%v", p, added)
+	}
+	// Re-upserting hidden keeps it hidden and is not a new row.
+	if _, added := r.UpsertHidden("wire", "/home/u/.local/share/mp/api", "", "/local/api"); added {
+		t.Error("second UpsertHidden added a row")
+	}
+	if got := r.Visible(); len(got) != 1 || got[0].Path != "/local/api" {
+		t.Errorf("Visible = %+v, want only the local row", got)
+	}
+	// Hidden rows remain addressable.
+	if _, err := r.FindUnique("api@wire"); err != nil {
+		t.Errorf("FindUnique hidden: %v", err)
+	}
+	if err := r.Save(); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var hidden *Project
+	for i := range loaded.Projects {
+		if loaded.Projects[i].Host == "wire" {
+			hidden = &loaded.Projects[i]
+		}
+	}
+	if hidden == nil || !hidden.Hidden || hidden.LinkedFrom != "/local/api" {
+		t.Fatalf("hidden row lost in round trip: %+v", loaded.Projects)
+	}
+
+	// An explicit registration promotes the row to visible.
+	if _, added := r.UpsertRemote("wire", "/home/u/.local/share/mp/api", "api"); added {
+		t.Error("UpsertRemote over hidden added a row")
+	}
+	if len(r.Visible()) != 2 {
+		t.Errorf("after UpsertRemote, Visible = %d rows, want 2", len(r.Visible()))
+	}
+	// UpsertHidden over a visible row never hides it.
+	r.UpsertHidden("wire", "/home/u/.local/share/mp/api", "", "/local/api")
+	if len(r.Visible()) != 2 {
+		t.Error("UpsertHidden hid a user-registered row")
+	}
+}

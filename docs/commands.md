@@ -907,12 +907,13 @@ echo '{"host":"wire","path":"code/api"}' | mp project add
 
 mp project list                      # human-readable table (alias: ls, status)
 mp project list --json               # machine output
+mp project list --all                # include hidden rows (box-side clones of placed pieces)
 
 mp project remove my-project         # unregister (alias: rm); repo on disk untouched
 mp project remove --target /path/to/repo
 ```
 
-`mp project list` shows best-effort live state per project (current branch, number of pieces). Remote projects show as `(remote)` with a `host:path` location; their JSON rows carry a `"host"` field. The `HOST:PATH` form resolves the path to an absolute path on the host at add time and requires the repo to already be `mp init`-ed there — see [Remote development](remote-development.md).
+`mp project list` shows best-effort live state per project (current branch, number of pieces). Remote projects show as `(remote)` with a `host:path` location; their JSON rows carry a `"host"` field. Rows with `"hidden": true` are bookkeeping for placed pieces (`mp create --remote`, see [Remote development](remote-development.md)) — shown as `(hidden)` only with `--all`; their `"linked_from"` is the controller-side repo root. The `HOST:PATH` form resolves the path to an absolute path on the host at add time and requires the repo to already be `mp init`-ed there — see [Remote development](remote-development.md).
 
 ---
 
@@ -951,7 +952,7 @@ Remote-host utilities for the ssh proxy (see [Remote development](remote-develop
 
 ```bash
 mp remote doctor wire     # probe one ssh host
-mp remote doctor          # probe every host in the project registry
+mp remote doctor          # probe every box in the project registry (hidden rows included)
 ```
 
 Like `mp config`, `doctor` uses positional args — there is no JSON-stdin mode.
