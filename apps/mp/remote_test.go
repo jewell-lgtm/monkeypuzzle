@@ -265,6 +265,33 @@ func TestRemoteCommand(t *testing.T) {
 	}
 }
 
+// D4: placement calls tell the box-side mp who placed it; plain proxying
+// exports nothing, and MP_HOST (the reroute var) never appears.
+func TestRemoteCommand_PlacementExports(t *testing.T) {
+	t.Setenv("MP_REMOTE_BIN", "")
+	inner := func(s string) string { return "sh -c " + cli.ShQuote(s) }
+
+	placed := &remoteTarget{host: "wire", dir: "/x", placement: true}
+	got := remoteCommand(placed, []string{"status"})
+	want := inner(`export PATH="$HOME/.local/bin:$PATH"; export MP_PLACEMENT_HOST='wire' MP_REMOTE=1; cd '/x' && exec 'mp' 'status'`)
+	if got != want {
+		t.Errorf("placement remoteCommand = %s\nwant %s", got, want)
+	}
+
+	plain := &remoteTarget{host: "wire", dir: "/x"}
+	if got := remoteCommand(plain, []string{"status"}); strings.Contains(got, "MP_PLACEMENT_HOST") || strings.Contains(got, "MP_REMOTE") {
+		t.Errorf("plain proxy must not export placement vars: %s", got)
+	}
+
+	for _, tgt := range []*remoteTarget{placed, plain, {host: "wire", fromEnv: true, placement: true}} {
+		for _, a := range sshArgv(tgt, []string{"create", "--name", "p"}, false) {
+			if strings.Contains(a, "MP_HOST") {
+				t.Errorf("MP_HOST leaked into ssh argv: %q", a)
+			}
+		}
+	}
+}
+
 func TestSSHArgv(t *testing.T) {
 	t.Setenv("MP_REMOTE_BIN", "")
 	tgt := &remoteTarget{host: "wire", dir: "/x"}

@@ -1015,6 +1015,7 @@ Hooks are executable shell scripts in `.monkeypuzzle/hooks/` that run at key poi
 | `is-piece-done.sh`       | Consulted by `mp cleanup` / `mp merge`'s merge-status check | Blocking; exit 0 means "treat as merged" — use to recognise squash-merges a plain branch-ancestry check would miss |
 | `agent-blocked.sh`       | Piece's aggregate agent status transitions to `blocked` | Detached |
 | `agent-done.sh`          | Piece's aggregate agent status transitions to `done`    | Detached |
+| `on-box-connect.sh`      | First `mp create --remote=<box>` of a project on a box (controller-side) | Blocking; replaces the built-in clone + `mp init` + hook rsync entirely; non-zero aborts the placement. Env: `MP_BOX`, `MP_REMOTE_PATH`, `MP_REPO_URL`, `MP_PROJECT`, `MP_HOOKS_DIR` |
 
 ### Environment Variables
 
@@ -1034,6 +1035,13 @@ All hooks receive these environment variables:
 | `MP_AGENT_KIND`    | Agent kind, e.g. `claude` (agent hooks) |
 | `MP_AGENT_STATUS`  | New piece aggregate status (agent hooks) |
 | `MP_AGENT_PANE`    | Multiplexer pane the agent runs in (agent hooks) |
+| `MP_PLACEMENT_HOST` | Box name as the controller knows it (box-side hooks of a placed piece) |
+| `MP_REMOTE`        | `1` when the hook runs on a box on behalf of a controller |
+| `MP_BOX`           | ssh destination being connected (`on-box-connect.sh`) |
+| `MP_REMOTE_PATH`   | Intended clone path on the box, unexpanded `$HOME/.local/share/mp/<project>` (`on-box-connect.sh`) |
+| `MP_REPO_URL`      | The project's `origin` URL (`on-box-connect.sh`) |
+| `MP_PROJECT`       | Project name (`on-box-connect.sh`) |
+| `MP_HOOKS_DIR`     | Controller-side `.monkeypuzzle/hooks/` (`on-box-connect.sh`) |
 
 ### Behavior
 

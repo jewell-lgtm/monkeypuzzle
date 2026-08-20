@@ -57,6 +57,11 @@ mp create [--name <name> | --prompt <text>]
 
 Piece basics always available to every hook: `MP_PIECE_NAME`, `MP_WORKTREE_PATH`, `MP_REPO_ROOT`.
 
+Off the main line: `mp create --remote=<box>` fires `on-box-connect.sh` on the
+**controller** (blocking) the first time a project touches a box — see
+[Per-box setup](#per-box-setup) — and every hook that then runs **on the box**
+for a placed piece also gets `MP_PLACEMENT_HOST=<box>` and `MP_REMOTE=1`.
+
 ## A worked example — GitLab MR with a label flip + reviewer
 
 PHProcess-shape workflow: opening the MR flips it to "Doing", the user-driven ready-flip flips it to "Code Review ausstehend" and assigns a reviewer.
@@ -121,6 +126,48 @@ slow `go mod download` (or `npm install`, submodule init, etc.) never holds up
 the worktree being ready. Its output goes to
 `.monkeypuzzle/logs/on-piece-create-<piece-name>.log`; tail that file if a piece
 seems to be missing its dependencies.
+
+### Per-box setup
+
+`mp create --remote=<box>` needs a clone of the project on the box. Without a
+hook, mp does the minimum itself (clone `origin`, `mp init`, rsync your
+hooks). Drop an `on-box-connect.sh` to own that step instead — it runs
+**on the controller**, blocking, once per (project, box), and replaces the
+built-in connect entirely. mp then only resolves the clone path on the box
+and checks the contract (`mp remote doctor`). Non-zero exit aborts the
+placement and leaves the box unconnected, so the next attempt runs it again.
+
+```bash
+# .monkeypuzzle/hooks/on-box-connect.sh
+#!/bin/bash
+set -euo pipefail
+# env: MP_BOX  MP_REMOTE_PATH ($HOME/.local/share/mp/<project>, unexpanded)
+#      MP_REPO_URL (origin)  MP_PROJECT  MP_HOOKS_DIR (this dir)
+ssh "$MP_BOX" "set -e
+  export PATH=\"\$HOME/.local/bin:\$PATH\"
+  mkdir -p \"\$(dirname $MP_REMOTE_PATH)\"
+  [ -d $MP_REMOTE_PATH/.git ] || git clone $MP_REPO_URL $MP_REMOTE_PATH
+  cd $MP_REMOTE_PATH
+  [ -f .monkeypuzzle/monkeypuzzle.json ] || echo '{}' | mp init --name $MP_PROJECT >/dev/null
+  mise install                              # toolchain pinned by the repo
+  gh auth status >/dev/null 2>&1 || gh auth login --with-token < ~/.gh-token
+"
+rsync -a -- "$MP_HOOKS_DIR/" "$MP_BOX:$MP_REMOTE_PATH/.monkeypuzzle/hooks/"
+```
+
+Box-side hooks (`on-piece-create.sh` and friends) run on the box with
+`MP_PLACEMENT_HOST=<box>` and `MP_REMOTE=1`, so one hook file can branch on
+where it is:
+
+```bash
+# .monkeypuzzle/hooks/on-piece-create.sh
+#!/bin/bash
+cd "$MP_WORKTREE_PATH"
+if [ "${MP_REMOTE:-}" = 1 ]; then
+  echo "placed on $MP_PLACEMENT_HOST" >> .git/mp-placement
+fi
+go mod download
+```
 
 ### Post-merge promote
 

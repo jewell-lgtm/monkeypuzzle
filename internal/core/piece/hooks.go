@@ -32,6 +32,21 @@ const (
 	// "an agent needs you" / "an agent finished".
 	HookAgentBlocked = "agent-blocked.sh"
 	HookAgentDone    = "agent-done.sh"
+	// HookOnBoxConnect runs on the controller, blocking, the first time a
+	// project places a piece on a box (`mp create --remote`). When present it
+	// replaces mp's built-in connect (clone + init + ship hooks) entirely; it
+	// must leave an mp project at MP_REMOTE_PATH on MP_BOX. Non-zero aborts
+	// the placement. It is the only hook that runs with MP_BOX set.
+	HookOnBoxConnect = "on-box-connect.sh"
+)
+
+// Env vars a controller exports into a proxied placement call so the box-side
+// mp knows it is acting on behalf of a controller. They are read at startup
+// (NewHookRunner) and surface in every box-side hook's env. MP_HOST is never
+// used for this: it is the proxy reroute var.
+const (
+	EnvPlacementHost = "MP_PLACEMENT_HOST"
+	EnvRemote        = "MP_REMOTE"
 )
 
 // HookContext contains environment variables to pass to hooks
@@ -48,6 +63,32 @@ type HookContext struct {
 	AgentKind    string // MP_AGENT_KIND (for agent hooks)
 	AgentStatus  string // MP_AGENT_STATUS (for agent hooks; the piece aggregate)
 	AgentPane    string // MP_AGENT_PANE (for agent hooks)
+
+	// Placement (box-side hooks): the box this mp is running on, as named
+	// by the controller that placed the piece, and whether the call was
+	// proxied at all. Zero values fall back to what NewHookRunner read from
+	// the process env, so core call sites need not know about placement.
+	PlacementHost string // MP_PLACEMENT_HOST
+	Remote        bool   // MP_REMOTE=1
+
+	// Box connect (controller-side on-box-connect.sh only).
+	Box        string // MP_BOX: ssh destination being connected
+	RemotePath string // MP_REMOTE_PATH: intended clone path on the box (pre-readlink)
+	RepoURL    string // MP_REPO_URL: origin to clone
+	Project    string // MP_PROJECT
+	HooksDir   string // MP_HOOKS_DIR: controller-side hooks dir
+}
+
+// withPlacementDefaults fills PlacementHost/Remote from the runner when the
+// call site left them empty.
+func (h *HookRunner) withPlacementDefaults(ctx HookContext) HookContext {
+	if ctx.PlacementHost == "" {
+		ctx.PlacementHost = h.placementHost
+	}
+	if !ctx.Remote {
+		ctx.Remote = h.remote
+	}
+	return ctx
 }
 
 // HookRunner executes hook scripts from the .monkeypuzzle/hooks directory
@@ -55,14 +96,22 @@ type HookRunner struct {
 	exec   core.Exec
 	fs     core.FS
 	output core.Output
+
+	// Box-side placement identity, read once from the env the controller's
+	// proxy exported (see EnvPlacementHost). buildEnv strips MP_* from the
+	// inherited env, so these must be carried explicitly.
+	placementHost string
+	remote        bool
 }
 
 // NewHookRunner creates a new HookRunner with the given dependencies
 func NewHookRunner(deps core.Deps) *HookRunner {
 	return &HookRunner{
-		exec:   deps.Exec,
-		fs:     deps.FS,
-		output: deps.Output,
+		exec:          deps.Exec,
+		fs:            deps.FS,
+		output:        deps.Output,
+		placementHost: os.Getenv(EnvPlacementHost),
+		remote:        os.Getenv(EnvRemote) == "1",
 	}
 }
 
@@ -97,9 +146,17 @@ func (h *HookRunner) resolveExecutableHook(repoRoot, hookName string) (hookPath 
 // Returns nil if the hook doesn't exist or the hooks directory doesn't exist.
 // Returns an error if the hook exists but fails to execute (non-zero exit code).
 func (h *HookRunner) RunHook(ctx context.Context, repoRoot, hookName string, hookCtx HookContext) error {
+	_, _, err := h.RunHookOutput(ctx, repoRoot, hookName, hookCtx)
+	return err
+}
+
+// RunHookOutput is RunHook that also reports whether the hook existed (ran)
+// and returns its combined output, so callers can fold a failing hook's
+// stderr into their own error.
+func (h *HookRunner) RunHookOutput(ctx context.Context, repoRoot, hookName string, hookCtx HookContext) (output []byte, ran bool, err error) {
 	hookPath, ok, err := h.resolveExecutableHook(repoRoot, hookName)
 	if err != nil || !ok {
-		return err
+		return nil, false, err
 	}
 
 	// Build environment variables
@@ -111,7 +168,7 @@ func (h *HookRunner) RunHook(ctx context.Context, repoRoot, hookName string, hoo
 		Content: fmt.Sprintf("Running hook: %s", hookName),
 	})
 
-	output, err := h.execWithEnv(ctx, repoRoot, hookPath, env)
+	output, err = h.execWithEnv(ctx, repoRoot, hookPath, env)
 	if err != nil {
 		// Output hook's stderr/stdout
 		if len(output) > 0 {
@@ -120,7 +177,7 @@ func (h *HookRunner) RunHook(ctx context.Context, repoRoot, hookName string, hoo
 				Content: string(output),
 			})
 		}
-		return fmt.Errorf("hook %s failed: %w", hookName, err)
+		return output, true, fmt.Errorf("hook %s failed: %w", hookName, err)
 	}
 
 	// Output hook's stdout if any
@@ -131,7 +188,7 @@ func (h *HookRunner) RunHook(ctx context.Context, repoRoot, hookName string, hoo
 		})
 	}
 
-	return nil
+	return output, true, nil
 }
 
 // RunHookDetached starts a hook script in the background (fire-and-forget) and
@@ -176,6 +233,7 @@ func hookLogPath(repoRoot, hookName, pieceName string) string {
 // buildEnv creates environment variable strings for the hook.
 // It filters out any existing MP_* variables to ensure our values take precedence.
 func (h *HookRunner) buildEnv(ctx HookContext) []string {
+	ctx = h.withPlacementDefaults(ctx)
 	// Filter out existing MP_* variables to avoid duplicates
 	env := filterEnv(os.Environ(), "MP_")
 
@@ -214,6 +272,27 @@ func (h *HookRunner) buildEnv(ctx HookContext) []string {
 	}
 	if ctx.AgentPane != "" {
 		env = append(env, fmt.Sprintf("MP_AGENT_PANE=%s", ctx.AgentPane))
+	}
+	if ctx.PlacementHost != "" {
+		env = append(env, fmt.Sprintf("%s=%s", EnvPlacementHost, ctx.PlacementHost))
+	}
+	if ctx.Remote {
+		env = append(env, EnvRemote+"=1")
+	}
+	if ctx.Box != "" {
+		env = append(env, fmt.Sprintf("MP_BOX=%s", ctx.Box))
+	}
+	if ctx.RemotePath != "" {
+		env = append(env, fmt.Sprintf("MP_REMOTE_PATH=%s", ctx.RemotePath))
+	}
+	if ctx.RepoURL != "" {
+		env = append(env, fmt.Sprintf("MP_REPO_URL=%s", ctx.RepoURL))
+	}
+	if ctx.Project != "" {
+		env = append(env, fmt.Sprintf("MP_PROJECT=%s", ctx.Project))
+	}
+	if ctx.HooksDir != "" {
+		env = append(env, fmt.Sprintf("MP_HOOKS_DIR=%s", ctx.HooksDir))
 	}
 
 	return env

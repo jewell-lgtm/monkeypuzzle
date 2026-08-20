@@ -436,3 +436,97 @@ func TestHookRunner_BuildEnv_FiltersExistingMPVariables(t *testing.T) {
 // Suppresses the unused variable warning for envContains and os
 var _ = envContains
 var _ = os.ErrNotExist
+
+// hookEnv runs hookName with ctx through a MockExec and returns the env the
+// hook saw as a map.
+func hookEnv(t *testing.T, hookName string, ctx piece.HookContext) map[string]string {
+	t.Helper()
+	fs := adapters.NewMemoryFS()
+	mockExec := adapters.NewMockExec()
+	runner := piece.NewHookRunner(core.Deps{FS: fs, Output: adapters.NewBufferOutput(), Exec: mockExec})
+	hooksDir := "repo/.monkeypuzzle/hooks"
+	_ = fs.MkdirAll(hooksDir, 0755)
+	_ = fs.WriteFile(filepath.Join(hooksDir, hookName), []byte("#!/bin/bash\n"), 0755)
+	mockExec.AddResponse("bash", []string{filepath.Join("/repo/.monkeypuzzle/hooks", hookName)}, nil, nil)
+	if err := runner.RunHook(context.Background(), "/repo", hookName, ctx); err != nil {
+		t.Fatalf("RunHook: %v", err)
+	}
+	calls := mockExec.GetCalls()
+	env := map[string]string{}
+	for _, e := range calls[len(calls)-1].Env {
+		if k, v, ok := strings.Cut(e, "="); ok {
+			env[k] = v
+		}
+	}
+	return env
+}
+
+func TestHookRunner_PlacementEnv_FromContext(t *testing.T) {
+	t.Setenv("MP_PLACEMENT_HOST", "")
+	t.Setenv("MP_REMOTE", "")
+	env := hookEnv(t, piece.HookOnPieceCreate, piece.HookContext{PieceName: "p", PlacementHost: "wire", Remote: true})
+	if env["MP_PLACEMENT_HOST"] != "wire" || env["MP_REMOTE"] != "1" {
+		t.Errorf("env = %v, want MP_PLACEMENT_HOST=wire MP_REMOTE=1", env)
+	}
+	if _, ok := env["MP_HOST"]; ok {
+		t.Error("MP_HOST must never be set for hooks")
+	}
+
+	env = hookEnv(t, piece.HookOnPieceCreate, piece.HookContext{PieceName: "p"})
+	for _, k := range []string{"MP_PLACEMENT_HOST", "MP_REMOTE"} {
+		if _, ok := env[k]; ok {
+			t.Errorf("%s set for a local piece: %v", k, env)
+		}
+	}
+}
+
+// Box-side: the controller's proxy exported MP_PLACEMENT_HOST / MP_REMOTE
+// into mp's env; NewHookRunner reads them so every hook sees them even
+// though buildEnv strips inherited MP_*.
+func TestHookRunner_PlacementEnv_FromProcessEnv(t *testing.T) {
+	t.Setenv("MP_PLACEMENT_HOST", "wire")
+	t.Setenv("MP_REMOTE", "1")
+	t.Setenv("MP_HOST", "should-be-stripped")
+	env := hookEnv(t, piece.HookBeforePRCreate, piece.HookContext{PieceName: "p"})
+	if env["MP_PLACEMENT_HOST"] != "wire" || env["MP_REMOTE"] != "1" {
+		t.Errorf("env = %v, want MP_PLACEMENT_HOST=wire MP_REMOTE=1 from process env", env)
+	}
+	if _, ok := env["MP_HOST"]; ok {
+		t.Error("MP_HOST leaked into hook env")
+	}
+}
+
+func TestHookRunner_BoxConnectEnv(t *testing.T) {
+	env := hookEnv(t, piece.HookOnBoxConnect, piece.HookContext{
+		Box: "wire", RemotePath: "$HOME/.local/share/mp/api", RepoURL: "git@h:o/api.git", Project: "api", HooksDir: "/repo/.monkeypuzzle/hooks",
+	})
+	want := map[string]string{
+		"MP_BOX": "wire", "MP_REMOTE_PATH": "$HOME/.local/share/mp/api", "MP_REPO_URL": "git@h:o/api.git",
+		"MP_PROJECT": "api", "MP_HOOKS_DIR": "/repo/.monkeypuzzle/hooks",
+	}
+	for k, v := range want {
+		if env[k] != v {
+			t.Errorf("%s = %q, want %q", k, env[k], v)
+		}
+	}
+}
+
+func TestHookRunner_RunHookOutput_ReportsRanAndOutput(t *testing.T) {
+	fs := adapters.NewMemoryFS()
+	mockExec := adapters.NewMockExec()
+	runner := piece.NewHookRunner(core.Deps{FS: fs, Output: adapters.NewBufferOutput(), Exec: mockExec})
+
+	_, ran, err := runner.RunHookOutput(context.Background(), "/repo", piece.HookOnBoxConnect, piece.HookContext{})
+	if err != nil || ran {
+		t.Fatalf("absent hook: ran=%v err=%v", ran, err)
+	}
+
+	hooksDir := "repo/.monkeypuzzle/hooks"
+	_ = fs.MkdirAll(hooksDir, 0755)
+	_ = fs.WriteFile(filepath.Join(hooksDir, piece.HookOnBoxConnect), []byte("#!/bin/bash\n"), 0755)
+	mockExec.AddResponse("bash", []string{"/repo/.monkeypuzzle/hooks/" + piece.HookOnBoxConnect}, []byte("clone failed\n"), errors.New("exit status 1"))
+	out, ran, err := runner.RunHookOutput(context.Background(), "/repo", piece.HookOnBoxConnect, piece.HookContext{})
+	if err == nil || !ran || string(out) != "clone failed\n" {
+		t.Errorf("failing hook: out=%q ran=%v err=%v", out, ran, err)
+	}
+}
