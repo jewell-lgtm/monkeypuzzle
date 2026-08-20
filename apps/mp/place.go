@@ -67,7 +67,7 @@ func runPieceCreateRemote(ctx context.Context, deps core.Deps, handler *piececmd
 	if err != nil {
 		return err
 	}
-	info, err := placePiece(ctx, req, fs)
+	info, err := placePiece(ctx, req, deps)
 	if err != nil {
 		if rmErr := piececmd.RemovePlacement(req.repoRoot, req.name, fs); rmErr != nil {
 			fmt.Fprintf(os.Stderr, "%s could not remove pending link for %s: %v\n", cli.GlyphWarn, req.name, rmErr)
@@ -135,7 +135,8 @@ func validatePlacement(ctx context.Context, handler *piececmd.Handler, fs core.F
 }
 
 // placePiece is steps 2–7; the caller owns the pending link.
-func placePiece(ctx context.Context, req placeRequest, fs core.FS) (piececmd.PieceInfo, error) {
+func placePiece(ctx context.Context, req placeRequest, deps core.Deps) (piececmd.PieceInfo, error) {
+	fs := deps.FS
 	reg, err := registry.Load()
 	if err != nil {
 		return piececmd.PieceInfo{}, err
@@ -152,7 +153,7 @@ func placePiece(ctx context.Context, req placeRequest, fs core.FS) (piececmd.Pie
 		}
 	}
 	if remoteProject == "" {
-		remoteProject, err = connectBox(ctx, req, fs)
+		remoteProject, err = connectBox(ctx, req, deps)
 		if err != nil {
 			return piececmd.PieceInfo{}, err
 		}
@@ -189,7 +190,7 @@ func placePiece(ctx context.Context, req placeRequest, fs core.FS) (piececmd.Pie
 	if req.input.Agent != "" {
 		argv = append(argv, "--agent", req.input.Agent)
 	}
-	target := &remoteTarget{host: req.box, dir: remoteProject}
+	target := &remoteTarget{host: req.box, dir: remoteProject, placement: true}
 	out, code, err := runRemoteCapture(target, argv, 0)
 	if err != nil {
 		if code == 255 {
@@ -219,17 +220,74 @@ func placePiece(ctx context.Context, req placeRequest, fs core.FS) (piececmd.Pie
 	return info, nil
 }
 
-// connectBox is the built-in first-touch of a box for a project: clone the
-// origin into $HOME/.local/share/mp/<project> (skipped when present), `mp
-// init` it (skipped when already a project), ship the controller's hooks,
-// and return the clone's path resolved on the box — $HOME only expands there.
-func connectBox(ctx context.Context, req placeRequest, fs core.FS) (string, error) {
+// connectBox is the first touch of a box for a project. It fires at most
+// once successfully per (project, box): the hidden registry row the caller
+// writes afterwards is the marker, so a failed connect is retried next time.
+// The controller-side on-box-connect.sh hook, when present, replaces the
+// built-in connect entirely (it sees MP_BOX, MP_REMOTE_PATH, MP_REPO_URL,
+// MP_PROJECT, MP_HOOKS_DIR); built-in = clone the origin into
+// $HOME/.local/share/mp/<project> (skipped when present), `mp init` it
+// (skipped when already a project), ship the controller's hooks. Either way
+// the clone's path is then resolved on the box — $HOME only expands there.
+func connectBox(ctx context.Context, req placeRequest, deps core.Deps) (string, error) {
 	originB, err := exec.CommandContext(ctx, "git", "-C", req.repoRoot, "remote", "get-url", "origin").Output()
 	origin := string(originB)
 	if err != nil || strings.TrimSpace(origin) == "" {
 		return "", fmt.Errorf("%w: %s has no origin remote to clone from", ErrBoxConnect, req.repoRoot)
 	}
 	origin = strings.TrimSpace(origin)
+	// The project dir is quoted as a suffix so the box expands $HOME itself.
+	dir := `"$HOME"/` + cli.ShQuote(remoteMPDir+"/"+req.project)
+
+	hooks := piececmd.NewHookRunner(deps)
+	out, ran, err := hooks.RunHookOutput(ctx, req.repoRoot, piececmd.HookOnBoxConnect, piececmd.HookContext{
+		Box:        req.box,
+		RemotePath: "$HOME/" + remoteMPDir + "/" + req.project,
+		RepoURL:    origin,
+		Project:    req.project,
+		HooksDir:   projectdir.HooksDir(req.repoRoot),
+	})
+	if err != nil {
+		return "", fmt.Errorf("%w: %s: %s: %s", ErrBoxConnect, req.box, piececmd.HookOnBoxConnect, strings.TrimSpace(string(out)))
+	}
+	var script string
+	if ran {
+		script = `cd ` + dir + ` && readlink -f .`
+	} else {
+		script = builtinConnectScript(req, deps.FS, origin, dir)
+		fmt.Fprintf(os.Stderr, "Connecting %s for %s (clone + mp init under ~/%s)...\n", req.box, req.project, remoteMPDir)
+	}
+	stdout, stderr, code, err := sshScript(req.box, script)
+	if err != nil {
+		if code == 255 {
+			return "", fmt.Errorf("%w: %s: %s", ErrBoxUnreachable, req.box, strings.TrimSpace(stderr))
+		}
+		return "", fmt.Errorf("%w: %s: %s", ErrBoxConnect, req.box, strings.TrimSpace(stderr))
+	}
+	root := strings.TrimSpace(stdout)
+	if root == "" || !strings.HasPrefix(root, "/") {
+		return "", fmt.Errorf("%w: %s: could not resolve clone path (got %q)", ErrBoxConnect, req.box, root)
+	}
+	if ran {
+		return root, nil // the hook owns hooks/toolchain/creds on the box
+	}
+
+	// Hooks exist on the box only if shipped from here.
+	hooksDir := projectdir.HooksDir(req.repoRoot)
+	if fi, err := os.Stat(hooksDir); err == nil && fi.IsDir() {
+		dest := req.box + ":" + root + "/.monkeypuzzle/hooks/"
+		cmd := exec.Command("rsync", "-a", "--", hooksDir+string(filepath.Separator), dest)
+		var errb bytes.Buffer
+		cmd.Stderr = &errb
+		if err := cmd.Run(); err != nil {
+			return "", fmt.Errorf("%w: shipping hooks to %s: %s", ErrBoxConnect, dest, strings.TrimSpace(errb.String()))
+		}
+	}
+	return root, nil
+}
+
+// builtinConnectScript is the default connect, run on the box under sh.
+func builtinConnectScript(req placeRequest, fs core.FS, origin, dir string) string {
 	initArgs := []string{"init", "--name", req.project}
 	if cfg, err := piececmd.ReadConfig(req.repoRoot, fs); err == nil && cfg.PR.Provider != "" {
 		initArgs = append(initArgs, "--pr-provider", cfg.PR.Provider)
@@ -239,41 +297,13 @@ func connectBox(ctx context.Context, req placeRequest, fs core.FS) (string, erro
 	for _, a := range initArgs {
 		init.WriteString(" " + cli.ShQuote(a))
 	}
-	// The project dir is quoted as a suffix so the box expands $HOME itself.
-	dir := `"$HOME"/` + cli.ShQuote(remoteMPDir+"/"+req.project)
-	script := `export PATH="$HOME/.local/bin:$PATH"
+	return `export PATH="$HOME/.local/bin:$PATH"
 set -e
 mkdir -p "$HOME"/` + cli.ShQuote(remoteMPDir) + `
 if [ ! -d ` + dir + `/.git ]; then git clone ` + cli.ShQuote(origin) + ` ` + dir + ` >&2; fi
 cd ` + dir + `
 if [ ! -f .monkeypuzzle/monkeypuzzle.json ]; then echo '{}' | ` + init.String() + ` >/dev/null; fi
 readlink -f .`
-
-	fmt.Fprintf(os.Stderr, "Connecting %s for %s (clone + mp init under ~/%s)...\n", req.box, req.project, remoteMPDir)
-	out, stderr, code, err := sshScript(req.box, script)
-	if err != nil {
-		if code == 255 {
-			return "", fmt.Errorf("%w: %s: %s", ErrBoxUnreachable, req.box, strings.TrimSpace(stderr))
-		}
-		return "", fmt.Errorf("%w: %s: %s", ErrBoxConnect, req.box, strings.TrimSpace(stderr))
-	}
-	root := strings.TrimSpace(out)
-	if root == "" || !strings.HasPrefix(root, "/") {
-		return "", fmt.Errorf("%w: %s: could not resolve clone path (got %q)", ErrBoxConnect, req.box, root)
-	}
-
-	// Hooks exist on the box only if shipped from here.
-	hooks := projectdir.HooksDir(req.repoRoot)
-	if fi, err := os.Stat(hooks); err == nil && fi.IsDir() {
-		dest := req.box + ":" + root + "/.monkeypuzzle/hooks/"
-		cmd := exec.Command("rsync", "-a", "--", hooks+string(filepath.Separator), dest)
-		var errb bytes.Buffer
-		cmd.Stderr = &errb
-		if err := cmd.Run(); err != nil {
-			return "", fmt.Errorf("%w: shipping hooks to %s: %s", ErrBoxConnect, dest, strings.TrimSpace(errb.String()))
-		}
-	}
-	return root, nil
 }
 
 // sshScript runs a POSIX script on host (sh -c, BatchMode, 5s connect) and

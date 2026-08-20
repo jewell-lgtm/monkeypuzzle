@@ -75,7 +75,7 @@ func locatePiece(ctx context.Context, fs core.FS, selector string) (pieceLocatio
 // box's exit code, like every other proxied command.
 func proxyPlaced(loc pieceLocation, fs core.FS, selector string, ending bool) error {
 	args := stripSelector(os.Args[1:], selector)
-	target := &remoteTarget{host: loc.placement.Box, dir: loc.placement.RemotePath}
+	target := &remoteTarget{host: loc.placement.Box, dir: loc.placement.RemotePath, placement: true}
 	code := runRemote(target, args)
 	if code != 0 {
 		os.Exit(code)

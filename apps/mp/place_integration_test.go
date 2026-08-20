@@ -350,3 +350,155 @@ func TestCLI_CreateRemote_Schema(t *testing.T) {
 		t.Errorf("schema missing remote: %v\n%s", err, stdout)
 	}
 }
+
+// writeConnectHook installs a controller-side on-box-connect.sh that records
+// its env (one file per run, so call counts are observable) and exits code.
+func writeConnectHook(t *testing.T, e *testEnv, code int) (envDir string) {
+	t.Helper()
+	hooks := filepath.Join(e.tmpDir, ".monkeypuzzle", "hooks")
+	envDir = filepath.Join(e.tmpDir, "hook-env")
+	if err := os.MkdirAll(hooks, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(envDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	script := fmt.Sprintf("#!/bin/sh\nenv | grep '^MP_' > %q/run-$$\necho 'hook says no' >&2\nexit %d\n", envDir, code)
+	if err := os.WriteFile(filepath.Join(hooks, "on-box-connect.sh"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return envDir
+}
+
+func hookRuns(t *testing.T, envDir string) []string {
+	t.Helper()
+	entries, _ := os.ReadDir(envDir)
+	var runs []string
+	for _, en := range entries {
+		data, _ := os.ReadFile(filepath.Join(envDir, en.Name()))
+		runs = append(runs, string(data))
+	}
+	return runs
+}
+
+func TestCLI_CreateRemote_ConnectHook_ReplacesBuiltin(t *testing.T) {
+	e := placeEnv(t)
+	envDir := writeConnectHook(t, e, 0)
+	shim := newSeqShim(t, e,
+		shimResponse{stdout: boxProject + "\n"}, // 1 readlink only: hook did the clone
+		shimResponse{stdout: probeOK},           // 2 doctor probe
+		shimResponse{stdout: createJSON("fix-auth")},
+		shimResponse{stdout: probeOK}, // second create: connected, no hook
+		shimResponse{stdout: createJSON("fix-auth-2")},
+	)
+
+	_, stderr, err := runProxy(e, shim.path, "", nil, "create", "--remote", "wire", "--name", "fix-auth")
+	if err != nil {
+		t.Fatalf("create --remote: %v\nstderr: %s", err, stderr)
+	}
+	if shim.calls(t) != 3 {
+		t.Fatalf("shim calls = %d, want 3 (readlink, doctor, create) — hook must replace clone+init+rsync", shim.calls(t))
+	}
+	resolve := shim.argv(t, 1)
+	if strings.Contains(resolve, "git clone") || !strings.Contains(resolve, "readlink -f") || !strings.Contains(resolve, ".local/share/mp") {
+		t.Errorf("post-hook resolve should only readlink the clone:\n%s", resolve)
+	}
+	for n := 1; n <= 3; n++ {
+		if strings.HasPrefix(shim.argv(t, n), "rsync") {
+			t.Errorf("rsync ran although the hook owns the box (call %d)", n)
+		}
+	}
+
+	runs := hookRuns(t, envDir)
+	if len(runs) != 1 {
+		t.Fatalf("hook ran %d times, want 1", len(runs))
+	}
+	origin, _ := exec.Command("git", "-C", e.tmpDir, "remote", "get-url", "origin").Output()
+	for _, want := range []string{
+		"MP_BOX=wire\n",
+		"MP_REMOTE_PATH=$HOME/.local/share/mp/placed-proj\n",
+		"MP_REPO_URL=" + strings.TrimSpace(string(origin)) + "\n",
+		"MP_PROJECT=placed-proj\n",
+		"MP_HOOKS_DIR=", // repo root may be symlink-resolved (/private on macOS)
+		"/.monkeypuzzle/hooks\n",
+	} {
+		if !strings.Contains(runs[0], want) {
+			t.Errorf("hook env missing %q:\n%s", want, runs[0])
+		}
+	}
+	for _, never := range []string{"MP_HOST=", "MP_PLACEMENT_HOST=", "MP_REMOTE=1"} {
+		if strings.Contains(runs[0], never) {
+			t.Errorf("controller-side hook env must not carry %s:\n%s", never, runs[0])
+		}
+	}
+
+	// D4: the proxied create tells the box it's a placement; MP_HOST never.
+	create := shim.argv(t, 3)
+	if !strings.Contains(create, `export MP_PLACEMENT_HOST='\''wire'\'' MP_REMOTE=1; `) {
+		t.Errorf("create argv lacks placement exports:\n%s", create)
+	}
+	if strings.Contains(create, "MP_HOST") {
+		t.Errorf("MP_HOST leaked into proxied create:\n%s", create)
+	}
+
+	// Connected marker = hidden registry row → second placement skips the hook.
+	if _, stderr, err := runProxy(e, shim.path, "", nil, "create", "--remote", "wire", "--name", "fix-auth-2"); err != nil {
+		t.Fatalf("second create: %v\n%s", err, stderr)
+	}
+	if got := len(hookRuns(t, envDir)); got != 1 {
+		t.Errorf("hook ran %d times after second placement, want 1", got)
+	}
+	if shim.calls(t) != 5 {
+		t.Errorf("shim calls = %d, want 5", shim.calls(t))
+	}
+}
+
+func TestCLI_CreateRemote_ConnectHook_FailureAborts(t *testing.T) {
+	e := placeEnv(t)
+	envDir := writeConnectHook(t, e, 3)
+	shim := newSeqShim(t, e, shimResponse{stdout: boxProject + "\n"})
+
+	_, stderr, err := runProxy(e, shim.path, "", nil, "create", "--remote", "wire", "--name", "fix-auth")
+	if err == nil {
+		t.Fatal("create --remote succeeded despite failing hook")
+	}
+	if !strings.Contains(stderr, "box connect failed") || !strings.Contains(stderr, "on-box-connect.sh") || !strings.Contains(stderr, "hook says no") {
+		t.Errorf("stderr should name ErrBoxConnect, the hook and its stderr:\n%s", stderr)
+	}
+	if shim.calls(t) != 0 {
+		t.Errorf("ssh ran %d times after hook failure, want 0", shim.calls(t))
+	}
+	if len(readPlacements(t, e)) != 0 {
+		t.Error("pending link not removed after hook failure")
+	}
+	if strings.Contains(readRegistry(t, e), "wire") {
+		t.Error("registry row written although connect failed")
+	}
+	// Not connected → retried (and still failing) on the next attempt.
+	_, _, _ = runProxy(e, shim.path, "", nil, "create", "--remote", "wire", "--name", "fix-auth")
+	if got := len(hookRuns(t, envDir)); got != 2 {
+		t.Errorf("hook ran %d times across two failed attempts, want 2", got)
+	}
+}
+
+func TestCLI_Placed_ProxyExportsPlacement(t *testing.T) {
+	e := placedEnv(t, "")
+	shimDir, path := sshShim(t, e, `{"in_piece":true}`, 0)
+	if _, stderr, err := runProxy(e, path, "", nil, "status", "fix-auth", "--json"); err != nil {
+		t.Fatalf("status placed: %v\n%s", err, stderr)
+	}
+	argv := shimFile(t, shimDir, "argv")
+	if !strings.Contains(argv, `export MP_PLACEMENT_HOST='\''wire'\'' MP_REMOTE=1; `) {
+		t.Errorf("placed verb lacks placement exports:\n%s", argv)
+	}
+	if strings.Contains(argv, "MP_HOST") {
+		t.Errorf("MP_HOST leaked:\n%s", argv)
+	}
+	// Plain proxying is not a placement.
+	if _, _, err := runProxy(e, path, "", nil, "--host", "wire", "list"); err != nil {
+		t.Fatal(err)
+	}
+	if argv := shimFile(t, shimDir, "argv"); strings.Contains(argv, "MP_PLACEMENT_HOST") || strings.Contains(argv, "MP_REMOTE=") {
+		t.Errorf("plain --host proxy exported placement vars:\n%s", argv)
+	}
+}
