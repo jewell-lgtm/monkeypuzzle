@@ -55,18 +55,27 @@ type doctorReport struct {
 	Tmux         bool   `json:"tmux"`
 	Gh           bool   `json:"gh"`
 	GhAuth       bool   `json:"gh_auth"`
+	// Dir/Init are set when a path was probed: is it an mp project there?
+	Dir  string `json:"dir,omitempty"`
+	Init bool   `json:"init,omitempty"`
 }
 
 // doctorProbe is the single shell script run on the host; one key=value line
 // per check keeps it one ssh round-trip. It probes the same binary the proxy
-// would run (MP_REMOTE_BIN honored) under the same PATH.
-func doctorProbe() string {
-	return `export PATH="$HOME/.local/bin:$PATH"
+// would run (MP_REMOTE_BIN honored) under the same PATH. With a dir it also
+// reports whether that path is an mp project (init=yes|no).
+func doctorProbe(dir string) string {
+	script := `export PATH="$HOME/.local/bin:$PATH"
 echo "mp=$(` + cli.ShQuote(remoteBin()) + ` --version 2>/dev/null || echo missing)"
 echo "git=$(command -v git >/dev/null && echo yes || echo no)"
 echo "tmux=$(command -v tmux >/dev/null && echo yes || echo no)"
 echo "gh=$(command -v gh >/dev/null && echo yes || echo no)"
 echo "gh_auth=$(gh auth status >/dev/null 2>&1 && echo yes || echo no)"`
+	if dir != "" {
+		script += `
+echo "init=$(test -f ` + cli.ShQuote(dir+"/.monkeypuzzle/monkeypuzzle.json") + ` && echo yes || echo no)"`
+	}
+	return script
 }
 
 func runRemoteDoctor(cmd *cobra.Command, args []string) error {
@@ -94,7 +103,7 @@ func runRemoteDoctor(cmd *cobra.Command, args []string) error {
 	reports := make([]doctorReport, 0, len(hosts))
 	ok := true
 	for _, h := range hosts {
-		r := probeHost(h)
+		r := probeHost(h, "")
 		reports = append(reports, r)
 		ok = ok && r.Reachable && r.MPVersion != "missing" && r.Git
 		printDoctorHuman(r)
@@ -108,15 +117,17 @@ func runRemoteDoctor(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func probeHost(host string) doctorReport {
-	r := doctorReport{Host: host, LocalVersion: resolveVersion()}
+// probeHost runs the doctor probe on host; dir, when set, is a box-side path
+// whose mp-project status is reported as Init.
+func probeHost(host, dir string) doctorReport {
+	r := doctorReport{Host: host, LocalVersion: resolveVersion(), Dir: dir}
 	// The registry file is user-writable; a poisoned host must not reach ssh.
 	if err := cli.ValidSSHDest(host); err != nil {
 		r.SSHError = err.Error()
 		return r
 	}
 	// sh -c so the POSIX probe survives fish/csh login shells.
-	out, err := exec.Command("ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "--", host, "sh -c "+cli.ShQuote(doctorProbe())).Output()
+	out, err := exec.Command("ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "--", host, "sh -c "+cli.ShQuote(doctorProbe(dir))).Output()
 	if err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
@@ -144,6 +155,8 @@ func probeHost(host string) doctorReport {
 			r.Gh = v == "yes"
 		case "gh_auth":
 			r.GhAuth = v == "yes"
+		case "init":
+			r.Init = v == "yes"
 		}
 	}
 	r.VersionMatch = r.MPVersion == r.LocalVersion
@@ -176,4 +189,7 @@ func printDoctorHuman(r doctorReport) {
 		fmt.Fprintf(os.Stderr, " (auth: %s)", tick(r.GhAuth))
 	}
 	fmt.Fprintln(os.Stderr)
+	if r.Dir != "" {
+		fmt.Fprintf(os.Stderr, "  %s %s is an mp project\n", tick(r.Init), r.Dir)
+	}
 }

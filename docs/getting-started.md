@@ -87,3 +87,4 @@ repo) or `mp go` (across every registered project) for a fuzzy picker — or
 
 - [Commands Reference](commands.md) - Full command documentation
 - [Workflow Guide](workflow.md) - Using pieces for stacked branches
+- [Remote development](remote-development.md) - Drive a project on another machine, or place single pieces on a box with `mp create --remote`
