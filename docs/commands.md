@@ -321,7 +321,7 @@ Pieces that could not be removed (e.g. uncommitted changes without `--force`) ap
 
 ## mp status
 
-Show a piece's status. Defaults to the piece you're standing in (or the main repo); name one positionally or with `--piece` to inspect it from anywhere in the repo.
+Show a piece's status. Defaults to the piece you're standing in (or the main repo); name one positionally or with `--piece` to inspect it from anywhere in the repo. A piece placed on a box (`mp create --remote`) is proxied there — see [Remote development](remote-development.md#working-on-a-placed-piece).
 
 ### Usage
 
@@ -628,6 +628,10 @@ meaning everywhere else (override a safety check). Use `--apply` or `--yes`.
 3. Previews the merged pieces and stale projects that would be removed
 4. With `--apply` (or an interactive confirmation): removes each worktree, kills
    its multiplexer session, and prunes registry entries for deleted projects
+5. Checks each placement (`mp create --remote`) against its box and drops
+   stale (gone on the box) and pending (create never finished) links — and
+   the box's hidden registry row once no links to it remain. Unreachable
+   boxes keep their links. JSON: `links[]` with `present`/`pending`/`dropped`.
 
 ---
 
@@ -729,7 +733,7 @@ mp pr ready --schema        # prints {} — ready takes no input
 
 ## mp done
 
-Clean up a piece (worktree + multiplexer session) after its branch has been merged. Defaults to the piece you're standing in; name one positionally or with `--piece` to finish it from anywhere in the repo. Verifies the piece is merged first — use [`mp abandon`](#mp-abandon) for unmerged pieces.
+Clean up a piece (worktree + multiplexer session) after its branch has been merged. Defaults to the piece you're standing in; name one positionally or with `--piece` to finish it from anywhere in the repo. Verifies the piece is merged first — use [`mp abandon`](#mp-abandon) for unmerged pieces. Naming a piece placed on a box runs `done` there and drops the placement (same for `abandon`).
 
 ### Usage
 
@@ -959,6 +963,11 @@ Remote-host utilities for the ssh proxy (see [Remote development](remote-develop
 mp remote doctor wire     # probe one ssh host
 mp remote doctor          # probe every box in the project registry (hidden rows included)
 ```
+
+Per box the JSON also carries `pending_links` — `project/piece` placements
+whose `mp create --remote` never finished (drop them with `mp cleanup` in
+that project) — and, when a path was probed, `dir`/`init` (is it an mp
+project there).
 
 Like `mp config`, `doctor` uses positional args — there is no JSON-stdin mode.
 It reports, per host: key-based (BatchMode) ssh reachability, the remote
