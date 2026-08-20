@@ -58,6 +58,9 @@ type doctorReport struct {
 	// Dir/Init are set when a path was probed: is it an mp project there?
 	Dir  string `json:"dir,omitempty"`
 	Init bool   `json:"init,omitempty"`
+	// PendingLinks are "project/piece" placements on this box whose create
+	// never finished (`mp cleanup` in that project drops them).
+	PendingLinks []string `json:"pending_links,omitempty"`
 }
 
 // doctorProbe is the single shell script run on the host; one key=value line
@@ -79,15 +82,15 @@ echo "init=$(test -f ` + cli.ShQuote(dir+"/.monkeypuzzle/monkeypuzzle.json") + `
 }
 
 func runRemoteDoctor(cmd *cobra.Command, args []string) error {
+	reg, err := registry.Load()
+	if err != nil {
+		return err
+	}
 	var hosts []string
 	switch {
 	case len(args) == 1:
 		hosts = []string{args[0]}
 	default:
-		reg, err := registry.Load()
-		if err != nil {
-			return err
-		}
 		seen := map[string]bool{}
 		for _, p := range reg.Projects {
 			if p.Host != "" && !seen[p.Host] {
@@ -104,6 +107,7 @@ func runRemoteDoctor(cmd *cobra.Command, args []string) error {
 	ok := true
 	for _, h := range hosts {
 		r := probeHost(h, "")
+		r.PendingLinks = pendingLinks(reg, h)
 		reports = append(reports, r)
 		ok = ok && r.Reachable && r.MPVersion != "missing" && r.Git
 		printDoctorHuman(r)
@@ -191,5 +195,8 @@ func printDoctorHuman(r doctorReport) {
 	fmt.Fprintln(os.Stderr)
 	if r.Dir != "" {
 		fmt.Fprintf(os.Stderr, "  %s %s is an mp project\n", tick(r.Init), r.Dir)
+	}
+	if len(r.PendingLinks) > 0 {
+		fmt.Fprintf(os.Stderr, "  %s pending placements: %s (run `mp cleanup` in the project)\n", cli.GlyphWarn, strings.Join(r.PendingLinks, ", "))
 	}
 }

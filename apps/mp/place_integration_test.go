@@ -25,6 +25,7 @@ type seqShim struct {
 func newSeqShim(t *testing.T, e *testEnv, responses ...shimResponse) seqShim {
 	t.Helper()
 	dir := filepath.Join(e.tmpDir, "seq-shim")
+	_ = os.RemoveAll(dir) // a fresh shim restarts the call counter
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}

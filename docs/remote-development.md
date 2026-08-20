@@ -168,6 +168,31 @@ over ssh` (ssh exit 255), `box connect failed` (clone/init/rsync stderr),
 The origin URL is forwarded to the box verbatim by the built-in connect —
 use ssh remotes rather than URLs with embedded credentials.
 
+### Working on a placed piece
+
+Piece verbs that take a piece selector — `mp status <piece>`, `mp done
+<piece>`, `mp abandon <piece>` (positional or `--piece`) — look the name up
+in `placements.json` first. A placed piece is proxied to its box as
+`mp --host <box> --dir <remote_path> <verb> …` with the selector stripped
+(the box-side mp runs inside the worktree), stdout/exit code passed through.
+Verbs that end a piece (`done`, `abandon`) drop the link once the box has
+succeeded; when that was the project's last piece on the box, the hidden
+registry row goes too. Verbs that only run from inside a piece (`pr create`,
+`pr ready`, `update`, `merge`, `sync`) have no selector: address the box-side
+worktree directly, which is what the hint after `mp create --remote` prints:
+
+```bash
+mp --host wire --dir /home/u/.local/share/mp/api/.monkeypuzzle/pieces/fix-auth pr create --draft
+```
+
+A link whose create never finished is **pending**: the verbs refuse it
+(`piece placement is still pending`), `mp remote doctor` lists it under
+`pending_links`, and `mp cleanup` drops it. `mp cleanup` also asks each box
+whether its side of every link still exists (`test -d <remote_path>`) and
+drops **stale** links (piece gone on the box, e.g. merged from inside the box
+worktree); unreachable boxes keep their links. Its JSON carries the verdicts
+under `links`.
+
 ### Preparing a box by hand
 
 The built-in connect needs only ssh + git + `mp` on the box. To control the
@@ -195,8 +220,8 @@ first `mp create --remote=wire` then finds the clone and only ships hooks.
 - One host per remote project — no mirroring of a repo across hosts. A
   placed piece lives on exactly one box and cannot be moved.
 - Placed pieces: `mp list` shows them with their last known `state`; live
-  refresh, `mp go` into a box session, and piece verbs proxying to the box
-  are being added phase by phase.
+  refresh and `mp go` into a box session are not there yet — attach with
+  `ssh -t <box> tmux new -A -s <session> -c <remote_path>`.
 - Version skew is tolerated (the remote's flags and example-input defaults win — the proxy
   forwards argv verbatim without parsing it); `mp remote doctor` flags a
   mismatch.
