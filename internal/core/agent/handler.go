@@ -149,6 +149,9 @@ func (h *Handler) List(ctx context.Context, repoRoot string) ([]ListItem, error)
 
 	var items []ListItem
 	for _, p := range pieces {
+		if p.IsPlaced() {
+			continue // agents on a box are not visible from here (yet)
+		}
 		var reported []ListItem
 		if metadata, err := piece.ReadPieceMetadata(p.WorktreePath, h.deps.FS); err == nil {
 			for id, rec := range metadata.Agents {

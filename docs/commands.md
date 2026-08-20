@@ -448,9 +448,12 @@ mp list --all     # across all registered projects
 ```json
 [
   { "name": "feature-auth", "worktree_path": "/path", "parent": "main", "mod_time": "2025-01-04T10:00:00Z" },
-  { "name": "auth-oauth", "worktree_path": "/path", "parent": "feature-auth", "mod_time": "2025-01-04T11:00:00Z" }
+  { "name": "auth-oauth", "worktree_path": "/path", "parent": "feature-auth", "mod_time": "2025-01-04T11:00:00Z" },
+  { "name": "fix-auth", "worktree_path": "/home/u/.local/share/mp/api/.monkeypuzzle/pieces/fix-auth", "host": "wire", "state": "unknown", "parent": "main" }
 ]
 ```
+
+Pieces placed on a box (`mp create --remote`, see [Remote development](remote-development.md)) are listed too: `host` names the box, `worktree_path` is a path **on the box**, and `state` is `unknown` until refreshed or `pending` while the remote create is in flight. Local pieces carry neither field.
 
 ---
 
