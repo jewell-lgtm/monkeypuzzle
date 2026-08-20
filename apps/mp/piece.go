@@ -152,6 +152,7 @@ var flagPieceAdoptParent string
 var flagPieceAdoptSchema bool
 var flagPiecePrompt string
 var flagPieceAgent string
+var flagPieceRemote string
 var flagPieceListFlat bool
 var flagPieceListAll bool
 var flagPieceCreateJSON bool
@@ -172,6 +173,7 @@ func init() {
 	pieceCreateCmd.Flags().BoolVar(&flagPieceCreateSchema, "schema", false, "Print an example input document and exit")
 	pieceCreateCmd.Flags().BoolVar(&flagPieceCreateJSON, "json", false, "Output JSON even on a terminal")
 	pieceCreateCmd.Flags().StringVar(&flagPieceAgent, "agent", "", "Launch an agent in the new piece: claude or codex (typed into the session, or run headless with --prompt)")
+	pieceCreateCmd.Flags().StringVar(&flagPieceRemote, "remote", "", "Place the piece on this ssh box (worktree, hooks, PRs live there; see docs/remote-development.md)")
 	pieceUpdateCmd.Flags().StringVar(&flagMainBranch, "main", "main", "Main branch name to merge (default: main)")
 	pieceUpdateCmd.Flags().StringVar(&flagMainBranchLegacy, "main-branch", "", "Deprecated alias for --main")
 	_ = pieceUpdateCmd.Flags().MarkDeprecated("main-branch", "use --main")
@@ -572,6 +574,11 @@ func runPieceCreate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// A placed piece is created on its box, not here.
+	if input.Remote != "" {
+		return runPieceCreateRemote(ctx, deps, handler, input)
+	}
+
 	opts := piececmd.CreatePieceOptions{
 		OverwriteSession: input.OverwriteSession,
 	}
@@ -703,6 +710,9 @@ func getPieceCreateInput(deps core.Deps, workDir string) (piececmd.NewPieceInput
 	}
 	if flagPieceAgent != "" {
 		input.Agent = flagPieceAgent
+	}
+	if flagPieceRemote != "" {
+		input.Remote = flagPieceRemote
 	}
 
 	// Apply defaults and validate inside input layer

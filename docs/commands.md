@@ -359,6 +359,7 @@ mp create --name my-feature
 mp create --prompt "add dark mode"        # name auto-generated from the prompt
 mp create --parent parent-piece           # stack on another piece
 mp create --skip-switch  # Don't auto-switch to new piece
+mp create --remote wire --name fix-auth   # place the piece on the ssh box "wire"
 ```
 
 ### Flags
@@ -371,6 +372,7 @@ mp create --skip-switch  # Don't auto-switch to new piece
 | `--skip-switch`       | Don't switch to the new piece after creation      | `false`        |
 | `--overwrite-session` | Replace existing main repo multiplexer session    | `false`        |
 | `--agent`             | Launch an agent in the new piece: `claude` or `codex`. With a session, the launch line is typed into it; without one it runs headless with `--prompt` (output to `.monkeypuzzle/logs/`) | - |
+| `--remote`            | Place the piece on this ssh box: the worktree, hooks, agent and PR live there, the project stays here. First use clones + `mp init`s the repo on the box under `~/.local/share/mp/<project>`. `--parent` must be `main` or a piece already on the same box. Also `"remote"` in stdin JSON. See [Remote development](remote-development.md#placing-a-piece-on-a-box) | - |
 
 ### What it does
 
