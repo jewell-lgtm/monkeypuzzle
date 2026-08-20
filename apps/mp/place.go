@@ -79,7 +79,7 @@ func runPieceCreateRemote(ctx context.Context, deps core.Deps, handler *piececmd
 	if err := cli.PrintJSON(info); err != nil {
 		return err
 	}
-	cli.Hint(fmt.Sprintf("mp pr create --draft %s", info.Name))
+	cli.Hint(fmt.Sprintf("mp --host %s --dir %s pr create --draft", req.box, info.WorktreePath))
 	return nil
 }
 

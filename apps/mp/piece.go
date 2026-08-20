@@ -472,10 +472,15 @@ func runPieceStatus(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	wd, err := resolvePieceWorkDir(ctx, selector)
+	fs := adapters.NewOSFS("")
+	loc, err := locatePiece(ctx, fs, selector)
 	if err != nil {
 		return err
 	}
+	if loc.placed() {
+		return proxyPlaced(loc, fs, selector, false)
+	}
+	wd := loc.workDir
 
 	deps := core.NewDeps(
 		adapters.NewOSFS(""),
@@ -997,8 +1002,11 @@ func runPieceCleanup(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	if output.Links, err = checkLinks(repoRoot, deps.FS, true); err != nil {
+		return err
+	}
 
-	anythingToDo := len(output.CleanedPieces) > 0 || len(output.RemovedProjects) > 0
+	anythingToDo := len(output.CleanedPieces) > 0 || len(output.RemovedProjects) > 0 || droppableLinks(output.Links) > 0
 	apply, err := resolveApply(input.Apply || flagPieceCleanupYes, input.DryRun, anythingToDo, func() (bool, error) {
 		return confirmApply("Clean up merged pieces?", cleanupSummary(output))
 	})
@@ -1008,6 +1016,9 @@ func runPieceCleanup(cmd *cobra.Command, args []string) error {
 	if apply {
 		output, err = cleanupPass(ctx, handler, repoRoot, input.MainBranch, false)
 		if err != nil {
+			return err
+		}
+		if output.Links, err = checkLinks(repoRoot, deps.FS, false); err != nil {
 			return err
 		}
 	}
@@ -1023,7 +1034,8 @@ func runPieceCleanup(cmd *cobra.Command, args []string) error {
 
 // cleanupHumanSummary is the one-line terminal wrap-up for `mp cleanup`.
 func cleanupHumanSummary(output cleanupOutput, applied bool) string {
-	if len(output.CleanedPieces) == 0 && len(output.RemovedProjects) == 0 {
+	links := droppableLinks(output.Links)
+	if len(output.CleanedPieces) == 0 && len(output.RemovedProjects) == 0 && links == 0 {
 		return "Nothing to clean."
 	}
 	names := make([]string, 0, len(output.CleanedPieces))
@@ -1037,6 +1049,9 @@ func cleanupHumanSummary(output cleanupOutput, applied bool) string {
 	s := fmt.Sprintf("%s %d piece(s): %s", verb, len(names), strings.Join(names, ", "))
 	if n := len(output.RemovedProjects); n > 0 {
 		s += fmt.Sprintf("; pruned %d stale project(s)", n)
+	}
+	if links > 0 {
+		s += fmt.Sprintf("; dropped %d stale/pending placement(s)", links)
 	}
 	return s
 }
@@ -1089,6 +1104,9 @@ func cleanupSummary(out cleanupOutput) string {
 	if len(out.RemovedProjects) > 0 {
 		parts = append(parts, fmt.Sprintf("prune %d deleted project(s)", len(out.RemovedProjects)))
 	}
+	if n := droppableLinks(out.Links); n > 0 {
+		parts = append(parts, fmt.Sprintf("drop %d stale/pending placement(s)", n))
+	}
 	return "Would " + strings.Join(parts, "; ")
 }
 
@@ -1096,6 +1114,9 @@ func cleanupSummary(out cleanupOutput) string {
 type cleanupOutput struct {
 	CleanedPieces   []piececmd.CleanupResult `json:"cleaned_pieces"`
 	RemovedProjects []registry.Project       `json:"removed_projects"`
+	// Links are this project's placements on boxes, each checked against its
+	// box; stale and pending ones are dropped on apply.
+	Links []linkCheck `json:"links,omitempty"`
 }
 
 func getCleanupInput(cmd *cobra.Command) (piececmd.CleanupInput, error) {
@@ -1158,6 +1179,15 @@ func runPieceAbandon(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	if selector != "" {
+		loc, err := locatePiece(ctx, deps.FS, selector)
+		if err != nil {
+			return err
+		}
+		if loc.placed() {
+			return proxyPlaced(loc, deps.FS, selector, true)
+		}
+	}
 	input, err := getAbandonInput(ctx, handler, selector)
 	if err != nil {
 		return err
@@ -1192,10 +1222,15 @@ func runPieceDone(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	wd, err := resolvePieceWorkDir(ctx, selector)
+	fs := adapters.NewOSFS("")
+	loc, err := locatePiece(ctx, fs, selector)
 	if err != nil {
 		return err
 	}
+	if loc.placed() {
+		return proxyPlaced(loc, fs, selector, true)
+	}
+	wd := loc.workDir
 
 	deps := core.NewDeps(
 		adapters.NewOSFS(""),
