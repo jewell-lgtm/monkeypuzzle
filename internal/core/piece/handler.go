@@ -125,11 +125,12 @@ func (h *Handler) CreatePiece(ctx context.Context, pieceName string, opts Create
 	} else {
 		// Sanitize the provided name (convert spaces to hyphens, lowercase, etc.)
 		pieceName = SanitizePieceName(pieceName)
-		// Validate that the sanitized name doesn't already exist
-		piecePath := filepath.Join(piecesDir, pieceName)
-		_, err := h.deps.FS.Stat(piecePath)
-		if err == nil {
-			return PieceInfo{}, fmt.Errorf("piece name %q already exists at %s", pieceName, piecePath)
+		// Validate that the sanitized name doesn't already exist (as a
+		// worktree here or as a placement on a box)
+		if taken, err := h.PieceExists(repoRoot, pieceName); err != nil {
+			return PieceInfo{}, err
+		} else if taken {
+			return PieceInfo{}, fmt.Errorf("%w: %q in %s", ErrPieceExists, pieceName, repoRoot)
 		}
 	}
 
@@ -315,10 +316,11 @@ func (h *Handler) AdoptPiece(ctx context.Context, input AdoptPieceInput) (PieceI
 		return PieceInfo{}, fmt.Errorf("failed to get pieces directory: %w", err)
 	}
 
-	// Check if piece name already exists
-	piecePath := filepath.Join(piecesDir, pieceName)
-	if _, err := h.deps.FS.Stat(piecePath); err == nil {
-		return PieceInfo{}, fmt.Errorf("piece name %q already exists at %s", pieceName, piecePath)
+	// Check if piece name already exists (worktree here or placement on a box)
+	if taken, err := h.PieceExists(repoRoot, pieceName); err != nil {
+		return PieceInfo{}, err
+	} else if taken {
+		return PieceInfo{}, fmt.Errorf("%w: %q in %s", ErrPieceExists, pieceName, repoRoot)
 	}
 
 	// Create pieces directory if it doesn't exist
@@ -1525,6 +1527,9 @@ func (h *Handler) AbandonPiece(ctx context.Context, pieceName string, opts Aband
 			break
 		}
 	}
+	if target != nil && target.IsPlaced() {
+		return result, fmt.Errorf("%w: %q is on %s", ErrPiecePlaced, pieceName, target.Host)
+	}
 	if target == nil {
 		var names []string
 		for _, p := range pieces {
@@ -1691,6 +1696,9 @@ func (h *Handler) FlattenPieces(ctx context.Context, repoRoot string, opts Flatt
 
 	for i := range pieces {
 		p := pieces[i]
+		if p.IsPlaced() {
+			continue // lives on a box; nothing local to remove
+		}
 		item := FlattenItem{PieceName: p.Name, WorktreePath: p.WorktreePath}
 
 		// Capture the branch name before the worktree goes away.
@@ -2019,7 +2027,12 @@ func (h *Handler) ListPieces(ctx context.Context, repoRoot string) ([]PieceListI
 	entries, err := h.deps.FS.ReadDir(piecesDir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return []PieceListItem{}, nil
+			// No local worktrees yet, but pieces may still be placed on boxes.
+			placed := h.placedItems(repoRoot)
+			if placed == nil {
+				return []PieceListItem{}, nil
+			}
+			return placed, nil
 		}
 		return nil, fmt.Errorf("failed to read pieces directory: %w", err)
 	}
@@ -2084,6 +2097,10 @@ func (h *Handler) ListPieces(ctx context.Context, repoRoot string) ([]PieceListI
 			AgentCounts:  agentCounts,
 		})
 	}
+
+	// Placed pieces (on a box) join the same list; they are never local
+	// worktrees and are skipped by anything that walks piecesDir.
+	pieces = append(pieces, h.placedItems(repoRoot)...)
 
 	// Sort by modification time (newest first)
 	sort.Slice(pieces, func(i, j int) bool {
@@ -2190,6 +2207,10 @@ func (h *Handler) SwitchPiece(ctx context.Context, name string) (SwitchResult, e
 			return SwitchResult{}, fmt.Errorf("piece %q not found (no pieces exist)", name)
 		}
 		return SwitchResult{}, fmt.Errorf("piece %q not found. Available: %s", name, strings.Join(names, ", "))
+	}
+
+	if target.IsPlaced() {
+		return SwitchResult{}, fmt.Errorf("%w: %q is on %s (attach with `ssh -t %s tmux new -A -s %s -c %s`)", ErrPiecePlaced, name, target.Host, target.Host, target.SessionName, target.WorktreePath)
 	}
 
 	result := SwitchResult{Piece: *target}

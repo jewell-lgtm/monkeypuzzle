@@ -21,7 +21,8 @@ monkeypuzzle/
 │   │       ├── input.go
 │   │       ├── handler.go
 │   │       ├── handler_test.go
-│   │       └── hooks.go     # Hook runner for piece operations
+│   │       ├── hooks.go     # Hook runner for piece operations
+│   │       └── placements.go # Controller-side links to pieces placed on boxes
 │   ├── adapters/        # Interface implementations
 │   │   ├── filesystem.go   # OSFS, MemoryFS
 │   │   ├── output.go       # TextOutput, JSONOutput, BufferOutput
@@ -32,6 +33,20 @@ monkeypuzzle/
 │       └── init/        # Interactive init wizard
 └── pkg/styles/          # TUI styling
 ```
+
+## Project state on disk
+
+Everything mp keeps for a repo lives under its monkeypuzzle directory
+(`.monkeypuzzle/` by default; relocatable via `mp config`, see
+`internal/projectdir`):
+
+| Path | What |
+| --- | --- |
+| `monkeypuzzle.json` | project config (name, PR provider, multiplexer, …) |
+| `pieces/<name>/` | one git worktree per local piece — **every** directory here is treated as a worktree |
+| `hooks/` | lifecycle hook scripts |
+| `placements.json` | links to pieces placed on a box with `mp create --remote` — `{ "<piece>": {box, remote_path, remote_project, pending, cached} }`; read by `ListPieces` so placed pieces appear alongside local ones (with `host`/`state`), never as worktrees |
+| `logs/` | hook and headless-agent logs |
 
 ## Core Concepts
 

@@ -358,3 +358,38 @@ func TestCLI_ProjectList_HiddenRows(t *testing.T) {
 		t.Error("doctor did not ssh to hidden row's host")
 	}
 }
+
+func TestCLI_List_IncludesPlacedPieces(t *testing.T) {
+	e := setupTestEnv(t)
+	defer e.cleanup()
+	e.initGitRepo()
+	e.initProject("placed-proj")
+	if _, stderr, err := e.run("create", "--name", "local-a", "--skip-switch"); err != nil {
+		t.Fatalf("create: %v\n%s", err, stderr)
+	}
+	placements := `{"on-wire":{"box":"wire","remote_path":"/home/u/.local/share/mp/placed-proj/.monkeypuzzle/pieces/on-wire","remote_project":"/home/u/.local/share/mp/placed-proj"},"half":{"box":"wire","pending":true}}`
+	if err := os.WriteFile(filepath.Join(e.tmpDir, ".monkeypuzzle", "placements.json"), []byte(placements), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, err := e.run("list", "--flat", "--json")
+	if err != nil {
+		t.Fatalf("list: %v\n%s", err, stderr)
+	}
+	for _, want := range []string{`"name": "local-a"`, `"name": "on-wire"`, `"host": "wire"`, `"state": "unknown"`, `"state": "pending"`} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("list --json missing %s\n%s", want, stdout)
+		}
+	}
+	// A placed name is taken for local creation too.
+	if _, stderr, err := e.run("create", "--name", "on-wire", "--skip-switch"); err == nil || !strings.Contains(stderr, "already exists") {
+		t.Errorf("create over placed name: err = %v stderr = %q", err, stderr)
+	}
+	// Worktree-walking verbs must not trip over placed rows.
+	if _, stderr, err := e.run("stack", "status", "--json"); err != nil && !strings.Contains(stderr, "gh") {
+		t.Errorf("stack status with placed rows: %v\n%s", err, stderr)
+	}
+	if _, stderr, err := e.run("flatten", "--dry-run"); err != nil {
+		t.Errorf("flatten --dry-run with placed rows: %v\n%s", err, stderr)
+	}
+}
