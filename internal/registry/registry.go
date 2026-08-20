@@ -27,6 +27,14 @@ type Project struct {
 	Path    string    `json:"path"`           // absolute, symlink-resolved repo root (on Host when set)
 	Host    string    `json:"host,omitempty"` // ssh host where the repo lives; empty = this machine
 	AddedAt time.Time `json:"added_at"`
+	// Hidden rows are bookkeeping, not user-registered projects: the clone
+	// `mp create --remote` keeps on a box for a local project. Skipped by
+	// `mp project list` (unless --all) and the dashboard; still addressable
+	// by --project and still probed by `mp remote doctor`.
+	Hidden bool `json:"hidden,omitempty"`
+	// LinkedFrom is the controller-side repo root a hidden row was placed
+	// from, so the row can be traced back to its project.
+	LinkedFrom string `json:"linked_from,omitempty"`
 }
 
 // Registry is the on-disk structure stored at {DataDir}/projects.json.
@@ -123,9 +131,40 @@ func (r *Registry) Upsert(path, name string) (Project, bool) {
 	return r.upsert("", path, name)
 }
 
-// UpsertRemote is Upsert for a project living on an ssh host.
+// UpsertRemote is Upsert for a project living on an ssh host. An explicit
+// registration of a row that was only hidden bookkeeping promotes it to a
+// visible project.
 func (r *Registry) UpsertRemote(host, path, name string) (Project, bool) {
-	return r.upsert(host, path, name)
+	p, added := r.upsert(host, path, name)
+	if i := r.indexBy(host, path); i >= 0 && r.Projects[i].Hidden {
+		r.Projects[i].Hidden = false
+		p = r.Projects[i]
+	}
+	return p, added
+}
+
+// UpsertHidden records the box-side clone a placed piece lives in without
+// surfacing it as a project of its own. A row the user already registered
+// stays visible; linkedFrom is recorded either way.
+func (r *Registry) UpsertHidden(host, path, name, linkedFrom string) (Project, bool) {
+	_, added := r.upsert(host, path, name)
+	i := r.indexBy(host, path)
+	if added {
+		r.Projects[i].Hidden = true
+	}
+	r.Projects[i].LinkedFrom = linkedFrom
+	return r.Projects[i], added
+}
+
+// Visible returns the projects that are not hidden bookkeeping rows.
+func (r Registry) Visible() []Project {
+	out := make([]Project, 0, len(r.Projects))
+	for _, p := range r.Projects {
+		if !p.Hidden {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func (r *Registry) upsert(host, path, name string) (Project, bool) {
