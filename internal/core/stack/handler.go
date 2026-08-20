@@ -86,6 +86,8 @@ func (h *Handler) Status(ctx context.Context, workDir string, in StatusInput) (S
 	if err != nil {
 		return StackStatusResult{}, err
 	}
+	// Placed pieces have no local worktree or metadata to reconcile.
+	items = piece.LocalPieces(items)
 
 	result := StackStatusResult{MainBranch: in.MainBranch}
 
@@ -125,6 +127,7 @@ func (h *Handler) Status(ctx context.Context, workDir string, in StatusInput) (S
 			if items, err = h.pieces.ListPieces(ctx, mainRepoRoot); err != nil {
 				return StackStatusResult{}, err
 			}
+			items = piece.LocalPieces(items)
 		}
 	}
 

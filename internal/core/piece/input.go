@@ -62,6 +62,13 @@ type PieceListItem struct {
 	AgentStatus string `json:"agent_status,omitempty"`
 	// AgentCounts is the per-status agent count behind the aggregate.
 	AgentCounts map[string]int `json:"agent_counts,omitempty"`
+	// Host is the box a placed piece lives on (`mp create --remote`); empty
+	// for local pieces. When set, WorktreePath is a path on that box.
+	Host string `json:"host,omitempty"`
+	// State is the placed piece's last known box-side state: "unknown" until
+	// refreshed, "pending" while its create is in flight. Empty for local
+	// pieces.
+	State string `json:"state,omitempty"`
 }
 
 // SwitchResult contains the result of a switch operation.
