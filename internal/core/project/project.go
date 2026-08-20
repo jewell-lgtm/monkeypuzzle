@@ -20,8 +20,10 @@ type Info struct {
 	Name       string `json:"name"`
 	Path       string `json:"path"`
 	Host       string `json:"host,omitempty"` // ssh host where the repo lives; empty = local
-	Exists     bool   `json:"exists"`         // repo root still present on disk
-	IsProject  bool   `json:"is_project"`     // .monkeypuzzle/monkeypuzzle.json present
+	Hidden     bool   `json:"hidden,omitempty"`
+	LinkedFrom string `json:"linked_from,omitempty"`
+	Exists     bool   `json:"exists"`     // repo root still present on disk
+	IsProject  bool   `json:"is_project"` // .monkeypuzzle/monkeypuzzle.json present
 	Branch     string `json:"branch,omitempty"`
 	PieceCount int    `json:"piece_count"`
 }
@@ -154,14 +156,29 @@ func pathMissing(path string) bool {
 	return !fi.IsDir()
 }
 
-// List returns all registered projects with best-effort enrichment.
+// List returns the visible registered projects with best-effort enrichment.
+// Hidden bookkeeping rows (see registry.Project.Hidden) are skipped; ListAll
+// includes them.
 func List() ([]Info, error) {
+	return list(false)
+}
+
+// ListAll is List including hidden rows.
+func ListAll() ([]Info, error) {
+	return list(true)
+}
+
+func list(all bool) ([]Info, error) {
 	reg, err := registry.Load()
 	if err != nil {
 		return nil, err
 	}
-	out := make([]Info, 0, len(reg.Projects))
-	for _, p := range reg.Projects {
+	projects := reg.Projects
+	if !all {
+		projects = reg.Visible()
+	}
+	out := make([]Info, 0, len(projects))
+	for _, p := range projects {
 		out = append(out, enrich(p))
 	}
 	return out, nil
@@ -191,7 +208,7 @@ func Describe(root string) Info {
 }
 
 func enrich(p registry.Project) Info {
-	info := Info{Name: p.Name, Path: p.Path, Host: p.Host}
+	info := Info{Name: p.Name, Path: p.Path, Host: p.Host, Hidden: p.Hidden, LinkedFrom: p.LinkedFrom}
 	if p.Host != "" {
 		// Validated at add time; live state would need an ssh round-trip per
 		// project, which is too slow for list — proxy into it for detail.
@@ -237,4 +254,3 @@ func pieceCount(repoRoot string) int {
 	}
 	return n
 }
-
