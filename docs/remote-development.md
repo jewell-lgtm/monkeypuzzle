@@ -1,15 +1,27 @@
 # Remote development over ssh
 
-mp can drive a project that lives on another machine. The model is a **proxy**:
-your local `mp` forwards the whole command over ssh to an `mp` binary on the
-remote host, which runs it exactly where the repo and worktrees live. Worktree
-paths, lifecycle hooks, tmux sessions, and forge auth (`gh`/`glab`) all resolve
-on the remote machine — nothing is emulated locally.
+Vocabulary: the **controller** is the machine running `mp` (your laptop); a
+**box** is the ssh destination it talks to. mp's `--host` flag and the
+`"host"` field in registry rows and JSON name a box.
 
-This is built for the fleet workflow: a laptop dispatching pieces to a beefy
-box where coding agents run. The remote surface is byte-identical to the local
-one — flags, stdin JSON, `--schema`, JSON out — so anything that can drive `mp`
-locally can drive a remote host, including [mp-mcp](../apps/mp-mcp/README.md).
+## Two placement models
+
+mp can work on another machine in two ways, both built on the same **proxy**:
+your local `mp` forwards a command over ssh to an `mp` binary on the box,
+which runs it exactly where the repo and worktrees live. Worktree paths,
+lifecycle hooks, tmux sessions, and forge auth (`gh`/`glab`) all resolve on
+the box — nothing is emulated on the controller.
+
+| Model | What lives on the box | How you address it |
+| --- | --- | --- |
+| **Remote project** — the whole project is on the box | the repo and every piece | `mp project add box:path`, then `mp --project <name> <cmd>` (or `--host`/`--dir`) — see [Setup](#setup-once-per-host) |
+| **Placed piece** — one piece of a local project is on the box | one clone per (project, box) under `~/.local/share/mp/<project>`, with that piece as a normal worktree | `mp create --remote=<box> --name <piece>`; the project, `mp list`, and the tmux plugin stay on the controller — see [Placing a piece on a box](#placing-a-piece-on-a-box) |
+
+Both are built for the fleet workflow: a laptop dispatching pieces to beefy
+boxes where coding agents run. The remote surface is byte-identical to the
+local one — flags, stdin JSON, `--schema`, JSON out — so anything that can
+drive `mp` locally can drive a box, including
+[mp-mcp](../apps/mp-mcp/README.md).
 
 ## Setup (once per host)
 
@@ -104,13 +116,87 @@ host**. Registry rows for remote projects carry a `"host"` field (`mp project
 list --json`, `mp go --json`) so scripts and the tmux plugin can tell them
 apart.
 
+## Placing a piece on a box
+
+`mp create --remote=<box> --name <piece>` (or `"remote"` in stdin JSON) puts
+**one piece** of the project you are standing in onto a long-lived box. mp
+owns the placement — which box a piece lives on — and the box contract
+(`mp remote doctor` passes). Provisioning, teardown, toolchains, credentials
+and `gh auth` on the box are not mp's: prepare the box by hand (below) or
+with whatever system owns it.
+
+```bash
+cd ~/code/api                 # local project (the controller side)
+mp create --remote=wire --name fix-auth
+# Connecting wire for api (clone + mp init under ~/.local/share/mp)...
+# ✓ Placed fix-auth on wire (/home/u/.local/share/mp/api/.monkeypuzzle/pieces/fix-auth)
+mp list                       # fix-auth shows up with host "wire"
+```
+
+What happens, in order:
+
+1. **Validate** on the controller: the box name is a sane ssh destination;
+   the piece name is free across local worktrees *and* placed pieces (one
+   namespace); `--parent` is `main` or a piece already placed on the same
+   box (a local parent or one on another box is refused — stacks never span
+   boxes).
+2. **Link** — `.monkeypuzzle/placements.json` gets
+   `{"fix-auth": {"box": "wire", "pending": true}}` *before* anything touches
+   the box, so a crash can never leave a box-side worktree nobody can find.
+3. **Connect** (first piece of this project on this box only): over ssh, the
+   repo's `origin` is cloned to `$HOME/.local/share/mp/<project>` (skipped if
+   the directory already has a `.git`), `mp init --name <project>` runs there
+   (skipped if already a project), and the controller's
+   `.monkeypuzzle/hooks/` is rsynced across — hooks only exist on the box if
+   shipped. The path is resolved **on the box** (`readlink -f`), so `$HOME`
+   never has to expand on the controller. The box is recorded as a hidden
+   registry row `<project>@<box>` (`mp project list --all`), which is what
+   "connected" means — later pieces skip this step.
+4. **Doctor** the clone: ssh, `mp` on the box, and `init=yes` for that path.
+5. **Create** by proxy: `mp --host wire --dir <clone> create --name fix-auth
+   [--parent …] [--prompt …] [--branch …] [--agent …] --skip-switch --json` —
+   an ordinary create on the box, hooks and all.
+6. **Placed**: the link flips to `pending: false` with the box-side
+   `remote_path`.
+
+Any failure after step 2 removes the pending link; the registry row stays
+once the box passed doctor (it *is* connected). Named errors: `piece already
+exists`, `parent must be main or a piece on the same box`, `box unreachable
+over ssh` (ssh exit 255), `box connect failed` (clone/init/rsync stderr),
+`box clone is not an mp project`, `mp is not installed on the box`.
+
+The origin URL is forwarded to the box verbatim by the built-in connect —
+use ssh remotes rather than URLs with embedded credentials.
+
+### Preparing a box by hand
+
+The built-in connect needs only ssh + git + `mp` on the box. To control the
+clone yourself (a different remote, credentials, a pre-warmed checkout), do
+its work up front and mp will find it:
+
+```bash
+ssh wire
+mkdir -p ~/.local/share/mp && cd ~/.local/share/mp
+git clone git@github.com:acme/api api && cd api
+mp init --name api            # must match the controller's project name
+mp config set multiplexer none
+gh auth login                 # PRs are created on the box
+```
+
+Back on the controller, `mp remote doctor wire` should be all green; the
+first `mp create --remote=wire` then finds the clone and only ships hooks.
+
 ## Known limits (v1)
 
 - `mp go`/`mp switch` don't yet open remote tmux sessions for you; attach with
   `ssh -t <host> tmux new -A -s <session> -c <worktree>`.
 - The dashboard lists remote projects but doesn't enumerate their pieces;
   `mp --project <name> list` proxies in for the live tree.
-- One host per project — no mirroring of a repo across hosts.
+- One host per remote project — no mirroring of a repo across hosts. A
+  placed piece lives on exactly one box and cannot be moved.
+- Placed pieces: `mp list` shows them with their last known `state`; live
+  refresh, `mp go` into a box session, and piece verbs proxying to the box
+  are being added phase by phase.
 - Version skew is tolerated (the remote's flags and example-input defaults win — the proxy
   forwards argv verbatim without parsing it); `mp remote doctor` flags a
   mismatch.

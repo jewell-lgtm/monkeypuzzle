@@ -16,6 +16,9 @@ type PieceInfo struct {
 	WorktreePath string `json:"worktree_path"`
 	// SessionName is the name of the tmux session created for this piece
 	SessionName string `json:"session_name"`
+	// Host is the box a placed piece was created on; WorktreePath is then a
+	// path on that box. Empty for local pieces.
+	Host string `json:"host,omitempty"`
 }
 
 // PieceStatus contains information about the current piece status.
@@ -92,6 +95,9 @@ type NewPieceInput struct {
 	// typed into the piece's session when one is created, else run headless
 	// with the prompt. Validated at the CLI layer against agent.ValidKinds.
 	Agent string `json:"agent,omitempty"`
+	// Remote places the piece on this ssh box instead of a local worktree
+	// (`mp create --remote=<box>`). Handled at the CLI layer.
+	Remote string `json:"remote,omitempty"`
 }
 
 // NewPieceSchema returns an example input document for piece create input.
@@ -104,6 +110,7 @@ func NewPieceSchema() ([]byte, error) {
 		"skip_switch":       false,
 		"overwrite_session": false,
 		"agent":             "",
+		"remote":            "",
 	}
 	return json.MarshalIndent(schema, "", "  ")
 }
@@ -151,6 +158,7 @@ func WithNewPieceDefaults(input NewPieceInput) NewPieceInput {
 		Branch:           strings.TrimSpace(input.Branch),
 		SkipSwitch:       input.SkipSwitch,
 		OverwriteSession: input.OverwriteSession,
+		Remote:           strings.TrimSpace(input.Remote),
 		Agent:            strings.TrimSpace(input.Agent),
 	}
 }
