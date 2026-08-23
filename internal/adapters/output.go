@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"sync"
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
@@ -19,23 +20,28 @@ var (
 
 // TextOutput writes human-readable messages
 type TextOutput struct {
-	w io.Writer
+	w     io.Writer
+	paint cli.Painter
 }
 
 // NewTextOutput creates output adapter for human-readable text
 func NewTextOutput(w io.Writer) *TextOutput {
-	return &TextOutput{w: w}
+	o := &TextOutput{w: w}
+	if f, ok := w.(*os.File); ok {
+		o.paint = cli.NewPainter(f)
+	}
+	return o
 }
 
 func (o *TextOutput) Write(msg core.Message) {
 	prefix := ""
 	switch msg.Type {
 	case core.MsgSuccess:
-		prefix = cli.GlyphOK + " "
+		prefix = o.paint.Paint(cli.SGRGreen, cli.GlyphOK) + " "
 	case core.MsgWarning:
-		prefix = cli.GlyphWarn + " "
+		prefix = o.paint.Paint(cli.SGRYellow, cli.GlyphWarn) + " "
 	case core.MsgError:
-		prefix = cli.GlyphFail + " "
+		prefix = o.paint.Paint(cli.SGRRed, cli.GlyphFail) + " "
 	}
 	_, _ = fmt.Fprintf(o.w, "%s%s\n", prefix, msg.Content)
 }
