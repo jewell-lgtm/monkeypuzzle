@@ -63,6 +63,10 @@ plugin claims a single key in the prefix table and puts everything in a
 
 The switch picker shows `project/piece` rows (plus each project's adoptable
 branches) with a preview pane of each piece's `git status` and recent commits.
+Each row carries an aligned status badge — `◆ draft` / `◆ in review` from the
+piece's locally-stored PR metadata (no forge round-trip), `trunk` for a
+project's main row, `branch` for adoptable branches — and `ctrl-p` jumps
+straight to the create flow without leaving the picker.
 The branch jump (`m g`) is repo-aware: it scopes to the project of the current
 pane's directory and takes whatever you paste — an existing piece attaches, an
 existing local or remote branch is adopted as a piece, and a brand-new name
