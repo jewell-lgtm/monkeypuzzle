@@ -14,6 +14,14 @@ type StackNodePR struct {
 	State  string `json:"state"` // OPEN, MERGED, CLOSED
 	URL    string `json:"url"`
 	Base   string `json:"base"` // PR/MR base branch as seen on the forge
+	Draft  bool   `json:"draft,omitempty"`
+}
+
+// Diffstat is a piece's local line delta vs its parent branch
+// (git diff parent...HEAD).
+type Diffstat struct {
+	Additions int `json:"additions"`
+	Deletions int `json:"deletions"`
 }
 
 // StackNode is one piece in the rendered stack tree.
@@ -21,6 +29,7 @@ type StackNode struct {
 	Piece    string       `json:"piece"`
 	Parent   string       `json:"parent"`
 	PR       *StackNodePR `json:"pr,omitempty"`
+	Diff     *Diffstat    `json:"diffstat,omitempty"`
 	Drift    []string     `json:"drift,omitempty"`
 	Children []*StackNode `json:"children,omitempty"`
 }
@@ -89,7 +98,7 @@ func buildStackTree(items []piece.PieceListItem, prByHead map[string]pr.PRInfo, 
 		it := sorted[i]
 		n := &StackNode{Piece: it.Name, Parent: it.Parent}
 		if info, ok := prByHead[it.Name]; ok {
-			n.PR = &StackNodePR{Number: info.Number, State: info.State, URL: info.URL, Base: info.BaseRefName}
+			n.PR = &StackNodePR{Number: info.Number, State: info.State, URL: info.URL, Base: info.BaseRefName, Draft: info.Draft}
 		}
 		nodes[it.Name] = n
 	}

@@ -145,9 +145,49 @@ func (h *Handler) Status(ctx context.Context, workDir string, in StatusInput) (S
 	}
 
 	tree, drift := buildStackTree(items, prByHead, in.MainBranch)
+	h.attachDiffstats(ctx, tree, items, in.MainBranch)
 	result.Tree = tree
 	result.Drift = drift
 	return result, nil
+}
+
+// attachDiffstats fills each node's local line delta vs its parent branch.
+// Best-effort presentation data: a failed diff (missing parent branch, pruned
+// worktree) just leaves the node without one. Merged pieces are skipped — the
+// parent already contains their commits, so the local diff would read as empty.
+func (h *Handler) attachDiffstats(ctx context.Context, root *StackNode, items []piece.PieceListItem, mainBranch string) {
+	byName := make(map[string]piece.PieceListItem, len(items))
+	for _, it := range items {
+		byName[it.Name] = it
+	}
+	branchOf := func(name string) string {
+		if name == "main" || name == "" {
+			return mainBranch
+		}
+		it, ok := byName[name]
+		if !ok {
+			return ""
+		}
+		if it.Branch != "" {
+			return it.Branch
+		}
+		return it.Name
+	}
+
+	var walk func(nodes []*StackNode)
+	walk = func(nodes []*StackNode) {
+		for _, n := range nodes {
+			if it, ok := byName[n.Piece]; ok && (n.PR == nil || n.PR.State != "MERGED") {
+				if parent := branchOf(n.Parent); parent != "" {
+					if adds, dels, err := h.git.DiffStat(ctx, it.WorktreePath, parent); err == nil {
+						n.Diff = &Diffstat{Additions: adds, Deletions: dels}
+					}
+				}
+			}
+			walk(n.Children)
+		}
+	}
+	walk(root.Children)
 }
 
 // ---- Sync ------------------------------------------------------------------

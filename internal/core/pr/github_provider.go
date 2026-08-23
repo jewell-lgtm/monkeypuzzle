@@ -18,6 +18,7 @@ func toPRInfos(rows []adapters.PRInfo) []PRInfo {
 			BaseRefName: r.BaseRefName,
 			State:       r.State,
 			URL:         r.URL,
+			Draft:       r.IsDraft,
 		})
 	}
 	return out

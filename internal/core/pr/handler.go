@@ -128,19 +128,12 @@ func (h *Handler) CreatePR(ctx context.Context, workDir string, input Input) (*P
 	}
 
 	// Push branch to remote
-	h.deps.Output.Write(core.Message{
-		Type:    core.MsgInfo,
-		Content: fmt.Sprintf("Pushing branch %s to origin...", branch),
-	})
-
 	if err := provider.Push(ctx, workDir); err != nil {
 		return nil, fmt.Errorf("failed to push branch: %w", err)
 	}
-
-	// Create PR
 	h.deps.Output.Write(core.Message{
-		Type:    core.MsgInfo,
-		Content: "Creating PR...",
+		Type:    core.MsgSuccess,
+		Content: fmt.Sprintf("pushed %s → origin", branch),
 	})
 
 	prResult, err := provider.Create(ctx, workDir, CreateInput(input))
@@ -155,6 +148,7 @@ func (h *Handler) CreatePR(ctx context.Context, workDir string, input Input) (*P
 		Branch:     branch,
 		BaseBranch: input.Base,
 		CreatedAt:  time.Now(),
+		Draft:      input.Draft,
 	}
 
 	if err := piece.WritePRMetadata(status.WorktreePath, metadata, h.deps.FS); err != nil {
@@ -167,10 +161,18 @@ func (h *Handler) CreatePR(ctx context.Context, workDir string, input Input) (*P
 		Branch:   branch,
 	}
 
+	kind := ""
+	if input.Draft {
+		kind = "draft "
+	}
 	h.deps.Output.Write(core.Message{
 		Type:    core.MsgSuccess,
-		Content: fmt.Sprintf("Created PR #%d: %s", prResult.Number, prResult.URL),
+		Content: fmt.Sprintf("opened %s#%d  %s → %s", kind, prResult.Number, branch, input.Base),
 		Data:    result,
+	})
+	h.deps.Output.Write(core.Message{
+		Type:    core.MsgInfo,
+		Content: "  " + prResult.URL,
 	})
 
 	// after-pr-create hook
@@ -225,18 +227,29 @@ func (h *Handler) MarkReady(ctx context.Context, workDir string) error {
 		return fmt.Errorf("before-pr-ready hook failed: %w", err)
 	}
 
-	h.deps.Output.Write(core.Message{
-		Type:    core.MsgInfo,
-		Content: fmt.Sprintf("Marking PR #%d as ready...", metadata.PRNumber),
-	})
-
 	if err := provider.MarkReady(ctx, workDir, metadata.PRNumber); err != nil {
 		return fmt.Errorf("failed to mark PR ready: %w", err)
 	}
 
+	// Keep the locally-mirrored draft flag in step with the forge. Best-effort:
+	// the flip itself already succeeded.
+	if metadata.Draft {
+		metadata.Draft = false
+		if err := piece.WritePRMetadata(status.WorktreePath, *metadata, h.deps.FS); err != nil {
+			h.deps.Output.Write(core.Message{
+				Type:    core.MsgWarning,
+				Content: fmt.Sprintf("failed to update PR metadata: %v", err),
+			})
+		}
+	}
+
 	h.deps.Output.Write(core.Message{
 		Type:    core.MsgSuccess,
-		Content: fmt.Sprintf("PR #%d marked ready: %s", metadata.PRNumber, metadata.PRURL),
+		Content: fmt.Sprintf("#%d ready for review", metadata.PRNumber),
+	})
+	h.deps.Output.Write(core.Message{
+		Type:    core.MsgInfo,
+		Content: "  " + metadata.PRURL,
 	})
 
 	if err := h.hooks.RunHook(ctx, status.RepoRoot, piece.HookAfterPRReady, hookCtx); err != nil {

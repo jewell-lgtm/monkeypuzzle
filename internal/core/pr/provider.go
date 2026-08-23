@@ -34,6 +34,7 @@ type PRInfo struct {
 	BaseRefName string
 	State       string // OPEN, MERGED, CLOSED
 	URL         string
+	Draft       bool
 }
 
 // Provider abstracts PR/MR backends (GitHub, GitLab, etc.).

@@ -322,6 +322,28 @@ func (g *Git) RepoRoot(ctx context.Context, workDir string) (string, error) {
 
 // CurrentBranch gets the current branch name.
 // Returns the short name of the current branch (e.g., "main", "piece-1").
+// DiffStat sums the line additions/deletions on HEAD since it diverged from
+// base (git diff base...HEAD --numstat). Binary files count as zero.
+func (g *Git) DiffStat(ctx context.Context, workDir, base string) (additions, deletions int, err error) {
+	output, err := g.exec.RunWithDir(ctx, workDir, "git", "diff", "--numstat", base+"...HEAD")
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to diff against %s: %w", base, err)
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		if a, err := strconv.Atoi(fields[0]); err == nil {
+			additions += a
+		}
+		if d, err := strconv.Atoi(fields[1]); err == nil {
+			deletions += d
+		}
+	}
+	return additions, deletions, nil
+}
+
 func (g *Git) CurrentBranch(ctx context.Context, workDir string) (string, error) {
 	output, err := g.exec.RunWithDir(ctx, workDir, "git", "rev-parse", "--abbrev-ref", "HEAD")
 	if err != nil {

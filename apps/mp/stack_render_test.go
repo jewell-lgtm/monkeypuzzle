@@ -5,6 +5,7 @@ import (
 
 	stackcmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/stack"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/stackgraph"
+	"github.com/jewell-lgtm/monkeypuzzle/pkg/cli"
 )
 
 func TestRenderStackStatus_TreeWithPRsAndDrift(t *testing.T) {
@@ -16,28 +17,30 @@ func TestRenderStackStatus_TreeWithPRsAndDrift(t *testing.T) {
 				{
 					Piece: "api-rate-limit",
 					PR:    &stackcmd.StackNodePR{Number: 6, State: "OPEN", Base: "main"},
+					Diff:  &stackcmd.Diffstat{Additions: 210, Deletions: 18},
 					Children: []*stackcmd.StackNode{
 						{
 							Piece: "api-rate-limit-cli",
-							PR:    &stackcmd.StackNodePR{Number: 7, State: "OPEN", Base: "api-rate-limit"},
+							PR:    &stackcmd.StackNodePR{Number: 7, State: "OPEN", Base: "api-rate-limit", Draft: true},
+							Diff:  &stackcmd.Diffstat{Additions: 62, Deletions: 4},
 							Drift: []string{"PR #7 base on forge is main, local parent is api-rate-limit"},
 						},
 					},
 				},
-				{Piece: "fix-flaky-retry", PR: &stackcmd.StackNodePR{Number: 9, State: "OPEN", Base: "main"}},
-				{Piece: "no-pr-yet"},
+				{Piece: "fix-flaky-retry", PR: &stackcmd.StackNodePR{Number: 9, State: "MERGED", Base: "main"}},
+				{Piece: "no-pr-yet", Diff: &stackcmd.Diffstat{Additions: 5, Deletions: 1}},
 			},
 		},
 	}
 
 	want := `main
-├── api-rate-limit  PR #6 OPEN → main
-│   └── api-rate-limit-cli  PR #7 OPEN → api-rate-limit
+├── ◆ api-rate-limit          in review  #6  +210 -18
+│   └── ◆ api-rate-limit-cli  draft      #7  +62  -4
 │       ⚠ PR #7 base on forge is main, local parent is api-rate-limit
-├── fix-flaky-retry  PR #9 OPEN → main
-└── no-pr-yet  (no PR)
+├── ● fix-flaky-retry         merged ✓   #9
+└── ◇ no-pr-yet               no PR          +5   -1
 `
-	if got := renderStackStatus(result); got != want {
+	if got := renderStackStatus(result, cli.Painter{}); got != want {
 		t.Errorf("renderStackStatus mismatch\ngot:\n%s\nwant:\n%s", got, want)
 	}
 }
@@ -47,7 +50,7 @@ func TestRenderStackStatus_ForgeUnreachable(t *testing.T) {
 		MainBranch: "main",
 		Tree:       &stackcmd.StackNode{},
 	}
-	got := renderStackStatus(result)
+	got := renderStackStatus(result, cli.Painter{})
 	want := "main\n\n⚠ forge unreachable — PR/MR state not checked\n"
 	if got != want {
 		t.Errorf("got:\n%q\nwant:\n%q", got, want)
