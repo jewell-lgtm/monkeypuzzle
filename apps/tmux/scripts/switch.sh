@@ -13,25 +13,47 @@ source "$DIR/helpers.sh"
 # <display> column is shown by fzf; <project> plus <piece>/<branch> drive the
 # mp switch call and <worktree> feeds the preview. A piece checked out on a
 # branch that differs from its name shows the branch in its label. Non-project
-# / missing entries are skipped.
+# / missing entries are skipped. <display> carries an aligned status badge:
+# "◆ draft" / "◆ in review" from the piece's locally-stored PR metadata (no
+# forge round-trip), "trunk" for main rows, "branch" for adoptable branches.
 build_rows() {
 	jq -r '
 		.projects[]
 		| select(.exists and .is_project)
 		| .name as $proj
 		| .path as $path
-		| ( [ { label: "(main)", piece: "", worktree: $path, branch: "" } ]
+		| ( [ { label: "(main)", badge: "trunk", piece: "", worktree: $path, branch: "" } ]
 		    + ( (.pieces // []) | map({
 		          label: (if (.branch // "") != "" and .branch != .name then .name + "  [" + .branch + "]" else .name end),
+		          badge: (if (.pr_draft // false) then "◆ draft"
+		                  elif (.pr_number // 0) > 0 then "◆ in review"
+		                  else "" end),
 		          piece: .name, worktree: .worktree_path, branch: ""
 		        }) )
 		    + ( (.branches // []) | map({
-		          label: (.name + "  (branch)"),
+		          label: .name, badge: "branch",
 		          piece: "", worktree: $path, branch: .name
 		        }) ) )
 		| .[]
-		| [ ($proj + "/" + .label), $proj, .piece, .worktree, .branch ]
+		| [ ($proj + "/" + .label), .badge, $proj, .piece, .worktree, .branch ]
 		| @tsv
+	' | align_rows
+}
+
+# align_rows pads the label column to a shared width and folds the badge into
+# the display field, keeping the hidden selector fields in their positions.
+align_rows() {
+	awk -F'\t' '
+		{ rows[NR] = $0; if (length($1) > max) max = length($1) }
+		END {
+			for (i = 1; i <= NR; i++) {
+				split(rows[i], f, "\t")
+				display = f[1]
+				if (f[2] != "")
+					display = f[1] sprintf("%" (max - length(f[1]) + 2) "s", "") f[2]
+				printf "%s\t%s\t%s\t%s\t%s\n", display, f[3], f[4], f[5], f[6]
+			}
+		}
 	'
 }
 
@@ -39,15 +61,29 @@ main() {
 	set -euo pipefail
 	ensure_env
 
-	local rows selection proj piece branch
+	local rows out key selection proj piece branch
 	rows="$("$(mp_bin)" go --json | build_rows)"
 	[[ -n "$rows" ]] || die "no pieces or projects found"
 
-	selection="$(printf '%s\n' "$rows" | fzf_pick \
+	out="$(printf '%s\n' "$rows" | fzf_pick \
 		--with-nth=1 \
 		--prompt='piece> ' \
+		--header='↵ switch · ^P new piece' \
+		--expect=ctrl-p \
 		--preview='git -C {4} -c color.ui=always status -sb 2>/dev/null; echo; git -C {4} log --oneline -5 2>/dev/null' \
 		--preview-window='right,50%')" || exit 0
+	[[ -n "$out" ]] || exit 0
+
+	if [[ -n "${MP_PLUGIN_FILTER:-}" ]]; then
+		# --filter mode (test seam) has no --expect key line.
+		selection="$out"
+	else
+		key="${out%%$'\n'*}"
+		selection="${out#*$'\n'}"
+		if [[ "$key" == "ctrl-p" ]]; then
+			exec "$DIR/create.sh"
+		fi
+	fi
 	[[ -n "$selection" ]] || exit 0
 
 	proj="$(cut -f2 <<<"$selection")"

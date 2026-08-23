@@ -42,6 +42,8 @@ have() { command -v "$1" >/dev/null 2>&1; }
 # Canned `mp go --json` output: two real projects (one with pieces and
 # adoptable branches, one bare) plus a non-project entry that must be filtered
 # out. dark-mode is an adopted branch whose name differs from the piece name.
+# fix-login carries draft PR metadata and dark-mode a ready PR, exercising the
+# switch picker's status badges.
 canned_json() {
 	cat <<'JSON'
 {
@@ -50,8 +52,8 @@ canned_json() {
       "name": "alpha", "path": "/repos/alpha", "exists": true, "is_project": true,
       "branch": "main", "piece_count": 2, "main_session": "mp/alpha",
       "pieces": [
-        { "name": "fix-login", "worktree_path": "/wt/alpha/fix-login", "session_name": "mp/alpha/fix-login", "has_session": true, "branch": "fix-login" },
-        { "name": "dark-mode", "worktree_path": "/wt/alpha/dark-mode", "session_name": "mp/alpha/dark-mode", "has_session": false, "branch": "feat/dark-mode" }
+        { "name": "fix-login", "worktree_path": "/wt/alpha/fix-login", "session_name": "mp/alpha/fix-login", "has_session": true, "branch": "fix-login", "pr_number": 483, "pr_draft": true },
+        { "name": "dark-mode", "worktree_path": "/wt/alpha/dark-mode", "session_name": "mp/alpha/dark-mode", "has_session": false, "branch": "feat/dark-mode", "pr_number": 484 }
       ],
       "branches": [
         { "name": "spike-idea" },
@@ -76,13 +78,13 @@ JSON
 if source "$SCRIPTS/switch.sh" 2>/dev/null; then
 	got="$(canned_json | build_rows)"
 	want="$(printf '%s\n' \
-		$'alpha/(main)\talpha\t\t/repos/alpha\t' \
-		$'alpha/fix-login\talpha\tfix-login\t/wt/alpha/fix-login\t' \
-		$'alpha/dark-mode  [feat/dark-mode]\talpha\tdark-mode\t/wt/alpha/dark-mode\t' \
-		$'alpha/spike-idea  (branch)\talpha\t\t/repos/alpha\tspike-idea' \
-		$'alpha/origin/review-fixes  (branch)\talpha\t\t/repos/alpha\torigin/review-fixes' \
-		$'beta/(main)\tbeta\t\t/repos/beta\t')"
-	assert_eq "switch build_rows: main + piece + branch rows, non-project skipped" "$got" "$want"
+		$'alpha/(main)                       trunk\talpha\t\t/repos/alpha\t' \
+		$'alpha/fix-login                    ◆ draft\talpha\tfix-login\t/wt/alpha/fix-login\t' \
+		$'alpha/dark-mode  [feat/dark-mode]  ◆ in review\talpha\tdark-mode\t/wt/alpha/dark-mode\t' \
+		$'alpha/spike-idea                   branch\talpha\t\t/repos/alpha\tspike-idea' \
+		$'alpha/origin/review-fixes          branch\talpha\t\t/repos/alpha\torigin/review-fixes' \
+		$'beta/(main)                        trunk\tbeta\t\t/repos/beta\t')"
+	assert_eq "switch build_rows: badge-aligned main + piece + branch rows, non-project skipped" "$got" "$want"
 else
 	fail "source switch.sh" "could not source $SCRIPTS/switch.sh"
 fi
