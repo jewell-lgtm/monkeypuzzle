@@ -1,0 +1,48 @@
+---
+import { getCollection, render } from 'astro:content';
+import Layout from '../../layouts/Layout.astro';
+import Nav from '../../components/Nav.astro';
+import Footer from '../../components/Footer.astro';
+import '../../styles/site.css';
+import '../../styles/docs.css';
+
+export async function getStaticPaths() {
+  const docs = await getCollection('docs');
+  return docs.map((doc) => ({ params: { slug: doc.id }, props: { doc } }));
+}
+
+const { doc } = Astro.props;
+const docs = (await getCollection('docs')).sort((a, b) => a.data.order - b.data.order);
+const { Content } = await render(doc);
+---
+
+<Layout title={`${doc.data.title} — Monkeypuzzle docs`}>
+  <a class="skip-link" href="#doc">Skip to content</a>
+  <header>
+    <Nav />
+  </header>
+
+  <main class="site docs">
+    <aside class="docs__sidebar">
+      <nav aria-label="Documentation">
+        <div class="docs__sidebar-label"><a href="/docs/">docs</a></div>
+        <ul>
+          {docs.map((d) => (
+            <li>
+              <a href={`/docs/${d.id}/`} aria-current={d.id === doc.id ? 'page' : undefined}>
+                {d.data.title}
+              </a>
+            </li>
+          ))}
+        </ul>
+      </nav>
+    </aside>
+
+    <article id="doc" class="docs__article">
+      <h1>{doc.data.title}</h1>
+      <Content />
+    </article>
+  </main>
+
+  <Footer />
+</Layout>
