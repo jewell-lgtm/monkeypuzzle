@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
@@ -56,8 +57,9 @@ func ensureUserConfig(cmd *cobra.Command) error {
 }
 
 func notConfiguredError() error {
-	return fmt.Errorf("monkeypuzzle is not configured yet. Run `mp config set multiplexer <tmux|none>` to set it up, " +
-		"or run any `mp` command in an interactive terminal to use the setup wizard")
+	return fmt.Errorf("monkeypuzzle is not configured yet. Run `mp config set multiplexer <%s>` to set it up, "+
+		"or run any `mp` command in an interactive terminal to use the setup wizard",
+		strings.Join(validMultiplexerValues, "|"))
 }
 
 // commandSkipsConfigCheck returns true for commands that must work without a

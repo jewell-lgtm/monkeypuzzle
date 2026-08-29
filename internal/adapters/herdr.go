@@ -255,3 +255,61 @@ func (h *HerdrMultiplexer) FocusPane(ctx context.Context, sessionName, pane stri
 func (h *HerdrMultiplexer) CurrentPane() string {
 	return os.Getenv("HERDR_PANE_ID")
 }
+
+type herdrAgentList struct {
+	Agents []struct {
+		Pane  string `json:"pane"`
+		Agent string `json:"agent"`
+		State string `json:"state"`
+		PID   int    `json:"pid"`
+	} `json:"agents"`
+}
+
+// ObserveAgents returns herdr's natively-tracked agents for one workspace.
+// `herdr agent list` is server-wide; entries are scoped by pane-id prefix — a
+// workspace's panes are "<ws>:pN", so no separate scoping flag is needed. A
+// missing workspace observes as empty, not an error (mirrors detection
+// against a dead session).
+func (h *HerdrMultiplexer) ObserveAgents(ctx context.Context, sessionName string) ([]core.AgentObservation, error) {
+	id, err := h.lookupWorkspace(ctx, sessionName)
+	if err != nil {
+		return nil, err
+	}
+	if id == "" {
+		return nil, nil
+	}
+	out, err := h.exec.Run(ctx, "herdr", "agent", "list", "--json")
+	if err != nil {
+		return nil, fmt.Errorf("failed to list herdr agents: %w", err)
+	}
+	var list herdrAgentList
+	if err := json.Unmarshal(out, &list); err != nil {
+		return nil, fmt.Errorf("failed to parse herdr agent list: %w", err)
+	}
+	var observations []core.AgentObservation
+	for _, a := range list.Agents {
+		if !strings.HasPrefix(a.Pane, id+":") {
+			continue
+		}
+		observations = append(observations, core.AgentObservation{
+			Pane:   a.Pane,
+			Kind:   strings.ToLower(a.Agent),
+			Status: mapHerdrAgentState(a.State),
+			PID:    a.PID,
+		})
+	}
+	return observations, nil
+}
+
+// mapHerdrAgentState maps herdr's agent states onto mp's status vocabulary.
+// The four shared states pass through; "unknown" (and anything herdr grows
+// later) maps to idle — a false blocked/working trains people to ignore the
+// status, the same strictness mp's own detection borrows from herdr.
+func mapHerdrAgentState(state string) string {
+	switch state {
+	case "working", "blocked", "done", "idle":
+		return state
+	default:
+		return "idle"
+	}
+}

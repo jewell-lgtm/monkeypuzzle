@@ -10,7 +10,8 @@ import (
 )
 
 // ReportInput holds input for `mp agent report`. ID/Kind/PID/Pane default at
-// the CLI edge (ppid, $TMUX_PANE) so hooks can call it with just --status.
+// the CLI edge (ppid, the configured multiplexer's current pane) so hooks
+// can call it with just --status.
 type ReportInput struct {
 	ID     string `json:"id,omitempty"`
 	Kind   string `json:"kind,omitempty"`

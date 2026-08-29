@@ -1,0 +1,63 @@
+# Monkeypuzzle herdr plugin manifest.
+#
+# herdr already covers what the tmux plugin needed pickers for — live
+# workspace switching, per-pane agent state, ambient status — so this plugin
+# only adds the verbs where mp holds the data herdr doesn't: pieces and
+# projects that have no live workspace yet, piece creation, branch adoption,
+# and the cross-project jump-to-blocked. See README.md.
+
+id = "monkeypuzzle"
+name = "Monkeypuzzle"
+version = "0.1.0"
+min_herdr_version = "0.7.0"
+description = "Worktree-per-piece git flow: open, create, and adopt pieces; jump to the blocked agent"
+
+# Picker actions open their popup pane; blocked is a direct command riding
+# mp's own resolution (`mp agent focus --blocked --all`).
+[[actions]]
+id = "open"
+title = "Monkeypuzzle: open piece"
+contexts = ["workspace"]
+command = ["bash", "scripts/show.sh", "open"]
+
+[[actions]]
+id = "create"
+title = "Monkeypuzzle: new piece"
+contexts = ["workspace"]
+command = ["bash", "scripts/show.sh", "create"]
+
+[[actions]]
+id = "adopt"
+title = "Monkeypuzzle: adopt branch"
+contexts = ["workspace"]
+command = ["bash", "scripts/show.sh", "adopt"]
+
+[[actions]]
+id = "blocked"
+title = "Monkeypuzzle: jump to blocked agent"
+contexts = ["workspace"]
+command = ["bash", "scripts/blocked.sh"]
+
+[[panes]]
+id = "open"
+title = "Open piece"
+placement = "popup"
+width = "80%"
+height = 20
+command = ["bash", "scripts/open.sh"]
+
+[[panes]]
+id = "create"
+title = "New piece"
+placement = "popup"
+width = "80%"
+height = 20
+command = ["bash", "scripts/create.sh"]
+
+[[panes]]
+id = "adopt"
+title = "Adopt branch"
+placement = "popup"
+width = "80%"
+height = 20
+command = ["bash", "scripts/adopt.sh"]

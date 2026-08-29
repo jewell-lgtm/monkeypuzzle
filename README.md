@@ -101,7 +101,7 @@ The key rule: **non-interactive invocations (flags or JSON) fail loudly on genui
 | `mp pr ready` | Flip a draft PR/MR to ready |
 | `mp done` | After merge: clean up worktree + session |
 | `mp agent focus [id\|piece] [--blocked]` | Switch the client to an agent's pane, or fall back to a piece switch |
-| `mp config get/set multiplexer` | tmux / zellij / cmux / none |
+| `mp config get/set multiplexer` | tmux / zellij / cmux / herdr / none |
 
 See [docs/commands.md](docs/commands.md) for full reference.
 

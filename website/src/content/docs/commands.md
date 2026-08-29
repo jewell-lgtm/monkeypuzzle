@@ -1,5 +1,8 @@
-# Command Reference
-
+---
+title: "Command Reference"
+order: 2
+---
+<!-- Generated from docs/commands.md by scripts/sync-docs.mjs — edit the source, then run `pnpm sync-docs`. -->
 ## Input Modes
 
 Every command follows the same interaction contract, in priority order:
@@ -36,7 +39,7 @@ entry has a host, from its path when local), and `mp --host <ssh-host> [--dir
 after the verb these names belong to the verb (`mp init --dir`, `mp switch
 --project`). The whole invocation is forwarded verbatim to the `mp` binary on
 the host, so the remote surface is byte-identical — flags, stdin JSON, JSON
-out. See [Remote development](remote-development.md) and
+out. See [Remote development](/docs/remote-development/) and
 [`mp remote doctor`](#mp-remote).
 
 **Session management is interactive-only.** mp creates or switches a
@@ -913,7 +916,7 @@ mp project remove my-project         # unregister (alias: rm); repo on disk unto
 mp project remove --target /path/to/repo
 ```
 
-`mp project list` shows best-effort live state per project (current branch, number of pieces). Remote projects show as `(remote)` with a `host:path` location; their JSON rows carry a `"host"` field. The `HOST:PATH` form resolves the path to an absolute path on the host at add time and requires the repo to already be `mp init`-ed there — see [Remote development](remote-development.md).
+`mp project list` shows best-effort live state per project (current branch, number of pieces). Remote projects show as `(remote)` with a `host:path` location; their JSON rows carry a `"host"` field. The `HOST:PATH` form resolves the path to an absolute path on the host at add time and requires the repo to already be `mp init`-ed there — see [Remote development](/docs/remote-development/).
 
 ---
 
@@ -946,7 +949,7 @@ The JSON form includes per-project `pieces` and `branches` arrays so callers can
 
 ## mp remote
 
-Remote-host utilities for the ssh proxy (see [Remote development](remote-development.md)).
+Remote-host utilities for the ssh proxy (see [Remote development](/docs/remote-development/)).
 
 ### Usage
 

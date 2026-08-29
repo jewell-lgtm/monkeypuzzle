@@ -25,8 +25,8 @@ var remoteDoctorCmd = &cobra.Command{
 	Use:   "doctor [host]",
 	Short: "Check that a remote host is ready for mp over ssh",
 	Long: `Probe an ssh host and report everything the remote workflow needs: key-based
-(BatchMode) ssh access, an mp binary and its version vs this one, git, tmux,
-and gh with working auth. Run it once after installing mp on a new host, and
+(BatchMode) ssh access, an mp binary and its version vs this one, git, the
+multiplexers (tmux, herdr), and gh with working auth. Run it once after installing mp on a new host, and
 first whenever a proxied command misbehaves.
 
 The host argument is an ssh destination (alias or user@host). With no
@@ -53,6 +53,7 @@ type doctorReport struct {
 	VersionMatch bool   `json:"version_match"`
 	Git          bool   `json:"git"`
 	Tmux         bool   `json:"tmux"`
+	Herdr        bool   `json:"herdr"`
 	Gh           bool   `json:"gh"`
 	GhAuth       bool   `json:"gh_auth"`
 }
@@ -65,6 +66,7 @@ func doctorProbe() string {
 echo "mp=$(` + cli.ShQuote(remoteBin()) + ` --version 2>/dev/null || echo missing)"
 echo "git=$(command -v git >/dev/null && echo yes || echo no)"
 echo "tmux=$(command -v tmux >/dev/null && echo yes || echo no)"
+echo "herdr=$(command -v herdr >/dev/null && echo yes || echo no)"
 echo "gh=$(command -v gh >/dev/null && echo yes || echo no)"
 echo "gh_auth=$(gh auth status >/dev/null 2>&1 && echo yes || echo no)"`
 }
@@ -140,6 +142,8 @@ func probeHost(host string) doctorReport {
 			r.Git = v == "yes"
 		case "tmux":
 			r.Tmux = v == "yes"
+		case "herdr":
+			r.Herdr = v == "yes"
 		case "gh":
 			r.Gh = v == "yes"
 		case "gh_auth":
@@ -171,7 +175,7 @@ func printDoctorHuman(r doctorReport) {
 	} else {
 		fmt.Fprintf(os.Stderr, "  %s mp %s = local\n", cli.GlyphOK, r.MPVersion)
 	}
-	fmt.Fprintf(os.Stderr, "  %s git  %s tmux  %s gh", tick(r.Git), tick(r.Tmux), tick(r.Gh))
+	fmt.Fprintf(os.Stderr, "  %s git  %s tmux  %s herdr  %s gh", tick(r.Git), tick(r.Tmux), tick(r.Herdr), tick(r.Gh))
 	if r.Gh {
 		fmt.Fprintf(os.Stderr, " (auth: %s)", tick(r.GhAuth))
 	}

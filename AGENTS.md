@@ -10,4 +10,5 @@ Monorepo for **monkeypuzzle** (`mp`) — worktree-per-piece git-flow with lifecy
 - **`apps/mp-mcp`** — MCP server exposing the mp workflow to agents. @apps/mp-mcp/README.md
 - **`apps/mp-server`** — web dashboard + OAuth server (source-available). @apps/mp-server/README.md
 - **`apps/tmux`** — tmux plugin: fzf popup to switch/create pieces. @apps/tmux/README.md
+- **`apps/herdr`** — herdr plugin: pickers + blocked-jump for what herdr doesn't cover natively. @apps/herdr/README.md
 - **`website`** — marketing site (Astro). @website/README.md

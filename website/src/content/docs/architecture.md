@@ -1,5 +1,8 @@
-# Architecture
-
+---
+title: "Architecture"
+order: 5
+---
+<!-- Generated from docs/architecture.md by scripts/sync-docs.mjs — edit the source, then run `pnpm sync-docs`. -->
 Monkeypuzzle uses clean architecture with dependency injection for testability.
 
 ## Directory Structure

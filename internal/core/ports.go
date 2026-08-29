@@ -136,6 +136,31 @@ type PaneOps interface {
 	CurrentPane() string
 }
 
+// AgentObservation is one natively-tracked agent in a multiplexer session.
+type AgentObservation struct {
+	// Pane is the pane id the agent runs in.
+	Pane string
+	// Kind is the agent flavor as the multiplexer reports it ("claude",
+	// "codex", ...) — passed through unfiltered, so mp inherits the
+	// multiplexer's coverage rather than its own allowlist.
+	Kind string
+	// Status uses mp's vocabulary: "working", "blocked", "done", or "idle" —
+	// the piece.Agent* constants by convention (core cannot import
+	// core/piece). Adapters map their provider's states into it.
+	Status string
+	// PID is the agent's process id, 0 when the multiplexer doesn't expose it.
+	PID int
+}
+
+// AgentObserver is the optional Multiplexer extension for providers that
+// track agent state natively (herdr). Callers type-assert; when present it
+// replaces pane screen-scraping entirely — the multiplexer sees process
+// identity and state directly instead of reading them off the screen, and
+// can report "done", which scraping cannot see at all.
+type AgentObserver interface {
+	ObserveAgents(ctx context.Context, sessionName string) ([]AgentObservation, error)
+}
+
 // LoadingSignal provides pub/sub for loading state.
 // Handlers publish loading state changes, UI layers subscribe to display feedback.
 type LoadingSignal struct {

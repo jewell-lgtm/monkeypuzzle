@@ -30,8 +30,9 @@ type Handler struct {
 	mux    core.Multiplexer
 	// Alive reports process liveness; swapped out in tests.
 	Alive func(pid int) bool
-	// SelfPane is the pane mp was invoked from ($TMUX_PANE at the CLI edge);
-	// detection skips it so `mp wait` run by an agent never sees itself.
+	// SelfPane is the pane mp was invoked from (the configured multiplexer's
+	// CurrentPane at the CLI edge); detection and observation skip it so
+	// `mp wait` run by an agent never sees itself.
 	SelfPane string
 }
 
@@ -139,12 +140,14 @@ func (h *Handler) Report(ctx context.Context, loc Location, input ReportInput) (
 
 // List returns every live agent across the project's pieces, blocked first,
 // then by recency. Hook-reported records (dead PIDs filtered) are merged with
-// zero-install pane detection; nothing is persisted — only Report writes.
+// the multiplexer's native agent tracking when it has one (AgentObserver),
+// else zero-install pane detection; nothing is persisted — only Report writes.
 func (h *Handler) List(ctx context.Context, repoRoot string) ([]ListItem, error) {
 	pieces, err := h.pieces.ListPieces(ctx, repoRoot)
 	if err != nil {
 		return nil, err
 	}
+	observer, hasObserver := h.mux.(core.AgentObserver)
 	paneOps, hasPaneOps := h.mux.(core.PaneOps)
 
 	var items []ListItem
@@ -169,7 +172,10 @@ func (h *Handler) List(ctx context.Context, repoRoot string) ([]ListItem, error)
 		}
 
 		var detected []ListItem
-		if hasPaneOps && h.mux.Exists(ctx, p.SessionName) {
+		switch {
+		case hasObserver && h.mux.Exists(ctx, p.SessionName):
+			detected = observeSessionAgents(ctx, observer, p.Name, p.SessionName, h.SelfPane)
+		case hasPaneOps && h.mux.Exists(ctx, p.SessionName):
 			detected = detectSessionAgents(ctx, paneOps, p.Name, p.SessionName, h.SelfPane)
 		}
 		items = append(items, mergeAgents(reported, detected)...)
