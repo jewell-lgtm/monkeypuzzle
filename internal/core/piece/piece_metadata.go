@@ -32,7 +32,7 @@ type AgentRecord struct {
 	Status string `json:"status"`
 	// PID is the agent process, used for lazy liveness reaping. 0 = unknown.
 	PID int `json:"pid,omitempty"`
-	// Pane is the multiplexer pane the agent runs in (tmux $TMUX_PANE),
+	// Pane is the multiplexer pane the agent runs in ($TMUX_PANE, $HERDR_PANE_ID),
 	// letting UIs jump focus straight to the agent.
 	Pane      string    `json:"pane,omitempty"`
 	UpdatedAt time.Time `json:"updated_at"`

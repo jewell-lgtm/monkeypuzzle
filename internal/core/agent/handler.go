@@ -30,8 +30,9 @@ type Handler struct {
 	mux    core.Multiplexer
 	// Alive reports process liveness; swapped out in tests.
 	Alive func(pid int) bool
-	// SelfPane is the pane mp was invoked from ($TMUX_PANE at the CLI edge);
-	// detection skips it so `mp wait` run by an agent never sees itself.
+	// SelfPane is the pane mp was invoked from (the configured multiplexer's
+	// CurrentPane at the CLI edge); detection and observation skip it so
+	// `mp wait` run by an agent never sees itself.
 	SelfPane string
 }
 

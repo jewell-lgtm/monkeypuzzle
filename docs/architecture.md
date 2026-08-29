@@ -27,7 +27,7 @@ monkeypuzzle/
 │   │   ├── output.go       # TextOutput, JSONOutput, BufferOutput
 │   │   ├── exec.go         # OSExec, MockExec
 │   │   ├── git.go          # Git operations
-│   │   └── tmux.go         # Tmux operations
+│   │   └── tmux.go … herdr.go  # Multiplexer adapters (tmux, zellij, cmux, herdr)
 │   └── tui/             # Bubble Tea UI
 │       └── init/        # Interactive init wizard
 └── pkg/styles/          # TUI styling
@@ -160,13 +160,26 @@ git.CurrentBranch(workDir)
 git.Merge(workDir, branch)
 ```
 
-**Tmux** - Uses Exec internally:
+**Multiplexer** - Uses Exec internally. `adapters.NewMultiplexer(provider,
+exec)` builds the adapter for the configured provider (`tmux`, `zellij`,
+`cmux`, `herdr`, or the no-op `none`), each implementing `core.Multiplexer`
+— `SwitchTo` (create-or-focus), `Kill`, `Exists`, `InSession`, `IsInstalled`,
+`Name`:
 
 ```go
-tmux := adapters.NewTmux(deps.Exec)
-tmux.NewSession(sessionName, workDir)
-tmux.KillSession(sessionName)
+mux, _ := adapters.NewMultiplexer("herdr", deps.Exec)
+mux.SwitchTo(ctx, sessionName, workDir)
+mux.Kill(ctx, sessionName)
 ```
+
+Two optional extensions are discovered by type assertion, and callers treat
+a failed assertion as "unsupported by this provider":
+
+- `core.PaneOps` (tmux, herdr) — pane-level send/read/list/focus plus
+  `CurrentPane`; powers `mp agent read`/`send`, pane-precise `focus`, and
+  zero-install detection.
+- `core.AgentObserver` (herdr) — the provider's own agent tracking; when
+  present it replaces screen-scraping in `mp agent list` entirely.
 
 **HookRunner** - Executes shell scripts with environment variables:
 

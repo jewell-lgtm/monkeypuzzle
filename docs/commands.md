@@ -42,7 +42,8 @@ out. See [Remote development](remote-development.md) and
 **Session management is interactive-only.** mp creates or switches a
 multiplexer session **only** when driven interactively — a real terminal on
 stdin (isatty) **and** running inside the configured multiplexer (`$TMUX` for
-tmux, `$ZELLIJ` for zellij, `$CMUX_WORKSPACE_ID` for cmux). Agents and scripts
+tmux, `$ZELLIJ` for zellij, `$CMUX_WORKSPACE_ID` for cmux, `$HERDR_ENV` for
+herdr). Agents and scripts
 (flags / stdin JSON, output captured) have no controlling terminal, so
 `create`/`switch`/`go` skip the multiplexer and return the worktree path
 instead (in JSON, or on stdout for `cd $(mp switch …)`). The in-session env
@@ -978,7 +979,7 @@ mp config set multiplexer tmux   # tmux, zellij, cmux, or none
 
 | Key           | Description                                | Values                |
 | ------------- | ------------------------------------------ | --------------------- |
-| `multiplexer` | Terminal multiplexer for piece sessions    | `tmux`, `zellij`, `cmux`, `none` |
+| `multiplexer` | Terminal multiplexer for piece sessions    | `tmux`, `zellij`, `cmux`, `herdr`, `none` |
 
 ---
 
@@ -1052,7 +1053,9 @@ processes in a piece session's panes (tmux) and classify their state from the
 visible screen: an open permission dialog is `blocked`, a running spinner is
 `working`, a resting prompt is `idle`. Nothing is written into the agent's
 own configuration. Detection is deliberately strict about `blocked`, so a
-phrase in conversation text never raises a false alarm.
+phrase in conversation text never raises a false alarm. On herdr, mp skips
+the screen entirely and reads the multiplexer's own agent tracking, which
+also covers the `done` state and agents beyond claude/codex.
 
 **Optional precision.** `mp integration install claude` wires Claude Code's
 own hooks to `mp agent report`, which adds what a screen can't show: the
@@ -1091,8 +1094,8 @@ mp agent read my-piece
 mp agent send my-piece "yes, and add tests"
 ```
 
-`read` / `send` need a multiplexer with pane support (tmux). They are not
-TTY-gated: an orchestrating agent may drive its workers with them.
+`read` / `send` need a multiplexer with pane support (tmux, herdr). They are
+not TTY-gated: an orchestrating agent may drive its workers with them.
 
 ```bash
 # Switch the client straight to an agent's pane — the CLI form of the tmux
