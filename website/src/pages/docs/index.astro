@@ -1,0 +1,44 @@
+---
+import { getCollection } from 'astro:content';
+import Layout from '../../layouts/Layout.astro';
+import Nav from '../../components/Nav.astro';
+import Footer from '../../components/Footer.astro';
+import Card from '../../components/Card.astro';
+import '../../styles/site.css';
+import '../../styles/docs.css';
+
+const docs = (await getCollection('docs')).sort((a, b) => a.data.order - b.data.order);
+---
+
+<Layout
+  title="Monkeypuzzle docs"
+  description="Guides and reference for Monkeypuzzle: getting started, the piece workflow, the full command reference, remote development, and self-hosting."
+>
+  <a class="skip-link" href="#docs">Skip to content</a>
+  <header>
+    <Nav />
+  </header>
+
+  <main id="docs" class="site">
+    <section class="docs-index">
+      <div class="section__eyebrow">docs</div>
+      <h1>Guides &amp; reference</h1>
+      <p class="docs-index__lead">
+        The same docs that live in the repo, published here. Start with
+        <a href="/docs/getting-started/">getting started</a>, then the
+        <a href="/docs/workflow/">workflow guide</a>.
+      </p>
+      <div class="docs-index__grid">
+        {docs.map((doc) => (
+          <a class="docs-index__link" href={`/docs/${doc.id}/`}>
+            <Card pad interactive>
+              <span class="docs-index__title">{doc.data.title}</span>
+            </Card>
+          </a>
+        ))}
+      </div>
+    </section>
+  </main>
+
+  <Footer />
+</Layout>
