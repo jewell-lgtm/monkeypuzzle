@@ -13,7 +13,10 @@ import "strings"
 const Prefix = "mp"
 
 // Sanitize makes s safe to embed in a tmux session name. tmux disallows "."
-// and ":" in session names; we also collapse whitespace to "-".
+// and ":" in session names; we also collapse whitespace to "-". The absence
+// of ":" is also load-bearing for the herdr adapter: herdr pane ids are
+// "wN:pN", so a colon in a PaneOps target unambiguously means pane, not
+// session.
 func Sanitize(s string) string {
 	var b strings.Builder
 	for _, r := range s {
