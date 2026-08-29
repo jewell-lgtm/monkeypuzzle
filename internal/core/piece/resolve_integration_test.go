@@ -325,6 +325,11 @@ func TestIntegration_PieceForBranch_ErrorPropagates(t *testing.T) {
 		t.Skipf("cannot chmod piecesDir on this platform: %v", err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(piecesDir, 0o755) })
+	// chmod 0o000 doesn't bar root (CI containers run as root): verify the
+	// permission actually bites before asserting on the induced failure.
+	if _, err := os.ReadDir(piecesDir); err == nil {
+		t.Skip("piecesDir still readable after chmod 0o000 (running as root?)")
+	}
 
 	_, err := handler.PieceForBranch(ctx, repo, "any-branch")
 	if err == nil {
