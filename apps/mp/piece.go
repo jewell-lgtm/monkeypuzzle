@@ -252,11 +252,12 @@ func newPieceHandler(deps core.Deps) *piececmd.Handler {
 //
 //   - stdin is a TTY (cli.IsTerminal). Agents and scripts drive mp through its
 //     stateless API (flags / stdin JSON, output captured), which is never a TTY.
-//     MP_TMUX_PLUGIN=1 substitutes for the TTY check: the companion tmux plugin
-//     (apps/tmux) drives mp through the stateless API (no controlling TTY) but
-//     still wants mp to perform the switch-client/session-create. Only the
+//     MP_MUX_PLUGIN=1 substitutes for the TTY check: a companion plugin
+//     (apps/tmux, apps/herdr) drives mp through the stateless API (no
+//     controlling TTY) but still wants mp to perform the switch/create. Only a
 //     plugin sets it, per invocation -- an agent never does. The opt-in is
-//     tmux-specific and never enables other providers.
+//     honored only for providers with such a plugin (pluginCapableProviders);
+//     MP_TMUX_PLUGIN=1 is the legacy tmux-only spelling, kept working.
 //   - the configured multiplexer reports InSession() -- e.g. $TMUX set for tmux
 //     -- so switching can move the user's existing client. The env var alone is
 //     NOT trusted: it is inherited by child processes, so an agent spawned from
@@ -268,7 +269,7 @@ func newPieceHandler(deps core.Deps) *piececmd.Handler {
 // cd into. Config problems also degrade to no-op with a warning so piece
 // commands keep working with a broken user config.
 func chooseMultiplexer(exec core.Exec) core.Multiplexer {
-	pluginDriven := os.Getenv("MP_TMUX_PLUGIN") == "1"
+	pluginDriven := os.Getenv("MP_MUX_PLUGIN") == "1" || os.Getenv("MP_TMUX_PLUGIN") == "1"
 	if !cli.IsTerminal() && !pluginDriven {
 		return adapters.NewNoopMultiplexer()
 	}
@@ -289,13 +290,19 @@ func chooseMultiplexer(exec core.Exec) core.Multiplexer {
 		return adapters.NewNoopMultiplexer()
 	}
 
-	// The plugin opt-in stood in for the TTY check; it is only valid for tmux.
-	if !cli.IsTerminal() && mux.Name() != "tmux" {
+	// The plugin opt-in stood in for the TTY check; it is only valid for the
+	// providers that ship a companion plugin.
+	if !cli.IsTerminal() && !pluginCapableProviders[mux.Name()] {
 		return adapters.NewNoopMultiplexer()
 	}
 
 	return mux
 }
+
+// pluginCapableProviders are the multiplexers whose companion plugin may set
+// MP_MUX_PLUGIN=1 (or the legacy MP_TMUX_PLUGIN=1) in place of the TTY check
+// in chooseMultiplexer.
+var pluginCapableProviders = map[string]bool{"tmux": true, "herdr": true}
 
 func completePieceNames(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	deps := core.NewDeps(
@@ -642,13 +649,14 @@ func launchAgentInPiece(ctx context.Context, deps core.Deps, info piececmd.Piece
 		repoRoot = info.WorktreePath
 	}
 	logPath := filepath.Join(projectdir.LogsDir(repoRoot), "agent-"+spec.Kind+"-"+info.Name+".log")
-	// Strip tmux identity from the headless agent's env: inherited TMUX_PANE
-	// would be the *user's* pane, and the agent's report hooks would record it
-	// — after which `mp agent send` / the plugin's focus would target the
-	// user's own shell instead of the agent.
+	// Strip multiplexer identity from the headless agent's env: an inherited
+	// TMUX_PANE / HERDR_PANE_ID would be the *user's* pane, and the agent's
+	// report hooks (mp's and herdr's alike) would record it — after which
+	// `mp agent send` / a plugin's focus would target the user's own shell
+	// instead of the agent.
 	env := make([]string, 0, len(os.Environ()))
 	for _, e := range os.Environ() {
-		if strings.HasPrefix(e, "TMUX=") || strings.HasPrefix(e, "TMUX_PANE=") {
+		if strings.HasPrefix(e, "TMUX=") || strings.HasPrefix(e, "TMUX_PANE=") || strings.HasPrefix(e, "HERDR_") {
 			continue
 		}
 		env = append(env, e)

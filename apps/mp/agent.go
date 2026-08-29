@@ -123,7 +123,7 @@ func init() {
 	agentReportCmd.Flags().StringVar(&flagAgentID, "id", "", "Agent id (defaults to pid-<pid>)")
 	agentReportCmd.Flags().StringVar(&flagAgentKind, "kind", "", "Agent kind: claude, codex, ...")
 	agentReportCmd.Flags().IntVar(&flagAgentPID, "pid", 0, "Agent process id (defaults to the parent pid)")
-	agentReportCmd.Flags().StringVar(&flagAgentPane, "pane", "", "Multiplexer pane the agent runs in (defaults to $TMUX_PANE)")
+	agentReportCmd.Flags().StringVar(&flagAgentPane, "pane", "", "Multiplexer pane the agent runs in (defaults to the current pane)")
 	agentReportCmd.Flags().BoolVar(&flagAgentClaudeHook, "claude-hook", false, "Parse a Claude Code hook payload from stdin")
 	agentReportCmd.Flags().BoolVar(&flagAgentSchema, "schema", false, "Print an example input document and exit")
 	agentListCmd.Flags().BoolVar(&flagAgentListJSON, "json", false, "Output JSON instead of the table")
@@ -160,8 +160,11 @@ func configuredMultiplexer(exec core.Exec) core.Multiplexer {
 
 // newAgentHandler builds the agent handler with pane detection wired in.
 func newAgentHandler(deps core.Deps) *agentcmd.Handler {
-	h := agentcmd.NewHandlerWithMux(deps, configuredMultiplexer(deps.Exec))
-	h.SelfPane = os.Getenv("TMUX_PANE")
+	mux := configuredMultiplexer(deps.Exec)
+	h := agentcmd.NewHandlerWithMux(deps, mux)
+	if pane, ok := mux.(core.PaneOps); ok {
+		h.SelfPane = pane.CurrentPane()
+	}
 	return h
 }
 
@@ -170,7 +173,7 @@ func paneMultiplexer(exec core.Exec) (core.PaneOps, error) {
 	mux := configuredMultiplexer(exec)
 	pane, ok := mux.(core.PaneOps)
 	if !ok {
-		return nil, fmt.Errorf("pane operations are not supported by multiplexer %q (tmux only)", mux.Name())
+		return nil, fmt.Errorf("pane operations are not supported by multiplexer %q (tmux and herdr only)", mux.Name())
 	}
 	return pane, nil
 }
@@ -440,7 +443,9 @@ func withAgentReportDefaults(cmd *cobra.Command, input agentcmd.ReportInput) age
 		input.PID = os.Getppid()
 	}
 	if input.Pane == "" {
-		input.Pane = os.Getenv("TMUX_PANE")
+		if pane, ok := configuredMultiplexer(adapters.NewOSExec()).(core.PaneOps); ok {
+			input.Pane = pane.CurrentPane()
+		}
 	}
 	return input
 }
