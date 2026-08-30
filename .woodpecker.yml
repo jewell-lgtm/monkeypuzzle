@@ -124,10 +124,10 @@ steps:
           UPDATED=$(kubectl -n monkeypuzzle get deployment monkeypuzzle-website -o jsonpath='{.status.updatedReplicas}');
           READY=$(kubectl -n monkeypuzzle get deployment monkeypuzzle-website -o jsonpath='{.status.readyReplicas}');
           UNAVAIL=$(kubectl -n monkeypuzzle get deployment monkeypuzzle-website -o jsonpath='{.status.unavailableReplicas}');
-          echo "attempt $attempt: updated=$UPDATED ready=$READY unavailable=${UNAVAIL:-0} image=$IMG";
+          echo "attempt $attempt: updated=$UPDATED ready=$READY unavailable=$${UNAVAIL:-0} image=$IMG";
           case "$IMG" in
             *"$WEB_DIGEST"*)
-              if [ "${UPDATED:-0}" -ge 1 ] && [ "${READY:-0}" -ge 1 ] && [ "${UNAVAIL:-0}" -eq 0 ]; then
+              if [ "$${UPDATED:-0}" -ge 1 ] && [ "$${READY:-0}" -ge 1 ] && [ "$${UNAVAIL:-0}" -eq 0 ]; then
                 echo "website rolled out at $WEB_DIGEST"; exit 0;
               fi;;
           esac;
