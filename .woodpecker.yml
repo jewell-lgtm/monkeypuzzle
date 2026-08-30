@@ -102,26 +102,37 @@ steps:
   - name: wait-for-gitops
     image: alpine:3.20
     commands:
-      - apk add --no-cache curl jq kubectl ripgrep
+      - apk add --no-cache curl kubectl
       - >
         MANIFEST_ACCEPT='application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json,application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json';
-        SRV_DIGEST=$(curl -fsS -D - -o /dev/null -H "Accept: $MANIFEST_ACCEPT" http://registry.registry.svc.cluster.local:5000/v2/monkeypuzzle-server/manifests/latest | awk -F': ' 'tolower($1)=="docker-content-digest"{gsub("\\r","",$2); print $2}');
         WEB_DIGEST=$(curl -fsS -D - -o /dev/null -H "Accept: $MANIFEST_ACCEPT" http://registry.registry.svc.cluster.local:5000/v2/monkeypuzzle-website/manifests/latest | awk -F': ' 'tolower($1)=="docker-content-digest"{gsub("\\r","",$2); print $2}');
-        test -n "$SRV_DIGEST"; test -n "$WEB_DIGEST";
-        echo "server digest $SRV_DIGEST"; echo "website digest $WEB_DIGEST"
+        test -n "$WEB_DIGEST";
+        echo "website digest $WEB_DIGEST"
+      # Convergence is asserted on the website deployment itself: image pinned
+      # to the digest just pushed, rollout updated, and nothing unavailable —
+      # readyReplicas alone would count the OLD pod while a broken new one
+      # crash-loops. Scoped to the website only: the server has no ArgoCD
+      # Application (its deployment pulls :latest on restart), and the
+      # woodpecker service account's RBAC (gitops repo,
+      # monkeypuzzle/website/woodpecker-rbac.yaml) grants deployment/pod reads
+      # in the monkeypuzzle namespace, not argocd — the old Application checks
+      # were Forbidden and invisible behind 2>/dev/null. Don't re-silence
+      # kubectl here.
       - >
         for attempt in $(seq 1 30); do
-          WEB_SYNC=$(kubectl -n argocd get application monkeypuzzle-website -o jsonpath='{.status.sync.status}' 2>/dev/null);
-          WEB_HEALTH=$(kubectl -n argocd get application monkeypuzzle-website -o jsonpath='{.status.health.status}' 2>/dev/null);
-          SRV_SYNC=$(kubectl -n argocd get application monkeypuzzle-server -o jsonpath='{.status.sync.status}' 2>/dev/null);
-          SRV_HEALTH=$(kubectl -n argocd get application monkeypuzzle-server -o jsonpath='{.status.health.status}' 2>/dev/null);
-          WEB_IMG=$(kubectl -n monkeypuzzle get deployment monkeypuzzle-website -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null);
-          if [ "$WEB_SYNC" = "Synced" ] && [ "$WEB_HEALTH" = "Healthy" ] && [ "$SRV_SYNC" = "Synced" ] && [ "$SRV_HEALTH" = "Healthy" ] && printf '%s' "$WEB_IMG" | rg -F "$WEB_DIGEST" >/dev/null; then
-            echo "ArgoCD converged to the new digests"; exit 0;
-          fi;
+          IMG=$(kubectl -n monkeypuzzle get deployment monkeypuzzle-website -o jsonpath='{.spec.template.spec.containers[0].image}');
+          UPDATED=$(kubectl -n monkeypuzzle get deployment monkeypuzzle-website -o jsonpath='{.status.updatedReplicas}');
+          READY=$(kubectl -n monkeypuzzle get deployment monkeypuzzle-website -o jsonpath='{.status.readyReplicas}');
+          UNAVAIL=$(kubectl -n monkeypuzzle get deployment monkeypuzzle-website -o jsonpath='{.status.unavailableReplicas}');
+          echo "attempt $attempt: updated=$UPDATED ready=$READY unavailable=${UNAVAIL:-0} image=$IMG";
+          case "$IMG" in
+            *"$WEB_DIGEST"*)
+              if [ "${UPDATED:-0}" -ge 1 ] && [ "${READY:-0}" -ge 1 ] && [ "${UNAVAIL:-0}" -eq 0 ]; then
+                echo "website rolled out at $WEB_DIGEST"; exit 0;
+              fi;;
+          esac;
           if [ "$attempt" -eq 30 ]; then
-            echo "Timed out waiting for ArgoCD convergence" >&2;
-            echo "web_sync=$WEB_SYNC web_health=$WEB_HEALTH srv_sync=$SRV_SYNC srv_health=$SRV_HEALTH" >&2;
+            echo "Timed out: website did not converge to $WEB_DIGEST" >&2;
             exit 1;
           fi;
           sleep 10;
