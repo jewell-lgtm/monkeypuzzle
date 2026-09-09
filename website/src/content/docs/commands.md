@@ -458,6 +458,90 @@ mp list --all     # across all registered projects
 
 ---
 
+## mp inbox
+
+Your pieces across **every** registered project as one ordered list. Each row
+is a piece (`project/piece`) with the live state mp already knows — agent
+status, PR state, whether it merged — plus your own rank and note. Every
+picker and dashboard is a view over `mp inbox --json`.
+
+### Usage
+
+```bash
+mp inbox                     # table on a terminal (stderr); JSON when piped
+mp inbox --json | jq .rows   # {"rows":[…]}
+mp inbox --sort urgency      # blocked first, then review/working/idle/merged
+mp inbox --refresh           # re-fetch PR state instead of the 2-minute cache
+```
+
+Works from any directory. An init'd repo you are standing in is included
+even if it was never registered.
+
+### Ordering
+
+1. Rows you have ranked (the `order` list in the state file), in that order.
+2. Everything else by urgency — `blocked` > `review` > `working` > `idle` >
+   `merged` — newest first.
+3. Snoozed rows (`snoozed_until` in the future) sit at the bottom of every
+   sort mode; they keep their urgency.
+
+`--sort urgency` puts urgency ahead of your order. Urgency is derived, never
+stored: an agent waiting on you is `blocked`; an open non-draft PR or a
+finished agent is `review`; a running agent is `working`; a merged PR is
+`merged`; anything else is `idle`.
+
+### Flags
+
+| Flag        | Description                                             | Default |
+| ----------- | ------------------------------------------------------- | ------- |
+| `--sort`    | `rank` (your order, urgency breaks ties) or `urgency`   | `rank`  |
+| `--refresh` | Bypass the per-project PR cache                         | `false` |
+| `--json`    | Output JSON even on a terminal                          | `false` |
+
+### Output
+
+```json
+{
+  "rows": [
+    {
+      "key": "api/fix-auth", "project": "api", "piece": "fix-auth", "rank": 1,
+      "branch": "fix-auth", "parent": "main",
+      "worktree_path": "/code/api/.monkeypuzzle/pieces/fix-auth",
+      "session_name": "mp/api/fix-auth", "has_session": true,
+      "agent_status": "blocked", "agent_counts": { "blocked": 1 },
+      "pr": { "number": 12, "url": "https://github.com/o/api/pull/12", "state": "open", "draft": true },
+      "merged": false, "urgency": "blocked",
+      "note": "waiting on review", "snoozed_until": "2026-09-10T09:00:00Z",
+      "updated_at": "2026-09-09T11:42:00Z"
+    }
+  ]
+}
+```
+
+`host`, `pr`, `note` and `snoozed_until` are omitted when empty.
+
+### State file
+
+`$MP_CONFIG_DIR/inbox.json` (default `~/.config/monkeypuzzle/inbox.json`),
+next to the user config:
+
+```json
+{
+  "version": 1,
+  "order": ["monkeypuzzle/inbox-list", "api/fix-auth"],
+  "notes": { "api/fix-auth": "waiting on review" },
+  "snoozed": { "api/fix-auth": "2026-09-10T09:00:00Z" },
+  "cache": { "api/fix-auth": { "pr": { "number": 12, "…": "…" }, "fetched_at": "…" } }
+}
+```
+
+Keys are `project/piece`. Every list drops keys whose piece no longer exists
+and refreshes stale `cache` entries (one forge call per project, reused for
+120s). A forge that is unreachable warns on stderr and leaves `pr` empty; it
+never fails the list.
+
+---
+
 ## mp update
 
 Merge main branch into current piece.

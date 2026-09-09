@@ -186,6 +186,23 @@ mp switch feat/new-idea --create      # brand-new name: create the piece on that
 
 Long-running processes survive switching — each piece's session keeps its own dev server, log tail, REPL.
 
+### The inbox
+
+Pieces pile up across repositories, so mp keeps one global list of them:
+
+```bash
+mp inbox                     # every piece in every registered project
+mp inbox --sort urgency      # blocked agents and open PRs first
+```
+
+By default the list is yours: rows you have ranked come first, in your
+order, and mp only uses what it already knows — a blocked agent, an open PR,
+a merged branch — to break ties among the rest and to offer `--sort
+urgency` when you want that view instead. Snoozed rows drop to the bottom
+until their time comes. The pickers (tmux, herdr) and the dashboard are all
+views over `mp inbox --json`, so whatever you rearrange in one shows up in
+the others. See [`mp inbox`](/docs/commands/#mp-inbox).
+
 ## Forge support
 
 | Provider | PRs/MRs |

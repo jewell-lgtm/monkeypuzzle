@@ -207,6 +207,7 @@ func (g *GitLab) ListPRs(ctx context.Context, workDir string) ([]PRInfo, error) 
 		TargetBranch string `json:"target_branch"`
 		State        string `json:"state"`
 		WebURL       string `json:"web_url"`
+		Draft        bool   `json:"draft"`
 	}
 	if err := json.Unmarshal(output, &rows); err != nil {
 		return []PRInfo{}, fmt.Errorf("failed to parse MR list: %w", err)
@@ -220,6 +221,7 @@ func (g *GitLab) ListPRs(ctx context.Context, workDir string) ([]PRInfo, error) 
 			BaseRefName: r.TargetBranch,
 			State:       glabStateToCanonical(r.State),
 			URL:         r.WebURL,
+			IsDraft:     r.Draft,
 		})
 	}
 	return prs, nil

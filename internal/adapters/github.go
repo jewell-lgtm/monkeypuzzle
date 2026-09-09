@@ -205,7 +205,7 @@ type PRInfo struct {
 func (g *GitHub) ListPRs(ctx context.Context, workDir string) ([]PRInfo, error) {
 	output, err := g.exec.RunWithDir(ctx, workDir, "gh", "pr", "list",
 		"--state", "all",
-		"--json", "number,headRefName,baseRefName,state,url",
+		"--json", "number,headRefName,baseRefName,state,url,isDraft",
 		"--limit", "200",
 	)
 	if err != nil {
