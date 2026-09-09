@@ -242,3 +242,20 @@ func TestProjectPRs_ForgeFailureWarnsOnceAndLeavesPREmpty(t *testing.T) {
 		t.Fatal("sentinel lost")
 	}
 }
+
+func TestAnnotate_IsSnoozedEvaluatedAtNow(t *testing.T) {
+	now := time.Date(2026, 9, 9, 12, 0, 0, 0, time.UTC)
+	future, past := now.Add(time.Hour), now.Add(-time.Hour)
+	st := State{Snoozed: map[string]time.Time{"p/future": future, "p/past": past}}
+	cases := map[string]bool{"p/future": true, "p/past": false, "p/none": false}
+	for key, want := range cases {
+		row := Row{Key: key}
+		annotate(&row, &st, now)
+		if row.IsSnoozed != want {
+			t.Errorf("%s: snoozed=%v want %v", key, row.IsSnoozed, want)
+		}
+	}
+	if row := (Row{Key: "p/past"}); func() bool { annotate(&row, &st, now); return row.SnoozedUntil == nil }() {
+		t.Error("expired snooze must still expose snoozed_until")
+	}
+}
