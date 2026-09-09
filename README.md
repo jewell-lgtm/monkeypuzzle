@@ -66,8 +66,9 @@ That's the whole integration. No `--reviewer` baked in, no opinion about labels 
 | `before-pr-create.sh` / `after-pr-create.sh` | around `mp pr create` | `MP_PR_NUMBER`, `MP_PR_URL`, `MP_PR_BASE_BRANCH` |
 | `before-pr-ready.sh` / `after-pr-ready.sh` | around `mp pr ready` | same as PR create |
 | `is-piece-done.sh` | consulted by `IsBranchMerged` / `mp cleanup` | exit 0 = merged (use to recognise squash-merges) |
+| `on-box-connect.sh` | first `mp create --remote=<box>` of a project on a box (runs on the controller, replaces the built-in clone) | `MP_BOX`, `MP_REMOTE_PATH`, `MP_REPO_URL`, `MP_PROJECT`, `MP_HOOKS_DIR` |
 
-Piece basics always available: `MP_PIECE_NAME`, `MP_WORKTREE_PATH`, `MP_REPO_ROOT`.
+Piece basics always available: `MP_PIECE_NAME`, `MP_WORKTREE_PATH`, `MP_REPO_ROOT`. Hooks running on a box for a [placed piece](docs/remote-development.md#hooks) also see `MP_PLACEMENT_HOST`, `MP_REMOTE=1`.
 
 Hooks are shell scripts; non-zero exit aborts the calling operation (except after-* hooks, which warn but don't fail).
 
