@@ -299,6 +299,21 @@ func (g *Git) RevParseGitDir(ctx context.Context, workDir string) (string, error
 	return gitDir, nil
 }
 
+// CommonDir returns the absolute git common directory for workDir: the main
+// repository's .git, shared by every linked worktree (where info/exclude lives).
+func (g *Git) CommonDir(ctx context.Context, workDir string) (string, error) {
+	output, err := g.exec.RunWithDir(ctx, workDir, "git", "rev-parse", "--git-common-dir")
+	if err != nil {
+		return "", fmt.Errorf("failed to get git common dir: %w", err)
+	}
+	dir := strings.TrimSpace(string(output))
+	if !filepath.IsAbs(dir) {
+		dir = filepath.Join(workDir, dir)
+	}
+	dir, _ = filepath.Abs(dir)
+	return dir, nil
+}
+
 // IsWorktree checks if the git directory indicates a worktree
 // Worktrees have .git directories that are either:
 // - Files containing "gitdir: /path/to/main/.git/worktrees/name"

@@ -2,11 +2,14 @@ package stack
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/adapters"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
+	"github.com/jewell-lgtm/monkeypuzzle/internal/core/piece"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/projectdir"
 )
 
@@ -92,5 +95,71 @@ func TestSplitRemoteRef(t *testing.T) {
 		if remote != tt.wantRemote || ref != tt.wantRef {
 			t.Errorf("splitRemoteRef(%q) = (%q, %q), want (%q, %q)", tt.from, remote, ref, tt.wantRemote, tt.wantRef)
 		}
+	}
+}
+
+// TestPushSynced_SkipsMergedPiece proves `mp stack sync --push` never pushes a
+// piece that is already merged: re-creating its branch on the forge resurrects
+// a base that was deleted on merge and breaks the retarget of child PRs.
+func TestPushSynced_SkipsMergedPiece(t *testing.T) {
+	const mainBr = "main"
+	tests := []struct {
+		name       string
+		merged     bool
+		force      bool
+		wantPush   []string
+		wantMerged bool
+	}{
+		{name: "merged piece is not pushed", merged: true, wantMerged: true},
+		{name: "merged piece is not force-pushed", merged: true, force: true, wantMerged: true},
+		{name: "unmerged piece is pushed", merged: false, wantPush: []string{"push", "-u", "origin", "HEAD"}},
+		{name: "unmerged rebased piece is force-pushed", merged: false, force: true, wantPush: []string{"push", "--force-with-lease", "origin", "HEAD"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fs := adapters.NewMemoryFS()
+			exec := adapters.NewMockExec()
+			h := newStackHandler(fs, exec)
+
+			// Non-git temp dir: projectdir.WorktreeDir falls back to <wt>/.monkeypuzzle.
+			piecesDir := t.TempDir()
+			wt := filepath.Join(piecesDir, "a")
+			if err := piece.WritePieceMetadata(wt, piece.PieceMetadata{Parent: "main", Merged: tt.merged}, fs); err != nil {
+				t.Fatalf("WritePieceMetadata: %v", err)
+			}
+			// Git fallbacks so the unmerged case reports "not merged" cleanly.
+			exec.AddResponse("git", []string{"ls-remote", "--heads", "origin", "a"}, []byte(""), nil)
+			exec.AddResponse("git", []string{"rev-list", "--left-right", "--count", "main...a"}, []byte("0\t1\n"), nil)
+			exec.AddResponse("git", []string{"branch", "--merged", mainBr}, []byte("* main\n"), nil)
+			exec.AddResponse("git", []string{"cherry", mainBr, "a"}, []byte("+ deadbeef\n"), nil)
+			exec.AddResponse("git", []string{"rev-parse", "a"}, []byte("deadbeef\n"), nil)
+			exec.AddResponse("git", []string{"merge-base", "--is-ancestor", "deadbeef", mainBr}, nil, fmt.Errorf("exit status 1"))
+			exec.AddResponse("git", []string{"push", "-u", "origin", "HEAD"}, nil, nil)
+			exec.AddResponse("git", []string{"push", "--force-with-lease", "origin", "HEAD"}, nil, nil)
+
+			var result SyncResult
+			h.pushSynced(context.Background(), piecesDir, "a", mainBr, tt.force, &result)
+
+			pushed := false
+			for _, c := range exec.GetCalls() {
+				if c.Name == "git" && len(c.Args) > 0 && c.Args[0] == "push" {
+					pushed = true
+					if tt.wantPush == nil {
+						t.Errorf("unexpected push: git %v", c.Args)
+					} else if strings.Join(c.Args, " ") != strings.Join(tt.wantPush, " ") {
+						t.Errorf("push args = %v, want %v", c.Args, tt.wantPush)
+					}
+				}
+			}
+			if tt.wantPush != nil && !pushed {
+				t.Errorf("expected git %v, no push ran", tt.wantPush)
+			}
+			if got := len(result.Merged) == 1 && result.Merged[0] == "a"; got != tt.wantMerged {
+				t.Errorf("result.Merged = %v, want listed=%v", result.Merged, tt.wantMerged)
+			}
+			if wantPushed := tt.wantPush != nil; (len(result.Pushed) == 1) != wantPushed {
+				t.Errorf("result.Pushed = %v, want listed=%v", result.Pushed, wantPushed)
+			}
+		})
 	}
 }

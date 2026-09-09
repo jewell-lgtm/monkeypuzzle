@@ -44,8 +44,10 @@ type SyncResult struct {
 	Strategy   string   `json:"strategy"`
 	Updated    []string `json:"updated"`
 	Pushed     []string `json:"pushed,omitempty"`
-	Skipped    []string `json:"skipped,omitempty"`
-	Status     string   `json:"status"` // synced | dry-run | aborted | blocked
+	// Merged lists pieces --push left alone because they are already merged.
+	Merged  []string `json:"merged,omitempty"`
+	Skipped []string `json:"skipped,omitempty"`
+	Status  string   `json:"status"` // synced | dry-run | aborted | blocked
 }
 
 // localParentBranch maps a piece's stored parent ("main" sentinel or a piece

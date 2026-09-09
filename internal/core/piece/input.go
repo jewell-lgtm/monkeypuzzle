@@ -503,6 +503,8 @@ type DoneResult struct {
 	Cleaned      bool   `json:"cleaned"`
 	// Forced is set when the merge gate was bypassed (--force or config).
 	Forced bool `json:"forced,omitempty"`
+	// ReparentedChildren lists child pieces re-homed onto this piece's parent.
+	ReparentedChildren []string `json:"reparented_children,omitempty"`
 }
 
 // DoneSchema returns an example input document for piece done input.

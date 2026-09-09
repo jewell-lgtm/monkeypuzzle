@@ -1,10 +1,13 @@
 package init
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"strings"
 
+	"github.com/jewell-lgtm/monkeypuzzle/internal/adapters"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core/claude"
 )
@@ -94,6 +97,7 @@ func (h *Handler) Run(input Input, workDir string) (Config, error) {
 	if err := h.EnsureGitignore(mpDir); err != nil {
 		return Config{}, err
 	}
+	h.ensureExcludeWarn(workDir, mpDir)
 
 	h.deps.Output.Write(core.Message{
 		Type:    core.MsgSuccess,
@@ -140,6 +144,7 @@ func (h *Handler) Refresh(workDir, mpDir string) (Config, error) {
 	if err := h.EnsureGitignore(mpDir); err != nil {
 		return Config{}, err
 	}
+	h.ensureExcludeWarn(workDir, mpDir)
 
 	claudeHandler := claude.NewHandler(h.deps)
 	if _, err := claudeHandler.CreateSkill(workDir); err != nil {
@@ -176,4 +181,68 @@ pieces/
 logs/
 `
 	return h.deps.FS.WriteFile(gitignorePath, []byte(content), DefaultFilePerm)
+}
+
+// excludeEntries are the piece-state paths mp writes inside every worktree,
+// relative to the repo root. They mirror <mpDir>/.gitignore.
+func excludeEntries(mpDir string) []string {
+	rel := filepath.ToSlash(filepath.Clean(mpDir))
+	return []string{
+		rel + "/piece-metadata.json",
+		rel + "/pr-metadata.json",
+		rel + "/pieces/",
+		rel + "/logs/",
+	}
+}
+
+// EnsureExclude adds mp's piece-state paths to <git-common-dir>/info/exclude,
+// which git honours in every linked worktree regardless of what the checked-out
+// commit's .gitignore says. Without it a piece branched from a commit that
+// predates the committed <mpDir>/.gitignore (the freshly-initialised repo is the
+// common case) carries an untracked piece-metadata.json: `git worktree remove`
+// refuses it and mp's clean checks call the piece dirty. Idempotent; a no-op
+// when workDir is not inside a git repository or no exec is available.
+func (h *Handler) EnsureExclude(ctx context.Context, workDir, mpDir string) error {
+	if h.deps.Exec == nil {
+		return nil
+	}
+	if mpDir == "" {
+		mpDir = DirName
+	}
+	common, err := adapters.NewGit(h.deps.Exec).CommonDir(ctx, workDir)
+	if err != nil {
+		return nil // not a git repo (or git missing): nothing to exclude in
+	}
+	path := filepath.Join(common, "info", "exclude")
+	existing, _ := h.deps.FS.ReadFile(path)
+	have := map[string]bool{}
+	for _, line := range strings.Split(string(existing), "\n") {
+		have[strings.TrimSpace(line)] = true
+	}
+	var missing []string
+	for _, e := range excludeEntries(mpDir) {
+		if !have[e] {
+			missing = append(missing, e)
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	if err := h.deps.FS.MkdirAll(filepath.Dir(path), DefaultDirPerm); err != nil {
+		return err
+	}
+	content := string(existing)
+	if content != "" && !strings.HasSuffix(content, "\n") {
+		content += "\n"
+	}
+	content += "# monkeypuzzle piece state (written by mp init)\n" + strings.Join(missing, "\n") + "\n"
+	return h.deps.FS.WriteFile(path, []byte(content), DefaultFilePerm)
+}
+
+// ensureExcludeWarn runs EnsureExclude and downgrades a failure to a warning:
+// the committed .gitignore still covers the common case.
+func (h *Handler) ensureExcludeWarn(workDir, mpDir string) {
+	if err := h.EnsureExclude(context.Background(), workDir, mpDir); err != nil {
+		h.deps.Output.Write(core.Message{Type: core.MsgWarning, Content: "Failed to update git info/exclude: " + err.Error()})
+	}
 }

@@ -152,6 +152,14 @@ Creates the monkeypuzzle directory (default `.monkeypuzzle/`):
 └── .gitignore           # Ignores pieces/ and per-piece metadata
 ```
 
+The same per-piece paths are also added to the repo's local
+`.git/info/exclude`, which git honours in every worktree. That keeps a piece's
+`piece-metadata.json` invisible to git even when the piece was branched from a
+commit that predates the committed `.gitignore` (e.g. the first pieces after
+`mp init`, before that scaffold is committed), so `mp cleanup` and clean-tree
+checks never trip over mp's own state. `mp init`, `mp reinit`, `mp move` and
+piece creation all refresh it.
+
 ### Providers
 
 **PR Providers:**
@@ -753,6 +761,9 @@ meaning everywhere else (override a safety check). Use `--apply` or `--yes`.
 3. Previews the merged pieces and stale projects that would be removed
 4. With `--apply` (or an interactive confirmation): removes each worktree, kills
    its multiplexer session, and prunes registry entries for deleted projects
+5. Child pieces of a removed piece are re-homed onto its parent (usually main)
+   so they never become orphans — metadata only; run `mp stack sync` to restack
+   them. Re-homed children are listed under `reparented_children`.
 
 ---
 
@@ -866,6 +877,10 @@ By default `mp done` refuses a piece whose branch is not merged. The gate is a p
 
 The result carries `"forced": true` when the gate was bypassed. To drop the branch as well, use [`mp abandon`](#mp-abandon).
 
+Child pieces of the finished piece are re-homed onto its parent (metadata only,
+listed under `reparented_children`); run `mp stack sync` to restack them. The
+same happens on `mp abandon` and `mp cleanup`.
+
 ### Usage
 
 ```bash
@@ -968,7 +983,7 @@ mp stack sync --stack             # limit the preview to the current piece's sta
 | `--dry-run`  | Preview only; never prompt, never change anything    | `false`       |
 | `--from`     | Upstream ref to update main from (fetch + fast-forward) | `origin/<main>` |
 | `--strategy` | Sync strategy: `merge` or `rebase`                   | `merge`       |
-| `--push`     | Push each branch after syncing                       | `false`       |
+| `--push`     | Push each branch after syncing; already-merged pieces are skipped (listed under `merged`) | `false` |
 | `--stack`    | Limit to the current piece's stack (run from a piece) | `false`      |
 | `--main`     | Main branch name                                     | `main`        |
 
