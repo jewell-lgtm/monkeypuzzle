@@ -4,16 +4,18 @@
 # workspace switching, per-pane agent state, ambient status — so this plugin
 # only adds the verbs where mp holds the data herdr doesn't: pieces and
 # projects that have no live workspace yet, piece creation, branch adoption,
-# and the cross-project jump-to-blocked. See README.md.
+# the cross-project jump-to-blocked, and the inbox (rank / snooze / cycle).
+# See README.md.
 
 id = "monkeypuzzle"
 name = "Monkeypuzzle"
 version = "0.1.0"
 min_herdr_version = "0.7.0"
-description = "Worktree-per-piece git flow: open, create, and adopt pieces; jump to the blocked agent"
+description = "Worktree-per-piece git flow: open, create, and adopt pieces; the inbox; jump to the blocked agent"
 
-# Picker actions open their popup pane; blocked is a direct command riding
-# mp's own resolution (`mp agent focus --blocked --all`).
+# Picker actions open their popup pane; blocked / next / prev are direct
+# commands riding mp's own resolution (`mp agent focus --blocked --all`,
+# `mp inbox next` / `prev`).
 [[actions]]
 id = "open"
 title = "Monkeypuzzle: open piece"
@@ -38,6 +40,24 @@ title = "Monkeypuzzle: jump to blocked agent"
 contexts = ["workspace"]
 command = ["bash", "scripts/blocked.sh"]
 
+[[actions]]
+id = "inbox"
+title = "Monkeypuzzle: inbox"
+contexts = ["workspace"]
+command = ["bash", "scripts/show.sh", "inbox"]
+
+[[actions]]
+id = "next"
+title = "Monkeypuzzle: next piece in the inbox"
+contexts = ["workspace"]
+command = ["bash", "scripts/step.sh", "next"]
+
+[[actions]]
+id = "prev"
+title = "Monkeypuzzle: previous piece in the inbox"
+contexts = ["workspace"]
+command = ["bash", "scripts/step.sh", "prev"]
+
 [[panes]]
 id = "open"
 title = "Open piece"
@@ -61,3 +81,11 @@ placement = "popup"
 width = "80%"
 height = 20
 command = ["bash", "scripts/adopt.sh"]
+
+[[panes]]
+id = "inbox"
+title = "Inbox"
+placement = "popup"
+width = "80%"
+height = 20
+command = ["bash", "scripts/inbox.sh"]

@@ -4,11 +4,12 @@ A lightweight tmux UI for [monkeypuzzle](../../README.md): pop up a fuzzy picker
 to **switch between pieces** across every registered project, or **create a new
 piece**, without leaving your current pane layout.
 
-It is a thin layer over the `mp` CLI. It reads state with `mp go --json` and
-renders its own [fzf](https://github.com/junegunn/fzf) picker; the switch/create
-actions call `mp` through its stateless API. The plugin exports
-`MP_TMUX_PLUGIN=1`, which tells `mp` to perform the tmux `switch-client` /
-session-create itself (see "Sessions are interactive-only" in the
+It is a thin layer over the `mp` CLI. It reads state with `mp go --json` /
+`mp inbox --json` and renders its own [fzf](https://github.com/junegunn/fzf)
+pickers; the switch/create/inbox actions call `mp` through its stateless
+API. The plugin exports `MP_TMUX_PLUGIN=1`, which tells `mp` to perform the
+tmux `switch-client` / session-create itself (see "Sessions are
+interactive-only" in the
 [workflow guide](../../docs/workflow.md#sessions-are-interactive-only)) — so
 `mp` stays the single source of truth for session naming.
 
@@ -16,7 +17,8 @@ session-create itself (see "Sessions are interactive-only" in the
 
 - `mp` on your `PATH` (or set `@monkeypuzzle-bin`)
 - `tmux` (the plugin runs inside it)
-- [`fzf`](https://github.com/junegunn/fzf) — the picker
+- [`fzf`](https://github.com/junegunn/fzf) ≥ 0.71 — the pickers (the inbox
+  picker keeps your cursor on the same piece across reloads with `--id-nth`)
 - [`jq`](https://stedolan.github.io/jq/) — parses `mp ... --json`
 
 ## Install
@@ -58,6 +60,8 @@ plugin claims a single key in the prefix table and puts everything in a
 | `m c`                | Create: pick a project, name the piece, create + switch       |
 | `m a`                | Agents: pick a live agent (blocked first), focus its pane     |
 | `m b`                | Jump straight to the first blocked agent — no picker          |
+| `m i`                | Inbox: every piece ranked; move, snooze, switch               |
+| `m n` / `m N`        | Next / previous piece in the inbox — no picker                |
 | `m t`                | Toggle a sidecar shell split in the current piece's worktree  |
 | `m m`                | Cheat sheet: list these bindings                              |
 
@@ -79,6 +83,21 @@ does all the resolving and pane-switching. `m b` is the same `mp agent focus
 show anything in, it relays any stderr the call produces to a `tmux
 display-message` — "no blocked agents" when there's nothing to do, or the
 error verbatim if the call fails outright.
+
+The inbox picker (`m i`) is a view over `mp inbox --json`: one row per piece
+across every project — rank, urgency, `project/piece`, agent status, PR and
+note — in mp's order (your rank, then urgency; snoozed rows last, dimmed),
+with the same git status/log preview as the switch picker plus the note and
+PR URL. Enter is the switch picker's handoff (`mp switch --project --piece`).
+The other keys each run one `mp inbox …` verb and reload the list:
+`ctrl-k` / `ctrl-j` move the row up / down, `ctrl-t` to the top, `ctrl-s`
+snoozes it for 2h, `ctrl-u` un-snoozes, `ctrl-r` re-fetches PR state
+(`mp inbox --refresh`). `m n` / `m N` are `mp inbox next` / `prev` with no
+picker — the "what's in progress?" cycle from the piece the pane is in,
+wrapping and skipping snoozed rows — and, like `m b`, relay whatever mp
+prints on stderr ("… is the only piece in the inbox; staying put") to a
+`tmux display-message`.
+
 Agents are detected with nothing installed into them: mp recognizes agent
 processes in each piece session's panes and reads blocked/working/idle off
 the screen. (`mp integration install claude` optionally adds hook-reported

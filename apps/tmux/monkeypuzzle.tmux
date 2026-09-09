@@ -46,10 +46,18 @@ popup p switch.sh # pick a piece / project main session
 popup c create.sh # create a new piece
 popup g branch.sh # paste a branch/piece name: switch, adopt, or create
 popup a agents.sh # pick a live agent, focus its pane
+popup i inbox.sh  # the inbox: rank/snooze pieces, switch to one
 
 # Jump straight to the first blocked agent — no picker, no popup.
 tmux bind-key -T monkeypuzzle b run-shell \
 	"MP_PLUGIN_BIN='$mp_bin' '$CURRENT_DIR/scripts/blocked.sh' '#{pane_current_path}'"
+
+# Cycle through the inbox: next / prev piece from the one the pane is in.
+# mp resolves "the piece you stand in" from the cwd, hence the pane path.
+tmux bind-key -T monkeypuzzle n run-shell \
+	"MP_PLUGIN_BIN='$mp_bin' '$CURRENT_DIR/scripts/step.sh' next '#{pane_current_path}'"
+tmux bind-key -T monkeypuzzle N run-shell \
+	"MP_PLUGIN_BIN='$mp_bin' '$CURRENT_DIR/scripts/step.sh' prev '#{pane_current_path}'"
 
 # Toggle the sidecar shell split in the current piece.
 tmux bind-key -T monkeypuzzle t run-shell \
