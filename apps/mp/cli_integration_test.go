@@ -1631,3 +1631,82 @@ func TestCLI_Merge_TargetAhead_NoUpdateCheck(t *testing.T) {
 		t.Error("piece work should be on main after merge")
 	}
 }
+
+// TestCLI_Cleanup_ReparentsChildren: cleaning up a merged piece must re-home
+// its children onto the removed piece's parent instead of orphaning them —
+// an orphan is skipped by `mp stack sync` and shown as "(orphaned)" by `mp list`.
+func TestCLI_Cleanup_ReparentsChildren(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	env.initGitRepo()
+	env.initProject("test")
+	env.gitInDir(env.tmpDir, "add", "-A")
+	env.gitInDir(env.tmpDir, "commit", "-m", "track mp config")
+
+	// main -> a -> b -> c; merge a with --force so b stays parented on a.
+	pieceA := createPiece(t, env, "a", "main")
+	commitInWorktree(t, pieceA, "a")
+	pieceB := createPiece(t, env, "b", "a")
+	commitInWorktree(t, pieceB, "b")
+	pieceC := createPiece(t, env, "c", "b")
+	commitInWorktree(t, pieceC, "c")
+	if stdout, stderr, err := env.runInDir(pieceA, "merge", "--force"); err != nil {
+		t.Fatalf("merge failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+
+	stdout, stderr, err := env.run("cleanup", "--apply")
+	if err != nil {
+		t.Fatalf("cleanup --apply failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+	var result struct {
+		CleanedPieces []struct {
+			PieceName          string   `json:"piece_name"`
+			ReparentedChildren []string `json:"reparented_children"`
+		} `json:"cleaned_pieces"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("invalid JSON output: %v\noutput: %s", err, stdout)
+	}
+	if len(result.CleanedPieces) != 1 || result.CleanedPieces[0].PieceName != "a" || !contains(result.CleanedPieces[0].ReparentedChildren, "b") {
+		t.Errorf("expected a cleaned with b re-homed, got %+v", result.CleanedPieces)
+	}
+	if !strings.Contains(stderr, "Re-homed b onto main") {
+		t.Errorf("expected re-home notice on stderr:\n%s", stderr)
+	}
+
+	// b now hangs off main; c is untouched; nothing is orphaned.
+	stdout, _, err = env.run("list")
+	if err != nil {
+		t.Fatalf("list failed: %v", err)
+	}
+	var items []struct {
+		Name   string `json:"name"`
+		Parent string `json:"parent"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &items); err != nil {
+		t.Fatalf("invalid list JSON: %v\n%s", err, stdout)
+	}
+	parents := map[string]string{}
+	for _, it := range items {
+		parents[it.Name] = it.Parent
+	}
+	if parents["b"] != "main" || parents["c"] != "b" {
+		t.Errorf("parents after cleanup = %v, want b->main c->b", parents)
+	}
+
+	// The re-homed subtree is back in sync's walk.
+	stdout, _, err = env.run("stack", "sync", "--dry-run")
+	if err != nil {
+		t.Fatalf("stack sync --dry-run failed: %v", err)
+	}
+	var sync struct {
+		Updated []string `json:"updated"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &sync); err != nil {
+		t.Fatalf("invalid sync JSON: %v\n%s", err, stdout)
+	}
+	if !contains(sync.Updated, "b") || !contains(sync.Updated, "c") {
+		t.Errorf("stack sync should walk the re-homed subtree, got updated=%v", sync.Updated)
+	}
+}

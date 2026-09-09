@@ -751,6 +751,9 @@ meaning everywhere else (override a safety check). Use `--apply` or `--yes`.
 3. Previews the merged pieces and stale projects that would be removed
 4. With `--apply` (or an interactive confirmation): removes each worktree, kills
    its multiplexer session, and prunes registry entries for deleted projects
+5. Child pieces of a removed piece are re-homed onto its parent (usually main)
+   so they never become orphans — metadata only; run `mp stack sync` to restack
+   them. Re-homed children are listed under `reparented_children`.
 
 ---
 
@@ -863,6 +866,10 @@ By default `mp done` refuses a piece whose branch is not merged. The gate is a p
 | user config  | `mp config set done_require_merged false` | always    |
 
 The result carries `"forced": true` when the gate was bypassed. To drop the branch as well, use [`mp abandon`](#mp-abandon).
+
+Child pieces of the finished piece are re-homed onto its parent (metadata only,
+listed under `reparented_children`); run `mp stack sync` to restack them. The
+same happens on `mp abandon` and `mp cleanup`.
 
 ### Usage
 

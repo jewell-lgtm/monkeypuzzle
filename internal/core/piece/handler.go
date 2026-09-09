@@ -1350,6 +1350,8 @@ func (h *Handler) checkCommitMerged(ctx context.Context, repoRoot, branchName, m
 type CleanupResult struct {
 	PieceName    string `json:"piece_name"`
 	WorktreePath string `json:"worktree_path"`
+	// ReparentedChildren lists child pieces re-homed onto this piece's parent.
+	ReparentedChildren []string `json:"reparented_children,omitempty"`
 }
 
 // CleanupOptions configures the cleanup behavior
@@ -1422,9 +1424,21 @@ func (h *Handler) CleanupMergedPieces(ctx context.Context, repoRoot string, opts
 				Type:    core.MsgInfo,
 				Content: fmt.Sprintf("[dry-run] Would cleanup: %s (merged via %s)", pieceName, mergeStatus.Method),
 			})
+			result.ReparentedChildren, _ = h.ReparentChildrenOf(piecesDir, pieceName, true)
 			results = append(results, result)
 			continue
 		}
+
+		// Re-home children before the worktree (and its metadata) disappears.
+		reparented, err := h.ReparentChildrenOf(piecesDir, pieceName, false)
+		if err != nil {
+			h.deps.Output.Write(core.Message{
+				Type:    core.MsgWarning,
+				Content: fmt.Sprintf("Skipping %s: %v", pieceName, err),
+			})
+			continue
+		}
+		result.ReparentedChildren = reparented
 
 		// Cleanup the piece
 		if err := h.removePiece(ctx, repoRoot, pieceName, worktreePath); err != nil {
@@ -1445,6 +1459,47 @@ func (h *Handler) CleanupMergedPieces(ctx context.Context, repoRoot string, opts
 	}
 
 	return results, nil
+}
+
+// ReparentChildrenOf re-homes every direct child of pieceName onto pieceName's
+// own parent (metadata only; branches are untouched) so removing a piece never
+// orphans its subtree — an orphan is invisible to `mp stack sync` and shown as
+// "(orphaned)" by `mp list`. Returns the re-homed child names. With dryRun it
+// only reports what would change.
+func (h *Handler) ReparentChildrenOf(piecesDir, pieceName string, dryRun bool) ([]string, error) {
+	children, err := GetPieceChildren(pieceName, piecesDir, h.deps.FS)
+	if err != nil {
+		return nil, err
+	}
+	if len(children) == 0 {
+		return nil, nil
+	}
+	meta, err := ReadPieceMetadata(filepath.Join(piecesDir, pieceName), h.deps.FS)
+	if err != nil {
+		return nil, err
+	}
+	newParent := meta.Parent
+	if newParent == "" {
+		newParent = "main"
+	}
+	sort.Strings(children)
+	for _, child := range children {
+		if dryRun {
+			h.deps.Output.Write(core.Message{Type: core.MsgInfo, Content: fmt.Sprintf("[dry-run] Would re-home %s onto %s", child, newParent)})
+			continue
+		}
+		childPath := filepath.Join(piecesDir, child)
+		cm, err := ReadPieceMetadata(childPath, h.deps.FS)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read metadata for child %q: %w", child, err)
+		}
+		cm.Parent = newParent
+		if err := WritePieceMetadata(childPath, *cm, h.deps.FS); err != nil {
+			return nil, fmt.Errorf("failed to re-home child %q onto %s: %w", child, newParent, err)
+		}
+		h.deps.Output.Write(core.Message{Type: core.MsgInfo, Content: fmt.Sprintf("Re-homed %s onto %s (run 'mp stack sync' to restack it)", child, newParent)})
+	}
+	return children, nil
 }
 
 // removePiece removes a piece worktree and associated session.
@@ -1527,6 +1582,8 @@ type AbandonResult struct {
 	BranchName    string `json:"branch_name,omitempty"`
 	BranchDeleted bool   `json:"branch_deleted,omitempty"`
 	MainPath      string `json:"main_path,omitempty"`
+	// ReparentedChildren lists child pieces re-homed onto this piece's parent.
+	ReparentedChildren []string `json:"reparented_children,omitempty"`
 }
 
 // AbandonPiece removes a piece worktree, tmux session, and optionally the branch.
@@ -1597,6 +1654,15 @@ func (h *Handler) AbandonPiece(ctx context.Context, pieceName string, opts Aband
 	repoRoot = detectedRepoRoot
 
 	shouldSwitchToMain := h.shouldSwitchClientToMain(target.WorktreePath)
+
+	// Re-home children before the worktree (and its metadata) disappears.
+	piecesDir, err := getPiecesDir(repoRoot)
+	if err != nil {
+		return result, fmt.Errorf("failed to get pieces directory: %w", err)
+	}
+	if result.ReparentedChildren, err = h.ReparentChildrenOf(piecesDir, pieceName, false); err != nil {
+		return result, err
+	}
 
 	// Do the destructive git work (remove worktree, delete branch) BEFORE
 	// killing the session. When `mp abandon` runs from inside the piece's own
@@ -1849,6 +1915,15 @@ func (h *Handler) DonePiece(ctx context.Context, workDir string, input DoneInput
 
 	if result.Forced {
 		h.warnUnmergedDone(ctx, status.WorktreePath, branchName, input.MainBranch)
+	}
+
+	// Re-home children before the worktree (and its metadata) disappears.
+	piecesDir, err := getPiecesDir(mainRepoRoot)
+	if err != nil {
+		return result, fmt.Errorf("failed to get pieces directory: %w", err)
+	}
+	if result.ReparentedChildren, err = h.ReparentChildrenOf(piecesDir, status.PieceName, false); err != nil {
+		return result, err
 	}
 
 	// If we're running inside the worktree being removed, switch the active

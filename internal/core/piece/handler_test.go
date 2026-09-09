@@ -2166,3 +2166,54 @@ func TestHandler_DonePiece_NotMerged_ConfigAllows(t *testing.T) {
 		t.Error("expected unmerged warning")
 	}
 }
+
+// TestHandler_ReparentChildrenOf: removing a piece (cleanup/done/abandon) must
+// re-home its direct children onto the piece's own parent, never orphan them.
+func TestHandler_ReparentChildrenOf(t *testing.T) {
+	fs := adapters.NewMemoryFS()
+	out := adapters.NewBufferOutput()
+	handler := piece.NewHandler(core.Deps{FS: fs, Output: out, Exec: adapters.NewMockExec()})
+
+	// Non-git temp dir: projectdir.WorktreeDir falls back to <wt>/.monkeypuzzle.
+	piecesDir := t.TempDir()
+	write := func(name, parent string) {
+		t.Helper()
+		if err := piece.WritePieceMetadata(filepath.Join(piecesDir, name), piece.PieceMetadata{Parent: parent}, fs); err != nil {
+			t.Fatalf("WritePieceMetadata(%s): %v", name, err)
+		}
+	}
+	// main -> a -> {b, c}; b -> d. Removing a re-homes b and c only.
+	write("a", "main")
+	write("b", "a")
+	write("c", "a")
+	write("d", "b")
+
+	got, err := handler.ReparentChildrenOf(piecesDir, "a", false)
+	if err != nil {
+		t.Fatalf("ReparentChildrenOf: %v", err)
+	}
+	if strings.Join(got, ",") != "b,c" {
+		t.Errorf("reparented = %v, want [b c]", got)
+	}
+	for name, want := range map[string]string{"b": "main", "c": "main", "d": "b"} {
+		meta, err := piece.ReadPieceMetadata(filepath.Join(piecesDir, name), fs)
+		if err != nil {
+			t.Fatalf("ReadPieceMetadata(%s): %v", name, err)
+		}
+		if meta.Parent != want {
+			t.Errorf("%s.parent = %q, want %q", name, meta.Parent, want)
+		}
+	}
+
+	// Dry run reports but leaves metadata alone.
+	got, err = handler.ReparentChildrenOf(piecesDir, "b", true)
+	if err != nil {
+		t.Fatalf("ReparentChildrenOf dry-run: %v", err)
+	}
+	if strings.Join(got, ",") != "d" {
+		t.Errorf("dry-run reparented = %v, want [d]", got)
+	}
+	if meta, _ := piece.ReadPieceMetadata(filepath.Join(piecesDir, "d"), fs); meta.Parent != "b" {
+		t.Errorf("dry-run rewrote d.parent to %q", meta.Parent)
+	}
+}
