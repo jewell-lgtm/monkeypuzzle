@@ -483,6 +483,8 @@ type DoneInput struct {
 	Main string `json:"main,omitempty"`
 	// MainBranch is the deprecated alias for Main.
 	MainBranch string `json:"main_branch,omitempty"`
+	// Force cleans up even when the branch is not merged (branch kept locally).
+	Force bool `json:"force,omitempty"`
 }
 
 // DoneResult contains the result of a done operation.
@@ -491,12 +493,15 @@ type DoneResult struct {
 	WorktreePath string `json:"worktree_path"`
 	MainPath     string `json:"main_path"`
 	Cleaned      bool   `json:"cleaned"`
+	// Forced is set when the merge gate was bypassed (--force or config).
+	Forced bool `json:"forced,omitempty"`
 }
 
 // DoneSchema returns an example input document for piece done input.
 func DoneSchema() ([]byte, error) {
 	schema := map[string]any{
-		"main": "main",
+		"main":  "main",
+		"force": false,
 	}
 	return json.MarshalIndent(schema, "", "  ")
 }
@@ -513,7 +518,7 @@ func ParseDoneJSON(data []byte) (DoneInput, error) {
 // WithDoneDefaults returns input with defaults applied.
 func WithDoneDefaults(input DoneInput) DoneInput {
 	mainBranch := firstNonEmpty(input.Main, input.MainBranch, "main")
-	return DoneInput{Main: mainBranch, MainBranch: mainBranch}
+	return DoneInput{Main: mainBranch, MainBranch: mainBranch, Force: input.Force}
 }
 
 // AdoptPieceInput holds input for the piece adopt command.

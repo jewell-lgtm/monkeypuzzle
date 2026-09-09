@@ -3,6 +3,7 @@ package piece_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -1984,5 +1985,131 @@ func TestHandler_CreatePieceFromPrompt(t *testing.T) {
 	}
 	if meta.Prompt != "add dark mode" {
 		t.Errorf("expected prompt 'add dark mode', got %q", meta.Prompt)
+	}
+}
+
+// doneTestEnv wires the mocks DonePiece needs: a piece worktree for branch
+// "feat", the remote/PR/ancestry probes IsBranchMerged runs, and the worktree
+// removal. merged flips `git branch --merged` so the piece counts as merged.
+func doneTestEnv(t *testing.T, merged bool) (*piece.Handler, *adapters.BufferOutput, *adapters.MockExec) {
+	t.Helper()
+	paths.SetDataDir("/test-data/monkeypuzzle")
+	t.Cleanup(paths.ResetDataDir)
+
+	fs := adapters.NewMemoryFS()
+	out := adapters.NewBufferOutput()
+	mockExec := adapters.NewMockExec()
+	handler := piece.NewHandler(core.Deps{FS: fs, Output: out, Exec: mockExec})
+
+	repoRoot := "/repo"
+	branch := "feat"
+	worktreePath := filepath.Join(repoRoot, ".monkeypuzzle", "pieces", branch)
+	_ = fs.MkdirAll(worktreePath, 0755)
+
+	mockExec.AddResponse("git", []string{"rev-parse", "--git-dir"}, []byte(repoRoot+"/.git/worktrees/"+branch+"\n"), nil)
+	mockExec.AddResponse("git", []string{"rev-parse", "--show-toplevel"}, []byte(worktreePath+"\n"), nil)
+	mockExec.AddResponse("git", []string{"rev-parse", "--abbrev-ref", "HEAD"}, []byte(branch+"\n"), nil)
+	mockExec.AddResponse("git", []string{"ls-remote", "--heads", "origin", branch}, []byte(""), nil)
+	mockExec.AddResponse("gh", []string{"pr", "list", "--head", branch, "--state", "merged", "--json", "number", "--limit", "1"}, []byte(`[]`), nil)
+	mockExec.AddResponse("git", []string{"rev-list", "--left-right", "--count", "main..." + branch}, []byte("0\t2\n"), nil)
+	mergedList := "  main\n"
+	if merged {
+		mergedList = "  " + branch + "\n  main\n"
+	}
+	mockExec.AddResponse("git", []string{"branch", "--merged", "main"}, []byte(mergedList), nil)
+	mockExec.AddResponse("git", []string{"cherry", "main", branch}, []byte("+ abc123\n"), nil)
+	mockExec.AddResponse("git", []string{"rev-parse", branch}, []byte("abc123\n"), nil)
+	mockExec.AddResponse("git", []string{"merge-base", "--is-ancestor", "abc123", "main"}, nil, fmt.Errorf("exit status 1"))
+	// No upstream: the unpushed count falls back to main..feat.
+	mockExec.AddResponse("git", []string{"rev-list", "--count", branch + "@{upstream}.." + branch}, nil, fmt.Errorf("no upstream configured"))
+	mockExec.AddResponse("git", []string{"rev-list", "--count", "main.." + branch}, []byte("2\n"), nil)
+	mockExec.AddResponse("git", []string{"worktree", "remove", "--force", worktreePath}, []byte(""), nil)
+
+	return handler, out, mockExec
+}
+
+func warningsOf(out *adapters.BufferOutput) []string {
+	var w []string
+	for _, m := range out.Messages {
+		if m.Type == core.MsgWarning {
+			w = append(w, m.Content)
+		}
+	}
+	return w
+}
+
+func TestHandler_DonePiece_Merged(t *testing.T) {
+	handler, out, mockExec := doneTestEnv(t, true)
+
+	result, err := handler.DonePiece(context.Background(), "/repo/.monkeypuzzle/pieces/feat", piece.DoneInput{Main: "main", MainBranch: "main"})
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if !result.Cleaned || result.Forced {
+		t.Errorf("expected Cleaned=true Forced=false, got %+v", result)
+	}
+	if !mockExec.WasCalled("git", "worktree", "remove", "--force", "/repo/.monkeypuzzle/pieces/feat") {
+		t.Error("expected worktree to be removed")
+	}
+	if out.HasWarning() {
+		t.Errorf("expected no warnings, got %v", warningsOf(out))
+	}
+}
+
+func TestHandler_DonePiece_NotMerged_Fails(t *testing.T) {
+	handler, _, mockExec := doneTestEnv(t, false)
+
+	_, err := handler.DonePiece(context.Background(), "/repo/.monkeypuzzle/pieces/feat", piece.DoneInput{Main: "main", MainBranch: "main"})
+	if !errors.Is(err, piece.ErrNotMerged) {
+		t.Fatalf("expected ErrNotMerged, got: %v", err)
+	}
+	for _, want := range []string{"--force", "done_require_merged", "mp abandon"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error should mention %q, got: %v", want, err)
+		}
+	}
+	if mockExec.WasCalled("git", "worktree", "remove", "--force", "/repo/.monkeypuzzle/pieces/feat") {
+		t.Error("worktree must not be removed without --force")
+	}
+}
+
+func TestHandler_DonePiece_NotMerged_Force(t *testing.T) {
+	handler, out, mockExec := doneTestEnv(t, false)
+
+	result, err := handler.DonePiece(context.Background(), "/repo/.monkeypuzzle/pieces/feat", piece.DoneInput{Main: "main", MainBranch: "main", Force: true})
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if !result.Cleaned || !result.Forced {
+		t.Errorf("expected Cleaned=true Forced=true, got %+v", result)
+	}
+	if !mockExec.WasCalled("git", "worktree", "remove", "--force", "/repo/.monkeypuzzle/pieces/feat") {
+		t.Error("expected worktree to be removed")
+	}
+	if mockExec.WasCalled("git", "branch", "-D", "feat") || mockExec.WasCalled("git", "branch", "-d", "feat") {
+		t.Error("branch must never be deleted")
+	}
+	warnings := strings.Join(warningsOf(out), "\n")
+	if !strings.Contains(warnings, "not merged") || !strings.Contains(warnings, "branch feat kept locally") {
+		t.Errorf("expected unmerged warning, got %q", warnings)
+	}
+	if !strings.Contains(warnings, "2 commits on feat not pushed (no upstream)") {
+		t.Errorf("expected unpushed-commits warning, got %q", warnings)
+	}
+}
+
+func TestHandler_DonePiece_NotMerged_ConfigAllows(t *testing.T) {
+	handler, out, _ := doneTestEnv(t, false)
+	handler.SetDoneRequireMerged(false)
+
+	result, err := handler.DonePiece(context.Background(), "/repo/.monkeypuzzle/pieces/feat", piece.DoneInput{Main: "main", MainBranch: "main"})
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if !result.Cleaned || !result.Forced {
+		t.Errorf("expected Cleaned=true Forced=true, got %+v", result)
+	}
+	if !out.HasWarning() {
+		t.Error("expected unmerged warning")
 	}
 }

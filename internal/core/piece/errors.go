@@ -6,3 +6,7 @@ import "errors"
 // One phrasing everywhere — command layers may wrap it with a command-specific
 // remedy, but the base sentence never varies.
 var ErrNotInPiece = errors.New("not in a piece worktree; run this from inside a piece")
+
+// ErrNotMerged is returned by DonePiece when the piece branch is not merged
+// and neither --force nor the done_require_merged=false config bypasses it.
+var ErrNotMerged = errors.New("piece is not merged")

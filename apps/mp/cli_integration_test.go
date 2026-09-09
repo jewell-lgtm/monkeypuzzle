@@ -1462,3 +1462,118 @@ func TestCLI_AgentList_HumanTableAlwaysOnStderr(t *testing.T) {
 		t.Errorf("stdout must be pure JSON with no leading human text, got: %q (err: %v)", stdout, err)
 	}
 }
+
+// commitInWorktree adds a commit so the piece branch has work main lacks.
+func commitInWorktree(t *testing.T, worktreePath, name string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(worktreePath, name+".txt"), []byte(name), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	for _, args := range [][]string{{"add", "."}, {"commit", "-m", name}} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = worktreePath
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v failed: %v\n%s", args, err, out)
+		}
+	}
+}
+
+// TestCLI_PieceDone_Unmerged_Force: an unmerged piece is refused by default
+// (hint names --force); --force removes the worktree, keeps the branch, warns.
+func TestCLI_PieceDone_Unmerged_Force(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	env.initGitRepo()
+	env.initProject("test")
+
+	stdout, stderr, err := env.run("create", "--name", "test-force", "--skip-switch")
+	if err != nil {
+		t.Fatalf("piece create failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+	var created map[string]any
+	if err := json.Unmarshal([]byte(stdout), &created); err != nil {
+		t.Fatalf("invalid JSON from piece create: %v", err)
+	}
+	worktreePath := created["worktree_path"].(string)
+	commitInWorktree(t, worktreePath, "work")
+
+	// Default: refused, with the bypass spelled out.
+	stdout, stderr, err = env.runInDirWithStdin(worktreePath, "{}", "done")
+	if err == nil {
+		t.Fatalf("done on unmerged piece should fail\nstdout: %s\nstderr: %s", stdout, stderr)
+	}
+	for _, want := range []string{"not merged", "--force", "done_require_merged"} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("stderr should mention %q\nstderr: %s", want, stderr)
+		}
+	}
+	if _, err := os.Stat(worktreePath); err != nil {
+		t.Fatal("worktree must survive a refused done")
+	}
+
+	// --force: cleans up, keeps the branch, reports forced.
+	stdout, stderr, err = env.runInDirWithStdin(worktreePath, "{}", "done", "--force")
+	if err != nil {
+		t.Fatalf("done --force failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+	var result map[string]any
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("invalid JSON output: %v\noutput: %s", err, stdout)
+	}
+	if result["forced"] != true || result["cleaned"] != true {
+		t.Errorf("expected forced=true cleaned=true, got %v", result)
+	}
+	if _, err := os.Stat(worktreePath); !os.IsNotExist(err) {
+		t.Error("worktree should have been removed")
+	}
+	if !strings.Contains(stderr, "not merged") || !strings.Contains(stderr, "not pushed") {
+		t.Errorf("expected unmerged + unpushed warnings\nstderr: %s", stderr)
+	}
+	cmd := exec.Command("git", "branch", "--list", "test-force")
+	cmd.Dir = env.tmpDir
+	if out, _ := cmd.CombinedOutput(); !strings.Contains(string(out), "test-force") {
+		t.Errorf("branch must be kept locally, got %q", out)
+	}
+}
+
+// TestCLI_PieceDone_Unmerged_ConfigKey: done_require_merged=false lifts the
+// gate for every call, no flag needed.
+func TestCLI_PieceDone_Unmerged_ConfigKey(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	env.initGitRepo()
+	env.initProject("test")
+
+	stdout, stderr, err := env.run("config", "set", "done_require_merged", "false")
+	if err != nil {
+		t.Fatalf("config set failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+
+	stdout, stderr, err = env.run("create", "--name", "test-cfg", "--skip-switch")
+	if err != nil {
+		t.Fatalf("piece create failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+	var created map[string]any
+	if err := json.Unmarshal([]byte(stdout), &created); err != nil {
+		t.Fatalf("invalid JSON from piece create: %v", err)
+	}
+	worktreePath := created["worktree_path"].(string)
+	commitInWorktree(t, worktreePath, "work")
+
+	stdout, stderr, err = env.runInDirWithStdin(worktreePath, "{}", "done")
+	if err != nil {
+		t.Fatalf("done with done_require_merged=false failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+	var result map[string]any
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("invalid JSON output: %v\noutput: %s", err, stdout)
+	}
+	if result["forced"] != true {
+		t.Errorf("expected forced=true, got %v", result)
+	}
+	if _, err := os.Stat(worktreePath); !os.IsNotExist(err) {
+		t.Error("worktree should have been removed")
+	}
+}

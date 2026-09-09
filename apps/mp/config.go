@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -35,7 +36,8 @@ var configSetCmd = &cobra.Command{
 	Long: `Set a configuration value.
 
 Available keys:
-  multiplexer  Terminal multiplexer to use (tmux, zellij, cmux, herdr, none)`,
+  multiplexer          Terminal multiplexer to use (tmux, zellij, cmux, herdr, none)
+  done_require_merged  Whether 'mp done' refuses unmerged pieces (true, false; default true)`,
 	Args: cobra.ExactArgs(2),
 	RunE: runConfigSet,
 }
@@ -48,7 +50,7 @@ func init() {
 	// Register completion for config keys
 	_ = configGetCmd.RegisterFlagCompletionFunc("", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		if len(args) == 0 {
-			return []string{"multiplexer"}, cobra.ShellCompDirectiveNoFileComp
+			return []string{"multiplexer", "done_require_merged"}, cobra.ShellCompDirectiveNoFileComp
 		}
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	})
@@ -66,6 +68,8 @@ func runConfigGet(cmd *cobra.Command, args []string) error {
 	switch key {
 	case "multiplexer":
 		value = cfg.Multiplexer
+	case "done_require_merged":
+		value = strconv.FormatBool(cfg.DoneRequiresMerged())
 	default:
 		return fmt.Errorf("unknown config key: %s", key)
 	}
@@ -97,6 +101,12 @@ func runConfigSet(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("invalid multiplexer value: %s (valid: %s)", value, strings.Join(validMultiplexerValues, ", "))
 		}
 		cfg.Multiplexer = value
+	case "done_require_merged":
+		b, err := strconv.ParseBool(value)
+		if err != nil {
+			return fmt.Errorf("invalid done_require_merged value: %s (valid: true, false)", value)
+		}
+		cfg.SetDoneRequireMerged(b)
 	default:
 		return fmt.Errorf("unknown config key: %s", key)
 	}

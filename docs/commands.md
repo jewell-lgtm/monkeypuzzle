@@ -725,7 +725,17 @@ mp pr ready --schema        # prints {} — ready takes no input
 
 ## mp done
 
-Clean up a piece (worktree + multiplexer session) after its branch has been merged. Defaults to the piece you're standing in; name one positionally or with `--piece` to finish it from anywhere in the repo. Verifies the piece is merged first — use [`mp abandon`](#mp-abandon) for unmerged pieces.
+Clean up a piece (worktree + multiplexer session) after its branch has been merged. Defaults to the piece you're standing in; name one positionally or with `--piece` to finish it from anywhere in the repo.
+
+By default `mp done` refuses a piece whose branch is not merged. The gate is a policy, not a rule — bypass it any of three ways; all keep the branch (only the worktree and session go), warn that the piece is unmerged, and warn how many commits its upstream lacks:
+
+| Bypass       | Spelling                                  | Scope     |
+| ------------ | ----------------------------------------- | --------- |
+| CLI flag     | `mp done --force`                         | this call |
+| stdin JSON   | `echo '{"force":true}' \| mp done`        | this call |
+| user config  | `mp config set done_require_merged false` | always    |
+
+The result carries `"forced": true` when the gate was bypassed. To drop the branch as well, use [`mp abandon`](#mp-abandon).
 
 ### Usage
 
@@ -733,6 +743,8 @@ Clean up a piece (worktree + multiplexer session) after its branch has been merg
 mp done
 mp done my-feature
 mp done --main develop
+mp done --force                  # unmerged: remove worktree, keep branch
+echo '{"force":true}' | mp done
 ```
 
 ### Flags
@@ -741,6 +753,7 @@ mp done --main develop
 | --------------- | --------------------------------------------- | ------- |
 | `--piece`       | Piece to finish (or pass it positionally)     | current |
 | `--main` | Main branch to check merge status against (`--main-branch` deprecated) | `main`  |
+| `--force`       | Clean up even if not merged (branch kept locally) | `false` |
 
 ---
 
@@ -973,13 +986,15 @@ Get and set user-level configuration (stored under `~/.config/monkeypuzzle/`). U
 ```bash
 mp config get multiplexer
 mp config set multiplexer tmux   # tmux, zellij, cmux, or none
+mp config set done_require_merged false   # let `mp done` clean up unmerged pieces
 ```
 
 ### Keys
 
-| Key           | Description                                | Values                |
-| ------------- | ------------------------------------------ | --------------------- |
-| `multiplexer` | Terminal multiplexer for piece sessions    | `tmux`, `zellij`, `cmux`, `herdr`, `none` |
+| Key                   | Description                                | Values                |
+| --------------------- | ------------------------------------------ | --------------------- |
+| `multiplexer`         | Terminal multiplexer for piece sessions    | `tmux`, `zellij`, `cmux`, `herdr`, `none` |
+| `done_require_merged` | Whether [`mp done`](#mp-done) refuses unmerged pieces (`--force` bypasses per call) | `true` (default), `false` |
 
 ---
 

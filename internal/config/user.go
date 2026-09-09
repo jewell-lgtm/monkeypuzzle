@@ -16,6 +16,20 @@ const (
 // UserConfig represents user-level monkeypuzzle configuration.
 type UserConfig struct {
 	Multiplexer string `json:"multiplexer,omitempty"` // "tmux", "zellij", "cmux", "herdr", or "none"
+	// DoneRequireMerged gates `mp done` on the piece branch being merged.
+	// Pointer so an absent key means the default (true) rather than false.
+	DoneRequireMerged *bool `json:"done_require_merged,omitempty"`
+}
+
+// DoneRequiresMerged reports whether `mp done` refuses unmerged pieces
+// (default true; `mp done --force` bypasses it per call).
+func (c UserConfig) DoneRequiresMerged() bool {
+	return c.DoneRequireMerged == nil || *c.DoneRequireMerged
+}
+
+// SetDoneRequireMerged sets the done_require_merged key.
+func (c *UserConfig) SetDoneRequireMerged(v bool) {
+	c.DoneRequireMerged = &v
 }
 
 // DefaultUserConfig returns config with default values.
