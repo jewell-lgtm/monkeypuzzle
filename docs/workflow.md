@@ -23,7 +23,9 @@ A **piece** is an isolated git worktree for a single change. Each piece:
 
 Workflows differ. PHProcess flips GitLab labels on draft→ready; another team auto-assigns reviewers; another posts to Slack; another runs `cargo fmt` on piece create. mp does the worktree/session/branch orchestration and emits a hook at every transition. The hook is a shell script — write whatever you want.
 
-## The lifecycle
+## A common recipe
+
+One way to run a piece end to end. Every step is optional and every gate below has a bypass — hooks decide what your flow needs.
 
 ```
 mp create [--name <name> | --prompt <text>]
@@ -55,7 +57,15 @@ mp create [--name <name> | --prompt <text>]
    mp done / cleanup — remove worktree + session
 ```
 
-`mp done` checks the branch is merged by default; `--force`, stdin `{"force":true}`, or `mp config set done_require_merged false` skip the check (branch kept). Likewise `mp merge` checks the target isn't ahead by default; `--no-update-check`, stdin `{"no_update_check":true}`, or `mp config set merge_require_updated false` skip it.
+### Gates and their bypasses
+
+| Gate (default)                              | Bypass                                                                                              |
+| ------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `mp done` refuses an unmerged piece         | `--force` / stdin `{"force":true}` / `mp config set done_require_merged false` (branch kept)         |
+| `mp merge` refuses when the target is ahead | `--no-update-check` / stdin `{"no_update_check":true}` / `mp config set merge_require_updated false` |
+| `mp merge` refuses a piece with children    | `--reparent-children` (re-homes them) / `--force` (leaves them orphaned)                            |
+| `mp abandon` refuses a dirty worktree       | `--force` (discards uncommitted changes — data-loss protection, not policy)                          |
+| `mp cleanup` removes merged pieces only     | `is-piece-done.sh` decides what "merged" means (e.g. squash-merges)                                 |
 
 Piece basics always available to every hook: `MP_PIECE_NAME`, `MP_WORKTREE_PATH`, `MP_REPO_ROOT`.
 
@@ -241,7 +251,7 @@ Sessions persist after detaching — your dev server keeps running, your termina
 
 ### "Main branch is ahead"
 
-`mp merge` refuses to merge a stale piece by default (`--no-update-check` skips this). Pull main into the piece first:
+`mp merge` refuses a stale piece by default (`--no-update-check` bypasses). One option is to pull main into the piece first:
 
 ```bash
 mp update

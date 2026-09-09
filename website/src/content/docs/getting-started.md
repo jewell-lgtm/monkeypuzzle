@@ -64,8 +64,8 @@ mp init --schema | jq '.name = "custom-name"' | mp init
 
 ## Your first piece
 
-This is the whole lifecycle — creating a unit of work, shipping it, cleaning up
-— in one pass:
+A common recipe — create a unit of work, ship it, clean up — in one pass
+(every step is optional):
 
 ```bash
 mp create --name my-feature   # worktree + session, branched off main
