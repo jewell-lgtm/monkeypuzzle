@@ -98,6 +98,11 @@ type PieceMetadata struct {
 	// Agents tracks agent processes running in this piece's worktree, keyed by
 	// agent id. Maintained by `mp agent report`; reaped lazily on write.
 	Agents map[string]AgentRecord `json:"agents,omitempty"`
+	// PlacementHost is the box name the controller placed this piece under
+	// (`mp create --remote=<box>`), written by the box-side create from the
+	// MP_PLACEMENT_HOST the proxy exported. Hooks in this worktree read it
+	// back, so the placement env no longer depends on how mp was invoked.
+	PlacementHost string `json:"placement_host,omitempty"`
 }
 
 // MarkPieceMerged sets the durable merged marker on a piece's metadata so that

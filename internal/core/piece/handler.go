@@ -210,6 +210,7 @@ func (h *Handler) CreatePiece(ctx context.Context, pieceName string, opts Create
 	pieceMetadata := PieceMetadata{
 		Parent:            parent,
 		CreatedFromBranch: currentBranch,
+		PlacementHost:     h.hooks.placementHost,
 	}
 	if err := WritePieceMetadata(worktreePath, pieceMetadata, h.deps.FS); err != nil {
 		// Non-fatal: log warning but continue
@@ -452,6 +453,7 @@ func (h *Handler) AdoptPiece(ctx context.Context, input AdoptPieceInput) (PieceI
 	pieceMetadata := PieceMetadata{
 		Parent:            parent,
 		CreatedFromBranch: branchToAdopt,
+		PlacementHost:     h.hooks.placementHost,
 	}
 	if err := WritePieceMetadata(worktreePath, pieceMetadata, h.deps.FS); err != nil {
 		h.deps.Output.Write(core.Message{

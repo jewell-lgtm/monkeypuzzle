@@ -60,14 +60,17 @@ func runPieceCreateRemote(ctx context.Context, deps core.Deps, handler *piececmd
 
 	// 1. Link first: a crash anywhere below leaves a visible pending link,
 	// never an orphaned box-side worktree nobody can find.
-	err = piececmd.UpdatePlacements(req.repoRoot, fs, func(p piececmd.Placements) error {
-		p[req.name] = piececmd.Placement{Box: req.box, Pending: true}
-		return nil
-	})
+	if err := claimLink(req.repoRoot, req.name, req.box, fs); err != nil {
+		return err
+	}
+	// One placement at a time per (project, box): connect must not race
+	// itself (two clones into one dir) and the registry row is written once.
+	unlock, err := piececmd.LockBox(req.repoRoot, req.box, fs)
 	if err != nil {
 		return err
 	}
 	info, err := placePiece(ctx, req, deps)
+	unlock()
 	if err != nil {
 		if rmErr := piececmd.RemovePlacement(req.repoRoot, req.name, fs); rmErr != nil {
 			fmt.Fprintf(os.Stderr, "%s could not remove pending link for %s: %v\n", cli.GlyphWarn, req.name, rmErr)
@@ -76,11 +79,30 @@ func runPieceCreateRemote(ctx context.Context, deps core.Deps, handler *piececmd
 	}
 
 	fmt.Fprintf(os.Stderr, "%s Placed %s on %s (%s)\n", cli.GlyphOK, info.Name, req.box, info.WorktreePath)
-	if err := cli.PrintJSON(info); err != nil {
-		return err
+	// Same gate as a local create: JSON is for pipes and agents (or --json).
+	if !cli.IsTerminal() || !cli.IsStdoutTerminal() || flagPieceCreateJSON {
+		if err := cli.PrintJSON(info); err != nil {
+			return err
+		}
 	}
+	// Any mp run in that worktree — proxied like this, or from a session on
+	// the box — gives hooks MP_PLACEMENT_HOST/MP_REMOTE: the box-side create
+	// wrote the placement into the piece metadata.
 	cli.Hint(fmt.Sprintf("mp --host %s --dir %s pr create --draft", req.box, info.WorktreePath))
 	return nil
+}
+
+// claimLink writes the pending link, re-checking the name under the
+// placements lock: validatePlacement's PieceExists ran outside it, so two
+// creates racing on one name both pass that and only one may claim here.
+func claimLink(repoRoot, name, box string, fs core.FS) error {
+	return piececmd.UpdatePlacements(repoRoot, fs, func(p piececmd.Placements) error {
+		if _, taken := p[name]; taken {
+			return fmt.Errorf("%w: %q in %s", piececmd.ErrPieceExists, name, repoRoot)
+		}
+		p[name] = piececmd.Placement{Box: box, Pending: true}
+		return nil
+	})
 }
 
 // validatePlacement is step 0: box syntax, name uniqueness across local
@@ -171,6 +193,11 @@ func placePiece(ctx context.Context, req placeRequest, deps core.Deps) (piececmd
 	}
 
 	// 5. Connected: record the clone (stays even if the create below fails).
+	// Reload first: the connect above may have taken a while and the registry
+	// has no lock of its own, so save the freshest view plus this one row.
+	if reg, err = registry.Load(); err != nil {
+		return piececmd.PieceInfo{}, err
+	}
 	reg.UpsertHidden(req.box, remoteProject, rowName, req.repoRoot)
 	if err := reg.Save(); err != nil {
 		return piececmd.PieceInfo{}, err
@@ -226,7 +253,7 @@ func placePiece(ctx context.Context, req placeRequest, deps core.Deps) (piececmd
 // The controller-side on-box-connect.sh hook, when present, replaces the
 // built-in connect entirely (it sees MP_BOX, MP_REMOTE_PATH, MP_REPO_URL,
 // MP_PROJECT, MP_HOOKS_DIR); built-in = clone the origin into
-// $HOME/.local/share/mp/<project> (skipped when present), `mp init` it
+// $HOME/.local/share/mp/<project> (skipped when a valid clone is there), `mp init` it
 // (skipped when already a project), ship the controller's hooks. Either way
 // the clone's path is then resolved on the box — $HOME only expands there.
 func connectBox(ctx context.Context, req placeRequest, deps core.Deps) (string, error) {
@@ -276,7 +303,9 @@ func connectBox(ctx context.Context, req placeRequest, deps core.Deps) (string, 
 	hooksDir := projectdir.HooksDir(req.repoRoot)
 	if fi, err := os.Stat(hooksDir); err == nil && fi.IsDir() {
 		dest := req.box + ":" + root + "/.monkeypuzzle/hooks/"
-		cmd := exec.Command("rsync", "-a", "--", hooksDir+string(filepath.Separator), dest)
+		// Same ssh discipline as every other box call: no password prompt
+		// to hang an agent on, bounded connect.
+		cmd := exec.Command("rsync", "-a", "-e", "ssh -o BatchMode=yes -o ConnectTimeout=5", "--", hooksDir+string(filepath.Separator), dest)
 		var errb bytes.Buffer
 		cmd.Stderr = &errb
 		if err := cmd.Run(); err != nil {
@@ -297,10 +326,18 @@ func builtinConnectScript(req placeRequest, fs core.FS, origin, dir string) stri
 	for _, a := range initArgs {
 		init.WriteString(" " + cli.ShQuote(a))
 	}
+	// A clone lands in <dir>.tmp and is renamed into place only once git
+	// has finished, so an interrupted clone is never mistaken for a
+	// connected box: "cloned" means <dir> has a HEAD git can verify;
+	// anything else there is leftovers and is replaced.
 	return `export PATH="$HOME/.local/bin:$PATH"
 set -e
 mkdir -p "$HOME"/` + cli.ShQuote(remoteMPDir) + `
-if [ ! -d ` + dir + `/.git ]; then git clone ` + cli.ShQuote(origin) + ` ` + dir + ` >&2; fi
+if ! git -C ` + dir + ` rev-parse --verify HEAD >/dev/null 2>&1; then
+  rm -rf ` + dir + ` ` + dir + `.tmp
+  git clone ` + cli.ShQuote(origin) + ` ` + dir + `.tmp >&2
+  mv ` + dir + `.tmp ` + dir + `
+fi
 cd ` + dir + `
 if [ ! -f .monkeypuzzle/monkeypuzzle.json ]; then echo '{}' | ` + init.String() + ` >/dev/null; fi
 readlink -f .`

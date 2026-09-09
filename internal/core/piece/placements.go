@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
 	initcmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/init"
@@ -109,6 +110,34 @@ func LockPlacements(repoRoot string, fs core.FS) (func(), error) {
 		return nil, err
 	}
 	return locker.LockFile(path + ".lock")
+}
+
+// LockBox serializes placements onto one box for this project (connect +
+// registry write + box-side create): `mp create --remote` holds it for the
+// whole flow. Separate from the placements lock so the flow can still update
+// the link store while holding it. No-op unlock when the FS cannot lock.
+func LockBox(repoRoot, box string, fs core.FS) (func(), error) {
+	locker, ok := fs.(core.FileLocker)
+	if !ok {
+		return func() {}, nil
+	}
+	dir := projectdir.Dir(repoRoot)
+	if err := fs.MkdirAll(dir, DefaultDirPerm); err != nil {
+		return nil, err
+	}
+	return locker.LockFile(BoxLockPath(repoRoot, box))
+}
+
+// BoxLockPath is the lock file LockBox takes for box; the box name is
+// reduced to filename-safe characters.
+func BoxLockPath(repoRoot, box string) string {
+	safe := strings.Map(func(r rune) rune {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '.' || r == '-' || r == '_' {
+			return r
+		}
+		return '_'
+	}, box)
+	return filepath.Join(projectdir.Dir(repoRoot), "box-"+safe+".lock")
 }
 
 // UpdatePlacements runs fn against the locked, freshly-read store and writes

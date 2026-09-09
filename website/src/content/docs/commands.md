@@ -769,10 +769,12 @@ meaning everywhere else (override a safety check). Use `--apply` or `--yes`.
 5. Child pieces of a removed piece are re-homed onto its parent (usually main)
    so they never become orphans — metadata only; run `mp stack sync` to restack
    them. Re-homed children are listed under `reparented_children`.
-6. Checks each placement (`mp create --remote`) against its box and drops
-   stale (gone on the box) and pending (create never finished) links — and
-   the box's hidden registry row once no links to it remain. Unreachable
-   boxes keep their links. JSON: `links[]` with `present`/`pending`/`dropped`.
+6. Checks each placement (`mp create --remote`) against its box: drops
+   stale links (gone on the box) and pending links (create never finished)
+   the box has nothing for, heals a pending link whose piece the box does
+   have, and drops the box's hidden registry row once no links to it
+   remain. Unreachable boxes keep their links. JSON: `links[]` with
+   `present`/`pending`/`healed`/`dropped`.
 
 ---
 
@@ -1125,8 +1127,8 @@ mp remote doctor          # probe every box in the project registry (hidden rows
 ```
 
 Per box the JSON also carries `pending_links` — `project/piece` placements
-whose `mp create --remote` never finished (drop them with `mp cleanup` in
-that project) — and, when a path was probed, `dir`/`init` (is it an mp
+whose `mp create --remote` never finished (`mp cleanup` in that project
+heals or drops them) — and, when a path was probed, `dir`/`init` (is it an mp
 project there).
 
 Like `mp config`, `doctor` uses positional args — there is no JSON-stdin mode.
@@ -1199,8 +1201,8 @@ All hooks receive these environment variables:
 | `MP_AGENT_KIND`    | Agent kind, e.g. `claude` (agent hooks) |
 | `MP_AGENT_STATUS`  | New piece aggregate status (agent hooks) |
 | `MP_AGENT_PANE`    | Multiplexer pane the agent runs in (agent hooks) |
-| `MP_PLACEMENT_HOST` | Box name as the controller knows it (box-side hooks of a placed piece) |
-| `MP_REMOTE`        | `1` when the hook runs on a box on behalf of a controller |
+| `MP_PLACEMENT_HOST` | Box name as the controller knows it (box-side hooks in a placed piece's worktree; read from the piece metadata the box-side create wrote, so any invocation there sees it) |
+| `MP_REMOTE`        | `1` when the hook runs on a box for a placed piece |
 | `MP_BOX`           | ssh destination being connected (`on-box-connect.sh`) |
 | `MP_REMOTE_PATH`   | Intended clone path on the box, unexpanded `$HOME/.local/share/mp/<project>` (`on-box-connect.sh`) |
 | `MP_REPO_URL`      | The project's `origin` URL (`on-box-connect.sh`) |

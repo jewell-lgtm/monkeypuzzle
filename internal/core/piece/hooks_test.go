@@ -530,3 +530,48 @@ func TestHookRunner_RunHookOutput_ReportsRanAndOutput(t *testing.T) {
 		t.Errorf("failing hook: out=%q ran=%v err=%v", out, ran, err)
 	}
 }
+
+// Box-side, no proxy: an mp run from a session on the box has no
+// MP_PLACEMENT_HOST in its env, so the runner reads the placement the
+// box-side create persisted into the worktree's metadata.
+func TestHookRunner_PlacementEnv_FromMetadata(t *testing.T) {
+	t.Setenv("MP_PLACEMENT_HOST", "")
+	t.Setenv("MP_REMOTE", "")
+	fs := adapters.NewMemoryFS()
+	mockExec := adapters.NewMockExec()
+	runner := piece.NewHookRunner(core.Deps{FS: fs, Output: adapters.NewBufferOutput(), Exec: mockExec})
+	wt := "/repo/.monkeypuzzle/pieces/p"
+	if err := piece.WritePieceMetadata(wt, piece.PieceMetadata{Parent: "main", PlacementHost: "wire"}, fs); err != nil {
+		t.Fatal(err)
+	}
+	hooksDir := "repo/.monkeypuzzle/hooks"
+	_ = fs.MkdirAll(hooksDir, 0755)
+	_ = fs.WriteFile(filepath.Join(hooksDir, piece.HookBeforePRCreate), []byte("#!/bin/bash\n"), 0755)
+	mockExec.AddResponse("bash", []string{"/repo/.monkeypuzzle/hooks/" + piece.HookBeforePRCreate}, nil, nil)
+	if err := runner.RunHook(context.Background(), "/repo", piece.HookBeforePRCreate, piece.HookContext{PieceName: "p", WorktreePath: wt}); err != nil {
+		t.Fatalf("RunHook: %v", err)
+	}
+	calls := mockExec.GetCalls()
+	env := map[string]string{}
+	for _, e := range calls[len(calls)-1].Env {
+		if k, v, ok := strings.Cut(e, "="); ok {
+			env[k] = v
+		}
+	}
+	if env["MP_PLACEMENT_HOST"] != "wire" || env["MP_REMOTE"] != "1" {
+		t.Errorf("env = %v, want MP_PLACEMENT_HOST=wire MP_REMOTE=1 from piece metadata", env)
+	}
+	// A local piece's metadata carries no placement → nothing exported.
+	if err := piece.WritePieceMetadata(wt, piece.PieceMetadata{Parent: "main"}, fs); err != nil {
+		t.Fatal(err)
+	}
+	if err := runner.RunHook(context.Background(), "/repo", piece.HookBeforePRCreate, piece.HookContext{PieceName: "p", WorktreePath: wt}); err != nil {
+		t.Fatalf("RunHook: %v", err)
+	}
+	calls = mockExec.GetCalls()
+	for _, e := range calls[len(calls)-1].Env {
+		if strings.HasPrefix(e, "MP_PLACEMENT_HOST=") || strings.HasPrefix(e, "MP_REMOTE=") {
+			t.Errorf("local piece exported %s", e)
+		}
+	}
+}

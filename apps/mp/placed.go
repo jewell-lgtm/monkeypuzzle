@@ -69,12 +69,13 @@ func locatePiece(ctx context.Context, fs core.FS, selector string) (pieceLocatio
 
 // proxyPlaced forwards the current invocation to the placed piece's box,
 // minus the selector (the box-side mp runs inside the worktree, so the verb
-// needs none). Piece-ending verbs pass ending=true: on success the link is
-// dropped and, when the box holds no more of this project's pieces, its
+// needs none) and minus any leading --project/--dir already consumed here
+// (invocationArgs). Piece-ending verbs pass ending=true: on success the link
+// is dropped and, when the box holds no more of this project's pieces, its
 // hidden registry row goes too. Never returns on success — it exits with the
 // box's exit code, like every other proxied command.
 func proxyPlaced(loc pieceLocation, fs core.FS, selector string, ending bool) error {
-	args := stripSelector(os.Args[1:], selector)
+	args := stripSelector(invocationArgs, selector)
 	target := &remoteTarget{host: loc.placement.Box, dir: loc.placement.RemotePath, placement: true}
 	code := runRemote(target, args)
 	if code != 0 {
@@ -169,26 +170,51 @@ type linkCheck struct {
 	Present     bool   `json:"present"`
 	Unreachable bool   `json:"unreachable,omitempty"`
 	Dropped     bool   `json:"dropped,omitempty"`
-	Error       string `json:"error,omitempty"`
+	// Healed: a pending link whose piece the box does have (the create
+	// finished but the controller crashed before recording it) was completed
+	// in place instead of dropped.
+	Healed bool   `json:"healed,omitempty"`
+	Error  string `json:"error,omitempty"`
 }
 
-// boxPiecePath is the worktree path a link points at, or where a pending
-// link's piece would have landed if the box is connected. Empty = unknown.
-func boxPiecePath(reg registry.Registry, repoRoot, name string, pl piececmd.Placement) string {
+// actionable reports whether a cleanup apply would touch this link: drop it
+// (box says absent) or heal it (pending, box says present).
+func (c linkCheck) actionable() bool {
+	return !c.Unreachable && c.Error == "" && (!c.Present || c.Pending)
+}
+
+// healLink completes a pending link whose piece exists on the box.
+func healLink(repoRoot, name, remotePath, remoteProject string, fs core.FS) error {
+	return piececmd.UpdatePlacements(repoRoot, fs, func(p piececmd.Placements) error {
+		pl := p[name]
+		pl.Pending = false
+		pl.RemotePath = remotePath
+		pl.RemoteProject = remoteProject
+		p[name] = pl
+		return nil
+	})
+}
+
+// boxPiecePath is the worktree path a link points at (and the clone it is
+// in), or where a pending link's piece would have landed if the box is
+// connected. Empty = unknown.
+func boxPiecePath(reg registry.Registry, repoRoot, name string, pl piececmd.Placement) (path, project string) {
 	if pl.RemotePath != "" {
-		return pl.RemotePath
+		return pl.RemotePath, pl.RemoteProject
 	}
 	for _, p := range reg.Projects {
 		if p.Host == pl.Box && p.LinkedFrom == repoRoot {
-			return p.Path + "/" + projectdir.DefaultDirName + "/pieces/" + name
+			return p.Path + "/" + projectdir.DefaultDirName + "/pieces/" + name, p.Path
 		}
 	}
-	return ""
+	return "", ""
 }
 
-// checkLinks asks each box whether its side of every link still exists:
-// stale links (box says no) and pending links are reported, and dropped when
-// dryRun is false. Unreachable boxes keep their links.
+// checkLinks asks each box whether its side of every link still exists.
+// Stale links (box says no) are dropped; a pending link is dropped when the
+// box has nothing and healed into a placed link when it does — the piece
+// was created, only the controller's record of it was lost. Both are
+// previewed only when dryRun. Unreachable boxes keep their links.
 func checkLinks(repoRoot string, fs core.FS, dryRun bool) ([]linkCheck, error) {
 	placements, err := piececmd.ReadPlacements(repoRoot, fs)
 	if err != nil {
@@ -211,7 +237,7 @@ func checkLinks(repoRoot string, fs core.FS, dryRun bool) ([]linkCheck, error) {
 	for _, name := range names {
 		pl := placements[name]
 		c := linkCheck{Piece: name, Box: pl.Box, Pending: pl.Pending}
-		path := boxPiecePath(reg, repoRoot, name, pl)
+		path, project := boxPiecePath(reg, repoRoot, name, pl)
 		if path == "" {
 			// Pending and never connected: nothing can exist on the box.
 			c.Present = false
@@ -229,21 +255,32 @@ func checkLinks(repoRoot string, fs core.FS, dryRun bool) ([]linkCheck, error) {
 				c.Error = fmt.Sprintf("%s: %s", ErrBoxUnreachable, strings.TrimSpace(stderr))
 			}
 		}
-		droppable := !c.Unreachable && c.Error == "" && (!c.Present || c.Pending)
+		heal := c.Pending && c.Present
 		switch {
-		case droppable && !dryRun:
-			if err := dropLink(repoRoot, name, fs); err != nil {
-				c.Error = err.Error()
-			} else {
-				c.Dropped = true
-			}
-		case droppable:
+		case !c.actionable():
+		case dryRun && heal:
+			fmt.Fprintf(os.Stderr, "[dry-run] Would heal placement %s on %s: %v (piece exists at %s)\n", name, pl.Box, ErrLinkPending, path)
+		case dryRun:
 			why := ErrLinkStale
 			if c.Pending {
 				why = ErrLinkPending
 			}
 			fmt.Fprintf(os.Stderr, "[dry-run] Would drop placement %s on %s: %v\n", name, pl.Box, why)
-		case c.Unreachable:
+		case heal:
+			if err := healLink(repoRoot, name, path, project, fs); err != nil {
+				c.Error = err.Error()
+			} else {
+				c.Healed = true
+				fmt.Fprintf(os.Stderr, "%s Healed placement %s (%s:%s)\n", cli.GlyphOK, name, pl.Box, path)
+			}
+		default:
+			if err := dropLink(repoRoot, name, fs); err != nil {
+				c.Error = err.Error()
+			} else {
+				c.Dropped = true
+			}
+		}
+		if c.Unreachable {
 			fmt.Fprintf(os.Stderr, "%s keeping placement %s: %s\n", cli.GlyphWarn, name, c.Error)
 		}
 		checks = append(checks, c)
@@ -251,11 +288,11 @@ func checkLinks(repoRoot string, fs core.FS, dryRun bool) ([]linkCheck, error) {
 	return checks, nil
 }
 
-// droppableLinks counts checks a cleanup apply would remove.
+// droppableLinks counts checks a cleanup apply would drop or heal.
 func droppableLinks(checks []linkCheck) int {
 	n := 0
 	for _, c := range checks {
-		if !c.Unreachable && c.Error == "" && (!c.Present || c.Pending) {
+		if c.actionable() {
 			n++
 		}
 	}

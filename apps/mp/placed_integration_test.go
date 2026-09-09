@@ -229,3 +229,93 @@ func TestCLI_Placed_DoctorListsPending(t *testing.T) {
 		t.Errorf("doctor stderr = %q", stderr)
 	}
 }
+
+// A leading --project is consumed on the controller (registry lookup +
+// chdir) and must not travel to the box: its registry has the clone under
+// the same name, so the box mp would chdir out of the worktree.
+func TestCLI_Placed_ProjectPrefixRouting(t *testing.T) {
+	e := placedEnv(t, "")
+	canned := `{"in_piece":true,"piece_name":"fix-auth"}`
+	shimDir, path := sshShim(t, e, canned, 0)
+
+	// Run from outside the project: only --project can find it.
+	cmd := exec.Command(e.binPath, "--project", "placed-proj", "status", "fix-auth", "--json")
+	cmd.Dir = e.dataDir
+	cmd.Env = append(e.env(), "PATH="+path)
+	var stdout, stderr strings.Builder
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("--project status placed: %v\n%s", err, stderr.String())
+	}
+	if stdout.String() != canned {
+		t.Errorf("stdout = %q, want box's response", stdout.String())
+	}
+	argv := shimFile(t, shimDir, "argv")
+	if strings.Contains(argv, "--project") || strings.Contains(argv, "placed-proj'") {
+		t.Errorf("--project forwarded to the box:\n%s", argv)
+	}
+	if !strings.Contains(argv, `cd '\''`+placedPath+`'\'' && exec '\''mp'\'' '\''status'\'' '\''--json'\''`) {
+		t.Errorf("proxied argv must cd into the box worktree with the selector and --project stripped:\n%s", argv)
+	}
+}
+
+// A pending link whose piece the box does have (create finished, controller
+// crashed before step 7) is healed, never dropped: dropping would orphan a
+// real box-side worktree.
+func TestCLI_Placed_CleanupHealsPendingPresent(t *testing.T) {
+	e := placedEnv(t, `,"half":{"box":"wire","pending":true}`)
+	present := shimResponse{exit: 0}
+	shim := newSeqShim(t, e,
+		present, present, // --dry-run: fix-auth, half
+		present, present, // --yes preview
+		present, present, // --yes apply
+	)
+
+	stdout, stderr, err := runProxy(e, shim.path, "", nil, "cleanup", "--dry-run", "--json")
+	if err != nil {
+		t.Fatalf("cleanup --dry-run: %v\n%s", err, stderr)
+	}
+	if !strings.Contains(stderr, "Would heal placement half") || strings.Contains(stderr, "Would drop") {
+		t.Errorf("dry-run stderr = %q", stderr)
+	}
+	if strings.Contains(stdout, `"healed": true`) {
+		t.Errorf("dry-run must not heal:\n%s", stdout)
+	}
+	if p := readPlacements(t, e); p["half"]["pending"] != true {
+		t.Error("dry-run mutated the pending link")
+	}
+
+	stdout, stderr, err = runProxy(e, shim.path, "", nil, "cleanup", "--yes", "--json")
+	if err != nil {
+		t.Fatalf("cleanup --yes: %v\n%s", err, stderr)
+	}
+	var out struct {
+		Links []struct {
+			Piece   string `json:"piece"`
+			Healed  bool   `json:"healed"`
+			Dropped bool   `json:"dropped"`
+		} `json:"links"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &out); err != nil {
+		t.Fatalf("cleanup JSON: %v\n%s", err, stdout)
+	}
+	for _, l := range out.Links {
+		if l.Dropped || (l.Piece == "half") != l.Healed {
+			t.Errorf("link verdict = %+v", l)
+		}
+	}
+	p := readPlacements(t, e)
+	half := p["half"]
+	if half == nil || half["pending"] == true || half["remote_path"] != boxProject+"/.monkeypuzzle/pieces/half" || half["remote_project"] != boxProject {
+		t.Errorf("healed link = %+v", half)
+	}
+	if _, ok := p["fix-auth"]; !ok {
+		t.Error("placed link dropped")
+	}
+	if !strings.Contains(stderr, "Healed placement half") {
+		t.Errorf("stderr = %q", stderr)
+	}
+	if !strings.Contains(readRegistry(t, e), "placed-proj@wire") {
+		t.Error("hidden row reaped")
+	}
+}
