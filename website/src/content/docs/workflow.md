@@ -58,6 +58,8 @@ mp create [--name <name> | --prompt <text>]
    mp done / cleanup — remove worktree + session
 ```
 
+`mp done` checks the branch is merged by default; `--force`, stdin `{"force":true}`, or `mp config set done_require_merged false` skip the check (branch kept).
+
 Piece basics always available to every hook: `MP_PIECE_NAME`, `MP_WORKTREE_PATH`, `MP_REPO_ROOT`.
 
 ## A worked example — GitLab MR with a label flip + reviewer

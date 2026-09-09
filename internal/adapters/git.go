@@ -387,6 +387,23 @@ func (g *Git) CommitsAheadBehind(ctx context.Context, workDir, mainBranch, branc
 	return ahead, behind, nil
 }
 
+// CommitsNotOnUpstream counts commits on branchName that its upstream does not
+// have. Without an upstream it counts commits not on mainBranch instead and
+// reports hasUpstream=false.
+func (g *Git) CommitsNotOnUpstream(ctx context.Context, workDir, branchName, mainBranch string) (count int, hasUpstream bool, err error) {
+	output, upErr := g.exec.RunWithDir(ctx, workDir, "git", "rev-list", "--count", branchName+"@{upstream}.."+branchName)
+	if upErr == nil {
+		count, err = strconv.Atoi(strings.TrimSpace(string(output)))
+		return count, true, err
+	}
+	output, err = g.exec.RunWithDir(ctx, workDir, "git", "rev-list", "--count", mainBranch+".."+branchName)
+	if err != nil {
+		return 0, false, fmt.Errorf("failed to count commits on %s: %w", branchName, err)
+	}
+	count, err = strconv.Atoi(strings.TrimSpace(string(output)))
+	return count, false, err
+}
+
 // GetMainRepoRoot gets the main repository root from a worktree.
 // For worktrees, this finds the main repo by examining the gitdir structure.
 // For regular repositories, it returns the same as RepoRoot.

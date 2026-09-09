@@ -26,6 +26,9 @@ type Handler struct {
 	git   *adapters.Git
 	mux   core.Multiplexer
 	hooks *HookRunner
+	// doneRequireMerged mirrors the user config key done_require_merged:
+	// when false, DonePiece cleans up unmerged pieces without --force.
+	doneRequireMerged bool
 }
 
 // NewHandler creates a new piece handler with dependencies.
@@ -37,11 +40,17 @@ func NewHandler(deps core.Deps) *Handler {
 // NewHandlerWithMultiplexer creates a new piece handler with a specific multiplexer.
 func NewHandlerWithMultiplexer(deps core.Deps, mux core.Multiplexer) *Handler {
 	return &Handler{
-		deps:  deps,
-		git:   adapters.NewGit(deps.Exec),
-		mux:   mux,
-		hooks: NewHookRunner(deps),
+		deps:              deps,
+		git:               adapters.NewGit(deps.Exec),
+		mux:               mux,
+		hooks:             NewHookRunner(deps),
+		doneRequireMerged: true,
 	}
+}
+
+// SetDoneRequireMerged applies the done_require_merged user config key.
+func (h *Handler) SetDoneRequireMerged(v bool) {
+	h.doneRequireMerged = v
 }
 
 // CreatePieceOptions configures piece creation behavior
@@ -1763,7 +1772,9 @@ func (h *Handler) FlattenPieces(ctx context.Context, repoRoot string, opts Flatt
 }
 
 // DonePiece cleans up the current piece after it has been merged.
-// Must be run from within a piece worktree. Verifies the piece is merged before cleanup.
+// Must be run from within a piece worktree. By default it refuses an unmerged
+// piece; input.Force or done_require_merged=false lets it through (the branch
+// is never deleted).
 func (h *Handler) DonePiece(ctx context.Context, workDir string, input DoneInput) (DoneResult, error) {
 	// Check if we're in a piece worktree
 	status, err := h.Status(ctx, workDir)
@@ -1793,14 +1804,19 @@ func (h *Handler) DonePiece(ctx context.Context, workDir string, input DoneInput
 		return DoneResult{}, fmt.Errorf("failed to check merge status: %w", err)
 	}
 
-	if !mergeStatus.IsMerged {
-		return DoneResult{}, fmt.Errorf("piece is not merged; use 'mp abandon' to remove unmerged pieces")
+	if !mergeStatus.IsMerged && !input.Force && h.doneRequireMerged {
+		return DoneResult{}, fmt.Errorf("%w; pass --force (stdin {\"force\":true}), set 'mp config set done_require_merged false', or use 'mp abandon'", ErrNotMerged)
 	}
 
 	result := DoneResult{
 		PieceName:    status.PieceName,
 		WorktreePath: status.WorktreePath,
 		MainPath:     mainRepoRoot,
+		Forced:       !mergeStatus.IsMerged,
+	}
+
+	if result.Forced {
+		h.warnUnmergedDone(ctx, status.WorktreePath, branchName, input.MainBranch)
 	}
 
 	// If we're running inside the worktree being removed, switch the active
@@ -1825,6 +1841,35 @@ func (h *Handler) DonePiece(ctx context.Context, workDir string, input DoneInput
 	_ = h.mux.Kill(ctx, h.pieceSessionName(mainRepoRoot, status.PieceName))
 
 	return result, nil
+}
+
+// warnUnmergedDone reports that an unmerged piece is being cleaned up: the
+// branch stays local, and any commits its upstream lacks are called out so
+// nothing is lost silently.
+func (h *Handler) warnUnmergedDone(ctx context.Context, worktreePath, branchName, mainBranch string) {
+	h.deps.Output.Write(core.Message{
+		Type:    core.MsgWarning,
+		Content: fmt.Sprintf("Piece is not merged; removing worktree anyway (branch %s kept locally)", branchName),
+	})
+	n, hasUpstream, err := h.git.CommitsNotOnUpstream(ctx, worktreePath, branchName, mainBranch)
+	if err != nil {
+		h.deps.Output.Write(core.Message{
+			Type:    core.MsgWarning,
+			Content: fmt.Sprintf("Failed to count unpushed commits on %s: %v", branchName, err),
+		})
+		return
+	}
+	if n == 0 {
+		return
+	}
+	suffix := ""
+	if !hasUpstream {
+		suffix = " (no upstream)"
+	}
+	h.deps.Output.Write(core.Message{
+		Type:    core.MsgWarning,
+		Content: fmt.Sprintf("%d commits on %s not pushed%s", n, branchName, suffix),
+	})
 }
 
 // ensureSubtreeClean errors if any worktree in the subtree rooted at the given

@@ -96,8 +96,9 @@ var pieceDoneCmd = &cobra.Command{
 	Short: "Cleanup a piece after merge",
 	Long: `Remove a piece worktree and multiplexer session after the branch has been merged.
 Defaults to the piece you're standing in; name a piece positionally or with
---piece to finish one from anywhere in the repo. Verifies the piece is merged
-before cleanup. Use 'mp abandon' for unmerged pieces.`,
+--piece to finish one from anywhere in the repo. By default refuses an unmerged
+piece; --force (or 'mp config set done_require_merged false') cleans up anyway,
+keeping the branch. Use 'mp abandon' to also drop the branch.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runPieceDone,
 }
@@ -135,6 +136,7 @@ var flagPieceCleanupJSON bool
 var flagAbandonName string
 var flagAbandonPiece string
 var flagDonePiece string
+var flagDoneForce bool
 var flagStatusPiece string
 var flagDeleteBranch bool
 var flagOverwriteSession bool
@@ -202,6 +204,7 @@ func init() {
 	pieceAbandonCmd.Flags().BoolVar(&flagPieceAbandonJSON, "json", false, "Output JSON even on a terminal")
 	pieceDoneCmd.Flags().StringVar(&flagDonePiece, "piece", "", "Piece to finish (default: the piece you're in)")
 	pieceDoneCmd.Flags().StringVar(&flagMainBranch, "main", "main", "Main branch to check merge status against")
+	pieceDoneCmd.Flags().BoolVar(&flagDoneForce, "force", false, "Clean up even if the piece is not merged (branch kept locally)")
 	pieceDoneCmd.Flags().StringVar(&flagMainBranchLegacy, "main-branch", "", "Deprecated alias for --main")
 	_ = pieceDoneCmd.Flags().MarkDeprecated("main-branch", "use --main")
 	pieceDoneCmd.Flags().BoolVar(&flagPieceDoneSchema, "schema", false, "Print an example input document and exit")
@@ -1183,6 +1186,9 @@ func runPieceDone(cmd *cobra.Command, args []string) error {
 	)
 
 	handler := newPieceHandler(deps)
+	if userCfg, err := config.LoadUserConfig(); err == nil {
+		handler.SetDoneRequireMerged(userCfg.DoneRequiresMerged())
+	}
 
 	// Get input
 	input, err := getDoneInput(cmd)
@@ -1218,6 +1224,9 @@ func getDoneInput(cmd *cobra.Command) (piececmd.DoneInput, error) {
 	if v, ok := mainBranchFromFlags(cmd); ok {
 		input.Main = v
 		input.MainBranch = v
+	}
+	if flagDoneForce {
+		input.Force = true
 	}
 
 	return piececmd.WithDoneDefaults(input), nil
