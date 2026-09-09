@@ -109,6 +109,17 @@ func (h *Handler) warn(msg string) {
 // keys whose piece is gone and refreshes stale forge caches, saving the
 // state file only when something changed.
 func (h *Handler) List(ctx context.Context, opts Options) ([]Row, error) {
+	return h.collect(ctx, opts, nil)
+}
+
+// mutation edits the state with the freshly listed rows (in rank order) in
+// hand. cwdProject names the project the caller stands in, or "".
+type mutation func(st *State, rows []Row, cwdProject string) (changed bool, err error)
+
+// collect is List plus an optional mutation, all inside one Update: list the
+// pieces, prune stale keys, rank, run fn, then re-annotate and re-rank so
+// the returned rows reflect the new state. An error from fn saves nothing.
+func (h *Handler) collect(ctx context.Context, opts Options, fn mutation) ([]Row, error) {
 	projects, err := h.projects(opts.CwdRoot)
 	if err != nil {
 		return nil, err
@@ -117,7 +128,11 @@ func (h *Handler) List(ctx context.Context, opts Options) ([]Row, error) {
 	var rows []Row
 	err = Update(h.deps.FS, func(st *State) (bool, error) {
 		changed := false
+		cwdProject := ""
 		for _, p := range projects {
+			if p.Path == opts.CwdRoot {
+				cwdProject = p.Name
+			}
 			items, err := h.pieces.ListPieces(ctx, p.Path)
 			if err != nil {
 				h.warn("skipping " + p.Name + ": " + err.Error())
@@ -137,7 +152,18 @@ func (h *Handler) List(ctx context.Context, opts Options) ([]Row, error) {
 			changed = true
 		}
 		assignRanks(rows, st.Order)
-		return changed, nil
+		if fn == nil {
+			return changed, nil
+		}
+		edited, err := fn(st, rows, cwdProject)
+		if err != nil {
+			return false, err
+		}
+		for i := range rows {
+			annotate(&rows[i], st)
+		}
+		assignRanks(rows, st.Order)
+		return changed || edited, nil
 	})
 	if err != nil {
 		return nil, err
@@ -247,14 +273,20 @@ func buildRow(p projectcmd.Info, it piece.PieceListItem, prInfo *PR, st *State) 
 		AgentCounts:  it.AgentCounts,
 		PR:           prInfo,
 		Merged:       prInfo != nil && prInfo.State == "merged",
-		Note:         st.Notes[key],
 		UpdatedAt:    it.ModTime,
 	}
-	if until, ok := st.Snoozed[key]; ok {
-		row.SnoozedUntil = &until
-	}
+	annotate(&row, st)
 	row.Urgency = deriveUrgency(it.AgentStatus, prInfo)
 	return row
+}
+
+// annotate copies the row's note and snooze from the state.
+func annotate(row *Row, st *State) {
+	row.Note = st.Notes[row.Key]
+	row.SnoozedUntil = nil
+	if until, ok := st.Snoozed[row.Key]; ok {
+		row.SnoozedUntil = &until
+	}
 }
 
 // deriveUrgency ranks a row from what mp already knows: blocked agents need

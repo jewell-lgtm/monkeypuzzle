@@ -537,6 +537,33 @@ and refreshes stale `cache` entries (one forge call per project, reused for
 120s). A forge that is unreachable warns on stderr and leaves `pr` empty; it
 never fails the list.
 
+### Subcommands
+
+Every subcommand takes flags or stdin JSON (`--schema` prints the shape),
+writes JSON to stdout and a one-liner to stderr on a terminal, and records a
+history event (`inbox.moved`, `inbox.noted`, `inbox.snoozed`).
+
+| Subcommand                                   | What it does                                                                                                     |
+| -------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `mp inbox move PIECE --top\|--bottom\|--up [N]\|--down [N]\|--before PIECE\|--after PIECE` | Re-rank; exactly one placement. The first move pins every row's current rank. Prints `{"key","rank","from_rank"}`. |
+| `mp inbox note PIECE [text]`                 | Set the note; empty text or `--clear` removes it. Prints `{"key","note"}`.                                       |
+| `mp inbox snooze PIECE --for 2d\|--until RFC3339\|--clear` | Park the row at the bottom (next/prev skip it) until then. Prints `{"key","snoozed_until"}` (`null` after `--clear`). |
+| `mp inbox next` / `mp inbox prev`            | Switch to the row after/before the piece you stand in, wrapping; snoozed rows skipped; `--sort urgency` respected. Same switch as `mp switch` (multiplexer, else the path on stdout); `--json` prints the switch result. Outside a piece `next` is rank 1, `prev` the last row. |
+| `mp inbox refresh`                           | `mp inbox --refresh`.                                                                                            |
+
+`PIECE` is `project/piece`, or a bare piece name: inside a repo that means
+this project's piece first; elsewhere it must be unique across projects, or
+the command fails naming the candidates.
+
+```bash
+mp inbox move fix-auth --top             # inside api/: api/fix-auth
+mp inbox move web/fix-auth --after nav   # explicit project; nav is unique
+mp inbox note fix-auth "waiting on review"
+mp inbox snooze fix-auth --for 2d
+echo '{"piece":"api/fix-auth","up":2}' | mp inbox move
+cd "$(mp inbox next)"                    # outside a multiplexer
+```
+
 ---
 
 ## mp update
