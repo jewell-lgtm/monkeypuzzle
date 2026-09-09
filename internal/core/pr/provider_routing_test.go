@@ -36,7 +36,7 @@ func TestProvider_ListPRs_RoutesToForgeCLI(t *testing.T) {
 		if !exec.WasCalled("glab", "mr", "list", "--all", "--per-page", "100", "-F", "json") {
 			t.Error("expected glab mr list to be called")
 		}
-		if exec.WasCalled("gh", "pr", "list", "--state", "all", "--json", "number,headRefName,baseRefName,state,url", "--limit", "200") {
+		if exec.WasCalled("gh", "pr", "list", "--state", "all", "--json", "number,headRefName,baseRefName,state,url,isDraft", "--limit", "200") {
 			t.Error("gh must not be called for a gitlab provider")
 		}
 		if len(prs) != 1 || prs[0].Number != 3 || prs[0].State != "OPEN" || prs[0].BaseRefName != "main" {
@@ -46,14 +46,14 @@ func TestProvider_ListPRs_RoutesToForgeCLI(t *testing.T) {
 
 	t.Run("github uses gh", func(t *testing.T) {
 		exec := adapters.NewMockExec()
-		exec.AddResponse("gh", []string{"pr", "list", "--state", "all", "--json", "number,headRefName,baseRefName,state,url", "--limit", "200"},
+		exec.AddResponse("gh", []string{"pr", "list", "--state", "all", "--json", "number,headRefName,baseRefName,state,url,isDraft", "--limit", "200"},
 			[]byte(`[{"number":5,"headRefName":"feat","baseRefName":"main","state":"OPEN","url":"https://gh/x/pull/5"}]`), nil)
 
 		prs, err := newProvider(t, "github", exec).ListPRs(context.Background(), "/repo")
 		if err != nil {
 			t.Fatalf("ListPRs: %v", err)
 		}
-		if !exec.WasCalled("gh", "pr", "list", "--state", "all", "--json", "number,headRefName,baseRefName,state,url", "--limit", "200") {
+		if !exec.WasCalled("gh", "pr", "list", "--state", "all", "--json", "number,headRefName,baseRefName,state,url,isDraft", "--limit", "200") {
 			t.Error("expected gh pr list to be called")
 		}
 		if len(prs) != 1 || prs[0].Number != 5 {

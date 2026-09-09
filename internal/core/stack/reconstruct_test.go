@@ -138,7 +138,7 @@ func TestIndexPRsByHead_CurrentPRWins(t *testing.T) {
 		{Number: 2, HeadRefName: "other", State: "MERGED"},
 	}
 
-	byHead := indexPRsByHead(prs)
+	byHead := IndexPRsByHead(prs)
 	if got := byHead["feat"]; got.Number != 6 || got.State != "OPEN" {
 		t.Errorf("feat resolved to PR#%d (%s), want open #6", got.Number, got.State)
 	}
@@ -147,7 +147,7 @@ func TestIndexPRsByHead_CurrentPRWins(t *testing.T) {
 	}
 
 	// Order independence: stale first, open last.
-	byHead = indexPRsByHead([]pr.PRInfo{
+	byHead = IndexPRsByHead([]pr.PRInfo{
 		{Number: 1, HeadRefName: "feat", State: "MERGED"},
 		{Number: 6, HeadRefName: "feat", State: "OPEN"},
 	})
@@ -157,7 +157,7 @@ func TestIndexPRsByHead_CurrentPRWins(t *testing.T) {
 }
 
 func TestIndexPRsByHead_SameStateNewestWins(t *testing.T) {
-	byHead := indexPRsByHead([]pr.PRInfo{
+	byHead := IndexPRsByHead([]pr.PRInfo{
 		{Number: 3, HeadRefName: "feat", State: "MERGED"},
 		{Number: 9, HeadRefName: "feat", State: "MERGED"},
 	})

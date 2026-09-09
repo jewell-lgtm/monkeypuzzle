@@ -105,7 +105,7 @@ func (h *Handler) Status(ctx context.Context, workDir string, in StatusInput) (S
 	result.GitHubChecked = forgeAvailable
 	result.ForgeChecked = forgeAvailable
 
-	prByHead := indexPRsByHead(prs)
+	prByHead := IndexPRsByHead(prs)
 
 	// Reconstruct local lineage from PR/MR bases (machine-#2 rebuild). Metadata-only.
 	if in.fromRemote() && forgeAvailable {
