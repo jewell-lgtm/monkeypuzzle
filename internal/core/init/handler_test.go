@@ -1,6 +1,7 @@
 package init_test
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -202,4 +203,77 @@ func TestHandler_Run_CreatesNestedGitignore(t *testing.T) {
 	if !strings.Contains(content, "piece-metadata.json") {
 		t.Errorf("expected .gitignore to contain piece-metadata.json, got: %s", content)
 	}
+}
+
+// TestHandler_EnsureExclude: mp's piece-state paths land in the git common
+// dir's info/exclude (so every worktree ignores them), idempotently, and the
+// call is a no-op outside a git repo or without an exec.
+func TestHandler_EnsureExclude(t *testing.T) {
+	const common = "/repo/.git"
+	exclude := common + "/info/exclude"
+
+	t.Run("writes entries and is idempotent", func(t *testing.T) {
+		fs := adapters.NewMemoryFS()
+		exec := adapters.NewMockExec()
+		exec.AddResponse("git", []string{"rev-parse", "--git-common-dir"}, []byte(common+"\n"), nil)
+		if err := fs.MkdirAll(common+"/info", 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := fs.WriteFile(exclude, []byte("*.swp\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		h := initcmd.NewHandler(core.Deps{FS: fs, Output: adapters.NewBufferOutput(), Exec: exec})
+
+		for i := 0; i < 2; i++ {
+			if err := h.EnsureExclude(context.Background(), "/repo", ".monkeypuzzle"); err != nil {
+				t.Fatalf("EnsureExclude #%d: %v", i+1, err)
+			}
+		}
+		data, err := fs.ReadFile(exclude)
+		if err != nil {
+			t.Fatalf("read exclude: %v", err)
+		}
+		got := string(data)
+		if !strings.HasPrefix(got, "*.swp\n") {
+			t.Errorf("existing entries must be preserved, got:\n%s", got)
+		}
+		for _, want := range []string{".monkeypuzzle/piece-metadata.json", ".monkeypuzzle/pr-metadata.json", ".monkeypuzzle/pieces/", ".monkeypuzzle/logs/"} {
+			if strings.Count(got, want+"\n") != 1 {
+				t.Errorf("want exactly one %q line, got:\n%s", want, got)
+			}
+		}
+	})
+
+	t.Run("custom mp dir", func(t *testing.T) {
+		fs := adapters.NewMemoryFS()
+		exec := adapters.NewMockExec()
+		exec.AddResponse("git", []string{"rev-parse", "--git-common-dir"}, []byte(common+"\n"), nil)
+		h := initcmd.NewHandler(core.Deps{FS: fs, Output: adapters.NewBufferOutput(), Exec: exec})
+		if err := h.EnsureExclude(context.Background(), "/repo", ".DONOTCOMMIT/mp"); err != nil {
+			t.Fatal(err)
+		}
+		data, _ := fs.ReadFile(exclude)
+		if !strings.Contains(string(data), ".DONOTCOMMIT/mp/piece-metadata.json\n") {
+			t.Errorf("entries must use the configured dir, got:\n%s", data)
+		}
+	})
+
+	t.Run("no-op outside a git repo", func(t *testing.T) {
+		fs := adapters.NewMemoryFS()
+		exec := adapters.NewMockExec() // rev-parse unmocked → error → not a repo
+		h := initcmd.NewHandler(core.Deps{FS: fs, Output: adapters.NewBufferOutput(), Exec: exec})
+		if err := h.EnsureExclude(context.Background(), "/nowhere", ""); err != nil {
+			t.Fatalf("expected nil outside a repo, got %v", err)
+		}
+		if _, err := fs.ReadFile(exclude); err == nil {
+			t.Error("nothing should be written outside a git repo")
+		}
+	})
+
+	t.Run("no-op without exec", func(t *testing.T) {
+		h := initcmd.NewHandler(core.Deps{FS: adapters.NewMemoryFS(), Output: adapters.NewBufferOutput()})
+		if err := h.EnsureExclude(context.Background(), "/repo", ""); err != nil {
+			t.Fatalf("expected nil without exec, got %v", err)
+		}
+	})
 }

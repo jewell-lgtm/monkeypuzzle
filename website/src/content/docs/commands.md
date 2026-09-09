@@ -152,6 +152,14 @@ Creates the monkeypuzzle directory (default `.monkeypuzzle/`):
 └── .gitignore           # Ignores pieces/ and per-piece metadata
 ```
 
+The same per-piece paths are also added to the repo's local
+`.git/info/exclude`, which git honours in every worktree. That keeps a piece's
+`piece-metadata.json` invisible to git even when the piece was branched from a
+commit that predates the committed `.gitignore` (e.g. the first pieces after
+`mp init`, before that scaffold is committed), so `mp cleanup` and clean-tree
+checks never trip over mp's own state. `mp init`, `mp reinit`, `mp move` and
+piece creation all refresh it.
+
 ### Providers
 
 **PR Providers:**
@@ -1055,12 +1063,13 @@ echo '{"host":"wire","path":"code/api"}' | mp project add
 
 mp project list                      # human-readable table (alias: ls, status)
 mp project list --json               # machine output
+mp project list --all                # include hidden rows (box-side clones of placed pieces)
 
 mp project remove my-project         # unregister (alias: rm); repo on disk untouched
 mp project remove --target /path/to/repo
 ```
 
-`mp project list` shows best-effort live state per project (current branch, number of pieces). Remote projects show as `(remote)` with a `host:path` location; their JSON rows carry a `"host"` field. The `HOST:PATH` form resolves the path to an absolute path on the host at add time and requires the repo to already be `mp init`-ed there — see [Remote development](/docs/remote-development/).
+`mp project list` shows best-effort live state per project (current branch, number of pieces). Remote projects show as `(remote)` with a `host:path` location; their JSON rows carry a `"host"` field. Rows with `"hidden": true` are bookkeeping for placed pieces (`mp create --remote`, see [Remote development](/docs/remote-development/)) — shown as `(hidden)` only with `--all`; their `"linked_from"` is the controller-side repo root. The `HOST:PATH` form resolves the path to an absolute path on the host at add time and requires the repo to already be `mp init`-ed there — see [Remote development](/docs/remote-development/).
 
 ---
 
@@ -1099,7 +1108,7 @@ Remote-host utilities for the ssh proxy (see [Remote development](/docs/remote-d
 
 ```bash
 mp remote doctor wire     # probe one ssh host
-mp remote doctor          # probe every host in the project registry
+mp remote doctor          # probe every box in the project registry (hidden rows included)
 ```
 
 Like `mp config`, `doctor` uses positional args — there is no JSON-stdin mode.

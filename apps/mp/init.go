@@ -125,6 +125,9 @@ func runInit(cmd *cobra.Command, args []string) error {
 		if err := handler.EnsureGitignore(mpDir); err != nil {
 			return err
 		}
+		if err := handler.EnsureExclude(cmd.Context(), wd, mpDir); err != nil {
+			return err
+		}
 		fmt.Fprintf(os.Stderr, "Regenerated %s\n", filepath.Join(mpDir, ".gitignore"))
 		return nil
 	}

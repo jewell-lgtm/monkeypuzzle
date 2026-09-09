@@ -12,6 +12,7 @@ import (
 	"github.com/jewell-lgtm/monkeypuzzle/internal/adapters"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core/history"
+	initcmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/init"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core/session"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/projectdir"
 )
@@ -133,6 +134,7 @@ func (h *Handler) CreatePiece(ctx context.Context, pieceName string, opts Create
 	if err != nil {
 		return PieceInfo{}, fmt.Errorf("failed to get pieces directory: %w", err)
 	}
+	h.ensureStateExcluded(ctx, repoRoot)
 
 	// Use provided name or generate one
 	if pieceName == "" {
@@ -280,6 +282,8 @@ func (h *Handler) AdoptPiece(ctx context.Context, input AdoptPieceInput) (PieceI
 			}
 		}
 	}
+
+	h.ensureStateExcluded(ctx, repoRoot)
 
 	// Detect if we're inside a worktree — affects defaulting and clean check.
 	// When the caller provides RepoRoot we treat it as a main repo (not a
@@ -1137,6 +1141,14 @@ func (h *Handler) buildSquashCommitMessage(pieceName string, commitMsgs []string
 
 // getPiecesDir returns the directory for storing pieces scoped to the given repo.
 // Honors any relocation of the monkeypuzzle directory.
+// ensureStateExcluded keeps mp's piece-state paths in git's info/exclude so the
+// worktree about to be created never shows them as untracked, even when its
+// base commit predates the committed .gitignore (see init.EnsureExclude).
+// Best-effort: init owns the authoritative, warning call.
+func (h *Handler) ensureStateExcluded(ctx context.Context, repoRoot string) {
+	_ = initcmd.NewHandler(h.deps).EnsureExclude(ctx, repoRoot, projectdir.RelDir(repoRoot))
+}
+
 func getPiecesDir(repoRoot string) (string, error) {
 	return projectdir.PiecesDir(repoRoot)
 }

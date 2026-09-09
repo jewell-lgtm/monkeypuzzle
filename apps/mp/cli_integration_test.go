@@ -1710,3 +1710,46 @@ func TestCLI_Cleanup_ReparentsChildren(t *testing.T) {
 		t.Errorf("stack sync should walk the re-homed subtree, got updated=%v", sync.Updated)
 	}
 }
+
+// TestCLI_Cleanup_UncommittedInitScaffold: a piece created before the
+// `mp init` scaffold (and its .gitignore) is committed must still be clean
+// in git's eyes and removable by `mp cleanup` — mp's own piece-metadata.json
+// must never block `git worktree remove`.
+func TestCLI_Cleanup_UncommittedInitScaffold(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	env.initGitRepo()
+	env.initProject("test") // deliberately not committed
+
+	pieceA := createPiece(t, env, "a", "main")
+	if status := env.gitInDir(pieceA, "status", "--porcelain"); status != "" {
+		t.Fatalf("fresh piece must be clean, git status shows:\n%s", status)
+	}
+	commitInWorktree(t, pieceA, "a")
+	if stdout, stderr, err := env.runInDir(pieceA, "merge"); err != nil {
+		t.Fatalf("merge failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+
+	stdout, stderr, err := env.run("cleanup", "--apply")
+	if err != nil {
+		t.Fatalf("cleanup --apply failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+	if strings.Contains(stderr, "Failed to cleanup") {
+		t.Errorf("cleanup refused the piece:\n%s", stderr)
+	}
+	var result struct {
+		CleanedPieces []struct {
+			PieceName string `json:"piece_name"`
+		} `json:"cleaned_pieces"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("invalid JSON output: %v\noutput: %s", err, stdout)
+	}
+	if len(result.CleanedPieces) != 1 || result.CleanedPieces[0].PieceName != "a" {
+		t.Errorf("expected a cleaned, got %+v", result.CleanedPieces)
+	}
+	if _, err := os.Stat(pieceA); !os.IsNotExist(err) {
+		t.Errorf("worktree should be removed, stat err: %v", err)
+	}
+}

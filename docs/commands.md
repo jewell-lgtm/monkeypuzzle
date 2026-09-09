@@ -149,6 +149,14 @@ Creates the monkeypuzzle directory (default `.monkeypuzzle/`):
 └── .gitignore           # Ignores pieces/ and per-piece metadata
 ```
 
+The same per-piece paths are also added to the repo's local
+`.git/info/exclude`, which git honours in every worktree. That keeps a piece's
+`piece-metadata.json` invisible to git even when the piece was branched from a
+commit that predates the committed `.gitignore` (e.g. the first pieces after
+`mp init`, before that scaffold is committed), so `mp cleanup` and clean-tree
+checks never trip over mp's own state. `mp init`, `mp reinit`, `mp move` and
+piece creation all refresh it.
+
 ### Providers
 
 **PR Providers:**
