@@ -66,7 +66,10 @@ type Row struct {
 	Urgency      string         `json:"urgency"`
 	Note         string         `json:"note,omitempty"`
 	SnoozedUntil *time.Time     `json:"snoozed_until,omitempty"`
-	UpdatedAt    time.Time      `json:"updated_at"`
+	// IsSnoozed is SnoozedUntil evaluated at list time, so consumers of the
+	// JSON never have to compare timestamps themselves.
+	IsSnoozed bool      `json:"snoozed"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // Snoozed reports whether the row is snoozed at now.
@@ -141,7 +144,7 @@ func (h *Handler) collect(ctx context.Context, opts Options, fn mutation) ([]Row
 			prs, fetched := h.projectPRs(ctx, st, p, items, opts.Refresh, now)
 			changed = changed || fetched
 			for _, it := range items {
-				rows = append(rows, buildRow(p, it, prs[p.Name+"/"+it.Name], st))
+				rows = append(rows, buildRow(p, it, prs[p.Name+"/"+it.Name], st, now))
 			}
 		}
 		present := make(map[string]bool, len(rows))
@@ -160,7 +163,7 @@ func (h *Handler) collect(ctx context.Context, opts Options, fn mutation) ([]Row
 			return false, err
 		}
 		for i := range rows {
-			annotate(&rows[i], st)
+			annotate(&rows[i], st, now)
 		}
 		assignRanks(rows, st.Order)
 		return changed || edited, nil
@@ -257,7 +260,7 @@ func cacheFresh(cache map[string]CacheEntry, keys []string, now time.Time) bool 
 	return true
 }
 
-func buildRow(p projectcmd.Info, it piece.PieceListItem, prInfo *PR, st *State) Row {
+func buildRow(p projectcmd.Info, it piece.PieceListItem, prInfo *PR, st *State, now time.Time) Row {
 	key := p.Name + "/" + it.Name
 	row := Row{
 		Key:          key,
@@ -275,18 +278,20 @@ func buildRow(p projectcmd.Info, it piece.PieceListItem, prInfo *PR, st *State) 
 		Merged:       prInfo != nil && prInfo.State == "merged",
 		UpdatedAt:    it.ModTime,
 	}
-	annotate(&row, st)
+	annotate(&row, st, now)
 	row.Urgency = deriveUrgency(it.AgentStatus, prInfo)
 	return row
 }
 
-// annotate copies the row's note and snooze from the state.
-func annotate(row *Row, st *State) {
+// annotate copies the row's note and snooze from the state and evaluates
+// the snooze at now.
+func annotate(row *Row, st *State, now time.Time) {
 	row.Note = st.Notes[row.Key]
 	row.SnoozedUntil = nil
 	if until, ok := st.Snoozed[row.Key]; ok {
 		row.SnoozedUntil = &until
 	}
+	row.IsSnoozed = row.Snoozed(now)
 }
 
 // deriveUrgency ranks a row from what mp already knows: blocked agents need

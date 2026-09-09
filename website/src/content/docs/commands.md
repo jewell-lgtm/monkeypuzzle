@@ -512,13 +512,15 @@ finished agent is `review`; a running agent is `working`; a merged PR is
       "pr": { "number": 12, "url": "https://github.com/o/api/pull/12", "state": "open", "draft": true },
       "merged": false, "urgency": "blocked",
       "note": "waiting on review", "snoozed_until": "2026-09-10T09:00:00Z",
+      "snoozed": true,
       "updated_at": "2026-09-09T11:42:00Z"
     }
   ]
 }
 ```
 
-`host`, `pr`, `note` and `snoozed_until` are omitted when empty.
+`host`, `pr`, `note` and `snoozed_until` are omitted when empty. `snoozed` is
+`snoozed_until` evaluated at list time, so pickers never compare timestamps.
 
 ### State file
 
@@ -1048,12 +1050,13 @@ echo '{"host":"wire","path":"code/api"}' | mp project add
 
 mp project list                      # human-readable table (alias: ls, status)
 mp project list --json               # machine output
+mp project list --all                # include hidden rows (box-side clones of placed pieces)
 
 mp project remove my-project         # unregister (alias: rm); repo on disk untouched
 mp project remove --target /path/to/repo
 ```
 
-`mp project list` shows best-effort live state per project (current branch, number of pieces). Remote projects show as `(remote)` with a `host:path` location; their JSON rows carry a `"host"` field. The `HOST:PATH` form resolves the path to an absolute path on the host at add time and requires the repo to already be `mp init`-ed there — see [Remote development](/docs/remote-development/).
+`mp project list` shows best-effort live state per project (current branch, number of pieces). Remote projects show as `(remote)` with a `host:path` location; their JSON rows carry a `"host"` field. Rows with `"hidden": true` are bookkeeping for placed pieces (`mp create --remote`, see [Remote development](/docs/remote-development/)) — shown as `(hidden)` only with `--all`; their `"linked_from"` is the controller-side repo root. The `HOST:PATH` form resolves the path to an absolute path on the host at add time and requires the repo to already be `mp init`-ed there — see [Remote development](/docs/remote-development/).
 
 ---
 
@@ -1092,7 +1095,7 @@ Remote-host utilities for the ssh proxy (see [Remote development](/docs/remote-d
 
 ```bash
 mp remote doctor wire     # probe one ssh host
-mp remote doctor          # probe every host in the project registry
+mp remote doctor          # probe every box in the project registry (hidden rows included)
 ```
 
 Like `mp config`, `doctor` uses positional args — there is no JSON-stdin mode.

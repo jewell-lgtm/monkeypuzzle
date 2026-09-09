@@ -509,13 +509,15 @@ finished agent is `review`; a running agent is `working`; a merged PR is
       "pr": { "number": 12, "url": "https://github.com/o/api/pull/12", "state": "open", "draft": true },
       "merged": false, "urgency": "blocked",
       "note": "waiting on review", "snoozed_until": "2026-09-10T09:00:00Z",
+      "snoozed": true,
       "updated_at": "2026-09-09T11:42:00Z"
     }
   ]
 }
 ```
 
-`host`, `pr`, `note` and `snoozed_until` are omitted when empty.
+`host`, `pr`, `note` and `snoozed_until` are omitted when empty. `snoozed` is
+`snoozed_until` evaluated at list time, so pickers never compare timestamps.
 
 ### State file
 
