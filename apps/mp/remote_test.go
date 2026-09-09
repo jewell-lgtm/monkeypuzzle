@@ -280,3 +280,21 @@ func TestSSHArgv(t *testing.T) {
 		t.Errorf("sshArgv(pty=true) = %v, want -t inserted before --", withPty)
 	}
 }
+
+func TestStripSelector(t *testing.T) {
+	cases := []struct {
+		in   []string
+		want string
+	}{
+		{[]string{"status", "fix", "--json"}, "status --json"},
+		{[]string{"done", "--piece", "fix"}, "done"},
+		{[]string{"done", "--piece=fix", "--main", "trunk"}, "done --main trunk"},
+		{[]string{"abandon", "--name", "fix", "--force"}, "abandon --force"},
+		{[]string{"abandon", "--name", "other", "fix"}, "abandon --name other"},
+	}
+	for _, c := range cases {
+		if got := strings.Join(stripSelector(c.in, "fix"), " "); got != c.want {
+			t.Errorf("stripSelector(%v) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
