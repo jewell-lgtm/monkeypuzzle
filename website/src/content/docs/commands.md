@@ -966,7 +966,7 @@ mp stack sync --stack             # limit the preview to the current piece's sta
 | `--dry-run`  | Preview only; never prompt, never change anything    | `false`       |
 | `--from`     | Upstream ref to update main from (fetch + fast-forward) | `origin/<main>` |
 | `--strategy` | Sync strategy: `merge` or `rebase`                   | `merge`       |
-| `--push`     | Push each branch after syncing                       | `false`       |
+| `--push`     | Push each branch after syncing; already-merged pieces are skipped (listed under `merged`) | `false` |
 | `--stack`    | Limit to the current piece's stack (run from a piece) | `false`      |
 | `--main`     | Main branch name                                     | `main`        |
 

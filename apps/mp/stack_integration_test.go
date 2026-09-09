@@ -470,3 +470,56 @@ func TestCLI_StackUndo_DirtyWorktreeFails(t *testing.T) {
 		t.Errorf("error should mention dirty/uncommitted state, got: %s", stderr)
 	}
 }
+
+// TestCLI_StackSync_PushSkipsMergedPiece: `mp stack sync --push` must not push
+// a piece that is already merged. Its branch was deleted on the forge when its
+// PR merged; re-creating it resurrects a dead base and breaks the forge's
+// retarget of child PRs onto main.
+func TestCLI_StackSync_PushSkipsMergedPiece(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	env.initGitRepo()
+	env.initProject("test")
+	env.gitInDir(env.tmpDir, "add", "-A")
+	env.gitInDir(env.tmpDir, "commit", "-m", "track mp config")
+	bare := env.addBareOrigin()
+
+	pieceA := createPiece(t, env, "a", "main")
+	commitInWorktree(t, pieceA, "a")
+	env.gitInDir(pieceA, "push", "-u", "origin", "a")
+	pieceB := createPiece(t, env, "b", "a")
+	commitInWorktree(t, pieceB, "b")
+
+	// Merge a into main (re-homing b onto main), then delete a on the remote
+	// exactly as a forge does after merging its PR.
+	if stdout, stderr, err := env.runInDir(pieceA, "merge", "--reparent-children"); err != nil {
+		t.Fatalf("merge failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+	env.gitInDir(env.tmpDir, "push", "origin", "main")
+	env.gitInDir(env.tmpDir, "push", "origin", "--delete", "a")
+
+	stdout, stderr, err := env.run("stack", "sync", "--push", "--apply")
+	if err != nil {
+		t.Fatalf("stack sync --push failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+	var result struct {
+		Pushed []string `json:"pushed"`
+		Merged []string `json:"merged"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("invalid JSON output: %v\noutput: %s", err, stdout)
+	}
+	if contains(result.Pushed, "a") || !contains(result.Merged, "a") {
+		t.Errorf("merged piece a must be listed under merged, not pushed: pushed=%v merged=%v", result.Pushed, result.Merged)
+	}
+	if !contains(result.Pushed, "b") {
+		t.Errorf("unmerged piece b should still be pushed: pushed=%v", result.Pushed)
+	}
+	if !strings.Contains(stderr, "Skipped push for 1 merged piece(s): a") {
+		t.Errorf("summary should say the merged piece was skipped:\n%s", stderr)
+	}
+	if heads := gitOut(t, bare, "branch", "--list", "a"); strings.TrimSpace(heads) != "" {
+		t.Errorf("sync --push resurrected merged branch a on the remote: %q", heads)
+	}
+}

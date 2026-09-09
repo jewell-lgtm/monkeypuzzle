@@ -204,6 +204,9 @@ func (h *Handler) Sync(ctx context.Context, workDir string, in SyncInput) (SyncR
 		return result, err
 	}
 
+	if len(result.Merged) > 0 {
+		h.emit(core.MsgInfo, fmt.Sprintf("Skipped push for %d merged piece(s): %s (run 'mp cleanup' to remove them)", len(result.Merged), strings.Join(result.Merged, ", ")))
+	}
 	h.emit(core.MsgSuccess, fmt.Sprintf("Stack synced (%s): %d piece(s) updated", in.Strategy, len(result.Updated)))
 	history.Record(h.deps.Output, history.Event{Event: "stack.synced", Project: piece.ProjectName(mainRepoRoot, h.deps.FS), Data: map[string]any{"strategy": in.Strategy, "pieces": result.Updated, "pushed": result.Pushed}})
 	return result, nil
@@ -325,11 +328,7 @@ func (h *Handler) syncMerge(ctx context.Context, piecesDir string, roots []strin
 			}
 			result.Updated = append(result.Updated, n.name)
 			if in.Push {
-				if err := h.git.Push(ctx, wt); err != nil {
-					h.emit(core.MsgWarning, fmt.Sprintf("Push failed for %q: %v", n.name, err))
-				} else {
-					result.Pushed = append(result.Pushed, n.name)
-				}
+				h.pushSynced(ctx, piecesDir, n.name, in.MainBranch, false, &result)
 			}
 		} else {
 			result.Skipped = append(result.Skipped, n.name)
@@ -346,6 +345,36 @@ func (h *Handler) syncMerge(ctx context.Context, piecesDir string, roots []strin
 	}
 
 	return result, nil
+}
+
+// pushSynced pushes one just-synced piece branch, force-with-lease when the
+// sync rewrote it. A piece already merged (same detection cleanup uses: recorded
+// marker, is-piece-done hook, PR state, ancestry) is never pushed: its branch was
+// deleted on the forge when its PR merged, and re-creating it resurrects a dead
+// base and breaks the forge's retarget of child PRs onto main.
+func (h *Handler) pushSynced(ctx context.Context, piecesDir, name, mainBranch string, force bool, result *SyncResult) {
+	wt := filepath.Join(piecesDir, name)
+	status, err := h.pieces.IsBranchMerged(ctx, wt, name, mainBranch)
+	if err != nil {
+		h.emit(core.MsgWarning, fmt.Sprintf("Push skipped for %q: failed to check merge status: %v", name, err))
+		return
+	}
+	if status.IsMerged {
+		h.emit(core.MsgInfo, fmt.Sprintf("Not pushing %q: already merged (via %s)", name, status.Method))
+		result.Merged = append(result.Merged, name)
+		return
+	}
+	if force {
+		h.emit(core.MsgWarning, forcePushMsg(name))
+		err = h.git.PushForceWithLease(ctx, wt)
+	} else {
+		err = h.git.Push(ctx, wt)
+	}
+	if err != nil {
+		h.emit(core.MsgWarning, fmt.Sprintf("Push failed for %q: %v", name, err))
+		return
+	}
+	result.Pushed = append(result.Pushed, name)
 }
 
 // mergePieceWithStash stashes any uncommitted changes, merges parentBranch into the
@@ -433,13 +462,7 @@ func (h *Handler) syncRebase(ctx context.Context, mainRepoRoot, piecesDir string
 		result.Updated = append(result.Updated, migrated...)
 		if in.Push {
 			for _, p := range migrated {
-				wt := filepath.Join(piecesDir, p)
-				h.emit(core.MsgWarning, forcePushMsg(p))
-				if err := h.git.PushForceWithLease(ctx, wt); err != nil {
-					h.emit(core.MsgWarning, fmt.Sprintf("Force-push failed for %q: %v", p, err))
-				} else {
-					result.Pushed = append(result.Pushed, p)
-				}
+				h.pushSynced(ctx, piecesDir, p, in.MainBranch, true, &result)
 			}
 		}
 	}
