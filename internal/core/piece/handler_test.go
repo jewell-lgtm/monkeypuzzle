@@ -635,32 +635,85 @@ func TestHandler_MergePiece_Success(t *testing.T) {
 	}
 }
 
-func TestHandler_MergePiece_MainAhead(t *testing.T) {
+// mergeAheadTestEnv wires the mocks MergePiece needs for a root piece "piece-1"
+// whose target main has 2 commits the piece lacks, plus the squash-merge path
+// for when the update gate is bypassed.
+func mergeAheadTestEnv(t *testing.T) (*piece.Handler, *adapters.BufferOutput, *adapters.MockExec) {
+	t.Helper()
 	fs := adapters.NewMemoryFS()
 	out := adapters.NewBufferOutput()
 	mockExec := adapters.NewMockExec()
-	deps := core.Deps{FS: fs, Output: out, Exec: mockExec}
-	handler := piece.NewHandler(deps)
+	handler := piece.NewHandler(core.Deps{FS: fs, Output: out, Exec: mockExec})
 
-	// Setup mock responses for worktree status
 	gitDir := "/repo/.git/worktrees/piece-1"
 	worktreePath := "/pieces/piece-1"
 	mockExec.AddResponse("git", []string{"rev-parse", "--git-dir"}, []byte(gitDir+"\n"), nil)
 	mockExec.AddResponse("git", []string{"rev-parse", "--show-toplevel"}, []byte(worktreePath+"\n"), nil)
-
-	// Setup mock responses - main is ahead
 	mockExec.AddResponse("git", []string{"rev-parse", "--abbrev-ref", "HEAD"}, []byte("piece-1\n"), nil)
-	// IsMainAhead: merge-base and rev-list
+	// IsMainAhead: main has 2 commits the piece lacks.
 	mockExec.AddResponse("git", []string{"merge-base", "main", "piece-1"}, []byte("abc123\n"), nil)
-	mockExec.AddResponse("git", []string{"rev-list", "--count", "abc123..main"}, []byte("2\n"), nil) // main has 2 commits ahead
+	mockExec.AddResponse("git", []string{"rev-list", "--count", "abc123..main"}, []byte("2\n"), nil)
+	// Squash-merge path (only reached when the gate is bypassed).
+	mockExec.AddResponse("git", []string{"log", "--format=%s", "main..piece-1"}, []byte("feat: add feature\n"), nil)
+	mockExec.AddResponse("git", []string{"checkout", "main"}, nil, nil)
+	mockExec.AddResponse("git", []string{"merge", "--squash", "piece-1"}, nil, nil)
+	mockExec.AddResponse("git", []string{"commit", "-m", "feat: piece-1\n\nSquashed commits:\n- feat: add feature\n"}, nil, nil)
+
+	return handler, out, mockExec
+}
+
+func TestHandler_MergePiece_MainAhead(t *testing.T) {
+	handler, _, mockExec := mergeAheadTestEnv(t)
 
 	_, err := handler.MergePiece(context.Background(), "/pieces/piece-1", piece.MergeInput{MainBranch: "main"})
-	if err == nil {
-		t.Fatal("expected error when main is ahead")
+	if !errors.Is(err, piece.ErrTargetAhead) {
+		t.Fatalf("expected ErrTargetAhead, got: %v", err)
 	}
+	for _, want := range []string{"commits not in piece worktree", "mp update", "--no-update-check", "merge_require_updated"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error should mention %q, got: %v", want, err)
+		}
+	}
+	if mockExec.WasCalled("git", "merge", "--squash", "piece-1") {
+		t.Error("must not merge when main is ahead without a bypass")
+	}
+}
 
-	if !strings.Contains(err.Error(), "cannot merge") || !strings.Contains(err.Error(), "commits not in piece worktree") {
-		t.Errorf("expected error about main being ahead, got: %v", err)
+func TestHandler_MergePiece_MainAhead_NoUpdateCheck(t *testing.T) {
+	handler, out, mockExec := mergeAheadTestEnv(t)
+
+	result, err := handler.MergePiece(context.Background(), "/pieces/piece-1", piece.MergeInput{MainBranch: "main", NoUpdateCheck: true})
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if !result.UpdateCheckSkipped || result.Status != "merged" {
+		t.Errorf("expected UpdateCheckSkipped=true status=merged, got %+v", result)
+	}
+	if !mockExec.WasCalled("git", "merge", "--squash", "piece-1") {
+		t.Error("expected squash merge to run")
+	}
+	warnings := strings.Join(warningsOf(out), "\n")
+	if !strings.Contains(warnings, "main has commits not in piece-1") || !strings.Contains(warnings, "merging anyway") {
+		t.Errorf("expected target-ahead warning, got %q", warnings)
+	}
+}
+
+func TestHandler_MergePiece_MainAhead_ConfigAllows(t *testing.T) {
+	handler, out, mockExec := mergeAheadTestEnv(t)
+	handler.SetMergeRequireUpdated(false)
+
+	result, err := handler.MergePiece(context.Background(), "/pieces/piece-1", piece.MergeInput{MainBranch: "main"})
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if !result.UpdateCheckSkipped {
+		t.Errorf("expected UpdateCheckSkipped=true, got %+v", result)
+	}
+	if !mockExec.WasCalled("git", "merge", "--squash", "piece-1") {
+		t.Error("expected squash merge to run")
+	}
+	if !out.HasWarning() {
+		t.Error("expected target-ahead warning")
 	}
 }
 

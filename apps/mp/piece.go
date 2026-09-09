@@ -58,9 +58,11 @@ var pieceUpdateCmd = &cobra.Command{
 var pieceMergeCmd = &cobra.Command{
 	Use:   "merge",
 	Short: "Merge piece back into main branch",
-	Long:  `Merges the piece branch back into main. Fails if main has commits not in the piece worktree. Must be run from within a piece worktree.`,
-	Args:  cobra.NoArgs,
-	RunE:  runPieceMerge,
+	Long: `Merges the piece branch back into main. Must be run from within a piece worktree.
+By default refuses when main has commits not in the piece worktree; --no-update-check
+(or 'mp config set merge_require_updated false') merges anyway.`,
+	Args: cobra.NoArgs,
+	RunE: runPieceMerge,
 }
 
 var pieceCleanupCmd = &cobra.Command{
@@ -137,6 +139,7 @@ var flagAbandonName string
 var flagAbandonPiece string
 var flagDonePiece string
 var flagDoneForce bool
+var flagMergeNoUpdateCheck bool
 var flagStatusPiece string
 var flagDeleteBranch bool
 var flagOverwriteSession bool
@@ -187,6 +190,7 @@ func init() {
 	pieceMergeCmd.Flags().BoolVar(&flagPieceMergeReparent, "reparent-children", false, "Merge a piece that has child pieces: re-home them onto the merge target")
 	pieceMergeCmd.Flags().StringVar(&flagPieceMergeReparentStrategy, "reparent-strategy", "", "How to re-home children: 'rebase' (default, rewrites history) or 'merge' (no force-push)")
 	pieceMergeCmd.Flags().BoolVar(&flagPieceMergeJSON, "json", false, "Output JSON even on a terminal")
+	pieceMergeCmd.Flags().BoolVar(&flagMergeNoUpdateCheck, "no-update-check", false, "Merge even if the target has commits not in the piece (conflicts surface from git)")
 	pieceCleanupCmd.Flags().StringVar(&flagMainBranch, "main", "main", "Main branch name to check for merged status (default: main)")
 	pieceCleanupCmd.Flags().StringVar(&flagMainBranchLegacy, "main-branch", "", "Deprecated alias for --main")
 	_ = pieceCleanupCmd.Flags().MarkDeprecated("main-branch", "use --main")
@@ -843,6 +847,9 @@ func runPieceMerge(cmd *cobra.Command, args []string) error {
 		adapters.SetupCLILoading(os.Stderr),
 	)
 	handler := newPieceHandler(deps)
+	if userCfg, err := config.LoadUserConfig(); err == nil {
+		handler.SetMergeRequireUpdated(userCfg.MergeRequiresUpdated())
+	}
 
 	// Get input
 	input, err := getMergeInput(cmd)
@@ -916,6 +923,9 @@ func getMergeInput(cmd *cobra.Command) (piececmd.MergeInput, error) {
 	if flagPieceMergeReparentStrategy != "" {
 		input.ReparentChildren = true
 		input.ReparentStrategy = flagPieceMergeReparentStrategy
+	}
+	if flagMergeNoUpdateCheck {
+		input.NoUpdateCheck = true
 	}
 
 	input = piececmd.WithMergeDefaults(input)

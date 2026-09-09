@@ -1577,3 +1577,57 @@ func TestCLI_PieceDone_Unmerged_ConfigKey(t *testing.T) {
 		t.Error("worktree should have been removed")
 	}
 }
+
+// TestCLI_Merge_TargetAhead_NoUpdateCheck: a piece whose target has commits it
+// lacks is refused by default (hint names --no-update-check); --no-update-check
+// squash-merges anyway, warns, and reports update_check_skipped.
+func TestCLI_Merge_TargetAhead_NoUpdateCheck(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	env.initGitRepo()
+	env.initProject("test")
+
+	stdout, stderr, err := env.run("create", "--name", "test-ahead", "--skip-switch")
+	if err != nil {
+		t.Fatalf("piece create failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+	var created map[string]any
+	if err := json.Unmarshal([]byte(stdout), &created); err != nil {
+		t.Fatalf("invalid JSON from piece create: %v", err)
+	}
+	worktreePath := created["worktree_path"].(string)
+	commitInWorktree(t, worktreePath, "piece-work")
+	// Move main ahead of the piece (a non-conflicting file).
+	commitInWorktree(t, env.tmpDir, "main-work")
+
+	// Default: refused, with the bypasses spelled out.
+	stdout, stderr, err = env.runInDirWithStdin(worktreePath, "{}", "merge")
+	if err == nil {
+		t.Fatalf("merge with target ahead should fail\nstdout: %s\nstderr: %s", stdout, stderr)
+	}
+	for _, want := range []string{"commits not in piece worktree", "mp update", "--no-update-check", "merge_require_updated"} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("stderr should mention %q\nstderr: %s", want, stderr)
+		}
+	}
+
+	// --no-update-check: merges, warns, reports the skipped gate.
+	stdout, stderr, err = env.runInDirWithStdin(worktreePath, "{}", "merge", "--no-update-check")
+	if err != nil {
+		t.Fatalf("merge --no-update-check failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+	var result map[string]any
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("invalid JSON output: %v\noutput: %s", err, stdout)
+	}
+	if result["update_check_skipped"] != true || result["status"] != "merged" {
+		t.Errorf("expected update_check_skipped=true status=merged, got %v", result)
+	}
+	if !strings.Contains(stderr, "merging anyway") {
+		t.Errorf("expected target-ahead warning\nstderr: %s", stderr)
+	}
+	if _, err := os.Stat(filepath.Join(env.tmpDir, "piece-work.txt")); err != nil {
+		t.Error("piece work should be on main after merge")
+	}
+}

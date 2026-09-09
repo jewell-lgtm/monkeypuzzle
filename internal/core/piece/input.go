@@ -347,6 +347,9 @@ type MergeInput struct {
 	// ReparentStrategy is "rebase" (default) or "merge"; only used when
 	// ReparentChildren is true.
 	ReparentStrategy string `json:"reparent_strategy,omitempty"`
+	// NoUpdateCheck merges even when the target has commits the piece lacks
+	// (conflicts then surface from git).
+	NoUpdateCheck bool `json:"no_update_check,omitempty"`
 }
 
 // MergeResult contains the result of a merge operation.
@@ -356,6 +359,9 @@ type MergeResult struct {
 	TargetBranch       string   `json:"target_branch"` // The branch merged into (parent or main)
 	Status             string   `json:"status"`        // "merged"
 	ReparentedChildren []string `json:"reparented_children,omitempty"`
+	// UpdateCheckSkipped is set when the target was ahead and the update gate
+	// was bypassed (--no-update-check or config).
+	UpdateCheckSkipped bool `json:"update_check_skipped,omitempty"`
 }
 
 // MergeSchema returns an example input document for piece merge input.
@@ -365,6 +371,7 @@ func MergeSchema() ([]byte, error) {
 		"force":             false,
 		"reparent_children": false,
 		"reparent_strategy": ReparentRebase,
+		"no_update_check":   false,
 	}
 	return json.MarshalIndent(schema, "", "  ")
 }
@@ -401,6 +408,7 @@ func WithMergeDefaults(input MergeInput) MergeInput {
 		Force:            input.Force,
 		ReparentChildren: input.ReparentChildren,
 		ReparentStrategy: strategy,
+		NoUpdateCheck:    input.NoUpdateCheck,
 	}
 }
 

@@ -29,6 +29,9 @@ type Handler struct {
 	// doneRequireMerged mirrors the user config key done_require_merged:
 	// when false, DonePiece cleans up unmerged pieces without --force.
 	doneRequireMerged bool
+	// mergeRequireUpdated mirrors the user config key merge_require_updated:
+	// when false, MergePiece proceeds even if the target is ahead.
+	mergeRequireUpdated bool
 }
 
 // NewHandler creates a new piece handler with dependencies.
@@ -40,17 +43,23 @@ func NewHandler(deps core.Deps) *Handler {
 // NewHandlerWithMultiplexer creates a new piece handler with a specific multiplexer.
 func NewHandlerWithMultiplexer(deps core.Deps, mux core.Multiplexer) *Handler {
 	return &Handler{
-		deps:              deps,
-		git:               adapters.NewGit(deps.Exec),
-		mux:               mux,
-		hooks:             NewHookRunner(deps),
-		doneRequireMerged: true,
+		deps:                deps,
+		git:                 adapters.NewGit(deps.Exec),
+		mux:                 mux,
+		hooks:               NewHookRunner(deps),
+		doneRequireMerged:   true,
+		mergeRequireUpdated: true,
 	}
 }
 
 // SetDoneRequireMerged applies the done_require_merged user config key.
 func (h *Handler) SetDoneRequireMerged(v bool) {
 	h.doneRequireMerged = v
+}
+
+// SetMergeRequireUpdated applies the merge_require_updated user config key.
+func (h *Handler) SetMergeRequireUpdated(v bool) {
+	h.mergeRequireUpdated = v
 }
 
 // CreatePieceOptions configures piece creation behavior
@@ -906,7 +915,9 @@ func splitSyncRemoteRef(from string) (remote, ref string) {
 // MergePiece squash-merges the piece branch into its target branch.
 // For root pieces (parent=main), merges into main.
 // For child pieces, merges into the parent piece's branch.
-// Blocks if piece has unmerged children unless Force is set.
+// Blocks if piece has unmerged children unless Force is set. By default it
+// refuses when the target has commits the piece lacks; input.NoUpdateCheck or
+// merge_require_updated=false lets it through.
 func (h *Handler) MergePiece(ctx context.Context, workDir string, input MergeInput) (MergeResult, error) {
 	// Check if we're in a piece worktree
 	status, err := h.Status(ctx, workDir)
@@ -985,8 +996,14 @@ func (h *Handler) MergePiece(ctx context.Context, workDir string, input MergeInp
 		return MergeResult{}, fmt.Errorf("failed to check if target is ahead: %w", err)
 	}
 
+	if isAhead && !input.NoUpdateCheck && h.mergeRequireUpdated {
+		return MergeResult{}, fmt.Errorf("%w: %s has commits not in piece worktree; run 'mp update', pass --no-update-check (stdin {\"no_update_check\":true}), or set 'mp config set merge_require_updated false'", ErrTargetAhead, targetBranch)
+	}
 	if isAhead {
-		return MergeResult{}, fmt.Errorf("cannot merge: %s has commits not in piece worktree. Run 'mp update' first", targetBranch)
+		h.deps.Output.Write(core.Message{
+			Type:    core.MsgWarning,
+			Content: fmt.Sprintf("%s has commits not in %s; merging anyway (conflicts will surface from git)", targetBranch, pieceBranch),
+		})
 	}
 
 	// Get commit messages from piece branch for the squash commit message
@@ -1079,6 +1096,7 @@ func (h *Handler) MergePiece(ctx context.Context, workDir string, input MergeInp
 		TargetBranch:       targetBranch,
 		Status:             "merged",
 		ReparentedChildren: reparented,
+		UpdateCheckSkipped: isAhead,
 	}
 
 	h.deps.Output.Write(core.Message{

@@ -37,7 +37,8 @@ var configSetCmd = &cobra.Command{
 
 Available keys:
   multiplexer          Terminal multiplexer to use (tmux, zellij, cmux, herdr, none)
-  done_require_merged  Whether 'mp done' refuses unmerged pieces (true, false; default true)`,
+  done_require_merged    Whether 'mp done' refuses unmerged pieces (true, false; default true)
+  merge_require_updated  Whether 'mp merge' refuses when the target is ahead (true, false; default true)`,
 	Args: cobra.ExactArgs(2),
 	RunE: runConfigSet,
 }
@@ -50,7 +51,7 @@ func init() {
 	// Register completion for config keys
 	_ = configGetCmd.RegisterFlagCompletionFunc("", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		if len(args) == 0 {
-			return []string{"multiplexer", "done_require_merged"}, cobra.ShellCompDirectiveNoFileComp
+			return []string{"multiplexer", "done_require_merged", "merge_require_updated"}, cobra.ShellCompDirectiveNoFileComp
 		}
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	})
@@ -70,6 +71,8 @@ func runConfigGet(cmd *cobra.Command, args []string) error {
 		value = cfg.Multiplexer
 	case "done_require_merged":
 		value = strconv.FormatBool(cfg.DoneRequiresMerged())
+	case "merge_require_updated":
+		value = strconv.FormatBool(cfg.MergeRequiresUpdated())
 	default:
 		return fmt.Errorf("unknown config key: %s", key)
 	}
@@ -107,6 +110,12 @@ func runConfigSet(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("invalid done_require_merged value: %s (valid: true, false)", value)
 		}
 		cfg.SetDoneRequireMerged(b)
+	case "merge_require_updated":
+		b, err := strconv.ParseBool(value)
+		if err != nil {
+			return fmt.Errorf("invalid merge_require_updated value: %s (valid: true, false)", value)
+		}
+		cfg.SetMergeRequireUpdated(b)
 	default:
 		return fmt.Errorf("unknown config key: %s", key)
 	}
