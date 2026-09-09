@@ -10,6 +10,7 @@ import (
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/adapters"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
+	"github.com/jewell-lgtm/monkeypuzzle/internal/core/history"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core/piece"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core/pr"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/projectdir"
@@ -204,6 +205,7 @@ func (h *Handler) Sync(ctx context.Context, workDir string, in SyncInput) (SyncR
 	}
 
 	h.emit(core.MsgSuccess, fmt.Sprintf("Stack synced (%s): %d piece(s) updated", in.Strategy, len(result.Updated)))
+	history.Record(h.deps.Output, history.Event{Event: "stack.synced", Project: piece.ProjectName(mainRepoRoot, h.deps.FS), Data: map[string]any{"strategy": in.Strategy, "pieces": result.Updated, "pushed": result.Pushed}})
 	return result, nil
 }
 

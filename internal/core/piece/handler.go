@@ -11,6 +11,7 @@ import (
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/adapters"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
+	"github.com/jewell-lgtm/monkeypuzzle/internal/core/history"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core/session"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/projectdir"
 )
@@ -210,6 +211,8 @@ func (h *Handler) CreatePiece(ctx context.Context, pieceName string, opts Create
 		WorktreePath: worktreePath,
 		RepoRoot:     repoRoot,
 		SessionName:  sessionName,
+		Branch:       newBranch,
+		Parent:       parent,
 	}
 	if err := h.hooks.RunHookDetached(repoRoot, HookOnPieceCreate, hookCtx); err != nil {
 		// The hook runs fire-and-forget so its setup work (dependency installs,
@@ -446,6 +449,8 @@ func (h *Handler) AdoptPiece(ctx context.Context, input AdoptPieceInput) (PieceI
 		WorktreePath: worktreePath,
 		RepoRoot:     repoRoot,
 		SessionName:  sessionName,
+		Branch:       branchToAdopt,
+		Parent:       parent,
 	}
 	if err := h.hooks.RunHookDetached(repoRoot, HookOnPieceCreate, hookCtx); err != nil {
 		// Fire-and-forget; only a failure to start lands here. Non-fatal: keep
@@ -461,6 +466,7 @@ func (h *Handler) AdoptPiece(ctx context.Context, input AdoptPieceInput) (PieceI
 		Content: fmt.Sprintf("Adopted branch %s as piece: %s at %s", branchToAdopt, pieceName, worktreePath),
 		Data:    info,
 	})
+	h.record(repoRoot, "piece.adopted", pieceName, branchToAdopt, nil)
 
 	return info, nil
 }
@@ -713,7 +719,7 @@ func (h *Handler) UpdatePiece(ctx context.Context, workDir, mainBranch string) (
 	}
 
 	// Get current branch to verify we're on a branch
-	_, err = h.git.CurrentBranch(ctx, workDir)
+	branch, err := h.git.CurrentBranch(ctx, workDir)
 	if err != nil {
 		return UpdateResult{}, fmt.Errorf("failed to get current branch: %w", err)
 	}
@@ -724,6 +730,7 @@ func (h *Handler) UpdatePiece(ctx context.Context, workDir, mainBranch string) (
 		WorktreePath: status.WorktreePath,
 		RepoRoot:     status.RepoRoot,
 		MainBranch:   mainBranch,
+		Branch:       branch,
 	}
 
 	// Run before-piece-update hook
@@ -771,7 +778,8 @@ func (h *Handler) SyncPiece(ctx context.Context, workDir string, input SyncInput
 		return SyncResult{}, ErrNotInPiece
 	}
 
-	if _, err := h.git.CurrentBranch(ctx, workDir); err != nil {
+	branch, err := h.git.CurrentBranch(ctx, workDir)
+	if err != nil {
 		return SyncResult{}, fmt.Errorf("failed to get current branch: %w", err)
 	}
 
@@ -804,6 +812,8 @@ func (h *Handler) SyncPiece(ctx context.Context, workDir string, input SyncInput
 		WorktreePath: status.WorktreePath,
 		RepoRoot:     status.RepoRoot,
 		MainBranch:   hookMainBranch,
+		Branch:       branch,
+		Parent:       parent,
 	}
 
 	if err := h.hooks.RunHook(ctx, status.RepoRoot, HookBeforePieceUpdate, hookCtx); err != nil {
@@ -963,6 +973,8 @@ func (h *Handler) MergePiece(ctx context.Context, workDir string, input MergeInp
 		WorktreePath: status.WorktreePath,
 		RepoRoot:     mainRepoRoot,
 		MainBranch:   targetBranch,
+		Branch:       pieceBranch,
+		Parent:       pieceMetadata.Parent,
 	}
 
 	// Run before-piece-merge hook
@@ -1400,6 +1412,7 @@ func (h *Handler) CleanupMergedPieces(ctx context.Context, repoRoot string, opts
 			Type:    core.MsgSuccess,
 			Content: fmt.Sprintf("Cleaned up: %s", pieceName),
 		})
+		h.record(repoRoot, "piece.cleaned", pieceName, branchName, map[string]any{"merged_via": mergeStatus.Method})
 
 		results = append(results, result)
 	}
@@ -1610,6 +1623,7 @@ func (h *Handler) AbandonPiece(ctx context.Context, pieceName string, opts Aband
 		Content: fmt.Sprintf("Abandoned piece: %s", pieceName),
 		Data:    result,
 	})
+	h.record(repoRoot, "piece.abandoned", pieceName, branchName, map[string]any{"branch_deleted": result.BranchDeleted})
 
 	// Kill the session last. All destructive work is now done and persisted, so
 	// even if this tears down the very session we're running in, the abandon has
@@ -1821,6 +1835,7 @@ func (h *Handler) DonePiece(ctx context.Context, workDir string, input DoneInput
 		Content: fmt.Sprintf("Done with piece: %s", status.PieceName),
 		Data:    result,
 	})
+	h.record(mainRepoRoot, "piece.done", status.PieceName, branchName, map[string]any{"merged_via": mergeStatus.Method})
 
 	_ = h.mux.Kill(ctx, h.pieceSessionName(mainRepoRoot, status.PieceName))
 
@@ -1969,10 +1984,21 @@ func (h *Handler) trunkRemote(ctx context.Context, repoRoot string) string {
 }
 
 func (h *Handler) projectName(repoRoot string) string {
-	if cfg, err := ReadConfig(repoRoot, h.deps.FS); err == nil && strings.TrimSpace(cfg.Project.Name) != "" {
+	return ProjectName(repoRoot, h.deps.FS)
+}
+
+// ProjectName is the project's configured name (project.name in
+// monkeypuzzle.json), falling back to the repo directory's base name.
+func ProjectName(repoRoot string, fs core.FS) string {
+	if cfg, err := ReadConfig(repoRoot, fs); err == nil && strings.TrimSpace(cfg.Project.Name) != "" {
 		return cfg.Project.Name
 	}
 	return filepath.Base(repoRoot)
+}
+
+// record appends a history event for a transition that has no hook of its own.
+func (h *Handler) record(repoRoot, event, pieceName, branch string, data map[string]any) {
+	history.Record(h.deps.Output, history.Event{Event: event, Project: h.projectName(repoRoot), Piece: pieceName, Branch: branch, Data: data})
 }
 
 // pieceSessionName returns the tmux session name for a piece in a repo.
@@ -2193,6 +2219,7 @@ func (h *Handler) SwitchPiece(ctx context.Context, name string) (SwitchResult, e
 	}
 
 	result := SwitchResult{Piece: *target}
+	h.record(mainRepoRoot, "piece.switched", target.Name, target.Branch, nil)
 
 	// No session management: callers surface the path from the result JSON.
 	if adapters.IsNoopMultiplexer(h.mux) {
@@ -2233,6 +2260,7 @@ func (h *Handler) switchToMain(ctx context.Context, mainRepoRoot, name string) (
 			HasSession:   h.mux.Exists(ctx, sessionName),
 		},
 	}
+	h.record(mainRepoRoot, "piece.switched", name, name, nil)
 
 	// No session management: callers surface the path from the result JSON.
 	if adapters.IsNoopMultiplexer(h.mux) {

@@ -256,6 +256,25 @@ User Input (flags/JSON/TUI)
     Adapter implementations execute
 ```
 
+## History log
+
+`internal/core/history` keeps an append-only JSONL audit trail of every
+transition mp performs, global across repositories:
+`$MP_HISTORY_FILE`, else `${XDG_STATE_HOME:-~/.local/state}/monkeypuzzle/history.jsonl`.
+
+- **Format**: one JSON object per line (`ts`, `event`, `project`, `piece`,
+  `branch`, `parent`, `host`, `actor`, `data`); see `mp history` in
+  [commands](/docs/commands/#mp-history) for the event list.
+- **Append-only**: opened `O_APPEND`, one `write(2)` per event, so concurrent
+  mp processes never interleave a line. Nothing rewrites or truncates it.
+- **Never fails a verb**: `history.Record` downgrades every error to a
+  warning. The hook runner records completed-transition hooks (`on-piece-create`,
+  `after-*`, `agent-*`) before it even looks for a script, so events fire with
+  no hooks configured; transitions without a hook (`done`, `abandon`,
+  `cleanup`, `switch`, `stack sync`) record explicitly in their handlers.
+- **Tests**: packages that emit use `historytest.Main` as their `TestMain`
+  so test runs never touch the real log.
+
 ## Testing Strategy
 
 All external dependencies mocked:

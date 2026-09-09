@@ -1136,6 +1136,58 @@ from `done`. Non-zero on timeout.
 mp integration install claude
 ```
 
+## mp history
+
+Read the append-only history log: one line per lifecycle event, across every repository on this machine. Recording never fails a verb — a write error is a stderr warning.
+
+### Usage
+
+```bash
+mp history                          # last 50 events, table on a terminal
+mp history --project mp --since 24h
+mp history --event 'pr.*' -n 10
+mp history --piece login --json | jq .
+```
+
+### Flags
+
+| Flag            | Description                                                  | Default |
+| --------------- | ------------------------------------------------------------ | ------- |
+| `--project`     | Only events for this project name                            | all     |
+| `--piece`       | Only events for this piece                                   | all     |
+| `--event`       | Exact event name, or a prefix with a trailing `*` (`pr.*`)   | all     |
+| `--since`       | Only events newer than this Go duration (`24h`, `30m`)       | all     |
+| `-n`, `--limit` | Keep the last N matching events (`0` = all)                  | `50`    |
+| `--json`        | JSON lines on stdout even on a terminal                      |         |
+
+### File
+
+`$MP_HISTORY_FILE`, else `${XDG_STATE_HOME:-~/.local/state}/monkeypuzzle/history.jsonl`. One JSON object per line:
+
+```json
+{"ts":"2026-09-09T10:12:03Z","event":"pr.created","project":"mp","piece":"history-log","branch":"history-log","actor":{"kind":"agent","id":"claude-1"},"data":{"pr_number":83,"pr_url":"https://github.com/…/pull/83","base":"main"}}
+```
+
+`actor.kind` is `agent` when `CLAUDECODE` or `MP_AGENT_ID` is set, else `user`. `branch`, `parent`, `host` and `data` are present only when they carry something.
+
+### Events
+
+| Event             | Fired by                                       |
+| ----------------- | ---------------------------------------------- |
+| `piece.created`   | `mp create`, `mp adopt` (also `piece.adopted`) |
+| `piece.switched`  | `mp switch`                                    |
+| `piece.updated`   | `mp update`, `mp sync`                         |
+| `piece.merged`    | `mp merge`                                     |
+| `piece.done`      | `mp done`                                      |
+| `piece.abandoned` | `mp abandon`                                   |
+| `piece.cleaned`   | `mp cleanup` (per removed piece)               |
+| `pr.created`      | `mp pr create` (`data`: `pr_number`, `pr_url`, `base`) |
+| `pr.ready`        | `mp pr ready`                                  |
+| `agent.blocked`, `agent.done` | `mp agent report` aggregate transitions |
+| `stack.synced`    | `mp stack sync` apply (`data.pieces`: pieces touched) |
+
+Hook-backed events fire whether or not the hook script exists. Output follows the usual contract: non-TTY or `--json` prints JSON lines (oldest first) on stdout; a terminal gets a table on stderr.
+
 ## AI Agent Integration
 
 Monkeypuzzle is designed for programmatic use:

@@ -113,6 +113,7 @@ func (h *Handler) CreatePR(ctx context.Context, workDir string, input Input) (*P
 		WorktreePath: status.WorktreePath,
 		RepoRoot:     status.RepoRoot,
 		PRBaseBranch: input.Base,
+		Branch:       branch,
 	}
 
 	// before-pr-create hook (e.g. to write a description file)
@@ -219,6 +220,7 @@ func (h *Handler) MarkReady(ctx context.Context, workDir string) error {
 		PRNumber:     metadata.PRNumber,
 		PRURL:        metadata.PRURL,
 		PRBaseBranch: metadata.BaseBranch,
+		Branch:       metadata.Branch,
 	}
 
 	if err := h.hooks.RunHook(ctx, status.RepoRoot, piece.HookBeforePRReady, hookCtx); err != nil {
