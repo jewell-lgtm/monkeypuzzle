@@ -580,7 +580,7 @@ echo '{"no_update_check":true}' | mp merge
 ### Requirements
 
 - Must be run from within a piece worktree
-- **Main branch must not be ahead** - By default fails if main has commits not in piece (`--no-update-check` bypasses, see above)
+- **Main branch not ahead** - By default fails if main has commits not in piece (`--no-update-check` bypasses, see above)
 - **No unmerged child pieces** - Fails if the piece has children, unless you pass `--reparent-children` (re-homes them) or `--force` (leaves them orphaned)
 
 ### What it does

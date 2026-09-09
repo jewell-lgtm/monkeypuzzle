@@ -99,7 +99,7 @@ The key rule: **non-interactive invocations (flags or JSON) fail loudly on genui
 | `mp merge` | Merge piece back to main |
 | `mp pr create [--draft]` | Push + open PR/MR via configured provider |
 | `mp pr ready` | Flip a draft PR/MR to ready |
-| `mp done` | After merge: clean up worktree + session |
+| `mp done` | Clean up worktree + session (refuses unmerged by default; `--force`) |
 | `mp agent focus [id\|piece] [--blocked]` | Switch the client to an agent's pane, or fall back to a piece switch |
 | `mp config get/set multiplexer` | tmux / zellij / cmux / herdr / none |
 
@@ -108,7 +108,7 @@ See [docs/commands.md](docs/commands.md) for full reference.
 ## Docs
 
 - [Getting started](docs/getting-started.md) — install + first piece
-- [Workflow guide](docs/workflow.md) — lifecycle, hook patterns
+- [Workflow guide](docs/workflow.md) — a common recipe, hook recipes
 - [Commands reference](docs/commands.md) — flags, example inputs
 - [Remote development](docs/remote-development.md) — drive a project on another machine over ssh
 - [Architecture](docs/architecture.md) — how it's built
