@@ -47,7 +47,7 @@ func TestProviderForRepo_RoutesToConfiguredForge(t *testing.T) {
 		if !exec.WasCalled("glab", "mr", "list", "--all", "--per-page", "100", "-F", "json") {
 			t.Error("expected glab to be invoked for a gitlab repo")
 		}
-		if exec.WasCalled("gh", "pr", "list", "--state", "all", "--json", "number,headRefName,baseRefName,state,url", "--limit", "200") {
+		if exec.WasCalled("gh", "pr", "list", "--state", "all", "--json", "number,headRefName,baseRefName,state,url,isDraft", "--limit", "200") {
 			t.Error("gh must not be invoked for a gitlab repo")
 		}
 		if len(prs) != 1 || prs[0].State != "OPEN" {
@@ -59,7 +59,7 @@ func TestProviderForRepo_RoutesToConfiguredForge(t *testing.T) {
 		fs := adapters.NewMemoryFS()
 		exec := adapters.NewMockExec()
 		writeProviderConfig(t, fs, "/repo", "")
-		exec.AddResponse("gh", []string{"pr", "list", "--state", "all", "--json", "number,headRefName,baseRefName,state,url", "--limit", "200"},
+		exec.AddResponse("gh", []string{"pr", "list", "--state", "all", "--json", "number,headRefName,baseRefName,state,url,isDraft", "--limit", "200"},
 			[]byte(`[]`), nil)
 
 		provider, err := newStackHandler(fs, exec).providerForRepo("/repo")
@@ -69,7 +69,7 @@ func TestProviderForRepo_RoutesToConfiguredForge(t *testing.T) {
 		if _, err := provider.ListPRs(context.Background(), "/repo"); err != nil {
 			t.Fatalf("ListPRs: %v", err)
 		}
-		if !exec.WasCalled("gh", "pr", "list", "--state", "all", "--json", "number,headRefName,baseRefName,state,url", "--limit", "200") {
+		if !exec.WasCalled("gh", "pr", "list", "--state", "all", "--json", "number,headRefName,baseRefName,state,url,isDraft", "--limit", "200") {
 			t.Error("expected gh to be invoked when provider is unset (github default)")
 		}
 	})

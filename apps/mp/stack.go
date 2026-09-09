@@ -248,7 +248,7 @@ func runStackStatus(cmd *cobra.Command, args []string) error {
 	}
 	// Humans at a terminal get the tree; pipes/agents keep the JSON contract.
 	if cli.IsTerminal() && cli.IsStdoutTerminal() && !flagStackStatusJSON {
-		fmt.Print(renderStackStatus(result))
+		fmt.Print(renderStackStatus(result, cli.NewPainter(os.Stdout)))
 		return nil
 	}
 	return cli.PrintJSON(result)

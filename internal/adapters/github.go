@@ -183,8 +183,8 @@ func (g *GitHub) FindMergedPRByBranch(ctx context.Context, workDir, branchName s
 }
 
 // PRInfo is one row of `gh pr list --json …`. It encodes a stack edge:
-// HeadRefName is the piece branch, BaseRefName its parent. Title/Author/IsDraft
-// are populated by the richer ListPRsForRepo fetch; ListPRs leaves them zero.
+// HeadRefName is the piece branch, BaseRefName its parent. Title/Author are
+// populated only by the richer ListPRsForRepo fetch; ListPRs leaves them zero.
 type PRInfo struct {
 	Number      int    `json:"number"`
 	HeadRefName string `json:"headRefName"`
@@ -205,7 +205,7 @@ type PRInfo struct {
 func (g *GitHub) ListPRs(ctx context.Context, workDir string) ([]PRInfo, error) {
 	output, err := g.exec.RunWithDir(ctx, workDir, "gh", "pr", "list",
 		"--state", "all",
-		"--json", "number,headRefName,baseRefName,state,url",
+		"--json", "number,headRefName,baseRefName,state,url,isDraft",
 		"--limit", "200",
 	)
 	if err != nil {
