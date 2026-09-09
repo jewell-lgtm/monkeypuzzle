@@ -19,6 +19,9 @@ type UserConfig struct {
 	// DoneRequireMerged gates `mp done` on the piece branch being merged.
 	// Pointer so an absent key means the default (true) rather than false.
 	DoneRequireMerged *bool `json:"done_require_merged,omitempty"`
+	// MergeRequireUpdated gates `mp merge` on the target having no commits the
+	// piece lacks. Pointer so an absent key means the default (true).
+	MergeRequireUpdated *bool `json:"merge_require_updated,omitempty"`
 }
 
 // DoneRequiresMerged reports whether `mp done` refuses unmerged pieces
@@ -30,6 +33,17 @@ func (c UserConfig) DoneRequiresMerged() bool {
 // SetDoneRequireMerged sets the done_require_merged key.
 func (c *UserConfig) SetDoneRequireMerged(v bool) {
 	c.DoneRequireMerged = &v
+}
+
+// MergeRequiresUpdated reports whether `mp merge` refuses a piece whose target
+// is ahead (default true; `mp merge --no-update-check` bypasses it per call).
+func (c UserConfig) MergeRequiresUpdated() bool {
+	return c.MergeRequireUpdated == nil || *c.MergeRequireUpdated
+}
+
+// SetMergeRequireUpdated sets the merge_require_updated key.
+func (c *UserConfig) SetMergeRequireUpdated(v bool) {
+	c.MergeRequireUpdated = &v
 }
 
 // DefaultUserConfig returns config with default values.

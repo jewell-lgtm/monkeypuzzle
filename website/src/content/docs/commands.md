@@ -551,11 +551,23 @@ configured but unreachable, `mp sync` warns and falls back to the local parent.
 
 Merge piece back to main branch.
 
+By default `mp merge` refuses when the target branch has commits the piece lacks (run [`mp update`](#mp-update) to pull them in). The gate is a policy, not a rule — bypass it any of three ways; the merge then proceeds with a warning and any conflicts surface from git:
+
+| Bypass       | Spelling                                       | Scope     |
+| ------------ | ---------------------------------------------- | --------- |
+| CLI flag     | `mp merge --no-update-check`                   | this call |
+| stdin JSON   | `echo '{"no_update_check":true}' \| mp merge`  | this call |
+| user config  | `mp config set merge_require_updated false`    | always    |
+
+The result carries `"update_check_skipped": true` when the gate was bypassed.
+
 ### Usage
 
 ```bash
 mp merge                   # Merge to 'main'
 mp merge --main develop  # Merge to 'develop'
+mp merge --no-update-check       # target ahead: merge anyway
+echo '{"no_update_check":true}' | mp merge
 ```
 
 ### Flags
@@ -566,11 +578,12 @@ mp merge --main develop  # Merge to 'develop'
 | `--force`              | Merge even if the piece has child pieces (children are **not** re-homed) | `false` |
 | `--reparent-children`  | Merge a piece with children, re-homing them onto the merge target        | `false` |
 | `--reparent-strategy`  | How to re-home children: `rebase` (rewrites history) or `merge` (no force-push) | `rebase` |
+| `--no-update-check`    | Merge even if the target has commits not in the piece (conflicts surface from git) | `false` |
 
 ### Requirements
 
 - Must be run from within a piece worktree
-- **Main branch must not be ahead** - Fails if main has commits not in piece
+- **Main branch must not be ahead** - By default fails if main has commits not in piece (`--no-update-check` bypasses, see above)
 - **No unmerged child pieces** - Fails if the piece has children, unless you pass `--reparent-children` (re-homes them) or `--force` (leaves them orphaned)
 
 ### What it does
@@ -587,7 +600,7 @@ If any hook fails, the operation is aborted.
 
 ### Safety check
 
-If main has commits not in the piece, merge fails. Run `mp update` first to incorporate those changes.
+If main has commits not in the piece, merge fails by default. Run `mp update` first to incorporate those changes, or bypass the check as above.
 
 ---
 
@@ -990,6 +1003,7 @@ Get and set user-level configuration (stored under `~/.config/monkeypuzzle/`). U
 mp config get multiplexer
 mp config set multiplexer tmux   # tmux, zellij, cmux, or none
 mp config set done_require_merged false   # let `mp done` clean up unmerged pieces
+mp config set merge_require_updated false # let `mp merge` proceed when the target is ahead
 ```
 
 ### Keys
@@ -998,6 +1012,7 @@ mp config set done_require_merged false   # let `mp done` clean up unmerged piec
 | --------------------- | ------------------------------------------ | --------------------- |
 | `multiplexer`         | Terminal multiplexer for piece sessions    | `tmux`, `zellij`, `cmux`, `herdr`, `none` |
 | `done_require_merged` | Whether [`mp done`](#mp-done) refuses unmerged pieces (`--force` bypasses per call) | `true` (default), `false` |
+| `merge_require_updated` | Whether [`mp merge`](#mp-merge) refuses when the target is ahead (`--no-update-check` bypasses per call) | `true` (default), `false` |
 
 ---
 

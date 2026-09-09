@@ -55,7 +55,7 @@ mp create [--name <name> | --prompt <text>]
    mp done / cleanup — remove worktree + session
 ```
 
-`mp done` checks the branch is merged by default; `--force`, stdin `{"force":true}`, or `mp config set done_require_merged false` skip the check (branch kept).
+`mp done` checks the branch is merged by default; `--force`, stdin `{"force":true}`, or `mp config set done_require_merged false` skip the check (branch kept). Likewise `mp merge` checks the target isn't ahead by default; `--no-update-check`, stdin `{"no_update_check":true}`, or `mp config set merge_require_updated false` skip it.
 
 Piece basics always available to every hook: `MP_PIECE_NAME`, `MP_WORKTREE_PATH`, `MP_REPO_ROOT`.
 
@@ -241,7 +241,7 @@ Sessions persist after detaching — your dev server keeps running, your termina
 
 ### "Main branch is ahead"
 
-`mp merge` refuses to merge a stale piece. Pull main into the piece first:
+`mp merge` refuses to merge a stale piece by default (`--no-update-check` skips this). Pull main into the piece first:
 
 ```bash
 mp update
