@@ -200,6 +200,19 @@ until their time comes. The pickers (tmux, herdr) and the dashboard are all
 views over `mp inbox --json`, so whatever you rearrange in one shows up in
 the others. See [`mp inbox`](./commands.md#mp-inbox).
 
+Rearrange it from anywhere — `mp inbox move fix-auth --top`, `mp inbox note
+fix-auth "waiting on review"`, `mp inbox snooze fix-auth --for 2d` — and
+cycle through it instead of hunting through sessions:
+
+```bash
+mp inbox next                # switch to the piece after this one (wraps)
+mp inbox prev                # and back
+```
+
+Each step is the same switch `mp switch` performs — the session inside your
+multiplexer, the worktree path outside one — so `cd "$(mp inbox next)"`
+works too. The tmux plugin will bind these to a chord.
+
 ## Forge support
 
 | Provider | PRs/MRs |
