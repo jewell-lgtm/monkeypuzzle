@@ -147,10 +147,14 @@ What happens, in order:
    controller has `.monkeypuzzle/hooks/on-box-connect.sh`, it runs — on the
    controller, blocking — and owns this step (see [Hooks](#hooks)).
    Otherwise, over ssh, the repo's `origin` is cloned to
-   `$HOME/.local/share/mp/<project>` (skipped if the directory already has a
-   `.git`), `mp init --name <project>` runs there (skipped if already a
-   project), and the controller's `.monkeypuzzle/hooks/` is rsynced across —
-   hooks only exist on the box if shipped. Either way the path is then
+   `$HOME/.local/share/mp/<project>` — into `<project>.tmp` first, renamed
+   into place once git is done, so an interrupted clone is never taken for
+   a connected box; "already cloned" means git can verify `HEAD` there, and
+   anything else at that path is replaced — `mp init --name <project>` runs
+   there (skipped if already a project), and the controller's
+   `.monkeypuzzle/hooks/` is rsynced across (same ssh options as every other
+   box call: `BatchMode`, 5s connect) — hooks only exist on the box if
+   shipped. Either way the path is then
    resolved **on the box** (`readlink -f`), so `$HOME` never has to expand on
    the controller. The box is recorded as a hidden registry row
    `<project>@<box>` (`mp project list --all`), which is what "connected"
@@ -160,13 +164,17 @@ What happens, in order:
 5. **Create** by proxy: `mp --host wire --dir <clone> create --name fix-auth
    [--parent …] [--prompt …] [--branch …] [--agent …] --skip-switch --json` —
    an ordinary create on the box, hooks and all. The proxy exports
-   `MP_PLACEMENT_HOST=wire MP_REMOTE=1` into that call so box-side hooks
-   know they are serving a placement.
+   `MP_PLACEMENT_HOST=wire MP_REMOTE=1` into that call; the box-side create
+   persists the box name into the piece's metadata (`placement_host`), which
+   is what every later hook in that worktree reads (see [Hooks](#hooks)).
 6. **Placed**: the link flips to `pending: false` with the box-side
    `remote_path`.
 
-Any failure after step 2 removes the pending link; the registry row stays
-once the box passed doctor (it *is* connected). Named errors: `piece already
+Steps 3–6 run under a per-(project, box) lock, so two creates onto the same
+box queue rather than race one clone; two creates of the same name lose to
+`piece already exists` at step 2. Any failure after step 2 removes the
+pending link; the registry row stays once the box passed doctor (it *is*
+connected). Named errors: `piece already
 exists`, `parent must be main or a piece on the same box`, `box unreachable
 over ssh` (ssh exit 255), `box connect failed` (clone/init/rsync or
 `on-box-connect.sh` stderr), `box clone is not an mp project`, `mp is not
@@ -193,12 +201,14 @@ mp --host wire --dir /home/u/.local/share/mp/api/.monkeypuzzle/pieces/fix-auth p
 ```
 
 A link whose create never finished is **pending**: the verbs refuse it
-(`piece placement is still pending`), `mp remote doctor` lists it under
-`pending_links`, and `mp cleanup` drops it. `mp cleanup` also asks each box
-whether its side of every link still exists (`test -d <remote_path>`) and
-drops **stale** links (piece gone on the box, e.g. merged from inside the box
-worktree); unreachable boxes keep their links. Its JSON carries the verdicts
-under `links`.
+(`piece placement is still pending`) and `mp remote doctor` lists it under
+`pending_links`. `mp cleanup` asks each box whether its side of every link
+exists (`test -d <remote_path>`): a pending link whose piece the box does
+have (the create finished, the controller crashed before recording it) is
+**healed** into a placed link; a pending link with nothing on the box, and
+any **stale** link (piece gone on the box, e.g. merged from inside the box
+worktree), is dropped; unreachable boxes keep their links. Its JSON carries
+the verdicts under `links` (`present`, `pending`, `healed`, `dropped`).
 
 ### Hooks
 
@@ -229,12 +239,17 @@ It runs with the controller repo as cwd. A worked recipe (clone + toolchain
 `before-pr-create.sh`, all of them — run on the box as usual, from the clone
 the hook or built-in connect made, and see two extra variables:
 `MP_PLACEMENT_HOST=<box>` (the box's name as the controller addresses it)
-and `MP_REMOTE=1`. The controller's proxy exports both into every placement
-call (`create --remote`, and verbs routed to a placed piece); plain
-`mp --host <box> …` proxying does not, and `MP_HOST` is never set on the box
-(it is the reroute variable and would make the box proxy onward). An older
-`mp` on the box simply ignores the two variables — `mp remote doctor` already
-flags the version skew.
+and `MP_REMOTE=1`. The controller's proxy exports both into the placement
+create (`create --remote`) and into verbs routed to a placed piece; the
+box-side create persists the box name into the piece's metadata
+(`placement_host` in `piece-metadata.json`), and the hook runner reads it
+from the worktree whenever the invocation's env lacks it. So **any** `mp`
+run in that worktree on the box — proxied with plain `mp --host <box> --dir
+<worktree> …` as the create's hint suggests, or from an agent's session on
+the box — gives its hooks the same two variables. `MP_HOST` is never set on
+the box (it is the reroute variable and would make the box proxy onward).
+An older `mp` on the box simply ignores the variables — `mp remote doctor`
+already flags the version skew.
 
 ### Preparing a box by hand
 

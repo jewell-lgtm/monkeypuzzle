@@ -25,12 +25,19 @@ func init() {
 	rootCmd.PersistentFlags().String("project", "", "before the verb: run the command against a registered project — proxied over ssh if it has a host, from its path if local")
 }
 
+// invocationArgs is argv after extractRemoteSpec took the leading
+// --host/--dir/--project (and resolveTarget acted on them): what a verb that
+// re-forwards the invocation to a box (proxyPlaced) must send, never
+// os.Args, or the box would re-apply a --project against its own registry.
+var invocationArgs []string
+
 func Execute() error {
 	args, spec, err := extractRemoteSpec(os.Args[1:])
 	if err != nil {
 		rootCmd.PrintErrln("Error:", err)
 		return err
 	}
+	invocationArgs = args
 	target, chdir, err := resolveTarget(spec)
 	if err != nil {
 		rootCmd.PrintErrln("Error:", err)

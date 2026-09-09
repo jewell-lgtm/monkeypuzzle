@@ -385,9 +385,21 @@ func TestCLI_List_IncludesPlacedPieces(t *testing.T) {
 	if _, stderr, err := e.run("create", "--name", "on-wire", "--skip-switch"); err == nil || !strings.Contains(stderr, "already exists") {
 		t.Errorf("create over placed name: err = %v stderr = %q", err, stderr)
 	}
-	// Worktree-walking verbs must not trip over placed rows.
-	if _, stderr, err := e.run("stack", "status", "--json"); err != nil && !strings.Contains(stderr, "gh") {
+	// Worktree-walking verbs must not trip over placed rows. A fake gh
+	// answers `pr list` so the forge lookup is deterministic.
+	ghDir := filepath.Join(e.tmpDir, "gh-shim")
+	if err := os.MkdirAll(ghDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ghDir, "gh"), []byte("#!/bin/sh\necho '[]'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stdout, stderr, err = runProxy(e, ghDir+string(os.PathListSeparator)+os.Getenv("PATH"), "", nil, "stack", "status", "--json")
+	if err != nil {
 		t.Errorf("stack status with placed rows: %v\n%s", err, stderr)
+	}
+	if strings.Contains(stdout, `"on-wire"`) || !strings.Contains(stdout, `"local-a"`) {
+		t.Errorf("stack status must list local pieces and skip placed rows:\n%s", stdout)
 	}
 	if _, stderr, err := e.run("flatten", "--dry-run"); err != nil {
 		t.Errorf("flatten --dry-run with placed rows: %v\n%s", err, stderr)

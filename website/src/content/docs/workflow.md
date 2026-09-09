@@ -75,7 +75,9 @@ Piece basics always available to every hook: `MP_PIECE_NAME`, `MP_WORKTREE_PATH`
 Off the main line: `mp create --remote=<box>` fires `on-box-connect.sh` on the
 **controller** (blocking) the first time a project touches a box — see
 [Per-box setup](#per-box-setup) — and every hook that then runs **on the box**
-for a placed piece also gets `MP_PLACEMENT_HOST=<box>` and `MP_REMOTE=1`.
+in a placed piece's worktree also gets `MP_PLACEMENT_HOST=<box>` and
+`MP_REMOTE=1`, whichever way mp was invoked there (the box-side create
+stores the placement in the piece's metadata).
 
 ## A worked example — GitLab MR with a label flip + reviewer
 
@@ -171,8 +173,9 @@ rsync -a -- "$MP_HOOKS_DIR/" "$MP_BOX:$MP_REMOTE_PATH/.monkeypuzzle/hooks/"
 ```
 
 Box-side hooks (`on-piece-create.sh` and friends) run on the box with
-`MP_PLACEMENT_HOST=<box>` and `MP_REMOTE=1`, so one hook file can branch on
-where it is:
+`MP_PLACEMENT_HOST=<box>` and `MP_REMOTE=1` — read from the piece's
+metadata, so an agent running `mp pr create` in a box session sees them
+too — and one hook file can branch on where it is:
 
 ```bash
 # .monkeypuzzle/hooks/on-piece-create.sh

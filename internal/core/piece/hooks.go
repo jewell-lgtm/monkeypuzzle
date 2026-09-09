@@ -70,9 +70,9 @@ type HookContext struct {
 	Parent string
 
 	// Placement (box-side hooks): the box this mp is running on, as named
-	// by the controller that placed the piece, and whether the call was
-	// proxied at all. Zero values fall back to what NewHookRunner read from
-	// the process env, so core call sites need not know about placement.
+	// by the controller that placed the piece. Zero values fall back to what
+	// NewHookRunner read from the process env, then to the worktree's piece
+	// metadata, so core call sites need not know about placement.
 	PlacementHost string // MP_PLACEMENT_HOST
 	Remote        bool   // MP_REMOTE=1
 
@@ -121,14 +121,21 @@ func (h *HookRunner) record(hookName string, ctx HookContext) {
 	history.Record(h.output, ev)
 }
 
-// withPlacementDefaults fills PlacementHost/Remote from the runner when the
-// call site left them empty.
+// withPlacementDefaults fills PlacementHost/Remote when the call site left
+// them empty: from the process env the controller's proxy exported, else from
+// the worktree's metadata (the box-side create persisted it), so a hook sees
+// the same env whether mp was proxied or run in a box session directly.
 func (h *HookRunner) withPlacementDefaults(ctx HookContext) HookContext {
 	if ctx.PlacementHost == "" {
 		ctx.PlacementHost = h.placementHost
 	}
-	if !ctx.Remote {
-		ctx.Remote = h.remote
+	if ctx.PlacementHost == "" && ctx.WorktreePath != "" {
+		if meta, err := ReadPieceMetadata(ctx.WorktreePath, h.fs); err == nil {
+			ctx.PlacementHost = meta.PlacementHost
+		}
+	}
+	if ctx.PlacementHost != "" || h.remote {
+		ctx.Remote = true
 	}
 	return ctx
 }

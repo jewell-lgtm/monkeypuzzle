@@ -198,8 +198,10 @@ a failed assertion as "unsupported by this provider":
 
 **HookRunner** - Executes shell scripts with environment variables. It
 strips inherited `MP_*` from the hook env, so the box-side identity of a
-placed piece (`MP_PLACEMENT_HOST`, `MP_REMOTE`, exported by the controller's
-ssh proxy) is read once in `NewHookRunner` and re-added to every hook. The
+placed piece (`MP_PLACEMENT_HOST`, `MP_REMOTE`) is re-added to every hook:
+from the env the controller's ssh proxy exported (read once in
+`NewHookRunner`), else from the worktree's `piece-metadata.json`
+(`placement_host`, written by the box-side create). The
 one controller-side hook, `on-box-connect.sh`, runs through the same runner
 with the local repo as root:
 

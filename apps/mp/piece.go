@@ -1051,7 +1051,7 @@ func cleanupHumanSummary(output cleanupOutput, applied bool) string {
 		s += fmt.Sprintf("; pruned %d stale project(s)", n)
 	}
 	if links > 0 {
-		s += fmt.Sprintf("; dropped %d stale/pending placement(s)", links)
+		s += fmt.Sprintf("; dropped/healed %d stale/pending placement(s)", links)
 	}
 	return s
 }
@@ -1105,7 +1105,7 @@ func cleanupSummary(out cleanupOutput) string {
 		parts = append(parts, fmt.Sprintf("prune %d deleted project(s)", len(out.RemovedProjects)))
 	}
 	if n := droppableLinks(out.Links); n > 0 {
-		parts = append(parts, fmt.Sprintf("drop %d stale/pending placement(s)", n))
+		parts = append(parts, fmt.Sprintf("drop or heal %d stale/pending placement(s)", n))
 	}
 	return "Would " + strings.Join(parts, "; ")
 }
