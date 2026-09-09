@@ -24,7 +24,7 @@ A **piece** is an isolated git worktree for a single change. Each piece:
 
 ### Why hooks?
 
-Workflows differ. PHProcess flips GitLab labels on draft→ready; another team auto-assigns reviewers; another posts to Slack; another runs `cargo fmt` on piece create. mp does the worktree/session/branch orchestration and emits a hook at every transition. The hook is a shell script — write whatever you want.
+Workflows differ. PHProcess flips GitLab labels on draft→ready; another team auto-assigns reviewers; another posts to Slack; another runs `cargo fmt` on piece create. mp does the worktree/session/branch orchestration and emits a hook at every transition. The hook is a shell script — write whatever you want. Every transition is also appended to a global history log, hook or not; read it with [`mp history`](/docs/commands/#mp-history).
 
 ## A common recipe
 

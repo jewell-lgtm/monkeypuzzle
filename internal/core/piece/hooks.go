@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
+	"github.com/jewell-lgtm/monkeypuzzle/internal/core/history"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/projectdir"
 )
 
@@ -48,6 +49,47 @@ type HookContext struct {
 	AgentKind    string // MP_AGENT_KIND (for agent hooks)
 	AgentStatus  string // MP_AGENT_STATUS (for agent hooks; the piece aggregate)
 	AgentPane    string // MP_AGENT_PANE (for agent hooks)
+	// Branch and Parent feed the history log only; they are not exported to
+	// the hook's environment.
+	Branch string
+	Parent string
+}
+
+// hookEvents maps completed-transition hooks to the history event each one
+// records. before-* and is-piece-done are deliberately absent: they precede
+// or probe a transition rather than mark one.
+var hookEvents = map[string]string{
+	HookOnPieceCreate:    "piece.created",
+	HookAfterPieceUpdate: "piece.updated",
+	HookAfterPRCreate:    "pr.created",
+	HookAfterPRReady:     "pr.ready",
+	HookAfterPieceMerge:  "piece.merged",
+	HookAgentBlocked:     "agent.blocked",
+	HookAgentDone:        "agent.done",
+}
+
+// record appends the history event for hookName, whether or not a script
+// exists for it. Runs before the script is even looked up so an absent hook
+// still leaves a trace.
+func (h *HookRunner) record(hookName string, ctx HookContext) {
+	name, ok := hookEvents[hookName]
+	if !ok {
+		return
+	}
+	ev := history.Event{
+		Event:   name,
+		Project: ProjectName(ctx.RepoRoot, h.fs),
+		Piece:   ctx.PieceName,
+		Branch:  ctx.Branch,
+		Parent:  ctx.Parent,
+	}
+	switch {
+	case ctx.PRNumber != 0:
+		ev.Data = map[string]any{"pr_number": ctx.PRNumber, "pr_url": ctx.PRURL, "base": ctx.PRBaseBranch}
+	case ctx.AgentID != "":
+		ev.Data = map[string]any{"agent_id": ctx.AgentID, "agent_kind": ctx.AgentKind, "agent_status": ctx.AgentStatus}
+	}
+	history.Record(h.output, ev)
 }
 
 // HookRunner executes hook scripts from the .monkeypuzzle/hooks directory
@@ -97,6 +139,7 @@ func (h *HookRunner) resolveExecutableHook(repoRoot, hookName string) (hookPath 
 // Returns nil if the hook doesn't exist or the hooks directory doesn't exist.
 // Returns an error if the hook exists but fails to execute (non-zero exit code).
 func (h *HookRunner) RunHook(ctx context.Context, repoRoot, hookName string, hookCtx HookContext) error {
+	h.record(hookName, hookCtx)
 	hookPath, ok, err := h.resolveExecutableHook(repoRoot, hookName)
 	if err != nil || !ok {
 		return err
@@ -144,6 +187,7 @@ func (h *HookRunner) RunHook(ctx context.Context, repoRoot, hookName string, hoo
 // process is returned as an error. This suits setup hooks (dependency installs,
 // submodule init) whose work shouldn't block the command that triggered them.
 func (h *HookRunner) RunHookDetached(repoRoot, hookName string, hookCtx HookContext) error {
+	h.record(hookName, hookCtx)
 	hookPath, ok, err := h.resolveExecutableHook(repoRoot, hookName)
 	if err != nil || !ok {
 		return err
