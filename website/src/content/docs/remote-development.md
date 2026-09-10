@@ -165,7 +165,7 @@ What happens, in order:
    built-in) is retried next time.
 4. **Doctor** the clone: ssh, `mp` on the box, and `init=yes` for that path.
 5. **Create** by proxy: `mp --host wire --dir <clone> create --name fix-auth
-   [--parent …] [--prompt …] [--branch …] [--agent …] --skip-switch --json` —
+   [--parent …] [--prompt …] [--branch …] --skip-switch --json` —
    an ordinary create on the box, hooks and all. The proxy exports
    `MP_PLACEMENT_HOST=wire MP_REMOTE=1` into that call; the box-side create
    persists the box name into the piece's metadata (`placement_host`), which

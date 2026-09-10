@@ -15,10 +15,11 @@ var waitCmd = &cobra.Command{
 	Short: "Block until agents settle (no agent working)",
 	Long: `Poll agent status until no agent in the target pieces is working — i.e. every
 agent is blocked, done, or idle. Without arguments, waits on every piece that
-has live agents. The fan-out pattern:
+has live agents. The fan-out pattern — one piece per worker, started in its
+worktree by whatever runs your agents:
 
-  mp create --name a --agent claude --prompt "..." --skip-switch
-  mp create --name b --agent claude --prompt "..." --skip-switch
+  mp create --name a --skip-switch --json   # worktree_path: start a worker there
+  mp create --name b --skip-switch --json
   mp wait && mp agent list
 
 Exits 0 when settled (the JSON says which pieces are blocked vs done), non-zero

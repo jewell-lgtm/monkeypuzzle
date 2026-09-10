@@ -91,8 +91,8 @@ func runSwitchAll(cmd *cobra.Command, args []string) error {
 	}
 
 	if !haveInput {
-		if !cli.IsTerminal() {
-			return fmt.Errorf("no input; pass a target, --piece/--branch, stdin JSON, or run with a terminal")
+		if !cli.IsInteractive() {
+			return fmt.Errorf("no input; pass a target, --piece/--branch, stdin JSON, or run with a terminal (stdin and stdout)")
 		}
 		return runSwitchInteractive(ctx, flagSwitchAll)
 	}
@@ -208,7 +208,7 @@ func runSwitchTarget(ctx context.Context, proj registry.Project, target string, 
 		return attachSession(ctx, info.SessionName, info.WorktreePath)
 	case piececmd.TargetNew:
 		if !create {
-			if cli.IsTerminal() && !cli.HasStdinData() {
+			if cli.IsInteractive() && !cli.HasStdinData() {
 				ok, err := confirmCreateTarget(res.Branch, res.PieceName)
 				if err != nil {
 					return err

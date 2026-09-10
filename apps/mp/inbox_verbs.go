@@ -302,10 +302,13 @@ func runInboxStep(cmd *cobra.Command, dir int) error {
 		return err
 	}
 	if flagInboxVerbJS {
+		if res.Method == "path" {
+			noteCwd(res.Piece.WorktreePath)
+		}
 		return cli.PrintJSON(res)
 	}
 	if res.Method == "path" {
-		fmt.Println(res.Piece.WorktreePath)
+		surfacePath(res.Piece.WorktreePath)
 	}
 	return nil
 }

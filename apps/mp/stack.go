@@ -322,7 +322,7 @@ func runStackSync(cmd *cobra.Command, args []string) error {
 	// explicit --dry-run (a read-only preview, where the source only affects a
 	// cosmetic line); non-interactive callers fall through and the handler
 	// defaults to origin/<main>.
-	if input.From == "" && !input.DryRun && cli.IsTerminal() && !cli.HasStdinData() {
+	if input.From == "" && !input.DryRun && cli.IsInteractive() && !cli.HasStdinData() {
 		mainName := input.MainBranch
 		if mainName == "" {
 			mainName = "main"
