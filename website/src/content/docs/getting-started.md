@@ -37,17 +37,7 @@ sudo mv bin/mp /usr/local/bin/   # or add bin/ to PATH
 
 ## Set up your shell
 
-mp keeps a small user config. Create it once; `none` means no multiplexer,
-which is the plain-terminal setup this guide uses:
-
-```bash
-mp config set multiplexer none
-```
-
-(Run any other `mp` command on a terminal first and a setup wizard asks the
-same question.)
-
-Then load the shell wrapper, so that `mp create` and `mp switch` move your
+Load the shell wrapper, so that `mp create` and `mp switch` move your
 shell into the piece's worktree instead of only printing its path:
 
 ```bash
@@ -75,14 +65,17 @@ cd path/to/your/repo
 mp init
 ```
 
-The wizard asks for a project name (defaults to the directory name) and a PR
-provider (`github` or `gitlab`). It creates `.monkeypuzzle/` with the project
-config and a `.gitignore` for the piece worktrees, and registers the project
-so `mp go` and `mp inbox` can find it.
+On first use mp asks which multiplexer you use; the default, `none`, is the
+plain-terminal setup this guide uses (`mp config set multiplexer …` changes it
+later). Then the wizard asks for a project name (defaults to the directory
+name) and a PR provider (`github` or `gitlab`). It creates `.monkeypuzzle/`
+with the project config and a `.gitignore` for the piece worktrees, and
+registers the project so `mp go` and `mp inbox` can find it.
 
-For scripts or CI, skip the wizard:
+For scripts or CI, skip the wizards:
 
 ```bash
+mp config set multiplexer none   # the first-run choice, once per machine
 mp init --name myproject --pr-provider github
 echo '{"name":"myproject","pr_provider":"github"}' | mp init
 mp init --schema | jq '.name = "custom-name"' | mp init

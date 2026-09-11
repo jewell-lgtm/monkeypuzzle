@@ -1256,9 +1256,10 @@ Get and set user-level configuration (`config.json` in the user config
 directory, `$MP_CONFIG_DIR` if set; `mp doctor` prints the path). Uses
 positional args, not JSON stdin.
 
-Until the file exists, mp refuses to run most commands: on a terminal the first
-`mp` command offers a setup wizard that picks the multiplexer; elsewhere it
-asks you to run `mp config set multiplexer …`.
+Until the file exists, mp refuses to run most commands (`help`, `completion`,
+`config`, `shell-init`, `doctor` and `--schema` work without it): on a
+terminal the first `mp` command offers a setup wizard that picks the
+multiplexer; elsewhere it asks you to run `mp config set multiplexer …`.
 
 ### Usage
 

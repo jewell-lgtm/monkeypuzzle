@@ -20,11 +20,10 @@ Both stack branches: git-town with `git town append`, mp with `mp stack`. The di
 
 ```bash
 brew install jewell-lgtm/tap/monkeypuzzle   # or: go install github.com/jewell-lgtm/monkeypuzzle/apps/mp@latest
-mp config set multiplexer none              # once: plain terminal, no tmux
 eval "$(mp shell-init zsh)"                 # add to ~/.zshrc: mp moves your shell into the worktree
 
 cd path/to/your/repo
-mp init                        # project name + PR provider (github/gitlab)
+mp init                        # first run: pick a multiplexer (none), then project name + PR provider
 
 mp create --name add-login     # new branch + worktree; your shell is now in it
 # ... do the thing, commit ...

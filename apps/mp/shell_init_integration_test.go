@@ -134,3 +134,34 @@ func TestShellInit_PreservesExitCodeAndStdout(t *testing.T) {
 		t.Error("wrapper should preserve a non-zero exit code from mp")
 	}
 }
+
+// TestShellInit_WorksBeforeFirstRun pins that the rc-file line and the setup
+// check work on a fresh machine: with no user config, shell-init and doctor
+// succeed and write nothing, while ordinary verbs still hit the first-run gate.
+func TestShellInit_WorksBeforeFirstRun(t *testing.T) {
+	e := setupTestEnv(t)
+	defer e.cleanup()
+
+	cfgFile := filepath.Join(e.configDir, "config.json")
+	if err := os.Remove(cfgFile); err != nil {
+		t.Fatalf("remove seeded config: %v", err)
+	}
+
+	for _, args := range [][]string{{"shell-init", "zsh"}, {"doctor", "--json"}} {
+		stdout, stderr, err := e.run(args...)
+		if err != nil {
+			t.Errorf("mp %s with no config: %v\nstderr: %s", strings.Join(args, " "), err, stderr)
+			continue
+		}
+		if strings.TrimSpace(stdout) == "" {
+			t.Errorf("mp %s printed nothing on stdout", strings.Join(args, " "))
+		}
+	}
+	if _, err := os.Stat(cfgFile); !os.IsNotExist(err) {
+		t.Errorf("shell-init/doctor must not write the config, stat err: %v", err)
+	}
+
+	if _, stderr, err := e.run("list"); err == nil || !strings.Contains(stderr, "not configured") {
+		t.Errorf("list should still require config, err=%v stderr=%s", err, stderr)
+	}
+}
