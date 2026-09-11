@@ -1,7 +1,6 @@
-// Package store is the persistence layer for mp server. It is the cache layer
-// between the app and the forge: Temporal workers fetch repos/PRs from the forge
-// API (GitHub or GitLab) and persist them here, and every read path (HTML UI,
-// MCP tools) reads only from the store — never from the forge directly.
+// Package store owns mp-server's durable piece registry and developer accounts.
+// Optional Temporal workers populate a secondary forge repository/PR cache.
+// Dashboard and agent reads use this store, never a forge directly.
 //
 // Following the repo's ports/adapters convention, Store is an interface with a
 // real Postgres implementation (PgxStore) and an in-memory implementation
@@ -81,6 +80,10 @@ type SyncStatus struct {
 // must be safe for concurrent use across different users; per-repo write
 // serialization (when needed) is the caller's responsibility.
 type Store interface {
+	TrackingStore
+	// EnsureRegistryUser creates a private account using the authenticated subject,
+	// preserving any existing account and forge credentials. No forge is required.
+	EnsureRegistryUser(ctx context.Context, externalID, displayName, avatarURL string) (int64, error)
 	// Migrate applies the schema idempotently. Safe to call on every boot.
 	Migrate(ctx context.Context) error
 	// Ping verifies the backing store is reachable; used by readiness checks.

@@ -5,6 +5,20 @@ order: 6
 <!-- Generated from docs/architecture.md by scripts/sync-docs.mjs — edit the source, then run `pnpm sync-docs`. -->
 Monkeypuzzle uses clean architecture with dependency injection for testability.
 
+## Global piece registry
+
+The CLI owns local worktrees and operates independently. Its explicit
+`mp tracking` commands publish stable machine/project/piece identities and
+progress snapshots to mp-server. The server's primary model is the published
+piece, owned by an authenticated developer; a piece does not need a PR or forge
+repository to exist. Developer accounts are private initially.
+
+Postgres is the durable registry. The HTTP API handles idempotent publication
+and removal; the dashboard and MCP `list_pieces` expose the developer's records
+across machines. PR monitoring is an optional secondary subsystem, disabled by
+default, and cannot prevent registry startup. See [the registry
+contract](/docs/server-tracking/) for identity, privacy and prototype limits.
+
 ## Directory Structure
 
 ```

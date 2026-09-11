@@ -42,7 +42,7 @@ func loginPage() g.Node {
 	return page("Sign in · Monkey Puzzle",
 		Main(Class("login"),
 			H1(g.Text("🐒 Monkey Puzzle")),
-			P(Class("muted"), g.Text("Sign in to see your stacks.")),
+			P(Class("muted"), g.Text("Sign in to your piece registry across machines and projects.")),
 			A(Class("btn"), Href("/login?provider=github"), g.Text("Sign in with GitHub")),
 			A(Class("btn"), Href("/login?provider=gitlab"), g.Text("Sign in with GitLab")),
 		),
@@ -132,7 +132,7 @@ func repoPageView(repo store.Repo, stacks []stackgraph.Stack) g.Node {
 	return page(repo.Owner+"/"+repo.Name,
 		navBar(),
 		Main(
-			P(A(Href("/"), g.Text("← all repositories"))),
+			P(A(Href("/repositories"), g.Text("← PR monitoring"))),
 			H1(g.Text(repo.Owner+"/"+repo.Name)),
 			content,
 		),

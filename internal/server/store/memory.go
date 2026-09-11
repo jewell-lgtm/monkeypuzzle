@@ -5,6 +5,8 @@ import (
 	"sort"
 	"strconv"
 	"sync"
+
+	"github.com/jewell-lgtm/monkeypuzzle/pkg/tracking"
 )
 
 // MemoryStore is an in-memory Store for hermetic tests (no Postgres). It mirrors
@@ -23,6 +25,7 @@ type MemoryStore struct {
 	userRepos    map[int64]map[int64]bool // user id -> set of repo ids
 	prs          map[int64][]PullRequest  // repo id -> PRs
 	sync         map[int64]SyncStatus     // user id -> status
+	tracked      map[trackedKey]tracking.Item
 }
 
 // forgeKey composites a provider and a forge-native id into the in-memory key,

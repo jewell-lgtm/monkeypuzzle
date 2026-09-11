@@ -71,8 +71,12 @@ it embeds the Postgres password.
   value: {{ required "publicBaseURL is required" .Values.publicBaseURL | quote }}
 - name: SECURE_COOKIES
   value: {{ .Values.secureCookies | quote }}
+- name: PR_SYNC_ENABLED
+  value: {{ .Values.prSync.enabled | quote }}
+{{- if .Values.prSync.enabled }}
 - name: TEMPORAL_HOSTPORT
   value: {{ include "monkeypuzzle.temporalHostPort" . | quote }}
+{{- end }}
 - name: DATABASE_URL
   valueFrom:
     secretKeyRef:
@@ -110,12 +114,11 @@ it embeds the Postgres password.
 {{- end -}}
 
 {{/*
-initContainers that block until the bundled Postgres/Temporal accept TCP, so the
-server/worker (which fail-fast on a failed DB migrate or Temporal dial at boot)
-start cleanly instead of crash-looping. No-op when both deps are external.
+Wait only for bundled Postgres, the registry's required backing store.
+Optional Temporal must never block registry startup. No-op for external Postgres.
 */}}
 {{- define "monkeypuzzle.waitForDeps" -}}
-{{- if or .Values.postgres.enabled .Values.temporal.enabled }}
+{{- if .Values.postgres.enabled }}
 initContainers:
   - name: wait-for-deps
     image: busybox:1.37
@@ -126,9 +129,6 @@ initContainers:
       - |
         {{- if .Values.postgres.enabled }}
         until nc -z {{ include "monkeypuzzle.postgresHost" . }} 5432; do echo "waiting for postgres..."; sleep 2; done
-        {{- end }}
-        {{- if .Values.temporal.enabled }}
-        until nc -z {{ include "monkeypuzzle.fullname" . }}-temporal 7233; do echo "waiting for temporal..."; sleep 2; done
         {{- end }}
         echo "dependencies ready"
 {{- end }}

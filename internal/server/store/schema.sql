@@ -80,3 +80,15 @@ ALTER TABLE repos DROP CONSTRAINT IF EXISTS repos_owner_name_key;
 CREATE UNIQUE INDEX IF NOT EXISTS users_provider_forge_uid  ON users (provider, github_user_id);
 CREATE UNIQUE INDEX IF NOT EXISTS repos_provider_forge_rid  ON repos (provider, github_repo_id);
 CREATE UNIQUE INDEX IF NOT EXISTS repos_provider_owner_name ON repos (provider, owner, name);
+
+-- Opt-in CLI progress snapshots, independent of forge repositories and PR sync.
+CREATE TABLE IF NOT EXISTS tracked_items (
+    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    machine_id TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    piece_id TEXT NOT NULL,
+    payload JSONB NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+    PRIMARY KEY (user_id, machine_id, project_id, piece_id)
+);

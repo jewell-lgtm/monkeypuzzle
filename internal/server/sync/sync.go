@@ -1,7 +1,7 @@
 // Package sync keeps the Postgres cache fresh from the forge via Temporal. The
 // SyncUserDataWorkflow fans out activities that fetch a user's repos and PRs
 // from the forge API (GitHub or GitLab, per the user's provider) and persist
-// them to the store; the web process triggers it (on login and on demand) and
+// them to the secondary forge cache; explicit PR-monitoring actions trigger it and
 // the worker executes it. This is also the durable substrate the future write
 // path (rebase/retarget a stack) will use.
 package sync

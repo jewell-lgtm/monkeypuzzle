@@ -13,6 +13,7 @@ type Config struct {
 	PublicBaseURL      string // e.g. http://localhost:8080 (OAuth redirect + MCP resource)
 	DatabaseURL        string
 	TemporalHostPort   string
+	PRSyncEnabled      bool // optional forge monitoring; registry does not need Temporal
 	WorkOSAPIKey       string
 	WorkOSClientID     string
 	AuthKitDomain      string // e.g. https://your-app.authkit.app (token issuer + AS metadata)
@@ -44,6 +45,7 @@ func LoadConfig() (Config, error) {
 		PublicBaseURL:    os.Getenv("PUBLIC_BASE_URL"),
 		DatabaseURL:      os.Getenv("DATABASE_URL"),
 		TemporalHostPort: envOr("TEMPORAL_HOSTPORT", "localhost:7233"),
+		PRSyncEnabled:    os.Getenv("PR_SYNC_ENABLED") == "true",
 		WorkOSAPIKey:     os.Getenv("WORKOS_API_KEY"),
 		WorkOSClientID:   os.Getenv("WORKOS_CLIENT_ID"),
 		AuthKitDomain:    os.Getenv("AUTHKIT_DOMAIN"),

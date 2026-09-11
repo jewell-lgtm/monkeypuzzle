@@ -56,6 +56,7 @@ Each step fires a shell hook in `.monkeypuzzle/hooks/` with the piece and PR con
 | `mp merge` | Merge the piece into main |
 | `mp done` | Remove the worktree after merge (refuses unmerged; `--force`) |
 | `mp abandon` | Remove an unmerged piece |
+| `mp settle [piece]` | Remove a published piece from your private registry; leaves Git and workflow state alone |
 | `mp cleanup` | Remove every merged piece (preview; `--apply`) |
 | `mp doctor` | Check this machine's setup |
 
@@ -74,6 +75,7 @@ Everything beyond the workflow is opt-in: `mp open` for your editor, `mp shell-i
 - [Remote development](docs/remote-development.md) — drive a project on another machine over ssh, or place single pieces on a box (`mp create --remote`)
 - [Architecture](docs/architecture.md) — how it's built
 - [Self-hosting](docs/self-hosting.md) — run the server on your own infra via Helm
+- [Piece registry](docs/server-tracking.md) — mp-server across machines and developers, private accounts and opt-in publication
 - [Contributing](docs/contributing.md) — dev setup, testing philosophy
 
 ## License
