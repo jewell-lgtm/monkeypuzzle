@@ -15,9 +15,10 @@ variables alone does not enable automatic publishing. No hooks are installed.
 ## CLI
 
 Use an existing mp-server deployment configured as described in
-[self-hosting](self-hosting.md). Supply an OAuth access token issued for that
-server's public URL and mapped to your existing mp-server account, using the
-same authentication as its MCP endpoint. A GitHub PAT or session cookie is not
+[self-hosting](self-hosting.md). Supply a first-party WorkOS AuthKit access token for the server’s configured
+application, mapped to your existing mp-server account. The registry verifies
+the signature, expiry, application-specific issuer, client ID, and session ID.
+WorkOS Connect resource tokens using the MCP authentication are also accepted. A GitHub PAT or session cookie is not
 an mp-server access token. This prototype does not implement interactive login
 or token refresh; an expired token returns an error.
 

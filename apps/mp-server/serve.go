@@ -125,7 +125,11 @@ func runServe() error {
 	mux.Handle("GET /.well-known/oauth-protected-resource", mcppkg.ProtectedResourceMetadata(resourceURL, cfg.AuthKitDomain))
 	mux.Handle("/mcp", mcpHandler)
 	mux.Handle("/mcp/", mcpHandler)
-	trackingHandler := trackingapi.NewHandler(st, verifier, resourceURL+"/.well-known/oauth-protected-resource")
+	registryVerifier, err := workos.NewRegistryTokenVerifier(cfg.WorkOSJWKSURL, cfg.WorkOSClientID, st, verifier)
+	if err != nil {
+		return fmt.Errorf("registry token verifier: %w", err)
+	}
+	trackingHandler := trackingapi.NewHandler(st, registryVerifier, resourceURL+"/.well-known/oauth-protected-resource")
 	mux.Handle(tracking.BasePath, trackingHandler)
 	mux.Handle(tracking.BasePath+"/", trackingHandler)
 
