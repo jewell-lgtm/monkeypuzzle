@@ -70,7 +70,12 @@ import { GITHUB_URL, TURNSTILE_SITE_KEY } from '../config';
 <script is:inline src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
 
 <style>
+  /* Top-align so the Star button keeps its own height beside the form. */
+  .band__actions { align-items: flex-start; }
+  /* An explicit basis: a wrapping flex container's intrinsic width is too
+     narrow for input + button, which would push the button to its own line. */
   .band__form {
+    flex: 0 1 36rem;
     display: flex;
     gap: 10px;
     flex-wrap: wrap;
@@ -88,38 +93,48 @@ import { GITHUB_URL, TURNSTILE_SITE_KEY } from '../config';
     pointer-events: none;
   }
   /* When Cloudflare escalates from invisible to an interactive check, give
-     the widget its own centered row instead of squeezing the flex line. */
+     the widget its own centered row under the input + button (order: 1 keeps
+     it from splitting them onto separate lines). */
   .band__form .cf-turnstile {
+    order: 1;
     flex-basis: 100%;
     display: flex;
     justify-content: center;
   }
   .band__form input {
-    font-family: var(--mp-font-mono, monospace);
-    font-size: 14px;
-    color: var(--mp-text-primary);
-    background: var(--mp-bg-primary);
-    border: 1px solid var(--mp-border-default);
-    border-radius: var(--mp-radius-md, 8px);
+    font-family: var(--mp-font-mono);
+    font-size: var(--mp-text-sm);
+    color: var(--mp-text);
+    background: var(--mp-ink-950);
+    border: 1px solid var(--mp-border-strong);
+    border-radius: var(--mp-radius-lg); /* match the lg button beside it */
     padding: 0 14px;
-    min-width: 240px;
+    flex: 1 1 220px;
+    min-width: 0;
+    min-height: 46px; /* the lg button's height, for when it wraps below */
   }
+  .band__form input::placeholder { color: var(--mp-text-muted); }
   .band__form input:focus-visible {
     outline: none;
     box-shadow: var(--mp-glow-green);
-    border-color: var(--mp-accent-primary, currentColor);
+    border-color: var(--mp-primary);
   }
   .band__form input[aria-invalid='true'] {
-    border-color: var(--mp-status-error, #e5484d);
+    border-color: var(--mp-danger);
   }
   .band__form-msg {
     min-height: 1.4em;
     margin-top: 14px;
-    font-family: var(--mp-font-mono, monospace);
-    font-size: 13px;
+    font-family: var(--mp-font-mono);
+    font-size: var(--mp-text-xs);
   }
-  .band__form-msg[data-tone='ok'] { color: var(--mp-status-ok, #46a758); }
-  .band__form-msg[data-tone='err'] { color: var(--mp-status-error, #e5484d); }
+  .band__form-msg[data-tone='ok'] { color: var(--mp-success); }
+  .band__form-msg[data-tone='err'] { color: var(--mp-danger); }
+  @media (max-width: 560px) {
+    .band__form { width: 100%; }
+    .band__form input,
+    .band__form > :global(.mp-btn) { flex: 1 1 100%; justify-content: center; }
+  }
 </style>
 
 <script>
