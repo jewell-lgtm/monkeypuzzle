@@ -988,6 +988,32 @@ echo '{"force":true}' | mp done
 
 ---
 
+## mp settle
+
+Remove a published piece from your private mp-server registry without declaring
+a workflow outcome. Settling does not touch the branch, worktree, PR, session,
+or local piece. Use `mp done` after merge and `mp abandon` when intentionally
+discarding work.
+
+It defaults to the piece you are standing in and accepts the same positional or
+`--piece` selector as `status`, `done`, and `abandon`. From another registered
+project, put the global selector before the verb: `mp --project api settle fix-auth`.
+The operation is safe to repeat.
+
+```bash
+mp settle
+mp settle old-feature
+mp settle --piece old-feature --json
+mp --project api settle old-feature
+echo '{"piece":"old-feature"}' | mp settle
+```
+
+`MP_SERVER_URL` and `MP_SERVER_TOKEN` configure the registry. `--server`
+overrides the URL for one call; `--schema` prints the stdin document shape.
+See [the piece registry](server-tracking.md).
+
+---
+
 ## mp adopt
 
 Convert an existing git branch into a piece worktree. Accepts a local branch name or a remote ref like `origin/foo` (remote refs are fetched and a tracking branch is created). Run from the main repo with no branch to adopt the current branch; from inside a piece worktree `--branch` is required.

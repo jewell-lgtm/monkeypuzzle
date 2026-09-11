@@ -3,16 +3,17 @@ title: "Self-hosting the Monkeypuzzle server"
 order: 5
 ---
 <!-- Generated from docs/self-hosting.md by scripts/sync-docs.mjs — edit the source, then run `pnpm sync-docs`. -->
-The `mp` CLI is free and runs entirely in your terminal. The **server** adds a
-web dashboard + MCP endpoint that syncs your GitHub repos and GitLab projects into
-Postgres and draws each stacked PR/MR tree as a live forest. It's source-available under FSL-1.1-MIT —
+The `mp` CLI is free and runs entirely in your terminal. The **server** is the
+global registry of explicitly published pieces across machines and developers.
+Each developer initially sees only their own pieces through the dashboard,
+HTTP API and MCP. PR monitoring is optional and secondary.
+It's source-available under FSL-1.1-MIT —
 self-hosting and internal use are free.
 
 This guide installs the server on Kubernetes with the official Helm chart in
 [`deploy/charts/monkeypuzzle`](https://github.com/jewell-lgtm/monkeypuzzle/blob/main/deploy/charts/monkeypuzzle). A single
-`helm install` brings up the whole stack: the web/MCP server, the sync worker,
-and bundled Postgres + Temporal. Point at external Postgres/Temporal for
-production.
+`helm install` brings up the registry server and bundled Postgres. Temporal and
+the PR-sync worker are disabled by default. Point at external Postgres for production.
 
 > Just kicking the tyres? `cd apps/mp-server && docker compose up --build` runs
 > the same stack with Docker Compose. See
@@ -24,11 +25,17 @@ production.
 | Component | What it is | Chart resource |
 | --- | --- | --- |
 | **server** (`mp-server serve`) | HTTP: HTML dashboard for humans + MCP endpoint for agents | Deployment + Service (+ Ingress) |
-| **worker** (`mp-server worker`) | Temporal worker that syncs GitHub/GitLab → Postgres | Deployment |
-| **Postgres** | App cache + encrypted token store | StatefulSet (bundled) or external |
-| **Temporal** | Drives the sync workflows | Deployment (bundled dev server) or external |
+| **worker** (`mp-server worker`) | Optional PR monitor; enable `prSync.enabled` | Deployment when enabled |
+| **Postgres** | Durable piece registry, accounts and optional PR cache | StatefulSet (bundled) or external |
+| **Temporal** | Optional PR sync workflows | Disabled by default |
 
 The server and worker run the **same image** with different commands.
+
+The default home page is the private piece registry. Publish from the CLI using
+[mp tracking](/docs/server-tracking/); agents query MCP `list_pieces`. To enable
+secondary PR monitoring, set `prSync.enabled: true` and either
+`temporal.enabled: true` or `externalTemporal.hostPort`. The PR view appears at
+`/repositories`. Login never initiates a PR sync.
 
 ## Prerequisites
 
@@ -159,8 +166,7 @@ docker push <registry>/mp-server:<tag>
 
 ## Production notes
 
-The bundled Postgres and Temporal make `helm install` a one-liner, but for a
-durable production deployment use managed/external instances:
+For a durable production registry, use managed/external Postgres:
 
 ```yaml
 postgres:
@@ -168,18 +174,20 @@ postgres:
 externalDatabase:
   url: postgres://user:pass@db.internal:5432/mp?sslmode=require
 
-temporal:
-  enabled: false
-externalTemporal:
-  hostPort: temporal-frontend.temporal.svc.cluster.local:7233
 ```
 
-The bundled Temporal is a single-replica `start-dev` server (in-memory — its
+If PR monitoring is enabled, production deployments should also use external
+Temporal via `externalTemporal.hostPort`. The optional bundled Temporal is a
+single-replica `start-dev` server (in-memory — its
 state is lost on restart). Sync workflows are idempotent re-syncs, so a restart
-only triggers a re-sync — but it is **not** a production Temporal. App data (repos, PRs, encrypted tokens) lives in
+only triggers a re-sync — but it is **not** a production Temporal. App data (pieces, accounts, repos, PRs, encrypted tokens) lives in
 Postgres, so persist *that* (the bundled Postgres uses a PVC by default).
 
 ## Upgrading
+
+Chart 0.2.0 makes the registry primary and disables PR monitoring by default.
+Existing installations that want to retain PR monitoring must explicitly set
+`prSync.enabled: true` and configure bundled or external Temporal.
 
 ```bash
 helm upgrade mp deploy/charts/monkeypuzzle -n monkeypuzzle -f my-values.yaml

@@ -53,17 +53,20 @@ under the directory chosen with ` + "`mp init --dir`" + `), which mp init gitign
 
 var pieceUpdateCmd = &cobra.Command{
 	Use:   "update",
-	Short: "Update piece with latest from main branch",
-	Long:  `Merges the main branch into the current piece's history. Must be run from within a piece worktree.`,
-	Args:  cobra.NoArgs,
-	RunE:  runPieceUpdate,
+	Short: "Merge main into the current piece (usually use sync)",
+	Long: `Merge the main branch directly into the current piece. Must be run from a
+piece worktree. Usually use 'mp sync' instead: it follows piece lineage and
+merges the current piece's parent, which is main for a root piece.`,
+	Args: cobra.NoArgs,
+	RunE: runPieceUpdate,
 }
 
 var pieceMergeCmd = &cobra.Command{
 	Use:   "merge",
-	Short: "Merge piece back into main branch",
-	Long: `Merges the piece branch back into main. Must be run from within a piece worktree.
-By default refuses when main has commits not in the piece worktree; --no-update-check
+	Short: "Merge the current piece into its parent",
+	Long: `Merge the piece branch into its parent (another piece, or main for a root
+piece). Must be run from within a piece worktree. By default refuses when the
+parent has commits not in the piece worktree; --no-update-check
 (or 'mp config set merge_require_updated false') merges anyway.`,
 	Args: cobra.NoArgs,
 	RunE: runPieceMerge,
@@ -180,15 +183,15 @@ func init() {
 	pieceCreateCmd.Flags().BoolVar(&flagOverwriteSession, "overwrite-session", false, "Replace existing main repo multiplexer session")
 	pieceCreateCmd.Flags().BoolVar(&flagPieceCreateSchema, "schema", false, "Print an example input document and exit")
 	pieceCreateCmd.Flags().BoolVar(&flagPieceCreateJSON, "json", false, "Output JSON even on a terminal")
-	pieceCreateCmd.Flags().BoolVar(&flagOpenAfter, "open", false, "Also open the new worktree with your configured opener (see `mp open`)")
+	pieceCreateCmd.Flags().BoolVar(&flagOpenAfter, "open", false, "Also open the new worktree with your configured opener (see 'mp open')")
 	pieceCreateCmd.Flags().StringVar(&flagOpenWith, "with", "", "Opener command for --open (overrides $MP_OPEN and open_command)")
 	pieceCreateCmd.Flags().StringVar(&flagPieceRemote, "remote", "", "Place the piece on this ssh box (worktree, hooks, PRs live there; see docs/remote-development.md)")
-	pieceUpdateCmd.Flags().StringVar(&flagMainBranch, "main", "main", "Main branch name to merge (default: main)")
+	pieceUpdateCmd.Flags().StringVar(&flagMainBranch, "main", "main", "Main branch name to merge")
 	pieceUpdateCmd.Flags().StringVar(&flagMainBranchLegacy, "main-branch", "", "Deprecated alias for --main")
 	_ = pieceUpdateCmd.Flags().MarkDeprecated("main-branch", "use --main")
 	pieceUpdateCmd.Flags().BoolVar(&flagPieceUpdateSchema, "schema", false, "Print an example input document and exit")
 	pieceUpdateCmd.Flags().BoolVar(&flagPieceUpdateJSON, "json", false, "Output JSON even on a terminal")
-	pieceMergeCmd.Flags().StringVar(&flagMainBranch, "main", "main", "Main branch name to merge into (default: main)")
+	pieceMergeCmd.Flags().StringVar(&flagMainBranch, "main", "main", "Trunk branch to use when the piece's parent is main")
 	pieceMergeCmd.Flags().StringVar(&flagMainBranchLegacy, "main-branch", "", "Deprecated alias for --main")
 	_ = pieceMergeCmd.Flags().MarkDeprecated("main-branch", "use --main")
 	pieceMergeCmd.Flags().BoolVar(&flagPieceMergeSchema, "schema", false, "Print an example input document and exit")
@@ -197,7 +200,7 @@ func init() {
 	pieceMergeCmd.Flags().StringVar(&flagPieceMergeReparentStrategy, "reparent-strategy", "", "How to re-home children: 'rebase' (default, rewrites history) or 'merge' (no force-push)")
 	pieceMergeCmd.Flags().BoolVar(&flagPieceMergeJSON, "json", false, "Output JSON even on a terminal")
 	pieceMergeCmd.Flags().BoolVar(&flagMergeNoUpdateCheck, "no-update-check", false, "Merge even if the target has commits not in the piece (conflicts surface from git)")
-	pieceCleanupCmd.Flags().StringVar(&flagMainBranch, "main", "main", "Main branch name to check for merged status (default: main)")
+	pieceCleanupCmd.Flags().StringVar(&flagMainBranch, "main", "main", "Main branch name to check for merged status")
 	pieceCleanupCmd.Flags().StringVar(&flagMainBranchLegacy, "main-branch", "", "Deprecated alias for --main")
 	_ = pieceCleanupCmd.Flags().MarkDeprecated("main-branch", "use --main")
 	pieceCleanupCmd.Flags().BoolVar(&flagPieceCleanupApply, "apply", false, "Apply the cleanup (default is a dry-run preview)")
@@ -221,11 +224,11 @@ func init() {
 	pieceDoneCmd.Flags().BoolVar(&flagPieceDoneJSON, "json", false, "Output JSON even on a terminal")
 	pieceAdoptCmd.Flags().StringVarP(&flagPieceAdoptBranch, "branch", "b", "", "Branch to adopt; local name or remote ref like origin/foo (defaults to current branch when on main)")
 	pieceAdoptCmd.Flags().StringVar(&flagPieceAdoptName, "name", "", "Override piece name (defaults to branch name)")
-	pieceAdoptCmd.Flags().StringVarP(&flagPieceAdoptParent, "parent", "p", "main", "Parent piece name (default: main)")
+	pieceAdoptCmd.Flags().StringVarP(&flagPieceAdoptParent, "parent", "p", "main", "Parent piece name")
 	pieceAdoptCmd.Flags().BoolVar(&flagPieceAdoptSchema, "schema", false, "Print an example input document and exit")
 	pieceAdoptCmd.Flags().BoolVar(&flagPieceAdoptJSON, "json", false, "Output JSON even on a terminal")
 	pieceStatusCmd.Flags().StringVar(&flagStatusPiece, "piece", "", "Piece to inspect (default: the piece you're in)")
-	pieceStatusCmd.Flags().StringVar(&flagMainBranch, "main", "main", "Main branch name (default: main)")
+	pieceStatusCmd.Flags().StringVar(&flagMainBranch, "main", "main", "Main branch name")
 	pieceStatusCmd.Flags().StringVar(&flagMainBranchLegacy, "main-branch", "", "Deprecated alias for --main")
 	_ = pieceStatusCmd.Flags().MarkDeprecated("main-branch", "use --main")
 	pieceStatusCmd.Flags().BoolVar(&flagPieceStatusJSON, "json", false, "Output JSON even on a terminal")

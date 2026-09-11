@@ -11,6 +11,40 @@ import (
 	"github.com/jewell-lgtm/monkeypuzzle/pkg/tracking"
 )
 
+// LookupIdentity returns an identity previously created by an explicit
+// tracking command. Unlike Identity it never invents an ID, so a typo in
+// `mp settle` cannot report success for a different, nonexistent item.
+func LookupIdentity(dir, root, piece string) (tracking.Key, error) {
+	var key tracking.Key
+	data, err := os.ReadFile(filepath.Join(dir, "identity.json"))
+	if os.IsNotExist(err) {
+		return key, fmt.Errorf("no tracking identity for piece %q on this machine and project", piece)
+	}
+	if err != nil {
+		return key, err
+	}
+	ids := map[string]string{}
+	if err := json.Unmarshal(data, &ids); err != nil {
+		return key, fmt.Errorf("read tracking identities: %w", err)
+	}
+	if ids == nil {
+		return key, fmt.Errorf("tracking identity registry must be an object")
+	}
+	projectKey, _ := json.Marshal([]string{root})
+	pieceKey, _ := json.Marshal([]string{root, piece})
+	machineID, machineOK := ids["machine"]
+	projectID, projectOK := ids[string(projectKey)]
+	pieceID, pieceOK := ids[string(pieceKey)]
+	if !machineOK || !projectOK || !pieceOK {
+		return key, fmt.Errorf("no tracking identity for piece %q on this machine and project", piece)
+	}
+	key = tracking.Key{MachineID: machineID, ProjectID: projectID, PieceID: pieceID}
+	if err := key.Validate(); err != nil {
+		return tracking.Key{}, fmt.Errorf("invalid stored tracking identity: %w", err)
+	}
+	return key, nil
+}
+
 // Identity is called only by explicit tracking commands. The registry survives
 // remote DELETE and is never initialized during ordinary mp workflows.
 func Identity(dir, root, piece string) (tracking.Key, error) {

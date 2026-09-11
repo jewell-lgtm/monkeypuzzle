@@ -44,6 +44,13 @@ func TestIdentityPersistsAndSerializesFirstUse(t *testing.T) {
 	if err != nil || third.MachineID != first.MachineID || third.ProjectID == first.ProjectID || third.PieceID == first.PieceID {
 		t.Fatalf("project isolation: %+v %v", third, err)
 	}
+	lookedUp, err := LookupIdentity(dir, "/project", "feature")
+	if err != nil || lookedUp != first {
+		t.Fatalf("lookup: %+v %v", lookedUp, err)
+	}
+	if _, err := LookupIdentity(dir, "/project", "typo"); err == nil {
+		t.Fatal("lookup invented an identity for an unpublished piece")
+	}
 	info, _ := os.Stat(filepath.Join(dir, "identity.json"))
 	if info.Mode().Perm() != 0600 {
 		t.Fatalf("identity permissions: %v", info.Mode())

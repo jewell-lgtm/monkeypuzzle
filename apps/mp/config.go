@@ -20,7 +20,9 @@ var validMultiplexerValues = []string{"tmux", "zellij", "cmux", "herdr", "none"}
 var configCmd = &cobra.Command{
 	Use:   "config",
 	Short: "Manage user configuration",
-	Long:  `Get and set user-level monkeypuzzle configuration.`,
+	Long: `Get and set user-level monkeypuzzle configuration: multiplexer, opener,
+and workflow safety gates. Project-specific choices such as the PR/MR provider
+are configured by 'mp init'. Run 'mp config set --help' to see every key.`,
 }
 
 var configGetCmd = &cobra.Command{
@@ -36,7 +38,7 @@ var configSetCmd = &cobra.Command{
 	Long: `Set a configuration value.
 
 Available keys:
-  multiplexer          Terminal multiplexer to use (tmux, zellij, cmux, herdr, none)
+  multiplexer            Terminal multiplexer to use (tmux, zellij, cmux, herdr, none)
   done_require_merged    Whether 'mp done' refuses unmerged pieces (true, false; default true)
   merge_require_updated  Whether 'mp merge' refuses when the target is ahead (true, false; default true)
   open_command           Command 'mp open' runs, e.g. 'code {path}' (placeholders: {path} {piece} {project} {branch})`,

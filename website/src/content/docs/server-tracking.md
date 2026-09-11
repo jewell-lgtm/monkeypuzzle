@@ -1,5 +1,8 @@
-# The mp-server piece registry
-
+---
+title: "The mp-server piece registry"
+order: 10
+---
+<!-- Generated from docs/server-tracking.md by scripts/sync-docs.mjs — edit the source, then run `pnpm sync-docs`. -->
 mp-server's primary purpose is a durable global registry of pieces from different
 machines and developers. Each developer's account is private initially; sharing,
 teams, and workspace membership are not implemented. Pieces exist independently
@@ -15,7 +18,7 @@ variables alone does not enable automatic publishing. No hooks are installed.
 ## CLI
 
 Use an existing mp-server deployment configured as described in
-[self-hosting](self-hosting.md). Supply a first-party WorkOS AuthKit access token for the server’s configured
+[self-hosting](/docs/self-hosting/). Supply a first-party WorkOS AuthKit access token for the server’s configured
 application, mapped to your existing mp-server account. The registry verifies
 the signature, expiry, application-specific issuer, client ID, and session ID.
 WorkOS Connect resource tokens using the MCP authentication are also accepted. A GitHub PAT or session cookie is not

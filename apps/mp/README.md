@@ -11,6 +11,7 @@ mode.
 
 MIT. Build with `make build` (→ `bin/mp`). Fuller docs: [root README](../../README.md) and [docs/](../../docs).
 
-`mp tracking put|delete|list|identity` provides explicit, opt-in progress tracking
-through mp-server. Normal commands remain independent of the server. See
+`mp tracking report|list|identity` provides explicit, opt-in progress tracking
+through mp-server; `mp settle` removes a published piece from that registry
+without touching its local workflow. Normal commands remain independent of the server. See
 [server tracking](../../docs/server-tracking.md) for setup and the prototype's limits.

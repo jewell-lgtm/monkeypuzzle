@@ -56,6 +56,7 @@ Each step fires a shell hook in `.monkeypuzzle/hooks/` with the piece and PR con
 | `mp merge` | Merge the piece into main |
 | `mp done` | Remove the worktree after merge (refuses unmerged; `--force`) |
 | `mp abandon` | Remove an unmerged piece |
+| `mp settle [piece]` | Remove a published piece from your private registry; leaves Git and workflow state alone |
 | `mp cleanup` | Remove every merged piece (preview; `--apply`) |
 | `mp doctor` | Check this machine's setup |
 

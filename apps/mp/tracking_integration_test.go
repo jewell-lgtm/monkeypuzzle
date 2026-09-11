@@ -43,6 +43,24 @@ func TestCLI_TrackingOptInAndRoundTrip(t *testing.T) {
 	t.Setenv("MP_SERVER_TOKEN", "test-token")
 	env.initGitRepo()
 	env.initProject("tracking")
+	help, stderr, err := env.run("--help")
+	if err != nil {
+		t.Fatalf("root help: %v\n%s", err, stderr)
+	}
+	for _, want := range []string{"mp create -> mp sync -> mp pr create", "Piece workflow:", "Collaboration:", "settle"} {
+		if !strings.Contains(help, want) {
+			t.Errorf("root help missing %q:\n%s", want, help)
+		}
+	}
+	trackingHelp, _, err := env.run("tracking", "--help")
+	if err != nil || !strings.Contains(trackingHelp, "report") || strings.Contains(trackingHelp, "delete") {
+		t.Fatalf("tracking help should teach report + settle, not delete: %v\n%s", err, trackingHelp)
+	}
+	var settleSchema map[string]any
+	settleSchemaOut, _, err := env.run("settle", "--schema")
+	if err != nil || json.Unmarshal([]byte(settleSchemaOut), &settleSchema) != nil || settleSchema["piece"] == "" {
+		t.Fatalf("settle schema: %v\n%s", err, settleSchemaOut)
+	}
 	for _, args := range [][]string{{"create", "--name", "feature", "--skip-switch"}, {"list", "--json"}, {"status", "--json"}, {"inbox", "--json"}, {"tracking", "--help"}} {
 		if out, stderr, err := env.run(args...); err != nil {
 			t.Fatalf("%v: %v\n%s\n%s", args, err, out, stderr)
@@ -71,7 +89,9 @@ func TestCLI_TrackingOptInAndRoundTrip(t *testing.T) {
 	if identity != run("identity") {
 		t.Fatal("identity changed across CLI processes")
 	}
-	first := run("put", "--state", "working", "--note", "test")
+	first := run("report", "--state", "working", "--note", "test")
+	// The old API-shaped spelling remains an alias, but is no longer the
+	// discoverable command.
 	if first != run("put", "--state", "working", "--note", "test") {
 		t.Fatal("repeated PUT changed snapshot")
 	}
@@ -86,20 +106,24 @@ func TestCLI_TrackingOptInAndRoundTrip(t *testing.T) {
 	if err := json.Unmarshal([]byte(run("list")), &items); err != nil || len(items.Items) != 1 {
 		t.Fatalf("list: %+v %v", items, err)
 	}
-	run("put", "--state", "done")
+	run("report", "--state", "done")
 	// Explicit selectors still address the same item after the worktree is gone.
 	if err := os.RemoveAll(worktree); err != nil {
 		t.Fatal(err)
 	}
 	for range 2 {
-		out, stderr, err := env.run("tracking", "delete", "--project-root", env.tmpDir, "--piece", "feature")
+		out, stderr, err := env.run("settle", "feature", "--json")
 		if err != nil {
-			t.Fatalf("delete: %v %s %s", err, out, stderr)
+			t.Fatalf("settle: %v %s %s", err, out, stderr)
+		}
+		var settled map[string]any
+		if err := json.Unmarshal([]byte(out), &settled); err != nil || settled["settled"] != true || settled["piece"] != "feature" {
+			t.Fatalf("settle result: %+v %v", settled, err)
 		}
 	}
 	stored, err := st.ListTrackedItems(context.Background(), uid)
 	if err != nil || len(stored) != 0 {
-		t.Fatalf("delete failed: %+v %v", stored, err)
+		t.Fatalf("settle failed: %+v %v", stored, err)
 	}
 	t.Setenv("MP_SERVER_URL", "")
 	if _, stderr, err := env.run("tracking", "list"); err == nil || !strings.Contains(stderr, "opt-in") {

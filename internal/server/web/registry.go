@@ -47,7 +47,7 @@ func registryPage(items []tracking.Item, prEnabled bool, query url.Values) g.Nod
 			g.If(len(items) == 0, Section(Class("registry-empty"),
 				H2(g.Text("Publish your first piece")),
 				P(g.Text("From a piece on any of your machines, configure your server URL and access token, then run:")),
-				Pre(Code(g.Text("mp tracking put --state working --note 'Getting started'"))),
+				Pre(Code(g.Text("mp tracking report --state working --note 'Getting started'"))),
 				P(Class("muted"), g.Text("Your usual mp workflow stays local. Publishing is always explicit.")))),
 			g.If(len(items) > 0 && len(visible) == 0, P(g.Text("No pieces match these filters."))),
 			g.If(len(visible) > 0, Div(Class("registry-table-wrap"), Table(Class("registry-table"),
@@ -65,7 +65,7 @@ func registryPage(items []tracking.Item, prEnabled bool, query url.Values) g.Nod
 						Td(Time(DateTime(item.UpdatedAt.Format(time.RFC3339)), g.Text(item.UpdatedAt.UTC().Format("02 Jan 2006, 15:04 UTC")))),
 					)
 				}))))),
-			g.If(len(items) > 0, P(Class("muted"), g.Text("Progress reflects the last explicit report, not live activity. Marking a piece done keeps it here; mp tracking delete removes it."))),
+			g.If(len(items) > 0, P(Class("muted"), g.Text("Progress reflects the last explicit report, not live activity. Marking a piece done keeps it here; mp settle removes it from the registry."))),
 			g.If(prEnabled, P(A(Href("/repositories"), g.Text("PR monitoring →")))),
 		),
 	)
