@@ -38,7 +38,8 @@ var configSetCmd = &cobra.Command{
 Available keys:
   multiplexer          Terminal multiplexer to use (tmux, zellij, cmux, herdr, none)
   done_require_merged    Whether 'mp done' refuses unmerged pieces (true, false; default true)
-  merge_require_updated  Whether 'mp merge' refuses when the target is ahead (true, false; default true)`,
+  merge_require_updated  Whether 'mp merge' refuses when the target is ahead (true, false; default true)
+  open_command           Command 'mp open' runs, e.g. 'code {path}' (placeholders: {path} {piece} {project} {branch})`,
 	Args: cobra.ExactArgs(2),
 	RunE: runConfigSet,
 }
@@ -48,13 +49,35 @@ func init() {
 	configCmd.AddCommand(configGetCmd)
 	configCmd.AddCommand(configSetCmd)
 
-	// Register completion for config keys
-	_ = configGetCmd.RegisterFlagCompletionFunc("", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	// Complete the key, then that key's values: `mp config set <TAB>` is how
+	// you discover what mp can be told without leaving the prompt.
+	configGetCmd.ValidArgsFunction = completeConfigKeys
+	configSetCmd.ValidArgsFunction = func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		if len(args) == 0 {
-			return []string{"multiplexer", "done_require_merged", "merge_require_updated"}, cobra.ShellCompDirectiveNoFileComp
+			return completeConfigKeys(cmd, args, toComplete)
 		}
+		if len(args) > 1 {
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
+		switch args[0] {
+		case "multiplexer":
+			return validMultiplexerValues, cobra.ShellCompDirectiveNoFileComp
+		case "done_require_merged", "merge_require_updated":
+			return []string{"true", "false"}, cobra.ShellCompDirectiveNoFileComp
+		default:
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
+	}
+}
+
+// configKeys are every key `mp config get/set` understands.
+var configKeys = []string{"multiplexer", "done_require_merged", "merge_require_updated", "open_command"}
+
+func completeConfigKeys(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	if len(args) > 0 {
 		return nil, cobra.ShellCompDirectiveNoFileComp
-	})
+	}
+	return configKeys, cobra.ShellCompDirectiveNoFileComp
 }
 
 func runConfigGet(cmd *cobra.Command, args []string) error {
@@ -73,6 +96,8 @@ func runConfigGet(cmd *cobra.Command, args []string) error {
 		value = strconv.FormatBool(cfg.DoneRequiresMerged())
 	case "merge_require_updated":
 		value = strconv.FormatBool(cfg.MergeRequiresUpdated())
+	case "open_command":
+		value = cfg.OpenCommand
 	default:
 		return fmt.Errorf("unknown config key: %s", key)
 	}
@@ -116,6 +141,8 @@ func runConfigSet(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("invalid merge_require_updated value: %s (valid: true, false)", value)
 		}
 		cfg.SetMergeRequireUpdated(b)
+	case "open_command":
+		cfg.OpenCommand = value
 	default:
 		return fmt.Errorf("unknown config key: %s", key)
 	}
