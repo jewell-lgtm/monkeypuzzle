@@ -20,6 +20,7 @@ const ORDER = [
   'getting-started',
   'workflow',
   'commands',
+  'integrations',
   'remote-development',
   'self-hosting',
   'architecture',

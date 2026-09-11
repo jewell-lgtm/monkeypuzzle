@@ -3,39 +3,42 @@ title: "Workflow guide"
 order: 1
 ---
 <!-- Generated from docs/workflow.md by scripts/sync-docs.mjs — edit the source, then run `pnpm sync-docs`. -->
-Monkeypuzzle gives each in-flight piece of work its own git worktree + tmux session, then fires shell hooks at every lifecycle moment. Hooks decide what label state machines, reviewer policies, and notifications your workflow needs — mp stays out of the way.
+Monkeypuzzle gives each change its own branch, its own git worktree and, when you're ready, its own PR. You cut a piece, stack more pieces on it if the change is big, open the PRs, merge, and clean up. mp fires a shell hook at every one of those transitions, so label state machines, reviewer policies and notifications live in your scripts, not in mp.
 
 ## Core concepts
 
 ### Pieces
 
-A **piece** is an isolated git worktree for a single change. Each piece:
+A **piece** is one change. Each piece:
 
-- Lives in its own directory at `<repo>/.monkeypuzzle/pieces/<piece-name>/` — a git worktree gitignored inside the repo
 - Has its own branch
-- Has its own tmux session (`mp/<project>/<piece>`) **when you work interactively from inside tmux** — agents and scripts driving mp through its stateless API get the worktree path instead of a session (see [Sessions are interactive-only](#sessions-are-interactive-only))
+- Lives in its own git worktree at `<repo>/.monkeypuzzle/pieces/<piece-name>/`, gitignored inside the repo
+- Can have a parent piece, which makes it part of a [stack](#stacking)
+- Gets its own PR/MR when you run `mp pr create`
+
+Multiplexer sessions (tmux, zellij, cmux, herdr) are optional; see [Integrations](/docs/integrations/#multiplexers).
 
 ### Why worktrees?
 
 - Switch between in-flight work without stashing
 - Run tests in one piece while editing in another
-- A long-running dev server in one session, a fresh checkout in another
+- Keep a long-running dev server in one worktree and a fresh checkout in another
 - Hooks have a stable `MP_WORKTREE_PATH` to chdir into
 
 ### Why hooks?
 
-Workflows differ. PHProcess flips GitLab labels on draft→ready; another team auto-assigns reviewers; another posts to Slack; another runs `cargo fmt` on piece create. mp does the worktree/session/branch orchestration and emits a hook at every transition. The hook is a shell script — write whatever you want. Every transition is also appended to a global history log, hook or not; read it with [`mp history`](/docs/commands/#mp-history).
+Workflows differ. PHProcess flips GitLab labels on draft→ready; another team auto-assigns reviewers; another posts to Slack; another runs `cargo fmt` on piece create. mp does the worktree/branch/PR orchestration and emits a hook at every transition. The hook is a shell script, so it can do whatever you want. Every transition is also appended to a global history log, hook or not; read it with [`mp history`](/docs/commands/#mp-history).
 
 ## A common recipe
 
-One way to run a piece end to end. Every step is optional and every gate below has a bypass — hooks decide what your flow needs.
+One way to run a piece end to end. Every step is optional and every gate below has a bypass; hooks decide what your flow needs.
 
 ```
 mp create [--name <name> | --prompt <text>]
         │
         ▼  on-piece-create.sh   (detached, fire-and-forget; logs to .monkeypuzzle/logs/)
-        │                       (env: MP_SESSION_NAME)
-   worktree + tmux session ready
+        │
+   worktree ready
         │
         ▼  (work, commit)
         │
@@ -53,11 +56,11 @@ mp create [--name <name> | --prompt <text>]
         ▼  after-pr-ready.sh                 (same env)
         │
         ▼  before-piece-merge.sh             (env: MP_MAIN_BRANCH)
-   mp merge — merge piece into main
+   mp merge — merge piece into main (or merge the PR on the forge)
         ▼  after-piece-merge.sh              (same env)
         │
         ▼  is-piece-done.sh (optional)       — exit 0 = merged (for squash-merge detection)
-   mp done / cleanup — remove worktree + session
+   mp done / cleanup — remove the worktree
 ```
 
 ### Gates and their bypasses
@@ -70,16 +73,76 @@ mp create [--name <name> | --prompt <text>]
 | `mp abandon` refuses a dirty worktree       | `--force` (discards uncommitted changes — data-loss protection, not policy)                          |
 | `mp cleanup` removes merged pieces only     | `is-piece-done.sh` decides what "merged" means (e.g. squash-merges)                                 |
 
-Piece basics always available to every hook: `MP_PIECE_NAME`, `MP_WORKTREE_PATH`, `MP_REPO_ROOT`.
+Piece basics always available to every hook: `MP_PIECE_NAME`, `MP_WORKTREE_PATH`, `MP_REPO_ROOT`. Pieces placed on a remote box get two more; see [Remote development](/docs/remote-development/#hooks).
 
-Off the main line: `mp create --remote=<box>` fires `on-box-connect.sh` on the
-**controller** (blocking) the first time a project touches a box — see
-[Per-box setup](#per-box-setup) — and every hook that then runs **on the box**
-in a placed piece's worktree also gets `MP_PLACEMENT_HOST=<box>` and
-`MP_REMOTE=1`, whichever way mp was invoked there (the box-side create
-stores the placement in the piece's metadata).
+## Stacking
 
-## A worked example — GitLab MR with a label flip + reviewer
+A big change goes up as a stack of small pieces, each with its own PR targeting the piece below it. mp records each piece's parent and keeps the stack in sync. The full flag reference is in [`mp stack`](/docs/commands/#mp-stack).
+
+```bash
+mp create --name auth-model           # base piece, off main
+mp stack append --name auth-api       # child of the current piece
+mp stack prepend --name auth-schema   # insert between the current piece and its parent
+mp create --name auth-ui --parent auth-api   # same as append, from anywhere
+```
+
+`mp pr create` in a stacked piece targets the parent's branch, so each PR shows only its own diff.
+
+Keep the stack current as main moves and lower pieces change:
+
+```bash
+mp stack status            # the tree, PR/MR state, and drift vs the forge
+mp stack sync              # preview: which pieces would be synced (dry-run)
+mp stack sync --apply      # update main from origin, then merge each parent into its children
+mp stack sync --strategy rebase --apply   # rebase instead of merge
+mp stack continue          # after resolving a rebase conflict
+mp stack undo              # restore every branch to the snapshot the last sync took
+```
+
+`mp sync` does the same for one piece: it merges `origin/<parent>` into the piece you're in.
+
+When a lower piece merges, `mp done` (and `mp abandon`, `mp cleanup`) re-homes its children onto its parent. Run `mp stack sync --apply` to restack them, and `mp stack status --apply-bases` if the forge still shows the old PR bases. To move a piece by hand, `mp stack set-parent --parent <piece|main>` (metadata only; sync restacks).
+
+## Moving between pieces
+
+```bash
+mp create --name feature-a            # worktree A
+mp create --name feature-b            # worktree B
+
+mp                                    # picker over this repo's pieces and branches
+mp go                                 # picker across every registered project
+mp switch feature-a                   # by piece or branch name
+mp switch feat/new-idea --create      # brand-new name: create the piece on that branch
+mp open feature-a                     # open the worktree in your editor
+```
+
+Without a multiplexer, `mp switch` and `mp create` print the worktree path. Load [`mp shell-init`](/docs/integrations/#follow-mp-into-the-worktree-mp-shell-init) and your shell follows mp into the worktree; without it, `cd "$(mp switch feature-a)"` does the same. [`mp open`](/docs/integrations/#editor-and-terminal-mp-open) hands the worktree to your editor or a new terminal window. With a multiplexer configured, `mp switch` attaches the piece's session instead; see [Integrations](/docs/integrations/#multiplexers).
+
+### The inbox
+
+Pieces pile up across repositories, so mp keeps one list of them, in your order:
+
+```bash
+mp inbox                     # every piece in every registered project
+mp inbox --sort urgency      # what needs you first: blocked agents, then PRs in review
+```
+
+Rows you have ranked come first, in your order. mp breaks ties among the rest with what it already knows (an open PR, a merged branch, an agent waiting on you), and `--sort urgency` puts that ahead of your order. Snoozed rows drop to the bottom until their time comes. The tmux and herdr pickers and the dashboard are all views over `mp inbox --json`, so whatever you rearrange in one shows up in the others. See [`mp inbox`](/docs/commands/#mp-inbox).
+
+Rearrange it from anywhere (`mp inbox move fix-auth --top`, `mp inbox note fix-auth "waiting on review"`, `mp inbox snooze fix-auth --for 2d`) and step through it:
+
+```bash
+mp inbox next                # switch to the piece after this one (wraps)
+mp inbox prev                # and back
+```
+
+Each step is the same switch `mp switch` performs, so the shell wrapper follows it and `cd "$(mp inbox next)"` works too.
+
+## Hooks
+
+Hooks are executable scripts in `.monkeypuzzle/hooks/`, named after the transition they run at. A non-zero exit aborts the calling operation, except for `after-*` hooks, where a failure logs a warning (the side effect already happened). The full list and every environment variable are in the [hooks reference](/docs/commands/#hooks).
+
+### A worked example: GitLab MR with a label flip + reviewer
 
 PHProcess-shape workflow: opening the MR flips it to "Doing", the user-driven ready-flip flips it to "Code Review ausstehend" and assigns a reviewer.
 
@@ -113,8 +176,6 @@ mp pr ready                  # ready label flip + reviewer assignment fires
 
 No `--reviewer` flag, no `--label` arg, no PHProcess-specific code in mp.
 
-## Hook recipes
-
 ### Pre-merge gate
 
 Run tests before a merge can land:
@@ -138,58 +199,17 @@ cd "$MP_WORKTREE_PATH"
 go mod download
 ```
 
-`on-piece-create.sh` runs **detached** — `mp create` doesn't wait for it, so a
+`on-piece-create.sh` runs **detached**: `mp create` doesn't wait for it, so a
 slow `go mod download` (or `npm install`, submodule init, etc.) never holds up
 the worktree being ready. Its output goes to
 `.monkeypuzzle/logs/on-piece-create-<piece-name>.log`; tail that file if a piece
 seems to be missing its dependencies.
 
-### Per-box setup
-
-`mp create --remote=<box>` needs a clone of the project on the box. Without a
-hook, mp does the minimum itself (clone `origin`, `mp init`, rsync your
-hooks). Drop an `on-box-connect.sh` to own that step instead — it runs
-**on the controller**, blocking, once per (project, box), and replaces the
-built-in connect entirely. mp then only resolves the clone path on the box
-and checks the contract (`mp remote doctor`). Non-zero exit aborts the
-placement and leaves the box unconnected, so the next attempt runs it again.
-
-```bash
-# .monkeypuzzle/hooks/on-box-connect.sh
-#!/bin/bash
-set -euo pipefail
-# env: MP_BOX  MP_REMOTE_PATH ($HOME/.local/share/mp/<project>, unexpanded)
-#      MP_REPO_URL (origin)  MP_PROJECT  MP_HOOKS_DIR (this dir)
-ssh "$MP_BOX" "set -e
-  export PATH=\"\$HOME/.local/bin:\$PATH\"
-  mkdir -p \"\$(dirname $MP_REMOTE_PATH)\"
-  [ -d $MP_REMOTE_PATH/.git ] || git clone $MP_REPO_URL $MP_REMOTE_PATH
-  cd $MP_REMOTE_PATH
-  [ -f .monkeypuzzle/monkeypuzzle.json ] || echo '{}' | mp init --name $MP_PROJECT >/dev/null
-  mise install                              # toolchain pinned by the repo
-  gh auth status >/dev/null 2>&1 || gh auth login --with-token < ~/.gh-token
-"
-rsync -a -- "$MP_HOOKS_DIR/" "$MP_BOX:$MP_REMOTE_PATH/.monkeypuzzle/hooks/"
-```
-
-Box-side hooks (`on-piece-create.sh` and friends) run on the box with
-`MP_PLACEMENT_HOST=<box>` and `MP_REMOTE=1` — read from the piece's
-metadata, so an agent running `mp pr create` in a box session sees them
-too — and one hook file can branch on where it is:
-
-```bash
-# .monkeypuzzle/hooks/on-piece-create.sh
-#!/bin/bash
-cd "$MP_WORKTREE_PATH"
-if [ "${MP_REMOTE:-}" = 1 ]; then
-  echo "placed on $MP_PLACEMENT_HOST" >> .git/mp-placement
-fi
-go mod download
-```
+Setting up a remote box for placed pieces has its own hook, `on-box-connect.sh`; see [Remote development](/docs/remote-development/#hooks).
 
 ### Post-merge promote
 
-Cherry-pick onto a staging branch after merge — mp's `piece merge` only knows about one downstream, so multi-stage deploys live in this hook:
+Cherry-pick onto a staging branch after merge. `mp merge` only knows about one downstream, so multi-stage deploys live in this hook:
 
 ```bash
 # .monkeypuzzle/hooks/after-piece-merge.sh
@@ -221,51 +241,6 @@ curl -sS -X POST -H 'Content-Type: application/json' \
   -d "{\"text\":\"PR ready: $MP_PR_URL\"}" "$SLACK_WEBHOOK_URL"
 ```
 
-Hooks are shell scripts. Non-zero exit aborts the calling operation, except for `after-*` hooks where failure logs a warning but doesn't fail the operation (the side-effect already happened).
-
-## Multiple concurrent pieces
-
-```bash
-mp create --name feature-a            # worktree A + session mp/<proj>/feature-a
-mp create --name feature-b            # worktree B + session mp/<proj>/feature-b
-
-mp switch                             # TUI selector across pieces
-mp switch feature-a                   # by name (uses tmux switch-client if you're in tmux)
-mp switch feat/new-idea --create      # brand-new name: create the piece on that branch
-```
-
-Long-running processes survive switching — each piece's session keeps its own dev server, log tail, REPL.
-
-### The inbox
-
-Pieces pile up across repositories, so mp keeps one global list of them:
-
-```bash
-mp inbox                     # every piece in every registered project
-mp inbox --sort urgency      # blocked agents and open PRs first
-```
-
-By default the list is yours: rows you have ranked come first, in your
-order, and mp only uses what it already knows — a blocked agent, an open PR,
-a merged branch — to break ties among the rest and to offer `--sort
-urgency` when you want that view instead. Snoozed rows drop to the bottom
-until their time comes. The pickers (tmux, herdr) and the dashboard are all
-views over `mp inbox --json`, so whatever you rearrange in one shows up in
-the others. See [`mp inbox`](/docs/commands/#mp-inbox).
-
-Rearrange it from anywhere — `mp inbox move fix-auth --top`, `mp inbox note
-fix-auth "waiting on review"`, `mp inbox snooze fix-auth --for 2d` — and
-cycle through it instead of hunting through sessions:
-
-```bash
-mp inbox next                # switch to the piece after this one (wraps)
-mp inbox prev                # and back
-```
-
-Each step is the same switch `mp switch` performs — the session inside your
-multiplexer, the worktree path outside one — so `cd "$(mp inbox next)"`
-works too. The tmux plugin will bind these to a chord.
-
 ## Forge support
 
 | Provider | PRs/MRs |
@@ -273,62 +248,7 @@ works too. The tmux plugin will bind these to a chord.
 | GitHub | `pr_provider: github`, uses `gh` |
 | GitLab | `pr_provider: gitlab`, uses `glab mr` |
 
-`mp pr create` pushes the branch and opens a PR/MR via the configured provider; its title defaults to the piece name. Everything beyond that — labels, reviewers, downstream tickets — is hook territory.
-
-## Tmux integration
-
-Sessions are namespaced `mp/<project>/<piece>` so worktrees from different repos never collide. `<project>` comes from `project.name` in `.monkeypuzzle/monkeypuzzle.json` (defaults to the repo dir name).
-
-```bash
-mp switch                             # TUI selector (works with/without tmux)
-mp switch foo                         # by piece or branch name
-tmux ls | grep "^mp/"                       # all mp sessions
-tmux attach -t mp/<project>/<piece>         # raw tmux attach
-```
-
-When you're already inside tmux, `mp switch` calls `switch-client` so you stay attached.
-
-### tmux plugin
-
-For an in-tmux UI that doesn't take over your current pane, the companion plugin
-in [`apps/tmux`](https://github.com/jewell-lgtm/monkeypuzzle/blob/main/apps/tmux/README.md) binds a `prefix m` chord table: a fuzzy
-`fzf` popup for switching between pieces and branches (`prefix m p`), a
-paste-a-branch jump scoped to the current repo (`prefix m g`), piece creation
-(`prefix m c`), agent focus (`prefix m a` / `m b`), and more — see its README
-for the full table. It reads state with `mp go --json` and delegates the actual
-session work back to `mp`.
-
-### Sessions are interactive-only
-
-mp manages a tmux session **only** when you drive it interactively from inside
-tmux — a real terminal on stdin (isatty) **and** `$TMUX` set. In that context
-`create`/`switch`/`go` create the session and `switch-client` your existing
-client to it.
-
-Driven any other way — by an agent or script through the stateless API
-(flags / stdin JSON, output captured), or from a terminal that isn't inside
-tmux — mp creates **no** session and instead returns the worktree path (in the
-result JSON, or on stdout so `cd $(mp switch …)` works). `$TMUX` alone doesn't
-count: it is inherited by child processes, so an agent launched from inside your
-tmux still has it set; the TTY check is what excludes those callers, so an agent
-can never spawn a stray session or `switch-client` your terminal out from under
-you.
-
-### Tmux 101
-
-If you've never used tmux, the essentials:
-
-| Command | Description |
-| --- | --- |
-| `tmux` | start a new session |
-| `tmux ls` | list sessions |
-| `tmux attach -t <name>` | attach to session |
-| `Ctrl+b d` | detach (session keeps running) |
-| `Ctrl+b s` | session picker |
-| `Ctrl+b c` | new window |
-| `Ctrl+b %` / `Ctrl+b "` | split pane |
-
-Sessions persist after detaching — your dev server keeps running, your terminal state survives reattach. If tmux isn't installed, mp falls back to printing the worktree path (use `cd $(mp switch <p>)`).
+`mp pr create` pushes the branch and opens a PR/MR via the configured provider; its title defaults to the piece name. Everything beyond that (labels, reviewers, downstream tickets) is hook territory.
 
 ## Troubleshooting
 
@@ -357,7 +277,7 @@ mp cleanup                               # preview merged pieces (dry-run by def
 mp cleanup --apply                       # remove all merged pieces
 mp cleanup --dry-run                     # explicit preview (never prompts)
 
-mp abandon --name foo                    # discard unmerged piece
-mp abandon --name foo --force            # also discard uncommitted changes
-mp abandon --name foo --delete-branch    # also delete the git branch
+mp abandon foo                           # discard unmerged piece
+mp abandon foo --force                   # also discard uncommitted changes
+mp abandon foo --delete-branch           # also delete the git branch
 ```
