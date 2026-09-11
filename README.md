@@ -1,6 +1,6 @@
 # monkeypuzzle
 
-**One piece of work. One worktree. One PR.**
+**Solve big problems one piece at a time.**
 
 Monkeypuzzle (`mp`) is a git workflow for the terminal. Every change gets its own branch in its own git worktree; mp stacks the pieces, opens the PRs, and cleans up after merge. At every step it fires a shell hook, pre-populated with `MP_PIECE_NAME`, `MP_PR_URL` and friends, so label state machines, reviewer policies and notifications live in your scripts, not in mp.
 
