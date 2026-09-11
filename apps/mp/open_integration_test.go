@@ -147,6 +147,36 @@ func TestOpen_ConfigKeyIsUsed(t *testing.T) {
 	}
 }
 
+// TestOpen_AfterCreateAndSwitchFillsBranch pins --open on create and switch to
+// the same placeholders as `mp open`: {branch} is the branch checked out in the
+// worktree, even when it differs from the piece name.
+func TestOpen_AfterCreateAndSwitchFillsBranch(t *testing.T) {
+	e := setupTestEnv(t)
+	defer e.cleanup()
+
+	dataDir := filepath.Join(e.tmpDir, "data")
+	repo := projectTestRepo(t, e, dataDir, filepath.Join(e.tmpDir, "repos"), "alpha")
+
+	opened := func(args ...string) string {
+		t.Helper()
+		marker := filepath.Join(t.TempDir(), "opened")
+		with := fmt.Sprintf("printf '%%s %%s %%s' {piece} {branch} {project} > %s", marker)
+		mpRun(t, e, repo, dataDir, append(args, "--open", "--with", with)...)
+		got, err := os.ReadFile(marker)
+		if err != nil {
+			t.Fatalf("mp %v: opener did not run: %v", args, err)
+		}
+		return string(got)
+	}
+
+	if got, want := opened("create", "--name", "fix-x"), "fix-x fix-x alpha"; got != want {
+		t.Errorf("create --open got %q, want %q", got, want)
+	}
+	if got, want := opened("switch", "feat/new-idea", "--create"), "new-idea feat/new-idea alpha"; got != want {
+		t.Errorf("switch --open got %q, want %q", got, want)
+	}
+}
+
 // TestDoctor_ReportsSetup pins the local doctor: it reports the multiplexer,
 // the shell wrapper and the opener without changing anything.
 func TestDoctor_ReportsSetup(t *testing.T) {

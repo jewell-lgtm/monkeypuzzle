@@ -2,6 +2,9 @@ package piece_test
 
 import (
 	"encoding/json"
+	"reflect"
+	"sort"
+	"strings"
 	"testing"
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core/piece"
@@ -42,6 +45,36 @@ func TestNewPieceSchema(t *testing.T) {
 	}
 	if _, ok := data["overwrite_session"]; !ok {
 		t.Error("expected 'overwrite_session' in schema")
+	}
+}
+
+// TestNewPieceSchema_MatchesInputFields pins the example document to the
+// fields stdin JSON actually accepts, so a removed flag (like the old "agent")
+// can't linger in --schema output.
+func TestNewPieceSchema_MatchesInputFields(t *testing.T) {
+	schema, err := piece.NewPieceSchema()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var data map[string]any
+	if err := json.Unmarshal(schema, &data); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	var got []string
+	for k := range data {
+		got = append(got, k)
+	}
+
+	var want []string
+	typ := reflect.TypeOf(piece.NewPieceInput{})
+	for i := 0; i < typ.NumField(); i++ {
+		want = append(want, strings.Split(typ.Field(i).Tag.Get("json"), ",")[0])
+	}
+
+	sort.Strings(got)
+	sort.Strings(want)
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("schema keys %v, want NewPieceInput fields %v", got, want)
 	}
 }
 
