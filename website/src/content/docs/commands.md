@@ -383,7 +383,6 @@ mp create --remote wire --name fix-auth   # place the piece on the ssh box "wire
 | `-p, --parent`        | Parent piece name to branch from (stacks the piece) | `main`       |
 | `--skip-switch`       | Don't switch to the new piece after creation      | `false`        |
 | `--overwrite-session` | Replace existing main repo multiplexer session    | `false`        |
-| `--agent`             | Launch an agent in the new piece: `claude` or `codex`. With a session, the launch line is typed into it; without one it runs headless with `--prompt` (output to `.monkeypuzzle/logs/`) | - |
 | `--remote`            | Place the piece on this ssh box: the worktree, hooks, agent and PR live there, the project stays here. First use clones + `mp init`s the repo on the box under `~/.local/share/mp/<project>`. `--parent` must be `main` or a piece already on the same box. Also `"remote"` in stdin JSON. See [Remote development](/docs/remote-development/#placing-a-piece-on-a-box) | - |
 
 ### What it does
@@ -1305,8 +1304,8 @@ Block until agents settle — no agent `working` in the target pieces.
 
 ```bash
 # Fan out, then wait for the whole flock
-mp create --name a --agent claude --prompt "..." --skip-switch
-mp create --name b --agent claude --prompt "..." --skip-switch
+mp create --name a --skip-switch --json   # worktree_path: start a worker there
+mp create --name b --skip-switch --json
 mp wait && mp agent list
 
 mp wait a b --timeout 30m --interval 5s

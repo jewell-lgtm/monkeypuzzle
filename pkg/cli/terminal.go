@@ -35,3 +35,11 @@ func HasStdinData() bool {
 	return (fi.Mode()&os.ModeCharDevice) == 0 && fi.Size() > 0 ||
 		(fi.Mode()&os.ModeNamedPipe) != 0
 }
+
+// IsInteractive reports whether a human is driving mp: stdin AND stdout are
+// terminals. Anything else — a pipe on either side, an agent, a script, a
+// `cd "$(mp …)"` substitution — is treated as an agent: no pickers, no
+// prompts, JSON or a bare path on stdout.
+func IsInteractive() bool {
+	return IsTerminal() && IsStdoutTerminal()
+}

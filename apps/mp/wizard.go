@@ -31,7 +31,7 @@ func ensureUserConfig(cmd *cobra.Command) error {
 	// Errors from here on are not usage errors — don't print cobra's banner.
 	cmd.SilenceUsage = true
 
-	if !cli.IsTerminal() {
+	if !cli.IsInteractive() {
 		return notConfiguredError()
 	}
 
