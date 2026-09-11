@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/jewell-lgtm/monkeypuzzle/internal/adapters"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/config"
 	opencmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/open"
 	piececmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/piece"
@@ -84,18 +85,7 @@ func resolveOpenTarget(ctx context.Context, args []string) (opencmd.Target, erro
 		if err != nil {
 			return opencmd.Target{}, fmt.Errorf("failed to get working directory: %w", err)
 		}
-		status, err := handler.Status(ctx, wd)
-		if err != nil {
-			return opencmd.Target{}, err
-		}
-		if status.RepoRoot == "" {
-			return opencmd.Target{}, fmt.Errorf("not inside a monkeypuzzle project; name a piece, or run this from a repo")
-		}
-		project := projectNameFor(status.RepoRoot)
-		if !status.InPiece {
-			return opencmd.Target{Path: status.RepoRoot, Piece: "main", Project: project}, nil
-		}
-		return opencmd.Target{Path: status.WorktreePath, Piece: status.PieceName, Project: project}, nil
+		return targetAt(ctx, handler, wd)
 	}
 
 	proj, err := resolveSwitchProject(ctx, "")
@@ -124,6 +114,27 @@ func resolveOpenTarget(ctx context.Context, args []string) (opencmd.Target, erro
 	default:
 		return opencmd.Target{}, fmt.Errorf("nothing named %q in %s (no piece, local branch, or remote branch); create it with `mp create --name %s`", name, proj.Name, res.PieceName)
 	}
+}
+
+// targetAt describes the worktree dir is in: the piece (or the project's main
+// worktree), its project, and the branch checked out there.
+func targetAt(ctx context.Context, handler *piececmd.Handler, dir string) (opencmd.Target, error) {
+	status, err := handler.Status(ctx, dir)
+	if err != nil {
+		return opencmd.Target{}, err
+	}
+	if status.RepoRoot == "" {
+		return opencmd.Target{}, fmt.Errorf("not inside a monkeypuzzle project; name a piece, or run this from a repo")
+	}
+	t := opencmd.Target{Path: status.RepoRoot, Piece: "main", Project: projectNameFor(status.RepoRoot)}
+	if status.InPiece {
+		t.Path, t.Piece = status.WorktreePath, status.PieceName
+	}
+	// A detached HEAD has no branch to offer; leave {branch} empty.
+	if branch, err := adapters.NewGit(adapters.NewOSExec()).CurrentBranch(ctx, t.Path); err == nil && branch != "HEAD" {
+		t.Branch = branch
+	}
+	return t, nil
 }
 
 // projectNameFor is the registered name of the project rooted at root, or its
@@ -198,18 +209,11 @@ func maybeOpenAfter(ctx context.Context, workDir string) {
 	if !flagOpenAfter || workDir == "" {
 		return
 	}
-	target := opencmd.Target{Path: workDir, Piece: filepath.Base(workDir)}
-	if _, handler := pieceHandlerForSwitch(); handler != nil {
-		if status, err := handler.Status(ctx, workDir); err == nil {
-			if status.InPiece {
-				target.Piece = status.PieceName
-			} else {
-				target.Piece = "main"
-			}
-			if status.RepoRoot != "" {
-				target.Project = projectNameFor(status.RepoRoot)
-			}
-		}
+	_, handler := pieceHandlerForSwitch()
+	target, err := targetAt(ctx, handler, workDir)
+	if err != nil {
+		// Not a project mp can describe; the path alone still opens.
+		target = opencmd.Target{Path: workDir, Piece: filepath.Base(workDir)}
 	}
 	if err := openTarget(target, flagOpenWith, false); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
