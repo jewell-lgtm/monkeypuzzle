@@ -167,9 +167,9 @@ type linkCheck struct {
 	Pending bool   `json:"pending,omitempty"`
 	// Present reports whether the box-side piece directory exists; Unreachable
 	// means the box could not be asked (the link is kept).
-	Present     bool   `json:"present"`
-	Unreachable bool   `json:"unreachable,omitempty"`
-	Dropped     bool   `json:"dropped,omitempty"`
+	Present     bool `json:"present"`
+	Unreachable bool `json:"unreachable,omitempty"`
+	Dropped     bool `json:"dropped,omitempty"`
 	// Healed: a pending link whose piece the box does have (the create
 	// finished but the controller crashed before recording it) was completed
 	// in place instead of dropped.

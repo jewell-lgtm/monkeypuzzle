@@ -31,7 +31,7 @@ func ensureUserConfig(cmd *cobra.Command) error {
 	// Errors from here on are not usage errors — don't print cobra's banner.
 	cmd.SilenceUsage = true
 
-	if !cli.IsTerminal() {
+	if !cli.IsInteractive() {
 		return notConfiguredError()
 	}
 
@@ -64,13 +64,20 @@ func notConfiguredError() error {
 
 // commandSkipsConfigCheck returns true for commands that must work without a
 // populated user config: the config command itself, help/completion plumbing,
-// and any invocation that's just emitting an example input document.
+// shell-init and doctor, and any invocation that's just emitting an example
+// input document.
 func commandSkipsConfigCheck(cmd *cobra.Command) bool {
 	if cmd == nil {
 		return true
 	}
 	switch cmd.Name() {
 	case "help", "completion", "__complete", "__completeNoDesc":
+		return true
+	}
+	// shell-init is eval'd from a shell rc file, where a missing config would
+	// break every new shell; doctor's job is to report the missing config.
+	switch cmd.CommandPath() {
+	case "mp shell-init", "mp doctor":
 		return true
 	}
 	for c := cmd; c != nil; c = c.Parent() {

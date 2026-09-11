@@ -2,19 +2,19 @@
 
 ## Prerequisites
 
-- **Go 1.24+** - Required for building
-- **Git** - Required for version control operations
-- **tmux** (optional) - For automatic session management when you run `mp create`/`mp switch` interactively from inside tmux. Without it (or when driven by an agent/script), mp prints the worktree path instead of opening a session.
+- **Git**
+- **`gh`** (GitHub) or **`glab`** (GitLab), authenticated, for `mp pr create`
+- **Go 1.24+**, only if you build from source
+
+A multiplexer (tmux, zellij, cmux, herdr) is optional; see
+[Integrations](integrations.md#multiplexers).
 
 ## Installation
 
-### From source (recommended)
+### Homebrew
 
 ```bash
-git clone https://github.com/jewell-lgtm/monkeypuzzle.git
-cd monkeypuzzle
-go build -o mp ./apps/mp   # the mp CLI lives in apps/mp (or just: make build → bin/mp)
-sudo mv mp /usr/local/bin/  # or add to PATH
+brew install jewell-lgtm/tap/monkeypuzzle
 ```
 
 ### Via go install
@@ -23,68 +23,102 @@ sudo mv mp /usr/local/bin/  # or add to PATH
 go install github.com/jewell-lgtm/monkeypuzzle/apps/mp@latest
 ```
 
-## Verify installation
+### From source
 
 ```bash
-mp --help
+git clone https://github.com/jewell-lgtm/monkeypuzzle.git
+cd monkeypuzzle
+make build                  # → bin/mp
+sudo mv bin/mp /usr/local/bin/   # or add bin/ to PATH
 ```
 
-## Initialize your first project
+## Set up your shell
 
-Navigate to your project directory and run:
+Load the shell wrapper, so that `mp create` and `mp switch` move your
+shell into the piece's worktree instead of only printing its path:
 
 ```bash
+echo 'eval "$(mp shell-init zsh)"' >> ~/.zshrc   # bash: ~/.bashrc
+exec zsh
+```
+
+For fish, add `mp shell-init fish | source` to `~/.config/fish/config.fish`.
+
+Check the result:
+
+```bash
+mp doctor
+```
+
+`mp doctor` reports the config, multiplexer, shell wrapper, opener and, inside
+a repo, whether it's an mp project and whether `gh`/`glab` is authenticated.
+
+## Initialize a project
+
+In your repo:
+
+```bash
+cd path/to/your/repo
 mp init
 ```
 
-This launches an interactive wizard:
-1. Enter project name (defaults to directory name)
-2. Choose PR provider (`github` or `gitlab`)
-3. Confirm configuration
+On first use mp asks which multiplexer you use; the default, `none`, is the
+plain-terminal setup this guide uses (`mp config set multiplexer …` changes it
+later). Then the wizard asks for a project name (defaults to the directory
+name) and a PR provider (`github` or `gitlab`). It creates `.monkeypuzzle/`
+with the project config and a `.gitignore` for the piece worktrees, and
+registers the project so `mp go` and `mp inbox` can find it.
 
-Creates `.monkeypuzzle/` directory with configuration.
-
-### Non-interactive initialization
-
-For scripts or CI:
+For scripts or CI, skip the wizards:
 
 ```bash
-# Via flags
+mp config set multiplexer none   # the first-run choice, once per machine
 mp init --name myproject --pr-provider github
-
-# Via JSON stdin
 echo '{"name":"myproject","pr_provider":"github"}' | mp init
-
-# Get an example input document, fill in a value, pipe it back
 mp init --schema | jq '.name = "custom-name"' | mp init
 ```
 
 ## Your first piece
 
-A common recipe — create a unit of work, ship it, clean up — in one pass
-(every step is optional):
-
 ```bash
-mp create --name my-feature   # worktree + session, branched off main
+mp create --name my-feature   # branch + worktree off main; your shell moves into it
 
-# ... make your changes in the new worktree ...
+# ... make your changes, commit ...
 
 mp pr create --draft          # push the branch, open a draft PR/MR
 mp pr ready                   # flip it to ready for review
-mp merge                      # merge the branch back into main
-mp done                       # remove the worktree/session now it's merged
+mp merge                      # merge into main (or merge the PR on the forge)
+mp done                       # remove the worktree now it's merged
 ```
 
-Each step fires the matching lifecycle hook if you've dropped one in
-`.monkeypuzzle/hooks/` — see [Hooks](commands.md#hooks) and the
-[Workflow Guide](workflow.md).
+`mp done` refuses a piece that isn't merged; `mp done --force` removes the
+worktree anyway and keeps the branch. When the worktree you're standing in is
+removed, the shell wrapper takes you back to the main repo.
 
-To jump back to work you've already started, run `mp` (scoped to the current
-repo) or `mp go` (across every registered project) for a fuzzy picker — or
-`mp switch <piece-or-branch-name>` to go straight there by name.
+Each step fires the matching lifecycle hook if you've dropped one in
+`.monkeypuzzle/hooks/`; see [Hooks](workflow.md#hooks).
+
+## Getting around
+
+```bash
+mp                            # picker over this repo's pieces and branches
+mp go                         # picker across every registered project
+mp switch my-feature          # straight to a piece or branch by name
+mp open my-feature            # open the worktree in your editor
+```
+
+`mp open` needs an opener. Set one once:
+
+```bash
+mp config set open_command 'code {path}'   # or cursor, zed, idea, …
+```
+
+Without the shell wrapper, `cd "$(mp switch my-feature)"` does the same as
+`mp switch my-feature`.
 
 ## Next steps
 
-- [Commands Reference](commands.md) - Full command documentation
-- [Workflow Guide](workflow.md) - Using pieces for stacked branches
-- [Remote development](remote-development.md) - Drive a project on another machine, or place single pieces on a box with `mp create --remote`
+- [Workflow guide](workflow.md): [stacking](workflow.md#stacking) pieces, gates, hook recipes
+- [Commands reference](commands.md): every flag and JSON shape
+- [Integrations](integrations.md): editors, tmux and other multiplexers, coding agents
+- [Remote development](remote-development.md): drive a project on another machine, or place single pieces on a box with `mp create --remote`

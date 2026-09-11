@@ -22,6 +22,9 @@ type UserConfig struct {
 	// MergeRequireUpdated gates `mp merge` on the target having no commits the
 	// piece lacks. Pointer so an absent key means the default (true).
 	MergeRequireUpdated *bool `json:"merge_require_updated,omitempty"`
+	// OpenCommand is the template `mp open` runs — e.g. "code {path}". Empty
+	// means no opener is configured and `mp open` only reports the path.
+	OpenCommand string `json:"open_command,omitempty"`
 }
 
 // DoneRequiresMerged reports whether `mp done` refuses unmerged pieces

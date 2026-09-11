@@ -232,9 +232,14 @@ func (h *Handler) CreatePiece(ctx context.Context, pieceName string, opts Create
 		PieceName:    pieceName,
 		WorktreePath: worktreePath,
 		RepoRoot:     repoRoot,
-		SessionName:  sessionName,
 		Branch:       newBranch,
 		Parent:       parent,
+	}
+	// MP_SESSION_NAME only when mp actually manages a session: a hook that
+	// targets it (tmux send-keys …) would otherwise fail silently for a user
+	// with no multiplexer.
+	if !adapters.IsNoopMultiplexer(h.mux) {
+		hookCtx.SessionName = sessionName
 	}
 	if err := h.hooks.RunHookDetached(repoRoot, HookOnPieceCreate, hookCtx); err != nil {
 		// The hook runs fire-and-forget so its setup work (dependency installs,
@@ -406,7 +411,7 @@ func (h *Handler) AdoptPiece(ctx context.Context, input AdoptPieceInput) (PieceI
 			if err := h.git.WorktreePrune(ctx, repoRoot); err != nil {
 				return PieceInfo{}, fmt.Errorf("branch %q was checked out in a worktree whose directory is gone, and pruning the stale record failed: %w", branchToAdopt, err)
 			}
-		case isPathInside(holder.Path, piecesDir):
+		case IsPathInside(holder.Path, piecesDir):
 			return PieceInfo{}, fmt.Errorf("branch %q is already a piece (checked out at %s); use `mp switch` instead", branchToAdopt, holder.Path)
 		case mainHolds:
 			stashed, err := h.git.StashPush(ctx, repoRoot)
@@ -1552,7 +1557,7 @@ func (h *Handler) shouldSwitchClientToMain(worktreePath string) bool {
 	if err != nil {
 		return false
 	}
-	return isPathInside(wd, worktreePath)
+	return IsPathInside(wd, worktreePath)
 }
 
 func (h *Handler) switchClientToMain(ctx context.Context, mainRepoRoot string) {
@@ -1565,8 +1570,8 @@ func (h *Handler) switchClientToMain(ctx context.Context, mainRepoRoot string) {
 	}
 }
 
-// isPathInside reports whether child is the same as or nested under parent.
-func isPathInside(child, parent string) bool {
+// IsPathInside reports whether child is the same as or nested under parent.
+func IsPathInside(child, parent string) bool {
 	absChild, err := filepath.Abs(child)
 	if err != nil {
 		return false
@@ -2388,7 +2393,7 @@ func (h *Handler) SwitchPiece(ctx context.Context, name string) (SwitchResult, e
 	}
 
 	if target.IsPlaced() {
-		return SwitchResult{}, fmt.Errorf("%w: %q is on %s (attach with `ssh -t %s tmux new -A -s %s -c %s`)", ErrPiecePlaced, name, target.Host, target.Host, target.SessionName, target.WorktreePath)
+		return SwitchResult{}, fmt.Errorf("%w: %q is on %s at %s (ssh %s, then cd there; with tmux on the box: `ssh -t %s tmux new -A -s %s -c %s`)", ErrPiecePlaced, name, target.Host, target.WorktreePath, target.Host, target.Host, target.SessionName, target.WorktreePath)
 	}
 
 	result := SwitchResult{Piece: *target}

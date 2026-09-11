@@ -9,29 +9,30 @@ const INSTALL_CMD = 'brew install jewell-lgtm/tap/monkeypuzzle';
 const [INSTALL_BIN, ...INSTALL_ARGS] = INSTALL_CMD.split(' ');
 const INSTALL_REST = INSTALL_ARGS.join(' ');
 
-// Real `mp` commands (verified against apps/mp): `mp stack status` prints the
-// tree; `mp pr create` pushes the current piece and opens a stacked PR.
+// The piece loop, create → pr create → done. Output lines are copied from real
+// `mp` runs on a terminal (pr create's from the strings in internal/core/pr).
 const lines = [
-  { cmd: 'stack status' },
-  { text: '  ◆ feat/auth-ui      draft       +62  −4', tone: 'muted' },
-  { text: '  ◆ feat/auth-api      in review   +210 −18', tone: 'info' },
-  { text: '  ● feat/auth-schema   merged ✓    +88  −2', tone: 'ok' },
-  { text: '  └ main', tone: 'muted' },
+  { cmd: 'create --name auth-schema' },
+  { text: '✓ Created piece: auth-schema at ~/acme/.monkeypuzzle/pieces/auth-schema', tone: 'ok' },
+  { text: '→ next: mp pr create --draft', tone: 'muted' },
   { text: '' },
-  { cmd: 'pr create' },
-  { text: '  ✓ pushed feat/auth-ui → origin', tone: 'ok' },
-  { text: '  ✓ opened #483  feat/auth-ui → feat/auth-api', tone: 'ok' },
+  { cmd: 'pr create --draft' },
+  { text: 'Pushing branch auth-schema to origin...', tone: 'muted' },
+  { text: 'Creating PR...', tone: 'muted' },
+  { text: '✓ Created PR #481: https://github.com/you/acme/pull/481', tone: 'ok' },
+  { text: '' },
+  { cmd: 'done' },
+  { text: '✓ Done with piece: auth-schema', tone: 'ok' },
 ] as const;
 ---
 
 <section class="hero">
   <div class="site">
-    <span class="eyebrow"><Icon name="GitBranch" size={13} /> for people running coding-agent fleets</span>
-    <h1>Land your agents' <span class="g">output.</span></h1>
+    <span class="eyebrow"><Icon name="GitBranch" size={13} /> git workflow for the terminal</span>
+    <h1>Solve big problems<br /> <span class="g">one piece at a time</span></h1>
     <p class="lede">
-      Run as many coding agents as you like. Monkeypuzzle shows you everything
-      they shipped — stacked in review order — so you land it clean and nothing
-      lands unseen by you.
+      One piece of work. One worktree. One PR. mp stacks the pieces, opens the
+      PRs, and cleans up after the merge. Hooks fire at every step.
     </p>
     <div class="cta">
       <div class="install" id="install" data-cmd={INSTALL_CMD}>

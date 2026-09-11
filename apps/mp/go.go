@@ -493,15 +493,18 @@ func runDashboardTUI(ctx context.Context, loadCmd tea.Cmd) error {
 func attachSession(ctx context.Context, sessionName, workDir string) error {
 	mux := chooseMultiplexer(adapters.NewOSExec())
 	if adapters.IsNoopMultiplexer(mux) || !mux.IsInstalled(ctx) {
-		// No session management here: print the path for `cd $(mp switch ...)`.
-		fmt.Println(workDir)
+		// No session management here: the path, for `cd "$(mp switch ...)"`.
+		surfacePath(workDir)
+		maybeOpenAfter(ctx, workDir)
 		return nil
 	}
 	if err := mux.SwitchTo(ctx, sessionName, workDir); err != nil {
-		// Fall back to printing the path.
-		fmt.Println(workDir)
+		// Fall back to the path.
+		surfacePath(workDir)
+		maybeOpenAfter(ctx, workDir)
 		return nil
 	}
 	fmt.Fprintf(os.Stderr, "Attached %s\n", sessionName)
+	maybeOpenAfter(ctx, workDir)
 	return nil
 }

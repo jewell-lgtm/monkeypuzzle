@@ -1,6 +1,6 @@
 ---
 title: "Self-hosting the Monkeypuzzle server"
-order: 4
+order: 5
 ---
 <!-- Generated from docs/self-hosting.md by scripts/sync-docs.mjs — edit the source, then run `pnpm sync-docs`. -->
 The `mp` CLI is free and runs entirely in your terminal. The **server** adds a

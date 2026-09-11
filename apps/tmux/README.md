@@ -9,8 +9,8 @@ It is a thin layer over the `mp` CLI. It reads state with `mp go --json` /
 pickers; the switch/create/inbox actions call `mp` through its stateless
 API. The plugin exports `MP_TMUX_PLUGIN=1`, which tells `mp` to perform the
 tmux `switch-client` / session-create itself (see "Sessions are
-interactive-only" in the
-[workflow guide](../../docs/workflow.md#sessions-are-interactive-only)) — so
+interactive-only" in
+[Integrations](../../docs/integrations.md#sessions-are-interactive-only)) — so
 `mp` stays the single source of truth for session naming.
 
 ## Requirements

@@ -214,9 +214,6 @@ func placePiece(ctx context.Context, req placeRequest, deps core.Deps) (piececmd
 	if req.input.Branch != "" {
 		argv = append(argv, "--branch", req.input.Branch)
 	}
-	if req.input.Agent != "" {
-		argv = append(argv, "--agent", req.input.Agent)
-	}
 	target := &remoteTarget{host: req.box, dir: remoteProject, placement: true}
 	out, code, err := runRemoteCapture(target, argv, 0)
 	if err != nil {

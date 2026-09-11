@@ -133,6 +133,10 @@ func init() {
 	agentFocusCmd.Flags().BoolVar(&flagAgentListAll, "all", false, "Span all registered projects (implied outside a git repo)")
 	agentFocusCmd.Flags().BoolVar(&flagAgentFocusJSON, "json", false, "Output JSON even on a terminal (direct pane focus only; see Long help)")
 
+	for _, c := range []*cobra.Command{agentReadCmd, agentSendCmd, agentFocusCmd} {
+		c.ValidArgsFunction = completePieceNames
+	}
+
 	agentCmd.AddCommand(agentReportCmd)
 	agentCmd.AddCommand(agentListCmd)
 	agentCmd.AddCommand(agentSummaryCmd)
@@ -144,8 +148,10 @@ func init() {
 
 // configuredMultiplexer returns the user's configured multiplexer without the
 // TTY gating of chooseMultiplexer: pane reads and agent detection are exactly
-// what orchestrating scripts/agents do, and neither steals client focus.
-// Degrades to the no-op multiplexer on config problems.
+// what orchestrating scripts/agents do, and neither steals client focus. The
+// in-session gate stays, though — outside the multiplexer there are no panes
+// to read, so shelling out to it only produces errors. Degrades to the no-op
+// multiplexer on config problems.
 func configuredMultiplexer(exec core.Exec) core.Multiplexer {
 	userCfg, err := config.LoadUserConfig()
 	if err != nil {
@@ -153,6 +159,10 @@ func configuredMultiplexer(exec core.Exec) core.Multiplexer {
 	}
 	mux, err := adapters.NewMultiplexer(userCfg.Multiplexer, exec)
 	if err != nil {
+		return adapters.NewNoopMultiplexer()
+	}
+	if !mux.InSession() {
+		warnNotInSession(mux.Name())
 		return adapters.NewNoopMultiplexer()
 	}
 	return mux

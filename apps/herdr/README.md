@@ -32,7 +32,7 @@ And with `mp config set multiplexer herdr`, `mp agent list` / `mp wait` /
 
 The scripts drive mp through its stateless API and export `MP_MUX_PLUGIN=1`,
 which tells mp to perform the herdr workspace focus/create itself (see
-"Sessions are interactive-only" in the [workflow guide](../../docs/workflow.md#sessions-are-interactive-only))
+"Sessions are interactive-only" in [Integrations](../../docs/integrations.md#sessions-are-interactive-only))
 — mp stays the single source of truth for workspace naming.
 
 ## Requirements

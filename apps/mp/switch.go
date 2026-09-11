@@ -68,6 +68,9 @@ func init() {
 	switchCmd.Flags().BoolVar(&flagSwitchCreate, "create", false, "Create a new piece when the target matches nothing")
 	switchCmd.Flags().BoolVar(&flagSwitchAll, "all", false, "Interactive picker across all registered projects")
 	switchCmd.Flags().BoolVar(&flagSwitchAllSchema, "schema", false, "Print an example input document and exit")
+	switchCmd.Flags().BoolVar(&flagOpenAfter, "open", false, "Also open the worktree with your configured opener (see `mp open`)")
+	switchCmd.Flags().StringVar(&flagOpenWith, "with", "", "Opener command for --open (overrides $MP_OPEN and open_command)")
+	switchCmd.ValidArgsFunction = completePieceNames
 	rootCmd.AddCommand(switchCmd)
 }
 
@@ -91,8 +94,8 @@ func runSwitchAll(cmd *cobra.Command, args []string) error {
 	}
 
 	if !haveInput {
-		if !cli.IsTerminal() {
-			return fmt.Errorf("no input; pass a target, --piece/--branch, stdin JSON, or run with a terminal")
+		if !cli.IsInteractive() {
+			return fmt.Errorf("no input; pass a target, --piece/--branch, stdin JSON, or run with a terminal (stdin and stdout)")
 		}
 		return runSwitchInteractive(ctx, flagSwitchAll)
 	}
@@ -208,7 +211,7 @@ func runSwitchTarget(ctx context.Context, proj registry.Project, target string, 
 		return attachSession(ctx, info.SessionName, info.WorktreePath)
 	case piececmd.TargetNew:
 		if !create {
-			if cli.IsTerminal() && !cli.HasStdinData() {
+			if cli.IsInteractive() && !cli.HasStdinData() {
 				ok, err := confirmCreateTarget(res.Branch, res.PieceName)
 				if err != nil {
 					return err

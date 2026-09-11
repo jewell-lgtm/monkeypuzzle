@@ -1,122 +1,81 @@
 # monkeypuzzle
 
-**Worktree-per-piece git-flow with lifecycle hooks at every transition.**
+**Solve big problems one piece at a time.**
 
-Monkeypuzzle (`mp`) gives every in-flight piece of work its own git worktree and tmux session, then fires shell hooks — pre-populated with `MP_PIECE_NAME`, `MP_PR_URL`, and friends — at every lifecycle moment. Bring whatever label state machines, reviewer policies, and notifications your workflow needs; mp stays out of the way and does the boring orchestration.
+Monkeypuzzle (`mp`) is a git workflow for the terminal. Every change gets its own branch in its own git worktree; mp stacks the pieces, opens the PRs, and cleans up after merge. At every step it fires a shell hook, pre-populated with `MP_PIECE_NAME`, `MP_PR_URL` and friends, so label state machines, reviewer policies and notifications live in your scripts, not in mp.
 
 ## Why?
 
-- **No context-switching.** Each piece is its own worktree + tmux session. No stashing, no branch juggling, no "I had three things going."
-- **Hooks at every transition.** `on-piece-create`, `before-/after-pr-create`, `before-/after-pr-ready`, `before-/after-piece-merge`, `is-piece-done` — all with rich env vars. Label flips, ticket-journal sync, Slack pings — all hook scripts, not core code.
-- **Forge-agnostic.** GitHub and GitLab as first-class providers (via `gh` and `glab`). Draft↔ready is a first-class state — `mp pr create --draft` then `mp pr ready` separately, with hooks around both.
-- **Humans and agents share one CLI.** Every command takes flags, stdin JSON, or runs interactive. `--schema` for introspection. No special "agent mode."
+- **No context-switching.** Each piece is its own worktree. No stashing, no branch juggling, no "I had three things going."
+- **Small PRs, stacked.** `mp stack append` builds on the piece you're in; each PR targets its parent, and `mp stack sync` keeps the stack current as main moves.
+- **Hooks at every transition.** `on-piece-create`, `before-/after-pr-create`, `before-/after-pr-ready`, `before-/after-piece-merge`, `is-piece-done`, all with rich env vars. Label flips, ticket-journal sync, Slack pings: hook scripts, not core code.
+- **Forge-agnostic.** GitHub and GitLab as first-class providers (via `gh` and `glab`). Draft↔ready is a first-class state: `mp pr create --draft`, then `mp pr ready`, with hooks around both.
+- **One CLI for humans and scripts.** Every command takes flags, stdin JSON, or runs interactively. `--schema` for introspection.
 
 ## How does this differ from git-town?
 
-git-town manages **stacked branches** in a single working directory. mp manages **isolated worktrees + sessions** for parallel pieces and bolts a hook system onto every lifecycle event. Pick the one whose primary metaphor matches yours — they compose if you really want both.
+Both stack branches: git-town with `git town append`, mp with `mp stack`. The difference is the working copy. git-town switches branches in one working directory; mp gives every piece its own worktree, so pieces sit side by side and you move between them without stashing. mp also fires a hook at every lifecycle transition.
 
 ## Quick start
 
 ```bash
-# 1. Install and point mp at tmux (once)
 brew install jewell-lgtm/tap/monkeypuzzle   # or: go install github.com/jewell-lgtm/monkeypuzzle/apps/mp@latest
-mp config set multiplexer tmux
+eval "$(mp shell-init zsh)"                 # add to ~/.zshrc: mp moves your shell into the worktree
 
 cd path/to/your/repo
-mp init                    # configure project name + pr provider (github/gitlab)
+mp init                        # first run: pick a multiplexer (none), then project name + PR provider
 
-mp create --name add-login     # spawn worktree + tmux session + on-piece-create hook fires
-# ... do the thing ...
-mp pr create --draft           # push, open draft PR/MR, fires before/after-pr-create hooks
-# ... self-review ...
-mp pr ready                    # flip to ready, fires before/after-pr-ready hooks
+mp create --name add-login     # new branch + worktree; your shell is now in it
+# ... do the thing, commit ...
+mp pr create --draft           # push, open a draft PR/MR
+mp pr ready                    # flip to ready for review
+mp merge                       # merge into main (or merge the PR on the forge)
+mp done                        # remove the worktree, back to the main repo
 ```
 
-Each `mp` step fires a shell hook in `.monkeypuzzle/hooks/` with the piece + PR context in env. The hook decides what label state machine, reviewer policy, or downstream system to touch.
+To open pieces in your editor: `mp config set open_command 'code {path}'`, then `mp open add-login`.
 
-## A worked example — GitLab MR with a label flip + reviewer
+Each step fires a shell hook in `.monkeypuzzle/hooks/` with the piece and PR context in env. See [hooks](docs/workflow.md#hooks) for the list and recipes.
 
-`.monkeypuzzle/hooks/after-pr-create.sh` — flip the MR from Draft to Doing on open:
-
-```bash
-#!/bin/bash
-[ -z "$MP_PR_NUMBER" ] && exit 0
-glab mr update "$MP_PR_NUMBER" --label Doing
-```
-
-`.monkeypuzzle/hooks/after-pr-ready.sh` — flip the MR to Code-Review-ausstehend + assign reviewer when the user calls `mp pr ready`:
-
-```bash
-#!/bin/bash
-[ -z "$MP_PR_NUMBER" ] && exit 0
-glab mr update "$MP_PR_NUMBER" \
-  --label "Code Review ausstehend" --unlabel Doing \
-  --reviewer my-reviewer
-```
-
-That's the whole integration. No `--reviewer` baked in, no opinion about labels — mp just hands the hook everything it needs and gets out of the way.
-
-## Hook reference
-
-| Hook | Fires when | Extra env on top of piece basics |
-| --- | --- | --- |
-| `on-piece-create.sh` | `mp create` finishes the worktree (runs detached/fire-and-forget; output → `.monkeypuzzle/logs/`) | `MP_SESSION_NAME` |
-| `before-piece-update.sh` / `after-piece-update.sh` | around `mp update` / `mp sync` | `MP_MAIN_BRANCH` |
-| `before-piece-merge.sh` / `after-piece-merge.sh` | around `mp merge` | `MP_MAIN_BRANCH` |
-| `before-pr-create.sh` / `after-pr-create.sh` | around `mp pr create` | `MP_PR_NUMBER`, `MP_PR_URL`, `MP_PR_BASE_BRANCH` |
-| `before-pr-ready.sh` / `after-pr-ready.sh` | around `mp pr ready` | same as PR create |
-| `is-piece-done.sh` | consulted by `IsBranchMerged` / `mp cleanup` | exit 0 = merged (use to recognise squash-merges) |
-| `on-box-connect.sh` | first `mp create --remote=<box>` of a project on a box (runs on the controller, replaces the built-in clone) | `MP_BOX`, `MP_REMOTE_PATH`, `MP_REPO_URL`, `MP_PROJECT`, `MP_HOOKS_DIR` |
-
-Piece basics always available: `MP_PIECE_NAME`, `MP_WORKTREE_PATH`, `MP_REPO_ROOT`. Hooks running on a box in a [placed piece](docs/remote-development.md#hooks)'s worktree also see `MP_PLACEMENT_HOST`, `MP_REMOTE=1` (stored in the piece's metadata at create, so it holds however mp is invoked there).
-
-Hooks are shell scripts; non-zero exit aborts the calling operation (except after-* hooks, which warn but don't fail).
-
-## Works with AI agents
-
-Every command takes flags, stdin JSON, or `--schema`. Output is JSON on stdout.
-
-```bash
-mp create --schema
-echo '{"name":"my-feature","skip_switch":true}' | mp create
-mp list
-```
-
-Run `mp claude skill` to drop a `.claude/skills/managing-monkeypuzzle/SKILL.md` into your repo so Claude Code knows the CLI surface.
-
-The key rule: **non-interactive invocations (flags or JSON) fail loudly on genuine ambiguity** rather than prompting or guessing — there's no human to ask. The wizard is the only place ambiguity gets resolved. (A pure no-op isn't ambiguous.)
+## Commands
 
 | Command | What it does |
 | --- | --- |
-| `mp init` / `mp reinit` | Configure project name + PR provider (first run) or refresh `.gitignore` + Claude skill (re-run) |
-| `mp` | Picker scoped to the current repo (falls through to `mp go`'s view outside one) |
-| `mp go` | Cross-project picker; `mp switch --all` under a shorter name |
-| `mp switch [target]` | Jump to a piece or branch by name — adopts an existing branch, or creates a new one with `--create` |
-| `mp create` | Spawn worktree + multiplexer session (`--name` or `--prompt`) |
-| `mp adopt <branch>` | Bring an existing branch into mp |
-| `mp list` | Show pieces (`--all` for cross-project) |
-| `mp update` | Sync piece with main |
-| `mp sync` | Sync piece with its parent (prefers origin's version) |
-| `mp merge` | Merge piece back to main |
-| `mp pr create [--draft]` | Push + open PR/MR via configured provider |
+| `mp init` | Configure project name + PR provider (first run) or refresh scaffolding (re-run) |
+| `mp create` | New branch + worktree (`--name` or `--prompt`; `--parent` to stack) |
+| `mp switch [target]` | Go to a piece or branch by name; adopts an existing branch, or creates with `--create` |
+| `mp` / `mp go` | Picker over this repo's pieces / across every project |
+| `mp open [target]` | Open a worktree in your editor or a new terminal |
+| `mp list` | Show pieces as a tree (`--all` for every project) |
+| `mp stack append` / `prepend` | Add a piece above / below the current one |
+| `mp stack sync` | Propagate main and each parent down the stack (preview; `--apply`) |
+| `mp stack status` | The stack tree, PR state, and drift vs the forge |
+| `mp update` / `mp sync` | Merge main / the parent into the current piece |
+| `mp pr create [--draft]` | Push + open PR/MR via the configured provider |
 | `mp pr ready` | Flip a draft PR/MR to ready |
-| `mp done` | Clean up worktree + session (refuses unmerged by default; `--force`) |
-| `mp agent focus [id\|piece] [--blocked]` | Switch the client to an agent's pane, or fall back to a piece switch |
-| `mp config get/set multiplexer` | tmux / zellij / cmux / herdr / none |
+| `mp merge` | Merge the piece into main |
+| `mp done` | Remove the worktree after merge (refuses unmerged; `--force`) |
+| `mp abandon` | Remove an unmerged piece |
+| `mp cleanup` | Remove every merged piece (preview; `--apply`) |
+| `mp doctor` | Check this machine's setup |
 
-See [docs/commands.md](docs/commands.md) for full reference.
+See [docs/commands.md](docs/commands.md) for the full reference.
+
+## Integrations
+
+Everything beyond the workflow is opt-in: `mp open` for your editor, `mp shell-init` for your shell, tmux/zellij/cmux/herdr sessions per piece, coding-agent status and an MCP server, remote boxes over ssh, and a web dashboard. See [docs/integrations.md](docs/integrations.md).
 
 ## Docs
 
 - [Getting started](docs/getting-started.md) — install + first piece
-- [Workflow guide](docs/workflow.md) — a common recipe, hook recipes
+- [Workflow guide](docs/workflow.md) — the lifecycle, stacking, hooks and recipes
 - [Commands reference](docs/commands.md) — flags, example inputs
+- [Integrations](docs/integrations.md) — editors, shells, multiplexers, coding agents
 - [Remote development](docs/remote-development.md) — drive a project on another machine over ssh, or place single pieces on a box (`mp create --remote`)
 - [Architecture](docs/architecture.md) — how it's built
 - [Self-hosting](docs/self-hosting.md) — run the server on your own infra via Helm
 - [Piece registry](docs/server-tracking.md) — mp-server across machines and developers, private accounts and opt-in publication
 - [Contributing](docs/contributing.md) — dev setup, testing philosophy
-- [tmux plugin](apps/tmux/README.md) — fzf popup to switch/create pieces in tmux
 
 ## License
 

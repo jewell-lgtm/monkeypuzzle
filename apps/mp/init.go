@@ -215,7 +215,7 @@ func getInput(workDir, mpDir string) (initcmd.Input, error) {
 			return initcmd.Input{}, err
 		}
 
-	case cli.IsTerminal():
+	case cli.IsInteractive():
 		input, err = runInteractiveMode(workDir)
 		if err != nil {
 			return initcmd.Input{}, err

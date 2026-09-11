@@ -91,10 +91,6 @@ type NewPieceInput struct {
 	Branch           string `json:"branch,omitempty"`
 	SkipSwitch       bool   `json:"skip_switch,omitempty"`
 	OverwriteSession bool   `json:"overwrite_session,omitempty"`
-	// Agent launches an agent of this kind (claude, codex) in the new piece:
-	// typed into the piece's session when one is created, else run headless
-	// with the prompt. Validated at the CLI layer against agent.ValidKinds.
-	Agent string `json:"agent,omitempty"`
 	// Remote places the piece on this ssh box instead of a local worktree
 	// (`mp create --remote=<box>`). Handled at the CLI layer.
 	Remote string `json:"remote,omitempty"`
@@ -109,7 +105,6 @@ func NewPieceSchema() ([]byte, error) {
 		"branch":            "",
 		"skip_switch":       false,
 		"overwrite_session": false,
-		"agent":             "",
 		"remote":            "",
 	}
 	return json.MarshalIndent(schema, "", "  ")
@@ -159,7 +154,6 @@ func WithNewPieceDefaults(input NewPieceInput) NewPieceInput {
 		SkipSwitch:       input.SkipSwitch,
 		OverwriteSession: input.OverwriteSession,
 		Remote:           strings.TrimSpace(input.Remote),
-		Agent:            strings.TrimSpace(input.Agent),
 	}
 }
 

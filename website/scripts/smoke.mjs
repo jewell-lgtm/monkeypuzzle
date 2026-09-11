@@ -8,11 +8,12 @@ import { join } from 'node:path';
 
 const PORT = process.env.SMOKE_PORT ?? '4399';
 const ROUTES = [
-  { path: '/', mustContain: 'Land your agents' },
+  { path: '/', mustContain: 'one piece at a time' },
   { path: '/workflow', mustContain: 'mp' },
   { path: '/docs/', mustContain: 'Guides' },
   { path: '/docs/getting-started/', mustContain: 'mp' },
   { path: '/docs/commands/', mustContain: 'multiplexer' },
+  { path: '/docs/integrations/', mustContain: 'mp open' },
 ];
 
 const server = spawn('node', ['dist/server/entry.mjs'], {

@@ -126,9 +126,11 @@ func init() {
 	inboxSnoozeCmd.Flags().StringVar(&flagInboxSnooze.Until, "until", "", "RFC3339 time")
 	inboxSnoozeCmd.Flags().BoolVar(&flagInboxSnooze.Clear, "clear", false, "Un-snooze")
 	for _, c := range []*cobra.Command{inboxMoveCmd, inboxNoteCmd, inboxSnoozeCmd} {
+		c.ValidArgsFunction = completePieceNames
 		c.Flags().StringVar(&flagInboxPiece, "piece", "", "Piece selector (alternative to the positional)")
 		c.Flags().BoolVar(&flagInboxSchema, "schema", false, "Print an example input document and exit")
 		c.Flags().BoolVar(&flagInboxVerbJS, "json", false, "Output JSON even on a terminal")
+		_ = c.RegisterFlagCompletionFunc("piece", completePieceNames)
 	}
 	for _, c := range []*cobra.Command{inboxNextCmd, inboxPrevCmd, inboxRefreshCmd} {
 		c.Flags().StringVar(&flagInboxStep, "sort", inbox.SortRank, "Order to step through: rank or urgency")
@@ -302,10 +304,13 @@ func runInboxStep(cmd *cobra.Command, dir int) error {
 		return err
 	}
 	if flagInboxVerbJS {
+		if res.Method == "path" {
+			noteCwd(res.Piece.WorktreePath)
+		}
 		return cli.PrintJSON(res)
 	}
 	if res.Method == "path" {
-		fmt.Println(res.Piece.WorktreePath)
+		surfacePath(res.Piece.WorktreePath)
 	}
 	return nil
 }

@@ -35,10 +35,17 @@ func (e *testEnv) env() []string {
 func setupTestEnv(t *testing.T) *testEnv {
 	t.Helper()
 
-	// Create temp directory
+	// Create temp directory. Resolve it: on macOS the temp root is a symlink
+	// (/var -> /private/var), and git — hence every path mp prints back —
+	// reports the real one. Comparing an unresolved expectation against mp's
+	// output is a false failure, so every path a test builds from tmpDir must
+	// start from the resolved form.
 	tmpDir, err := os.MkdirTemp("", "mp-cli-test-*")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	if resolved, err := filepath.EvalSymlinks(tmpDir); err == nil {
+		tmpDir = resolved
 	}
 
 	// Build binary to temp location. Build the package that contains this test
