@@ -81,6 +81,9 @@ type SyncStatus struct {
 // serialization (when needed) is the caller's responsibility.
 type Store interface {
 	TrackingStore
+	// EnsureRegistryUser creates a private account using the authenticated subject,
+	// preserving any existing account and forge credentials. No forge is required.
+	EnsureRegistryUser(ctx context.Context, externalID, displayName, avatarURL string) (int64, error)
 	// Migrate applies the schema idempotently. Safe to call on every boot.
 	Migrate(ctx context.Context) error
 	// Ping verifies the backing store is reachable; used by readiness checks.

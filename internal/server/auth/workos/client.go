@@ -1,15 +1,14 @@
 // Package workos integrates WorkOS as the identity provider for mp server.
 // WorkOS is the OAuth 2.1 Authorization Server for both consumer classes: human
 // web login (AuthKit, "Sign in with GitHub") and AI agents on the MCP surface.
-// For humans it also passes through the user's GitHub access token (enable
-// "Return GitHub OAuth tokens" in the WorkOS dashboard), which the server stores
-// encrypted so the worker can call the GitHub API.
+// A verified WorkOS identity is sufficient for registry login. An optional
+// GitHub access token supports PR monitoring when token passthrough is enabled.
 package workos
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/workos/workos-go/v4/pkg/usermanagement"
 
@@ -52,14 +51,23 @@ func (c *APIClient) Authenticate(ctx context.Context, code string) (identity.Ide
 	if err != nil {
 		return identity.Identity{}, fmt.Errorf("workos: authenticate: %w", err)
 	}
-	if resp.OAuthTokens == nil || resp.OAuthTokens.AccessToken == "" {
-		return identity.Identity{}, errors.New("workos: no GitHub OAuth token in response; enable 'Return GitHub OAuth tokens' in the WorkOS dashboard")
-	}
-	return identity.Identity{
+	return registryIdentity(resp), nil
+}
+
+func registryIdentity(resp usermanagement.AuthenticateResponse) identity.Identity {
+	result := identity.Identity{
 		ProviderUserID: resp.User.ID,
 		Provider:       "github",
-		Token:          resp.OAuthTokens.AccessToken,
-	}, nil
+		DisplayName:    strings.TrimSpace(resp.User.FirstName + " " + resp.User.LastName),
+		AvatarURL:      resp.User.ProfilePictureURL,
+	}
+	if result.DisplayName == "" {
+		result.DisplayName = resp.User.ID
+	}
+	if resp.OAuthTokens != nil {
+		result.Token = resp.OAuthTokens.AccessToken
+	}
+	return result
 }
 
 var _ identity.Provider = (*APIClient)(nil)
