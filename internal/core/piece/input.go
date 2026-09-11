@@ -105,7 +105,6 @@ func NewPieceSchema() ([]byte, error) {
 		"branch":            "",
 		"skip_switch":       false,
 		"overwrite_session": false,
-		"agent":             "",
 		"remote":            "",
 	}
 	return json.MarshalIndent(schema, "", "  ")
