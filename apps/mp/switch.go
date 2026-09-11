@@ -68,6 +68,9 @@ func init() {
 	switchCmd.Flags().BoolVar(&flagSwitchCreate, "create", false, "Create a new piece when the target matches nothing")
 	switchCmd.Flags().BoolVar(&flagSwitchAll, "all", false, "Interactive picker across all registered projects")
 	switchCmd.Flags().BoolVar(&flagSwitchAllSchema, "schema", false, "Print an example input document and exit")
+	switchCmd.Flags().BoolVar(&flagOpenAfter, "open", false, "Also open the worktree with your configured opener (see `mp open`)")
+	switchCmd.Flags().StringVar(&flagOpenWith, "with", "", "Opener command for --open (overrides $MP_OPEN and open_command)")
+	switchCmd.ValidArgsFunction = completePieceNames
 	rootCmd.AddCommand(switchCmd)
 }
 

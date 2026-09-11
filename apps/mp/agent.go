@@ -133,6 +133,10 @@ func init() {
 	agentFocusCmd.Flags().BoolVar(&flagAgentListAll, "all", false, "Span all registered projects (implied outside a git repo)")
 	agentFocusCmd.Flags().BoolVar(&flagAgentFocusJSON, "json", false, "Output JSON even on a terminal (direct pane focus only; see Long help)")
 
+	for _, c := range []*cobra.Command{agentReadCmd, agentSendCmd, agentFocusCmd} {
+		c.ValidArgsFunction = completePieceNames
+	}
+
 	agentCmd.AddCommand(agentReportCmd)
 	agentCmd.AddCommand(agentListCmd)
 	agentCmd.AddCommand(agentSummaryCmd)

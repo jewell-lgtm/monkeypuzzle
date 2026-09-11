@@ -178,6 +178,8 @@ func init() {
 	pieceCreateCmd.Flags().BoolVar(&flagOverwriteSession, "overwrite-session", false, "Replace existing main repo multiplexer session")
 	pieceCreateCmd.Flags().BoolVar(&flagPieceCreateSchema, "schema", false, "Print an example input document and exit")
 	pieceCreateCmd.Flags().BoolVar(&flagPieceCreateJSON, "json", false, "Output JSON even on a terminal")
+	pieceCreateCmd.Flags().BoolVar(&flagOpenAfter, "open", false, "Also open the new worktree with your configured opener (see `mp open`)")
+	pieceCreateCmd.Flags().StringVar(&flagOpenWith, "with", "", "Opener command for --open (overrides $MP_OPEN and open_command)")
 	pieceCreateCmd.Flags().StringVar(&flagPieceRemote, "remote", "", "Place the piece on this ssh box (worktree, hooks, PRs live there; see docs/remote-development.md)")
 	pieceUpdateCmd.Flags().StringVar(&flagMainBranch, "main", "main", "Main branch name to merge (default: main)")
 	pieceUpdateCmd.Flags().StringVar(&flagMainBranchLegacy, "main-branch", "", "Deprecated alias for --main")
@@ -247,6 +249,16 @@ func init() {
 	_ = pieceMergeCmd.RegisterFlagCompletionFunc("main-branch", completeGitBranches)
 	_ = pieceCleanupCmd.RegisterFlagCompletionFunc("main", completeGitBranches)
 	_ = pieceCleanupCmd.RegisterFlagCompletionFunc("main-branch", completeGitBranches)
+	_ = pieceDoneCmd.RegisterFlagCompletionFunc("piece", completePieceNames)
+	_ = pieceStatusCmd.RegisterFlagCompletionFunc("piece", completePieceNames)
+	_ = pieceCreateCmd.RegisterFlagCompletionFunc("parent", completePieceNames)
+	_ = pieceAdoptCmd.RegisterFlagCompletionFunc("parent", completePieceNames)
+
+	// Piece-name completion on every piece positional: without an fzf picker,
+	// tab completion is the picker.
+	for _, c := range []*cobra.Command{pieceStatusCmd, pieceDoneCmd, pieceAbandonCmd, waitCmd} {
+		c.ValidArgsFunction = completePieceNames
+	}
 }
 
 // newPieceHandler creates a piece handler, choosing the multiplexer from the
@@ -542,7 +554,10 @@ func runPieceStatus(cmd *cobra.Command, args []string) error {
 
 	// Output to stderr for human-readable text
 	if status.InPiece {
-		fmt.Fprintf(os.Stderr, "Current piece: %s\n\n", status.PieceName)
+		fmt.Fprintf(os.Stderr, "Current piece: %s\n", status.PieceName)
+		// The worktree path is the one fact a plain terminal can't infer, and
+		// what `cd` needs when no multiplexer session holds the piece.
+		fmt.Fprintf(os.Stderr, "Worktree: %s\n\n", status.WorktreePath)
 
 		// Display parent
 		if status.Parent != "" && status.Parent != "main" {
@@ -659,6 +674,7 @@ func runPieceCreate(cmd *cobra.Command, args []string) error {
 	if !input.SkipSwitch {
 		handOffSwitch(handler.SwitchPiece(ctx, info.Name))(info.WorktreePath, jsonMode)
 	}
+	maybeOpenAfter(ctx, info.WorktreePath)
 
 	cli.Hint("mp pr create --draft")
 	return nil
@@ -1431,6 +1447,11 @@ func runPieceList(cmd *cobra.Command, args []string) error {
 	// command's summary line, so `mp list | jq` sees only JSON on stdout
 	// (gated the same way as everywhere else) and never a tree it can't parse.
 	renderTree(piececmd.BuildPieceTree(pieces))
+	if len(pieces) > 0 {
+		// One line beats a path on every row: it turns any name above into a
+		// directory you can cd to.
+		fmt.Fprintf(os.Stderr, "\nWorktrees: %s/<piece>\n", filepath.Dir(pieces[0].WorktreePath))
+	}
 	return emitResult(pieces, flagPieceListJSON)
 }
 
