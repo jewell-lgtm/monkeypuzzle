@@ -44,7 +44,9 @@ var pieceCreateCmd = &cobra.Command{
 	Long: `Create a new puzzle piece: a git worktree on its own branch, plus a multiplexer
 session when you run mp interactively inside one. Otherwise the worktree path is
 the hand-off — printed on stdout for a human, in the JSON for an agent.
-The worktree will be created in a repo-scoped directory within the platform-appropriate data directory (e.g., ~/Library/Application Support/monkeypuzzle/pieces/{repo-hash}/ on macOS, ~/.local/share/monkeypuzzle/pieces/{repo-hash}/ on Linux).`,
+
+The worktree goes inside the repo, at <repo>/.monkeypuzzle/pieces/<name> (or
+under the directory chosen with ` + "`mp init --dir`" + `), which mp init gitignores.`,
 	Args: cobra.NoArgs,
 	RunE: runPieceCreate,
 }
