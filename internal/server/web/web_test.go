@@ -70,7 +70,7 @@ func TestWeb_Smoke(t *testing.T) {
 	jar.SetCookies(u, []*http.Cookie{{Name: session.CookieName, Value: val}})
 	authed := &http.Client{Jar: jar}
 
-	if body := getBody(t, authed, ts.URL+"/"); !strings.Contains(body, "Your repositories") {
+	if body := getBody(t, authed, ts.URL+"/"); !strings.Contains(body, "Your pieces") {
 		t.Fatalf("dashboard shell missing: %s", body)
 	}
 	if body := getBody(t, authed, ts.URL+"/partials/repos"); !strings.Contains(body, "o/r") {

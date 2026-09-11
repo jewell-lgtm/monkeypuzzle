@@ -3,7 +3,6 @@ package web
 import (
 	"encoding/json"
 	"errors"
-	"log"
 	"net/http"
 
 	g "maragu.dev/gomponents"
@@ -54,7 +53,7 @@ func (h *Handler) setCookie(w http.ResponseWriter, name, value string) {
 // callback completes login: verify state, recover the provider from its cookie,
 // exchange the code (WorkOS for GitHub, direct OAuth for GitLab) for an identity
 // + forge token, derive the forge profile, store the user (encrypted token), set
-// the session, and kick off a sync.
+// the session, and land in the private piece registry.
 func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	stateCookie, err := r.Cookie(oauthStateCookie)
@@ -109,16 +108,8 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	session.Set(w, value, h.deps.SecureCookies)
-	// First-login sync so data populates while the user lands on the dashboard.
-	// Non-fatal: a trigger failure (e.g. Temporal down) must not block login, but
-	// silently swallowing it yields a confusing empty dashboard — so log it and
-	// surface a notice via a query param the dashboard renders into a banner.
-	dest := "/"
-	if _, err := h.deps.Service.StartSync(ctx, uid); err != nil {
-		log.Printf("web: first-login sync failed for user %d: %v", uid, err)
-		dest = "/?sync_error=1"
-	}
-	http.Redirect(w, r, dest, http.StatusSeeOther)
+	// Login lands in the registry. Forge synchronization is a separate, explicit action.
+	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
 // logout clears the session.
@@ -127,9 +118,17 @@ func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
 }
 
-// dashboard renders the shell immediately (skeleton); Alpine hydrates the repo
-// list from /partials/repos for fast TTFB.
+// dashboard reads the private registry directly, with no forge/worker dependency.
 func (h *Handler) dashboard(w http.ResponseWriter, r *http.Request) {
+	items, err := h.deps.Service.ListPieces(r.Context(), userID(r.Context()))
+	if err != nil {
+		http.Error(w, "failed to load pieces", http.StatusInternalServerError)
+		return
+	}
+	h.render(w, registryPage(items, h.deps.Service.PRSyncEnabled(), r.URL.Query()))
+}
+
+func (h *Handler) repositories(w http.ResponseWriter, r *http.Request) {
 	h.render(w, dashboardPage(r.URL.Query().Get("sync_error") != ""))
 }
 

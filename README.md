@@ -114,6 +114,7 @@ See [docs/commands.md](docs/commands.md) for full reference.
 - [Remote development](docs/remote-development.md) — drive a project on another machine over ssh, or place single pieces on a box (`mp create --remote`)
 - [Architecture](docs/architecture.md) — how it's built
 - [Self-hosting](docs/self-hosting.md) — run the server on your own infra via Helm
+- [Piece registry](docs/server-tracking.md) — mp-server across machines and developers, private accounts and opt-in publication
 - [Contributing](docs/contributing.md) — dev setup, testing philosophy
 - [tmux plugin](apps/tmux/README.md) — fzf popup to switch/create pieces in tmux
 
