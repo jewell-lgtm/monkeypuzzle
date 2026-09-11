@@ -21,6 +21,9 @@ const lines = [
   { text: 'Creating PR...', tone: 'muted' },
   { text: '✓ Created PR #481: https://github.com/you/acme/pull/481', tone: 'ok' },
   { text: '' },
+  // `mp done` refuses unmerged pieces by default, so the merge has to show.
+  { text: '# review, mark ready, merge #481 on GitHub', tone: 'muted' },
+  { text: '' },
   { cmd: 'done' },
   { text: '✓ Done with piece: auth-schema', tone: 'ok' },
 ] as const;
