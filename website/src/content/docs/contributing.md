@@ -1,6 +1,6 @@
 ---
 title: "Contributing"
-order: 8
+order: 9
 ---
 <!-- Generated from docs/contributing.md by scripts/sync-docs.mjs — edit the source, then run `pnpm sync-docs`. -->
 ## Development Setup
@@ -9,7 +9,7 @@ order: 8
 
 - Go 1.24+ (use [mise](https://mise.jdx.dev/) for version management)
 - Git
-- tmux (for the piece commands)
+- tmux (optional; some integration tests skip without it)
 - gh CLI (for the GitHub PR provider) or glab CLI (for the GitLab MR provider)
 
 ### Clone and build

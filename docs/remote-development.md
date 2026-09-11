@@ -9,7 +9,7 @@ Vocabulary: the **controller** is the machine running `mp` (your laptop); a
 mp can work on another machine in two ways, both built on the same **proxy**:
 your local `mp` forwards a command over ssh to an `mp` binary on the box,
 which runs it exactly where the repo and worktrees live. Worktree paths,
-lifecycle hooks, tmux sessions, and forge auth (`gh`/`glab`) all resolve on
+lifecycle hooks, multiplexer sessions, and forge auth (`gh`/`glab`) all resolve on
 the box — nothing is emulated on the controller.
 
 | Model | What lives on the box | How you address it |
@@ -17,11 +17,9 @@ the box — nothing is emulated on the controller.
 | **Remote project** — the whole project is on the box | the repo and every piece | `mp project add box:path`, then `mp --project <name> <cmd>` (or `--host`/`--dir`) — see [Setup](#setup-once-per-host) |
 | **Placed piece** — one piece of a local project is on the box | one clone per (project, box) under `~/.local/share/mp/<project>`, with that piece as a normal worktree | `mp create --remote=<box> --name <piece>`; the project, `mp list`, and the tmux plugin stay on the controller — see [Placing a piece on a box](#placing-a-piece-on-a-box) |
 
-Both are built for the fleet workflow: a laptop dispatching pieces to beefy
-boxes where coding agents run. The remote surface is byte-identical to the
-local one — flags, stdin JSON, `--schema`, JSON out — so anything that can
-drive `mp` locally can drive a box, including
-[mp-mcp](../apps/mp-mcp/README.md).
+The remote surface is byte-identical to the local one — flags, stdin JSON,
+`--schema`, JSON out — so anything that can drive `mp` locally can drive a
+box, including [mp-mcp](../apps/mp-mcp/README.md).
 
 ## Setup (once per host)
 
@@ -54,7 +52,7 @@ mp remote doctor wire
 # wire:
 #   ✓ ssh (BatchMode)
 #   ✓ mp v0.9.2 = local
-#   ✓ git  ✓ tmux  ✓ gh (auth: ✓)
+#   ✓ git  ✓ tmux  ✓ herdr  ✓ gh (auth: ✓)
 ```
 
 `mp remote doctor` with no argument checks every host in your registry. If a
@@ -104,7 +102,7 @@ the ssh login home (it ends up inside single quotes on the remote shell, so
 | git, worktrees, branches | remote host |
 | lifecycle hooks (`.monkeypuzzle/hooks/`) | remote host, remote env |
 | PR creation (`gh` / `glab`) | remote host — auth there |
-| tmux sessions | remote host (create/attach yourself: `ssh -t wire tmux new -A -s <session>`) |
+| multiplexer sessions, if you use one | remote host (create/attach yourself, e.g. `ssh -t wire tmux new -A -s <session>`) |
 | interactivity | remote: a pty is allocated only when your local stdin+stdout are a real terminal |
 
 Piped/JSON invocations get no pty, so JSON output stays byte-clean; when the
@@ -233,7 +231,25 @@ stderr, the pending link is removed and nothing is registered, so the next
 | `MP_HOOKS_DIR` | the controller's `.monkeypuzzle/hooks/`, if you want them on the box too |
 
 It runs with the controller repo as cwd. A worked recipe (clone + toolchain
-+ `gh auth`) is in the [workflow guide](workflow.md#per-box-setup).
++ `gh auth`):
+
+```bash
+# .monkeypuzzle/hooks/on-box-connect.sh
+#!/bin/bash
+set -euo pipefail
+# env: MP_BOX  MP_REMOTE_PATH ($HOME/.local/share/mp/<project>, unexpanded)
+#      MP_REPO_URL (origin)  MP_PROJECT  MP_HOOKS_DIR (this dir)
+ssh "$MP_BOX" "set -e
+  export PATH=\"\$HOME/.local/bin:\$PATH\"
+  mkdir -p \"\$(dirname $MP_REMOTE_PATH)\"
+  [ -d $MP_REMOTE_PATH/.git ] || git clone $MP_REPO_URL $MP_REMOTE_PATH
+  cd $MP_REMOTE_PATH
+  [ -f .monkeypuzzle/monkeypuzzle.json ] || echo '{}' | mp init --name $MP_PROJECT >/dev/null
+  mise install                              # toolchain pinned by the repo
+  gh auth status >/dev/null 2>&1 || gh auth login --with-token < ~/.gh-token
+"
+rsync -a -- "$MP_HOOKS_DIR/" "$MP_BOX:$MP_REMOTE_PATH/.monkeypuzzle/hooks/"
+```
 
 **Box-side hooks of a placed piece** — `on-piece-create.sh`,
 `before-pr-create.sh`, all of them — run on the box as usual, from the clone
@@ -250,6 +266,18 @@ the box — gives its hooks the same two variables. `MP_HOST` is never set on
 the box (it is the reroute variable and would make the box proxy onward).
 An older `mp` on the box simply ignores the variables — `mp remote doctor`
 already flags the version skew.
+
+One hook file can branch on where it runs:
+
+```bash
+# .monkeypuzzle/hooks/on-piece-create.sh
+#!/bin/bash
+cd "$MP_WORKTREE_PATH"
+if [ "${MP_REMOTE:-}" = 1 ]; then
+  echo "placed on $MP_PLACEMENT_HOST" >> .git/mp-placement
+fi
+go mod download
+```
 
 ### Preparing a box by hand
 
