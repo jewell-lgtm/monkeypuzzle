@@ -27,11 +27,13 @@ import (
 	"github.com/jewell-lgtm/monkeypuzzle/internal/server/service"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/server/store"
 	syncpkg "github.com/jewell-lgtm/monkeypuzzle/internal/server/sync"
+	"github.com/jewell-lgtm/monkeypuzzle/internal/server/trackingapi"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/server/web"
+	"github.com/jewell-lgtm/monkeypuzzle/pkg/tracking"
 )
 
-// runServe wires the read service, the HTML UI (humans), and the MCP endpoint
-// (agents) — both over the same service — and serves HTTP.
+// runServe wires the private piece registry API, dashboard and MCP reads.
+// Optional PR monitoring may enrich the server but never gates registry startup.
 func runServe() error {
 	cfg, err := LoadConfig()
 	if err != nil {
@@ -53,16 +55,29 @@ func runServe() error {
 		return err
 	}
 
-	tc, err := client.Dial(client.Options{HostPort: cfg.TemporalHostPort})
-	if err != nil {
-		return fmt.Errorf("temporal dial: %w", err)
+	// Registry startup never depends on the optional PR-monitoring system.
+	var trigger syncpkg.SyncTrigger
+	var temporalHealth func(context.Context) error
+	if cfg.PRSyncEnabled {
+		dialCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		tc, err := client.DialContext(dialCtx, client.Options{HostPort: cfg.TemporalHostPort})
+		cancel()
+		if err != nil {
+			log.Printf("PR monitoring unavailable; serving the piece registry: %v", err)
+		} else {
+			defer tc.Close()
+			trigger = syncpkg.NewTemporalTrigger(tc, st)
+			temporalHealth = func(ctx context.Context) error {
+				_, err := tc.CheckHealth(ctx, &client.CheckHealthRequest{})
+				return err
+			}
+		}
 	}
-	defer tc.Close()
 
 	// Optional `mp stack graph` path (flag-gated by USE_MP_CLI); falls back to the
 	// in-process Go path on any failure. Reuses the same token cipher as sync.
 	runner := mprunner.NewExecRunner(cfg.MpBin)
-	svc := service.New(st, syncpkg.NewTemporalTrigger(tc, st), runner, cipher, cfg.UseMpCLI)
+	svc := service.New(st, trigger, runner, cipher, cfg.UseMpCLI)
 
 	// The forge registry is provider-neutral and needs no OAuth secrets; both
 	// factories are always available so a synced user of either forge can be read.
@@ -105,14 +120,18 @@ func runServe() error {
 	// them unauthenticated. Liveness never touches dependencies; readiness gates
 	// on the DB and best-effort checks Temporal.
 	mux.HandleFunc("GET /healthz", healthzHandler)
-	mux.HandleFunc("GET /readyz", newReadyzHandler(st, func(ctx context.Context) error {
-		_, err := tc.CheckHealth(ctx, &client.CheckHealthRequest{})
-		return err
-	}))
+	mux.HandleFunc("GET /readyz", newReadyzHandler(st, temporalHealth))
 	webHandler.Routes(mux)
 	mux.Handle("GET /.well-known/oauth-protected-resource", mcppkg.ProtectedResourceMetadata(resourceURL, cfg.AuthKitDomain))
 	mux.Handle("/mcp", mcpHandler)
 	mux.Handle("/mcp/", mcpHandler)
+	registryVerifier, err := workos.NewRegistryTokenVerifier(cfg.WorkOSJWKSURL, cfg.WorkOSClientID, st, verifier)
+	if err != nil {
+		return fmt.Errorf("registry token verifier: %w", err)
+	}
+	trackingHandler := trackingapi.NewHandler(st, registryVerifier, resourceURL+"/.well-known/oauth-protected-resource")
+	mux.Handle(tracking.BasePath, trackingHandler)
+	mux.Handle(tracking.BasePath+"/", trackingHandler)
 
 	addr := ":" + cfg.Port
 	srv := &http.Server{Addr: addr, Handler: mux}

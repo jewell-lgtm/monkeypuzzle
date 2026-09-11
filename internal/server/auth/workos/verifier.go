@@ -25,11 +25,15 @@ type UserResolver interface {
 // signature, issuer, expiry, and (if non-empty) audience — then maps its subject
 // to a local user id. jwksURL is typically <authkit-domain>/oauth2/jwks.
 func NewTokenVerifier(jwksURL, issuer, audience string, resolver UserResolver) (auth.TokenVerifier, error) {
+	return newTokenVerifier(jwksURL, issuer, audience, resolver, nil)
+}
+
+func newTokenVerifier(jwksURL, issuer, audience string, resolver UserResolver, validate func(jwt.MapClaims) error) (auth.TokenVerifier, error) {
 	kf, err := keyfunc.NewDefault([]string{jwksURL})
 	if err != nil {
 		return nil, fmt.Errorf("workos: load jwks %q: %w", jwksURL, err)
 	}
-	opts := []jwt.ParserOption{jwt.WithExpirationRequired()}
+	opts := []jwt.ParserOption{jwt.WithExpirationRequired(), jwt.WithValidMethods([]string{"RS256"})}
 	if issuer != "" {
 		opts = append(opts, jwt.WithIssuer(issuer))
 	}
@@ -44,6 +48,11 @@ func NewTokenVerifier(jwksURL, issuer, audience string, resolver UserResolver) (
 		claims, ok := parsed.Claims.(jwt.MapClaims)
 		if !ok {
 			return nil, fmt.Errorf("%w: unexpected claims type", auth.ErrInvalidToken)
+		}
+		if validate != nil {
+			if err := validate(claims); err != nil {
+				return nil, err
+			}
 		}
 		return tokenInfoFromClaims(ctx, claims, resolver)
 	}, nil
@@ -85,4 +94,30 @@ func scopesFromClaims(claims jwt.MapClaims) []string {
 		return strings.Fields(s)
 	}
 	return nil
+}
+
+// NewRegistryTokenVerifier also accepts first-party AuthKit access tokens. These
+// have no audience: their environment-specific issuer and client_id bind them to
+// this application. Connect resource tokens retain their original validation.
+func NewRegistryTokenVerifier(jwksURL, clientID string, resolver UserResolver, connect auth.TokenVerifier) (auth.TokenVerifier, error) {
+	if clientID == "" {
+		return nil, fmt.Errorf("workos: missing client id")
+	}
+	firstParty, err := newTokenVerifier(jwksURL, "https://api.workos.com/user_management/"+clientID, "", resolver, func(claims jwt.MapClaims) error {
+		sid, _ := claims["sid"].(string)
+		if claims["client_id"] != clientID || sid == "" || claims["aud"] != nil {
+			return fmt.Errorf("%w: expected application access token", auth.ErrInvalidToken)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return func(ctx context.Context, token string, req *http.Request) (*auth.TokenInfo, error) {
+		info, err := firstParty(ctx, token, req)
+		if err == nil {
+			return info, nil
+		}
+		return connect(ctx, token, req)
+	}, nil
 }
