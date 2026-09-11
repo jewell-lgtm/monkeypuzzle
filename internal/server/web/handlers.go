@@ -51,9 +51,9 @@ func (h *Handler) setCookie(w http.ResponseWriter, name, value string) {
 }
 
 // callback completes login: verify state, recover the provider from its cookie,
-// exchange the code (WorkOS for GitHub, direct OAuth for GitLab) for an identity
-// + forge token, derive the forge profile, store the user (encrypted token), set
-// the session, and land in the private piece registry.
+// exchange the code for a verified identity, create or reuse the private
+// registry account, set the session, and land in the registry. Forge profile
+// access is needed only for optional monitoring or direct GitLab login.
 func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	stateCookie, err := r.Cookie(oauthStateCookie)
@@ -75,32 +75,43 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "authentication failed", http.StatusBadGateway)
 		return
 	}
-	client, err := h.deps.Forge.ForToken(res.Provider, res.Token)
-	if err != nil {
-		http.Error(w, "unknown forge provider", http.StatusInternalServerError)
-		return
-	}
-	profile, err := client.GetAuthenticatedUser(ctx)
-	if err != nil {
-		http.Error(w, "failed to fetch forge profile", http.StatusBadGateway)
-		return
-	}
-	enc, err := h.deps.Cipher.Encrypt([]byte(res.Token))
-	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
-	}
-	uid, err := h.deps.Store.UpsertUser(ctx, store.User{
-		ExternalUserID: res.ProviderUserID,
-		Provider:       res.Provider,
-		ForgeUserID:    profile.ID,
-		ForgeLogin:     profile.Login,
-		AvatarURL:      profile.AvatarURL,
-		AccessTokenEnc: enc,
-	})
-	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
+	var uid int64
+	// Registry login requires only an authenticated identity. GitHub API access
+	// belongs to optional PR monitoring and may be absent from WorkOS responses.
+	if provider == "github" && !h.deps.Service.PRSyncEnabled() {
+		uid, err = h.deps.Store.EnsureRegistryUser(ctx, res.ProviderUserID, res.DisplayName, res.AvatarURL)
+		if err != nil {
+			http.Error(w, "failed to create registry account", http.StatusInternalServerError)
+			return
+		}
+	} else {
+		client, err := h.deps.Forge.ForToken(res.Provider, res.Token)
+		if err != nil {
+			http.Error(w, "unknown forge provider", http.StatusInternalServerError)
+			return
+		}
+		profile, err := client.GetAuthenticatedUser(ctx)
+		if err != nil {
+			http.Error(w, "failed to fetch forge profile", http.StatusBadGateway)
+			return
+		}
+		enc, err := h.deps.Cipher.Encrypt([]byte(res.Token))
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		uid, err = h.deps.Store.UpsertUser(ctx, store.User{
+			ExternalUserID: res.ProviderUserID,
+			Provider:       res.Provider,
+			ForgeUserID:    profile.ID,
+			ForgeLogin:     profile.Login,
+			AvatarURL:      profile.AvatarURL,
+			AccessTokenEnc: enc,
+		})
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
 	}
 	value, err := h.deps.Session.Encode(uid)
 	if err != nil {
