@@ -4,42 +4,44 @@ import Icon from './Icon.astro';
 
 const features = [
   {
+    icon: 'FolderGit2',
+    title: 'A worktree per piece',
+    body: 'Every piece is a branch checked out in its own directory. Switch tasks without stashing, and nothing half-done gets in the way.',
+  },
+  {
     icon: 'Layers',
     title: 'Stacks, not mega-PRs',
-    body: 'Break a feature into a chain of small pieces. Each reviews in minutes; the stack ships as one.',
+    body: 'Break a feature into a chain of small pieces, each built on the one below. Each PR reviews in minutes.',
   },
   {
     icon: 'RefreshCw',
     title: 'Restack on autopilot',
-    body: 'Change a piece low in the stack and Monkeypuzzle rebases everything above it — conflicts surfaced, never silent.',
+    bodyHtml:
+      'Change a piece low in the stack and <code class="feature__cmd">mp stack sync</code> carries it up through every piece above. A conflict stops the sync and tells you where.',
   },
   {
     icon: 'GitPullRequest',
     title: 'One command to submit',
     bodyHtml:
-      '<code class="feature__cmd">mp pr create</code> opens or updates a PR per piece, wired parent-to-parent, with the stack drawn in each description.',
+      '<code class="feature__cmd">mp pr create</code> pushes the piece and opens its PR against the piece below, so each PR holds one change.',
   },
   {
-    icon: 'GitPullRequest',
+    icon: 'Webhook',
+    title: 'Hooks at every transition',
+    bodyHtml:
+      'Scripts in <code class="feature__cmd">.monkeypuzzle/hooks/</code> run on create, update, PR and merge. Install dependencies for a new piece, run the tests before a PR opens.',
+  },
+  {
+    icon: 'GitBranch',
     title: 'Native to GitHub & GitLab',
-    body: 'First-class on both forges — pull requests or merge requests, with the checks and reviews you already have. No new forge, no lock-in.',
-  },
-  {
-    icon: 'Zap',
-    title: 'Built for the terminal',
-    body: 'A fast, friendly CLI first — plus a web dashboard when you want the whole team\'s stacks in one place.',
-  },
-  {
-    icon: 'Eye',
-    title: 'The stack, visualized',
-    body: 'Every piece, its status, and its place in the tree — readable at a glance, in your shell or the dashboard.',
+    body: 'Pull requests on GitHub, merge requests on GitLab, through gh and glab. Your checks and reviews stay where they are.',
   },
 ];
 ---
 
 <section class="section" id="features">
   <div class="site">
-    <div class="section__eyebrow">Why stacks</div>
+    <div class="section__eyebrow">Why pieces</div>
     <h2 class="section__title">Big features, small reviews.</h2>
     <div class="features">
       {
