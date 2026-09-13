@@ -70,7 +70,7 @@ func TestCLI_PRAtomListsAndShowsRecordedAssociations(t *testing.T) {
 	if err != nil || !strings.Contains(stdout, `"number": 42`) || !strings.Contains(stdout, `"branch": "with-pr"`) {
 		t.Fatalf("list: %v\nstdout=%s\nstderr=%s", err, stdout, stderr)
 	}
-	stdout, stderr, err = env.run("pr", "show", "#42", "--json")
+	stdout, stderr, err = env.runInDir(wt, "pr", "show", "--json")
 	if err != nil || !strings.Contains(stdout, `"url": "https://example.test/pr/42"`) {
 		t.Fatalf("show: %v\nstdout=%s\nstderr=%s", err, stdout, stderr)
 	}

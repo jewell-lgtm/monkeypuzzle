@@ -2,7 +2,9 @@ package pr
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -43,10 +45,20 @@ func (h *Handler) List(ctx context.Context, workDir string) ([]ManagedInfo, erro
 	}
 	rows := make([]ManagedInfo, 0)
 	for _, branch := range branches {
-		if branch.PRNumber == 0 {
+		if branch.PRNumber != 0 {
+			rows = append(rows, ManagedInfo{Number: branch.PRNumber, URL: branch.PRURL, Branch: branch.Name, Base: branch.Base, Piece: branch.Piece, Status: branch.Status, Current: branch.Current})
 			continue
 		}
-		rows = append(rows, ManagedInfo{Number: branch.PRNumber, URL: branch.PRURL, Branch: branch.Name, Base: branch.Base, Piece: branch.Piece, Status: branch.Status, Current: branch.Current})
+		legacy, legacyErr := piece.ReadPRMetadata(branch.Worktree, h.deps.FS)
+		if legacyErr != nil {
+			if errors.Is(legacyErr, os.ErrNotExist) {
+				continue
+			}
+			return nil, legacyErr
+		}
+		if legacy.PRNumber != 0 && (legacy.Branch == "" || legacy.Branch == branch.Name) {
+			rows = append(rows, ManagedInfo{Number: legacy.PRNumber, URL: legacy.PRURL, Branch: branch.Name, Base: legacy.BaseBranch, Piece: branch.Piece, Status: "OPEN", Current: branch.Current})
+		}
 	}
 	return rows, nil
 }
@@ -229,6 +241,7 @@ func (h *Handler) CreatePR(ctx context.Context, workDir string, input Input) (*P
 		return nil, fmt.Errorf("failed to write PR metadata: %w", err)
 	}
 	if pieceMetadata, err := piece.ReadPieceMetadata(status.WorktreePath, h.deps.FS); err == nil {
+		recorded := false
 		for i := range pieceMetadata.Stack {
 			if pieceMetadata.Stack[i].Branch == branch {
 				pieceMetadata.Stack[i].PRNumber = prResult.Number
@@ -237,7 +250,14 @@ func (h *Handler) CreatePR(ctx context.Context, workDir string, input Input) (*P
 				if err := piece.WritePieceMetadata(status.WorktreePath, *pieceMetadata, h.deps.FS); err != nil {
 					return nil, fmt.Errorf("failed to record PR in piece stack: %w", err)
 				}
+				recorded = true
 				break
+			}
+		}
+		if !recorded && len(pieceMetadata.Stack) == 0 {
+			pieceMetadata.Stack = []piece.StackEntry{{Branch: branch, Base: input.Base, PRNumber: prResult.Number, PRURL: prResult.URL, Status: "OPEN"}}
+			if err := piece.WritePieceMetadata(status.WorktreePath, *pieceMetadata, h.deps.FS); err != nil {
+				return nil, fmt.Errorf("failed to bootstrap piece stack with PR: %w", err)
 			}
 		}
 	}
