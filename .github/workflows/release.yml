@@ -1,0 +1,88 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Publish GitHub release and Homebrew formula
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the tagged source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Run the complete test suite
+        run: go test ./...
+
+      - name: Require the dedicated tap token
+        env:
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+        run: test -n "$HOMEBREW_TAP_GITHUB_TOKEN"
+
+      - name: Release mp and mp-mcp
+        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+        with:
+          distribution: goreleaser
+          # v2.10 deprecated Linux-capable formula publishing in favor of
+          # macOS-only casks. Pin the last formula-supporting release.
+          version: v2.9.0
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+
+  homebrew-smoke:
+    name: Homebrew smoke test (${{ matrix.os }})
+    needs: release
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Set up Homebrew
+        uses: Homebrew/actions/setup-homebrew@7001732169813b7bd296f39014e60fcc07f0ef9a
+
+      - name: Install the published formula
+        run: brew install jewell-lgtm/tap/monkeypuzzle
+
+      - name: Exercise the installed binaries and core workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          mp --version
+          printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
+            | mp-mcp \
+            | grep -q '"name":"monkeypuzzle-mcp"'
+
+          smoke_dir="$(mktemp -d)"
+          trap 'rm -rf "$smoke_dir"' EXIT
+          git -C "$smoke_dir" init --initial-branch main
+          git -C "$smoke_dir" config user.name "Homebrew smoke test"
+          git -C "$smoke_dir" config user.email "smoke@monkeypuzzle.dev"
+          touch "$smoke_dir/README.md"
+          git -C "$smoke_dir" add README.md
+          git -C "$smoke_dir" commit -m "Initial commit"
+
+          export MP_CONFIG_DIR="$smoke_dir/.mp-config"
+          mp config set multiplexer none
+          cd "$smoke_dir"
+          mp init --name brew-smoke --pr-provider github
+          piece_path="$(mp create --name first-piece --json | jq -r '.worktree_path')"
+          test -d "$piece_path"
+          cd "$piece_path"
+          mp stack append --name reviewable-step --json \
+            | jq -e '.branch == "reviewable-step"' >/dev/null
