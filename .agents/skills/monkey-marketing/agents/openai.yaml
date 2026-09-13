@@ -1,0 +1,4 @@
+interface:
+  display_name: "Monkey Marketing"
+  short_description: "Evidence-driven growth for Monkeypuzzle"
+  default_prompt: "Use $monkey-marketing to run this week’s growth meeting and update the vault."
