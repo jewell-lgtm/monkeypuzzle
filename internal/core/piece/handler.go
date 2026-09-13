@@ -211,6 +211,7 @@ func (h *Handler) CreatePiece(ctx context.Context, pieceName string, opts Create
 		Parent:            parent,
 		CreatedFromBranch: currentBranch,
 		PlacementHost:     h.hooks.placementHost,
+		Stack:             []StackEntry{{Branch: newBranch, Base: parent}},
 	}
 	if err := WritePieceMetadata(worktreePath, pieceMetadata, h.deps.FS); err != nil {
 		// Non-fatal: log warning but continue

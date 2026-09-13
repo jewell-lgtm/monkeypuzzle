@@ -38,6 +38,17 @@ type AgentRecord struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// StackEntry is one branch/PR layer in a piece's linear stack. The first
+// entry is the piece's initial branch; each later entry names the branch
+// immediately below it in Base.
+type StackEntry struct {
+	Branch   string `json:"branch"`
+	Base     string `json:"base"`
+	PRNumber int    `json:"pr_number,omitempty"`
+	PRURL    string `json:"pr_url,omitempty"`
+	Status   string `json:"status,omitempty"`
+}
+
 // AggregateAgents collapses a piece's agents to one status by severity:
 // blocked > working > done > idle. Empty map returns "".
 func AggregateAgents(agents map[string]AgentRecord) string {
@@ -95,6 +106,9 @@ type PieceMetadata struct {
 	// heuristics (branch --merged, git cherry) cannot detect it. Recording at
 	// merge time sidesteps that entirely.
 	Merged bool `json:"merged,omitempty"`
+	// Stack is the ordered branch chain managed inside this one worktree.
+	// It is omitted in v1 metadata and bootstrapped lazily by stack commands.
+	Stack []StackEntry `json:"stack,omitempty"`
 	// Agents tracks agent processes running in this piece's worktree, keyed by
 	// agent id. Maintained by `mp agent report`; reaped lazily on write.
 	Agents map[string]AgentRecord `json:"agents,omitempty"`

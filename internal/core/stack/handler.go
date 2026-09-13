@@ -600,33 +600,65 @@ func inScope(scope map[string]bool, name string) bool {
 
 // ---- Append / Prepend ------------------------------------------------------
 
-// Append creates a new piece as a child of the current piece (a new branch on top).
-func (h *Handler) Append(ctx context.Context, workDir string, in AppendInput) (piece.PieceInfo, error) {
+// Append creates a new branch on top of the current piece's stack and checks it
+// out in that piece's existing worktree.
+func (h *Handler) Append(ctx context.Context, workDir string, in AppendInput) (AppendResult, error) {
 	if err := ValidateAppendInput(in); err != nil {
-		return piece.PieceInfo{}, err
+		return AppendResult{}, err
 	}
 	st, err := h.pieces.Status(ctx, workDir)
 	if err != nil {
-		return piece.PieceInfo{}, err
+		return AppendResult{}, err
 	}
 	if !st.InPiece {
-		return piece.PieceInfo{}, fmt.Errorf("'mp stack append' must run from inside a piece worktree; use 'mp create' to start a new root piece")
+		return AppendResult{}, fmt.Errorf("'mp stack append' must run from inside a piece worktree; use 'mp create' to start a new root piece")
 	}
 	mainRepoRoot, _, err := h.resolveRepo(ctx, workDir)
 	if err != nil {
-		return piece.PieceInfo{}, err
+		return AppendResult{}, err
+	}
+	branch := strings.TrimSpace(in.Name)
+	if branch == "" {
+		return AppendResult{}, fmt.Errorf("stack branch names must be explicit; --prompt naming is not supported for intra-piece branches")
+	}
+	if h.git.LocalBranchExists(ctx, mainRepoRoot, branch) {
+		return AppendResult{}, fmt.Errorf("branch %q already exists", branch)
 	}
 
-	input := piece.WithNewPieceDefaults(piece.NewPieceInput{
-		Name:       in.Name,
-		Prompt:     in.Prompt,
-		Parent:     st.PieceName,
-		SkipSwitch: true,
-	})
-	if err := piece.ValidateNewPieceInput(input); err != nil {
-		return piece.PieceInfo{}, err
+	metadata, err := piece.ReadPieceMetadata(st.WorktreePath, h.deps.FS)
+	if err != nil {
+		return AppendResult{}, err
 	}
-	return h.pieces.CreatePieceWithInput(ctx, input, piece.CreatePieceOptions{Parent: st.PieceName, RepoRoot: mainRepoRoot})
+	currentBranch, err := h.git.CurrentBranch(ctx, st.WorktreePath)
+	if err != nil {
+		return AppendResult{}, err
+	}
+	if len(metadata.Stack) == 0 {
+		base := metadata.Parent
+		if base == "" {
+			base = "main"
+		}
+		metadata.Stack = []piece.StackEntry{{Branch: currentBranch, Base: base}}
+	}
+	tip := metadata.Stack[len(metadata.Stack)-1].Branch
+	if currentBranch != tip {
+		return AppendResult{}, fmt.Errorf("piece %q is checked out on %q, but its stack tip is %q", st.PieceName, currentBranch, tip)
+	}
+
+	if err := h.git.CreateAndCheckoutBranch(ctx, st.WorktreePath, branch); err != nil {
+		return AppendResult{}, err
+	}
+	metadata.Stack = append(metadata.Stack, piece.StackEntry{Branch: branch, Base: tip})
+	if err := piece.WritePieceMetadata(st.WorktreePath, *metadata, h.deps.FS); err != nil {
+		// Keep Git and metadata aligned when persisting the new topology fails.
+		_ = h.git.Checkout(ctx, st.WorktreePath, tip)
+		_ = h.git.BranchDelete(ctx, mainRepoRoot, branch, true)
+		return AppendResult{}, fmt.Errorf("failed to record stack branch %q: %w", branch, err)
+	}
+
+	h.emit(core.MsgSuccess, fmt.Sprintf("Appended branch %q to piece %q in %s", branch, st.PieceName, st.WorktreePath))
+	history.Record(h.deps.Output, history.Event{Event: "stack.appended", Project: piece.ProjectName(mainRepoRoot, h.deps.FS), Piece: st.PieceName, Data: map[string]any{"branch": branch, "base": tip}})
+	return AppendResult{Piece: st.PieceName, WorktreePath: st.WorktreePath, Branch: branch, Base: tip}, nil
 }
 
 // Prepend inserts a new piece between the current piece and its parent. The new

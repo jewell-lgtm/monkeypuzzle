@@ -452,6 +452,17 @@ func (g *Git) Checkout(ctx context.Context, workDir, branch string) error {
 	return nil
 }
 
+// CreateAndCheckoutBranch creates a branch at the current HEAD and checks it
+// out in the same worktree. This is the fundamental operation for an
+// intra-piece stack: advancing the stack must not allocate another worktree.
+func (g *Git) CreateAndCheckoutBranch(ctx context.Context, workDir, branch string) error {
+	_, err := g.exec.RunWithDir(ctx, workDir, "git", "checkout", "-b", branch)
+	if err != nil {
+		return fmt.Errorf("failed to create branch %s in %s: %w", branch, workDir, err)
+	}
+	return nil
+}
+
 // MergeSquash performs a squash merge of the specified branch into the current branch.
 // This stages all changes but does not commit - caller must commit with desired message.
 func (g *Git) MergeSquash(ctx context.Context, workDir, branch string) error {

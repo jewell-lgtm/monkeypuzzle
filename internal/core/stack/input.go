@@ -192,6 +192,14 @@ type AppendInput struct {
 	Prompt string `json:"prompt,omitempty"`
 }
 
+// AppendResult reports the branch layer added to an existing piece worktree.
+type AppendResult struct {
+	Piece        string `json:"piece"`
+	WorktreePath string `json:"worktree_path"`
+	Branch       string `json:"branch"`
+	Base         string `json:"base"`
+}
+
 // PrependInput holds input for `mp stack prepend` (insert a piece between the
 // current piece and its parent).
 type PrependInput struct {
