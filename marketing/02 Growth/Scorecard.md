@@ -8,6 +8,7 @@ updated: 2026-09-13
 
 | Metric | Current | Target | Meaning |
 | --- | ---: | ---: | --- |
+| Public distribution paths passing | 2 | 2 | Clean macOS and Linuxbrew workflows |
 | Behavior-qualified prospects | 0 | 20 | Evidence of existing workflow pain |
 | Screening conversations | 0 | 5 | Current behavior understood |
 | Design partners onboarded | 0 | 3 | Used own active repository |

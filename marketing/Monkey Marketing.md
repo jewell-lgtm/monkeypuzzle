@@ -13,10 +13,10 @@ that user does into product evidence.
 
 - North star: **external repeat users**
 - Current value: **0**
-- Current phase: **make installation real, then recruit three design partners**
+- Current phase: **recruit three private design partners; broad launch remains docs-gated**
 - Current bet: [[02 Growth/Current Bet]]
 - Scorecard: [[02 Growth/Scorecard]]
-- Next meeting: run `$monkey-marketing` and ask for a growth meeting
+- Next meeting: learning review after the first prospect list or conversation
 
 ## Start here
 
