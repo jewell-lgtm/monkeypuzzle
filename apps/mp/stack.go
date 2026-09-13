@@ -166,7 +166,7 @@ func init() {
 	stackSyncCmd.Flags().BoolVar(&flagStackSyncJSON, "json", false, "Output JSON even on a terminal")
 
 	stackAppendCmd.Flags().StringVar(&flagStackName, "name", "", "Piece name")
-	stackAppendCmd.Flags().StringVar(&flagStackPrompt, "prompt", "", "Piece prompt (recorded in piece metadata; used to name the piece)")
+	stackAppendCmd.Flags().StringVar(&flagStackPrompt, "prompt", "", "Prompt used to derive the branch name")
 	stackAppendCmd.Flags().BoolVar(&flagStackAppendSchema, "schema", false, "Print an example input document and exit")
 	stackAppendCmd.Flags().BoolVar(&flagStackAppendJSON, "json", false, "Output JSON even on a terminal")
 

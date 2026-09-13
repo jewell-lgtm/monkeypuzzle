@@ -18,6 +18,7 @@ const GITHUB_BLOB = 'https://github.com/jewell-lgtm/monkeypuzzle/blob/main';
 // Curated sidebar order; anything not listed sorts after, alphabetically.
 const ORDER = [
   'getting-started',
+  'atoms',
   'workflow',
   'commands',
   'integrations',
@@ -92,11 +93,24 @@ if (process.argv[1] === selfPath) {
   const websiteRoot = dirname(dirname(selfPath));
   const sourceDir = join(websiteRoot, '..', 'docs');
   const destDir = join(websiteRoot, 'src', 'content', 'docs');
-  rmSync(destDir, { recursive: true, force: true });
   mkdirSync(destDir, { recursive: true });
   const entries = buildDocEntries(sourceDir);
+  const wanted = new Set(entries.map(({ slug }) => `${slug}.md`));
+  // Keep existing files at the same paths/inodes where possible. Removing the
+  // whole collection before recreating it makes Astro's persistent content
+  // store briefly see the old and new inode as duplicate ids on the next build.
+  for (const name of readdirSync(destDir)) {
+    if (name.endsWith('.md') && !wanted.has(name)) {
+      rmSync(join(destDir, name), { force: true });
+    }
+  }
   for (const { slug, contents } of entries) {
     writeFileSync(join(destDir, `${slug}.md`), contents);
   }
+  // Astro's content loader persists file identities in this generated store.
+  // Rewriting vendored documents between builds can otherwise leave both the
+  // old and new identity for one slug and emit duplicate-id warnings. This is
+  // cache only; the next sync/build recreates it from the files above.
+  rmSync(join(websiteRoot, 'node_modules', '.astro', 'data-store.json'), { force: true });
   console.log(`synced ${entries.length} docs → src/content/docs/`);
 }

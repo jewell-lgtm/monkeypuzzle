@@ -1,6 +1,6 @@
 ---
 title: "Code Review Guide"
-order: 7
+order: 8
 ---
 <!-- Generated from docs/reviewing.md by scripts/sync-docs.mjs — edit the source, then run `pnpm sync-docs`. -->
 ## Philosophy

@@ -2227,7 +2227,7 @@ func (h *Handler) ListPieces(ctx context.Context, repoRoot string) ([]PieceListI
 	if worktrees, err := h.git.Worktrees(ctx, repoRoot); err == nil {
 		for _, wt := range worktrees {
 			if wt.Branch != "" {
-				branchByPath[filepath.Clean(wt.Path)] = wt.Branch
+				branchByPath[canonicalWorktreePath(wt.Path)] = wt.Branch
 			}
 		}
 	}
@@ -2255,7 +2255,7 @@ func (h *Handler) ListPieces(ctx context.Context, repoRoot string) ([]PieceListI
 		// Read piece metadata for parent + agent info
 		parent := "main"
 		agentStatus := ""
-		branch := branchByPath[filepath.Clean(worktreePath)]
+		branch := branchByPath[canonicalWorktreePath(worktreePath)]
 		var agentCounts map[string]int
 		if metadata, err := ReadPieceMetadata(worktreePath, h.deps.FS); err == nil {
 			parent = metadata.Parent
@@ -2292,6 +2292,17 @@ func (h *Handler) ListPieces(ctx context.Context, repoRoot string) ([]PieceListI
 	})
 
 	return pieces, nil
+}
+
+// canonicalWorktreePath makes filesystem paths comparable with paths emitted
+// by Git. This matters on macOS, where temporary paths commonly enter through
+// /var while `git worktree list` reports the same directory through /private/var.
+func canonicalWorktreePath(path string) string {
+	path = filepath.Clean(path)
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		return filepath.Clean(resolved)
+	}
+	return path
 }
 
 // TreeNode represents a node in the piece tree

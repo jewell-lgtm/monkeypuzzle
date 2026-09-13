@@ -1,6 +1,6 @@
 ---
 title: "Remote development over ssh"
-order: 4
+order: 5
 ---
 <!-- Generated from docs/remote-development.md by scripts/sync-docs.mjs — edit the source, then run `pnpm sync-docs`. -->
 Vocabulary: the **controller** is the machine running `mp` (your laptop); a

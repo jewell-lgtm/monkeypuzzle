@@ -619,7 +619,10 @@ func (h *Handler) Append(ctx context.Context, workDir string, in AppendInput) (A
 	}
 	branch := strings.TrimSpace(in.Name)
 	if branch == "" {
-		return AppendResult{}, fmt.Errorf("stack branch names must be explicit; --prompt naming is not supported for intra-piece branches")
+		branch = piece.SanitizePieceName(in.Prompt)
+	}
+	if branch == "" {
+		return AppendResult{}, fmt.Errorf("stack branch name is required")
 	}
 	if h.git.LocalBranchExists(ctx, mainRepoRoot, branch) {
 		return AppendResult{}, fmt.Errorf("branch %q already exists", branch)
@@ -659,6 +662,77 @@ func (h *Handler) Append(ctx context.Context, workDir string, in AppendInput) (A
 	h.emit(core.MsgSuccess, fmt.Sprintf("Appended branch %q to piece %q in %s", branch, st.PieceName, st.WorktreePath))
 	history.Record(h.deps.Output, history.Event{Event: "stack.appended", Project: piece.ProjectName(mainRepoRoot, h.deps.FS), Piece: st.PieceName, Data: map[string]any{"branch": branch, "base": tip}})
 	return AppendResult{Piece: st.PieceName, WorktreePath: st.WorktreePath, Branch: branch, Base: tip}, nil
+}
+
+// Remove deletes the current managed stack tip and checks out its recorded
+// base. The initial branch belongs to the piece lifecycle and is never removed
+// through the branch atom.
+func (h *Handler) Remove(ctx context.Context, workDir string, in RemoveInput) (RemoveResult, error) {
+	st, err := h.pieces.Status(ctx, workDir)
+	if err != nil {
+		return RemoveResult{}, err
+	}
+	if !st.InPiece {
+		return RemoveResult{}, fmt.Errorf("'mp branch delete' must run from inside a piece worktree")
+	}
+	if clean, err := h.git.IsClean(ctx, st.WorktreePath); err != nil {
+		return RemoveResult{}, err
+	} else if !clean {
+		return RemoveResult{}, fmt.Errorf("piece %q has uncommitted changes; commit or stash them before removing a branch layer", st.PieceName)
+	}
+	metadata, err := piece.ReadPieceMetadata(st.WorktreePath, h.deps.FS)
+	if err != nil {
+		return RemoveResult{}, err
+	}
+	current, err := h.git.CurrentBranch(ctx, st.WorktreePath)
+	if err != nil {
+		return RemoveResult{}, err
+	}
+	name := strings.TrimSpace(in.Name)
+	if name == "" {
+		name = current
+	}
+	if len(metadata.Stack) <= 1 {
+		if len(metadata.Stack) == 1 && name != metadata.Stack[0].Branch {
+			return RemoveResult{}, fmt.Errorf("branch %q is not managed by piece %q; adopt it as a piece first", name, st.PieceName)
+		}
+		return RemoveResult{}, fmt.Errorf("branch %q is the initial branch of piece %q; use 'mp piece done' or 'mp piece abandon'", current, st.PieceName)
+	}
+	tip := metadata.Stack[len(metadata.Stack)-1]
+	if name != tip.Branch {
+		return RemoveResult{}, fmt.Errorf("branch %q is not the managed stack tip %q; only the tip can be removed", name, tip.Branch)
+	}
+	if current != tip.Branch {
+		return RemoveResult{}, fmt.Errorf("piece %q is checked out on %q, but its managed stack tip is %q", st.PieceName, current, tip.Branch)
+	}
+	if tip.PRNumber != 0 && !in.Force {
+		return RemoveResult{}, fmt.Errorf("branch %q has recorded PR #%d; pass --force to remove the branch layer anyway", tip.Branch, tip.PRNumber)
+	}
+
+	previous := append([]piece.StackEntry(nil), metadata.Stack...)
+	metadata.Stack = metadata.Stack[:len(metadata.Stack)-1]
+	if err := piece.WritePieceMetadata(st.WorktreePath, *metadata, h.deps.FS); err != nil {
+		return RemoveResult{}, fmt.Errorf("failed to update stack metadata: %w", err)
+	}
+	restore := func() { metadata.Stack = previous; _ = piece.WritePieceMetadata(st.WorktreePath, *metadata, h.deps.FS) }
+	if err := h.git.Checkout(ctx, st.WorktreePath, tip.Base); err != nil {
+		restore()
+		return RemoveResult{}, err
+	}
+	mainRepoRoot, _, err := h.resolveRepo(ctx, workDir)
+	if err != nil {
+		_ = h.git.Checkout(ctx, st.WorktreePath, tip.Branch)
+		restore()
+		return RemoveResult{}, err
+	}
+	if err := h.git.BranchDelete(ctx, mainRepoRoot, tip.Branch, in.Force); err != nil {
+		_ = h.git.Checkout(ctx, st.WorktreePath, tip.Branch)
+		restore()
+		return RemoveResult{}, err
+	}
+	h.emit(core.MsgSuccess, fmt.Sprintf("Removed branch %q from piece %q; now on %q", tip.Branch, st.PieceName, tip.Base))
+	history.Record(h.deps.Output, history.Event{Event: "stack.removed", Project: piece.ProjectName(mainRepoRoot, h.deps.FS), Piece: st.PieceName, Data: map[string]any{"branch": tip.Branch, "base": tip.Base}})
+	return RemoveResult{Piece: st.PieceName, WorktreePath: st.WorktreePath, Branch: tip.Branch, Base: tip.Base, BranchDeleted: true}, nil
 }
 
 // Prepend inserts a new piece between the current piece and its parent. The new

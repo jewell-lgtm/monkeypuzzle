@@ -1,6 +1,6 @@
 ---
 title: "Integrations"
-order: 3
+order: 4
 ---
 <!-- Generated from docs/integrations.md by scripts/sync-docs.mjs — edit the source, then run `pnpm sync-docs`. -->
 The piece workflow needs git, a forge CLI (`gh` or `glab`) and a terminal.

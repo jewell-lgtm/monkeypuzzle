@@ -4,10 +4,13 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/adapters"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
+	branchcmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/branch"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core/piece"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/projectdir"
 )
@@ -17,6 +20,60 @@ type PRCreateResult struct {
 	PRNumber int    `json:"pr_number"`
 	PRURL    string `json:"pr_url"`
 	Branch   string `json:"branch"`
+}
+
+// ManagedInfo is a PR association recorded on an mp branch layer. The forge
+// remains authoritative for live state; this local record is the mp atom that
+// workflows can compose without discovering unrelated repository PRs.
+type ManagedInfo struct {
+	Number  int    `json:"number"`
+	URL     string `json:"url,omitempty"`
+	Branch  string `json:"branch"`
+	Base    string `json:"base"`
+	Piece   string `json:"piece"`
+	Status  string `json:"status,omitempty"`
+	Current bool   `json:"current,omitempty"`
+}
+
+// List returns PRs recorded against mp-managed branch layers.
+func (h *Handler) List(ctx context.Context, workDir string) ([]ManagedInfo, error) {
+	branches, err := branchcmd.NewHandler(h.deps).List(ctx, workDir)
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]ManagedInfo, 0)
+	for _, branch := range branches {
+		if branch.PRNumber == 0 {
+			continue
+		}
+		rows = append(rows, ManagedInfo{Number: branch.PRNumber, URL: branch.PRURL, Branch: branch.Name, Base: branch.Base, Piece: branch.Piece, Status: branch.Status, Current: branch.Current})
+	}
+	return rows, nil
+}
+
+// Show resolves a recorded PR by number or branch; an empty selector defaults
+// to the current managed branch.
+func (h *Handler) Show(ctx context.Context, workDir, selector string) (ManagedInfo, error) {
+	rows, err := h.List(ctx, workDir)
+	if err != nil {
+		return ManagedInfo{}, err
+	}
+	selector = strings.TrimSpace(selector)
+	if selector == "" {
+		for _, row := range rows {
+			if row.Current {
+				return row, nil
+			}
+		}
+		return ManagedInfo{}, fmt.Errorf("the current managed branch has no recorded PR")
+	}
+	number, _ := strconv.Atoi(strings.TrimPrefix(selector, "#"))
+	for _, row := range rows {
+		if row.Branch == selector || (number != 0 && row.Number == number) {
+			return row, nil
+		}
+	}
+	return ManagedInfo{}, fmt.Errorf("no mp-managed PR matches %q", selector)
 }
 
 // Handler executes PR-related commands
