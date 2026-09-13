@@ -18,9 +18,9 @@ import (
 
 var stackCmd = &cobra.Command{
 	Use:   "stack",
-	Short: "Manage stacks of pieces (git-town-style)",
-	Long: `Whole-stack operations over pieces: sync a stack against main and itself,
-inspect the tree against the forge's PR/MR list, and append/prepend pieces.
+	Short: "Manage branch stacks inside pieces",
+	Long: `Manage the linear branch/PR stack inside a piece worktree, inspect it
+against the forge's PR/MR list, and sync existing legacy piece stacks.
 
 Anything risky aborts cleanly and prints plain-English next steps (e.g. which
 PR/MR base to change on the forge). 'sync' is dry-run by default and asks to
@@ -49,7 +49,7 @@ preview unless --apply (or "apply": true) is given.`,
 
 var stackAppendCmd = &cobra.Command{
 	Use:   "append [name]",
-	Short: "Create a new piece as a child of the current piece",
+	Short: "Create a branch on top of the current piece's stack",
 	Args:  cobra.MaximumNArgs(1),
 	RunE:  runStackAppend,
 }

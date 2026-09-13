@@ -76,7 +76,14 @@ func (h *Handler) CreatePR(ctx context.Context, workDir string, input Input) (*P
 		return nil, err
 	}
 
-	// Auto-detect base branch from piece metadata if not explicitly provided
+	// The active branch identifies the stack layer being shipped.
+	branch, err := h.git.CurrentBranch(ctx, workDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get current branch: %w", err)
+	}
+
+	// Auto-detect the base from the current stack entry. V1 pieces without a
+	// stack retain their parent-based behavior.
 	if input.Base == "" {
 		pieceMetadata, err := piece.ReadPieceMetadata(status.WorktreePath, h.deps.FS)
 		if err != nil {
@@ -87,19 +94,22 @@ func (h *Handler) CreatePR(ctx context.Context, workDir string, input Input) (*P
 			input.Base = "main"
 		} else {
 			input.Base = pieceMetadata.Parent
-			if pieceMetadata.Parent != "main" {
+			for _, entry := range pieceMetadata.Stack {
+				if entry.Branch == branch {
+					input.Base = entry.Base
+					break
+				}
+			}
+			if input.Base == "" {
+				input.Base = "main"
+			}
+			if input.Base != "main" {
 				h.deps.Output.Write(core.Message{
 					Type:    core.MsgInfo,
-					Content: fmt.Sprintf("Using parent piece '%s' as PR base", pieceMetadata.Parent),
+					Content: fmt.Sprintf("Using stack base '%s' for branch '%s'", input.Base, branch),
 				})
 			}
 		}
-	}
-
-	// Get current branch
-	branch, err := h.git.CurrentBranch(ctx, workDir)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get current branch: %w", err)
 	}
 
 	// Default the PR title to the piece name when not provided.
@@ -160,6 +170,19 @@ func (h *Handler) CreatePR(ctx context.Context, workDir string, input Input) (*P
 
 	if err := piece.WritePRMetadata(status.WorktreePath, metadata, h.deps.FS); err != nil {
 		return nil, fmt.Errorf("failed to write PR metadata: %w", err)
+	}
+	if pieceMetadata, err := piece.ReadPieceMetadata(status.WorktreePath, h.deps.FS); err == nil {
+		for i := range pieceMetadata.Stack {
+			if pieceMetadata.Stack[i].Branch == branch {
+				pieceMetadata.Stack[i].PRNumber = prResult.Number
+				pieceMetadata.Stack[i].PRURL = prResult.URL
+				pieceMetadata.Stack[i].Status = "OPEN"
+				if err := piece.WritePieceMetadata(status.WorktreePath, *pieceMetadata, h.deps.FS); err != nil {
+					return nil, fmt.Errorf("failed to record PR in piece stack: %w", err)
+				}
+				break
+			}
+		}
 	}
 
 	result := &PRCreateResult{

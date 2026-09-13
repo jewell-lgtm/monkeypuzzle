@@ -290,6 +290,93 @@ func createPiece(t *testing.T, env *testEnv, name, parent string) string {
 	return res.WorktreePath
 }
 
+// TestCLI_StackAppend_CreatesBranchesInOnePieceWorktree is the defining v2
+// stack acceptance test: a stack is a branch chain inside one piece, not a
+// chain of piece worktrees.
+func TestCLI_StackAppend_CreatesBranchesInOnePieceWorktree(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	env.initGitRepo()
+	env.initProject("test")
+
+	worktree := createPiece(t, env, "billing", "main")
+	if err := os.WriteFile(filepath.Join(worktree, "schema.txt"), []byte("schema\n"), 0o644); err != nil {
+		t.Fatalf("write schema change: %v", err)
+	}
+	env.gitInDir(worktree, "add", "schema.txt")
+	env.gitInDir(worktree, "commit", "-m", "add schema")
+
+	appendBranch := func(branch string) map[string]string {
+		t.Helper()
+		stdout, stderr, err := env.runInDir(worktree, "stack", "append", branch)
+		if err != nil {
+			t.Fatalf("stack append %s failed: %v\nstdout: %s\nstderr: %s", branch, err, stdout, stderr)
+		}
+		var result map[string]string
+		if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+			t.Fatalf("invalid JSON from stack append %s: %v\noutput: %s", branch, err, stdout)
+		}
+		return result
+	}
+
+	orm := appendBranch("feat/orm-models")
+	if orm["piece"] != "billing" || orm["worktree_path"] != worktree || orm["branch"] != "feat/orm-models" || orm["base"] != "billing" {
+		t.Fatalf("unexpected first append result: %#v", orm)
+	}
+	if err := os.WriteFile(filepath.Join(worktree, "orm.txt"), []byte("orm\n"), 0o644); err != nil {
+		t.Fatalf("write orm change: %v", err)
+	}
+	env.gitInDir(worktree, "add", "orm.txt")
+	env.gitInDir(worktree, "commit", "-m", "add orm")
+
+	api := appendBranch("feat/rest-endpoints")
+	if api["piece"] != "billing" || api["worktree_path"] != worktree || api["branch"] != "feat/rest-endpoints" || api["base"] != "feat/orm-models" {
+		t.Fatalf("unexpected second append result: %#v", api)
+	}
+
+	if got := strings.TrimSpace(gitOut(t, worktree, "branch", "--show-current")); got != "feat/rest-endpoints" {
+		t.Errorf("worktree is on %q, want stack tip feat/rest-endpoints", got)
+	}
+	worktreeList := strings.Fields(gitOut(t, env.tmpDir, "worktree", "list", "--porcelain"))
+	worktreeCount := 0
+	for _, field := range worktreeList {
+		if field == "worktree" {
+			worktreeCount++
+		}
+	}
+	if worktreeCount != 2 { // main checkout plus exactly one piece checkout
+		t.Errorf("stack append created extra worktrees: got %d entries\n%s", worktreeCount, gitOut(t, env.tmpDir, "worktree", "list", "--porcelain"))
+	}
+
+	metadata, err := os.ReadFile(filepath.Join(worktree, ".monkeypuzzle", "piece-metadata.json"))
+	if err != nil {
+		t.Fatalf("read piece metadata: %v", err)
+	}
+	var stored struct {
+		Stack []struct {
+			Branch string `json:"branch"`
+			Base   string `json:"base"`
+		} `json:"stack"`
+	}
+	if err := json.Unmarshal(metadata, &stored); err != nil {
+		t.Fatalf("parse piece metadata: %v", err)
+	}
+	want := []struct{ branch, base string }{
+		{"billing", "main"},
+		{"feat/orm-models", "billing"},
+		{"feat/rest-endpoints", "feat/orm-models"},
+	}
+	if len(stored.Stack) != len(want) {
+		t.Fatalf("stored stack has %d entries, want %d: %s", len(stored.Stack), len(want), metadata)
+	}
+	for i := range want {
+		if stored.Stack[i].Branch != want[i].branch || stored.Stack[i].Base != want[i].base {
+			t.Errorf("stack[%d] = %s -> %s, want %s -> %s", i, stored.Stack[i].Branch, stored.Stack[i].Base, want[i].branch, want[i].base)
+		}
+	}
+}
+
 // TestCLI_StackSetParent_ReparentsPiece is the happy path for `mp stack
 // set-parent`: move piece c from parent a to parent b, verify metadata and
 // that stack status reflects the new lineage.
