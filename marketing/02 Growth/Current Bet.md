@@ -35,6 +35,11 @@ One external repeat user and a documented before/after workflow.
 
 ## Current blockers
 
-- First release requires a dedicated fine-grained token for the public Homebrew tap.
 - Public docs and homepage still need the post-refactor mental model.
 - Prospect list has not been populated.
+
+## Evidence update — 2026-09-13
+
+`v0.1.0` published successfully. Clean GitHub-hosted macOS and Linux runners
+installed from `jewell-lgtm/tap/monkeypuzzle` and completed the packaged core
+workflow. Distribution is no longer the current bottleneck.

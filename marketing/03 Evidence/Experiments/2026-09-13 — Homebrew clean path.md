@@ -1,6 +1,6 @@
 ---
 type: experiment
-status: building
+status: passed
 owner: engineering
 started: 2026-09-13
 decide_by: 2026-09-15
@@ -38,9 +38,12 @@ GitHub CLI OAuth token as a CI secret.
 
 ## Results
 
-Tap created. Release and smoke workflows prepared. Awaiting the dedicated token,
-merge, and first version tag.
+`v0.1.0` published on 2026-09-13 with four archives and checksums. The public
+tap received the generated formula. Clean GitHub-hosted macOS and Linux runners
+installed the formula, initialized a disposable repository, created a piece,
+and appended an in-worktree branch. Both jobs passed without manual repair.
 
 ## Decision
 
-Pending first tagged workflow run.
+Passed. Move the active constraint from distribution to design-partner
+recruitment. Continue running the smoke matrix on every tagged release.
