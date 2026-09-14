@@ -150,8 +150,10 @@ func NewPieceID() string {
 
 // DefaultPieceMetadata returns metadata with default values (parent=main)
 func DefaultPieceMetadata() PieceMetadata {
+	// No ID here: ReadPieceMetadata hands this back for a worktree with no
+	// metadata file, so minting one would make every read report a different
+	// id. Ids are minted at create/adopt and backfilled on write.
 	return PieceMetadata{
-		ID:                NewPieceID(),
 		Parent:            "main",
 		CreatedFromBranch: "",
 	}

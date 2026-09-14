@@ -452,3 +452,56 @@ func TestPieceMetadataIDOmittedWhenEmpty(t *testing.T) {
 		t.Errorf("empty id should be omitted, got %s", data)
 	}
 }
+
+// ReadPieceMetadata hands back the default for a worktree with no metadata
+// file. If that default carried an id, every read would report a different
+// one — the opposite of a durable identifier.
+func TestReadPieceMetadataWithoutFileHasNoID(t *testing.T) {
+	fs := adapters.NewMemoryFS()
+	worktreePath := "/workdir"
+	_ = fs.MkdirAll(filepath.Join(worktreePath, ".monkeypuzzle"), 0755)
+
+	first, err := piece.ReadPieceMetadata(worktreePath, fs)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	second, err := piece.ReadPieceMetadata(worktreePath, fs)
+	if err != nil {
+		t.Fatalf("second read: %v", err)
+	}
+	if first.ID != "" {
+		t.Errorf("a missing metadata file reported id %q; reads must not mint", first.ID)
+	}
+	if first.ID != second.ID {
+		t.Errorf("two reads gave different ids: %q then %q", first.ID, second.ID)
+	}
+}
+
+func TestDefaultPieceMetadataHasNoID(t *testing.T) {
+	if id := piece.DefaultPieceMetadata().ID; id != "" {
+		t.Errorf("DefaultPieceMetadata minted id %q", id)
+	}
+}
+
+// EnsurePieceID is the explicit materialisation path, so it has to work for
+// the case it exists for: a worktree with no metadata file at all.
+func TestEnsurePieceIDWithoutMetadataFile(t *testing.T) {
+	fs := adapters.NewMemoryFS()
+	worktreePath := "/workdir"
+	_ = fs.MkdirAll(filepath.Join(worktreePath, ".monkeypuzzle"), 0755)
+
+	first, err := piece.EnsurePieceID(worktreePath, fs)
+	if err != nil {
+		t.Fatalf("ensure: %v", err)
+	}
+	if first == "" {
+		t.Fatal("ensure returned an empty id")
+	}
+	second, err := piece.EnsurePieceID(worktreePath, fs)
+	if err != nil {
+		t.Fatalf("second ensure: %v", err)
+	}
+	if second != first {
+		t.Errorf("id was not persisted: %q then %q", first, second)
+	}
+}
