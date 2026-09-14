@@ -1,6 +1,7 @@
 package skill_test
 
 import (
+	"bytes"
 	"errors"
 	"path/filepath"
 	"strings"
@@ -191,5 +192,58 @@ func TestInstallLeavesForeignSymlinkAlone(t *testing.T) {
 	}
 	if target != "../../mine" {
 		t.Errorf("link was repointed to %q", target)
+	}
+}
+
+// Every shipped skill needs a name and a description: the description is the
+// only thing that decides whether an agent loads it for a given request.
+func TestEveryShippedSkillIsUsable(t *testing.T) {
+	catalog := skill.Catalog()
+	if len(catalog) < 2 {
+		t.Fatalf("expected at least the workflow and inbox skills, got %d", len(catalog))
+	}
+	for _, s := range catalog {
+		if s.Description == "" {
+			t.Errorf("%s has no description in its frontmatter", s.Name)
+		}
+		if !bytes.HasPrefix(s.Body, []byte("---\n")) {
+			t.Errorf("%s does not start with frontmatter", s.Name)
+		}
+		if !bytes.Contains(s.Body, []byte("name: "+s.Name)) {
+			t.Errorf("%s frontmatter name does not match its filename", s.Name)
+		}
+	}
+}
+
+func TestInboxSkillIsShipped(t *testing.T) {
+	got, err := skill.Get("monkeypuzzle-inbox")
+	if err != nil {
+		t.Fatalf("inbox skill not shipped: %v", err)
+	}
+	// It documents the cross-project surface, which is the whole reason it is
+	// separate from managing-monkeypuzzle.
+	for _, want := range []string{"mp inbox --json", "mp history", "urgency", "id"} {
+		if !bytes.Contains(got.Body, []byte(want)) {
+			t.Errorf("inbox skill does not mention %q", want)
+		}
+	}
+}
+
+func TestInstallNamedSkill(t *testing.T) {
+	h, fs := newTestHandler()
+
+	result, err := h.Install("/repo", skill.Input{Name: "monkeypuzzle-inbox"})
+	if err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	if result.Name != "monkeypuzzle-inbox" {
+		t.Errorf("name = %q", result.Name)
+	}
+	if _, err := fs.ReadFile(filepath.Join("/repo", skill.AgentsDir, "monkeypuzzle-inbox", skill.SkillFile)); err != nil {
+		t.Errorf("named skill not written: %v", err)
+	}
+	// Installing one skill must not disturb another's link.
+	if _, err := fs.Readlink(filepath.Join("/repo", skill.ClaudeDir, "monkeypuzzle-inbox")); err != nil {
+		t.Errorf("link not created: %v", err)
 	}
 }

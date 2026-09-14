@@ -222,8 +222,12 @@ same split between `AGENTS.md` and its `CLAUDE.md` symlink.
 mp skill                          # list (also: mp skill list, mp skills)
 mp skill show managing-monkeypuzzle
 mp skill create                   # write the default skill into this repo
-mp skill create --user            # write it under your home directory instead
+mp skill create monkeypuzzle-inbox --user   # cross-project, so install per machine
 ```
+
+mp ships two: `managing-monkeypuzzle`, the piece/PR/stack workflow inside one
+repo, and `monkeypuzzle-inbox`, the cross-project inbox, agents and history.
+The second works outside any project, so it belongs at `--user` scope.
 
 `create` is idempotent and reports `created`, `updated`, or `unchanged`, so it
 doubles as the refresh path after upgrading mp. A skill you wrote yourself at
