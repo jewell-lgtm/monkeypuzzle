@@ -42,14 +42,17 @@ Each step fires a shell hook in `.monkeypuzzle/hooks/` with the piece and PR con
 | Command | What it does |
 | --- | --- |
 | `mp init` | Configure project name + PR provider (first run) or refresh scaffolding (re-run) |
+| `mp branch` / `branches` | List mp-managed branch layers; create/delete compose the current piece stack |
+| `mp worktree` / `worktrees` | Piece-storage and lifecycle view; TTY culling picker, non-TTY JSON inventory |
+| `mp piece` / `pieces` | Noun-oriented piece surface: `show`, `list`, `create`, `adopt`, `sync`, `merge`, `done`, `abandon` |
 | `mp create` | New branch + worktree (`--name` or `--prompt`; `--parent` to stack) |
 | `mp switch [target]` | Go to a piece or branch by name; adopts an existing branch, or creates with `--create` |
 | `mp` / `mp go` | Picker over this repo's pieces / across every project |
 | `mp open [target]` | Open a worktree in your editor or a new terminal |
 | `mp list` | Show pieces as a tree (`--all` for every project) |
-| `mp stack append` / `prepend` | Add a piece above / below the current one |
+| `mp stack append` / `prepend` | Add a branch above the current tip / a piece below the current one |
 | `mp stack sync` | Propagate main and each parent down the stack (preview; `--apply`) |
-| `mp stack status` | The stack tree, PR state, and drift vs the forge |
+| `mp stack status` | The stack tree, PR state, and drift vs the forge (`show` and `list` aliases; `stacks` plural accepted) |
 | `mp update` / `mp sync` | Merge main / the parent into the current piece |
 | `mp pr create [--draft]` | Push + open PR/MR via the configured provider |
 | `mp pr ready` | Flip a draft PR/MR to ready |
@@ -69,6 +72,7 @@ Everything beyond the workflow is opt-in: `mp open` for your editor, `mp shell-i
 ## Docs
 
 - [Getting started](docs/getting-started.md) — install + first piece
+- [Atoms and workflows](docs/atoms.md) — the formal object model, noun commands, invariants, and workflow compositions
 - [Workflow guide](docs/workflow.md) — the lifecycle, stacking, hooks and recipes
 - [Commands reference](docs/commands.md) — flags, example inputs
 - [Integrations](docs/integrations.md) — editors, shells, multiplexers, coding agents

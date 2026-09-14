@@ -1,6 +1,6 @@
 ---
 title: "The mp-server piece registry"
-order: 10
+order: 11
 ---
 <!-- Generated from docs/server-tracking.md by scripts/sync-docs.mjs — edit the source, then run `pnpm sync-docs`. -->
 mp-server's primary purpose is a durable global registry of pieces from different

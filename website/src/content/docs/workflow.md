@@ -1,11 +1,17 @@
 ---
 title: "Workflow guide"
-order: 1
+order: 2
 ---
 <!-- Generated from docs/workflow.md by scripts/sync-docs.mjs — edit the source, then run `pnpm sync-docs`. -->
 Monkeypuzzle gives each change its own branch, its own git worktree and, when you're ready, its own PR. You cut a piece, stack more pieces on it if the change is big, open the PRs, merge, and clean up. mp fires a shell hook at every one of those transitions, so label state machines, reviewer policies and notifications live in your scripts, not in mp.
 
 ## Core concepts
+
+The formal object model and the distinction between atomic noun commands and
+composed workflows lives in [Atoms and workflows](/docs/atoms/). In short: a branch
+is a layer recorded by mp; a piece adds a worktree and lifecycle state; a stack
+records base→head relationships; and the inbox is a user-owned projection over
+pieces.
 
 ### Pieces
 
@@ -16,7 +22,9 @@ A **piece** is one change. Each piece:
 - Can have a parent piece, which makes it part of a [stack](#stacking)
 - Gets its own PR/MR when you run `mp pr create`
 
-Multiplexer sessions (tmux, zellij, cmux, herdr) are optional; see [Integrations](/docs/integrations/#multiplexers).
+Git still owns refs and linked checkouts, and optional terminal integrations
+still own their sessions. mp owns neither abstraction: it owns the piece,
+lineage, inbox state, and lifecycle spanning them. See [Integrations](/docs/integrations/#multiplexers).
 
 ### Why worktrees?
 
@@ -24,6 +32,9 @@ Multiplexer sessions (tmux, zellij, cmux, herdr) are optional; see [Integrations
 - Run tests in one piece while editing in another
 - Keep a long-running dev server in one worktree and a fresh checkout in another
 - Hooks have a stable `MP_WORKTREE_PATH` to chdir into
+
+Use `mp worktrees` to inspect them: it is a management picker on a terminal and
+a read-only JSON list without a TTY. See [the worktree atom](/docs/atoms/#worktree).
 
 ### Why hooks?
 
@@ -80,11 +91,16 @@ Piece basics always available to every hook: `MP_PIECE_NAME`, `MP_WORKTREE_PATH`
 A big change goes up as a stack of small pieces, each with its own PR targeting the piece below it. mp records each piece's parent and keeps the stack in sync. The full flag reference is in [`mp stack`](/docs/commands/#mp-stack).
 
 ```bash
-mp create --name auth-model           # base piece, off main
-mp stack append --name auth-api       # child of the current piece
-mp stack prepend --name auth-schema   # insert between the current piece and its parent
-mp create --name auth-ui --parent auth-api   # same as append, from anywhere
+mp create --name auth-model                  # base piece, off main
+mp stack append --name auth-api              # branch above the tip, same worktree
+mp stack prepend --name auth-schema          # piece between this piece and its parent
+mp create --name auth-ui --parent auth-model # child piece, separate worktree
 ```
+
+`append` is the lightweight, sequential form: another branch in the current
+piece's worktree. `create --parent` is the parallel form: another piece with its
+own worktree. Both record the base relationship used by `mp pr create`; see
+[Stack](/docs/atoms/#stack) for the two-level topology.
 
 `mp pr create` in a stacked piece targets the parent's branch, so each PR shows only its own diff.
 

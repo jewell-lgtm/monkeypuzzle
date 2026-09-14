@@ -276,8 +276,11 @@ func (g *Git) BranchDelete(ctx context.Context, repoRoot, branchName string, for
 	if force {
 		flag = "-D"
 	}
-	_, err := g.exec.RunWithDir(ctx, repoRoot, "git", "branch", flag, branchName)
+	out, err := g.exec.RunWithDir(ctx, repoRoot, "git", "branch", flag, branchName)
 	if err != nil {
+		if detail := strings.TrimSpace(string(out)); detail != "" {
+			return fmt.Errorf("failed to delete branch %s: %s", branchName, detail)
+		}
 		return fmt.Errorf("failed to delete branch %s: %w", branchName, err)
 	}
 	return nil

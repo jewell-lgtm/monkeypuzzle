@@ -22,6 +22,9 @@ contract](server-tracking.md) for identity, privacy and prototype limits.
 monkeypuzzle/
 ├── apps/mp/              # CLI wiring (Cobra commands)
 │   ├── root.go          # Root command
+│   ├── atoms.go         # Noun aliases and safe bare-command defaults
+│   ├── branch.go        # Branch atom CLI
+│   ├── worktree.go      # Worktree list/show/delete + management TUI
 │   ├── init.go          # mp init command
 │   └── piece.go         # piece commands (create, status, list, merge, …)
 ├── internal/
@@ -31,6 +34,8 @@ monkeypuzzle/
 │   │   │   ├── input.go     # Input struct, validation, schema
 │   │   │   ├── handler.go   # Business logic
 │   │   │   └── handler_test.go
+│   │   ├── branch/      # Projection of mp-managed stack branch layers
+│   │   ├── worktree/    # Piece-storage projection + lifecycle delegation
 │   │   └── piece/       # Piece command logic
 │   │       ├── input.go
 │   │       ├── handler.go
@@ -63,6 +68,14 @@ Everything mp keeps for a repo lives under its monkeypuzzle directory
 | `logs/` | hook and headless-agent logs |
 
 ## Core Concepts
+
+The user-facing domain model is specified in
+[Atoms and workflows](atoms.md). Core packages own atom invariants; CLI
+workflows compose handlers and adapters. In particular, the `branch` package
+projects mp-managed stack layers, `piece` owns worktrees and lifecycle metadata,
+`stack` owns base→head topology, `worktree` reports piece storage and delegates
+managed culling to `piece`, and `inbox` owns only cross-project ordering
+annotations. Raw Git and terminal-session resources stay behind adapters.
 
 ### Ports (Interfaces)
 

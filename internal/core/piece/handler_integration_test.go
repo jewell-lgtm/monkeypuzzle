@@ -2246,7 +2246,9 @@ func TestIntegration_AdoptPiece_BranchInForeignWorktree(t *testing.T) {
 	}
 
 	wantPath := filepath.Join(tmpDir, ".monkeypuzzle", "pieces", "agent-spike")
-	if info.WorktreePath != wantPath {
+	resolvedWant, wantErr := filepath.EvalSymlinks(wantPath)
+	resolvedGot, gotErr := filepath.EvalSymlinks(info.WorktreePath)
+	if wantErr != nil || gotErr != nil || resolvedGot != resolvedWant {
 		t.Errorf("expected worktree at %s, got %s", wantPath, info.WorktreePath)
 	}
 	if data, err := os.ReadFile(filepath.Join(info.WorktreePath, "wip.txt")); err != nil {

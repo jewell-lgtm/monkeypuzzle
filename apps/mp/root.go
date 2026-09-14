@@ -10,8 +10,8 @@ import (
 var rootCmd = &cobra.Command{
 	Use:   "mp",
 	Short: "Monkeypuzzle - development workflow CLI",
-	Long: `Monkeypuzzle gives every change its own piece: a branch, worktree, and
-optional multiplexer session.
+	Long: `Monkeypuzzle gives every change its own piece: managed branch lineage,
+a dedicated worktree, and lifecycle state.
 
 The default flow is deliberately small:
   mp create -> mp sync -> mp pr create -> mp pr ready -> mp merge -> mp done
@@ -43,9 +43,9 @@ func organizeRootHelp() {
 		groups := map[string]string{
 			"create": "workflow", "adopt": "workflow", "sync": "workflow",
 			"pr": "workflow", "merge": "workflow", "done": "workflow",
-			"abandon": "workflow", "stack": "workflow", "update": "workflow",
+			"abandon": "workflow", "piece": "workflow", "stack": "workflow", "update": "workflow",
 			"switch": "navigate", "open": "navigate", "go": "navigate",
-			"list": "navigate", "status": "navigate", "inbox": "navigate",
+			"branch": "navigate", "worktree": "navigate", "list": "navigate", "status": "navigate", "inbox": "navigate",
 			"history": "navigate",
 			"agent":   "collaborate", "wait": "collaborate", "tracking": "collaborate",
 			"settle": "collaborate",
@@ -79,6 +79,7 @@ func init() {
 var invocationArgs []string
 
 func Execute() error {
+	registerAtomCommands()
 	organizeRootHelp()
 	args, spec, err := extractRemoteSpec(os.Args[1:])
 	if err != nil {

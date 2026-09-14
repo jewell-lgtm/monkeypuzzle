@@ -1,6 +1,6 @@
 ---
 title: "Docker Development Environment"
-order: 8
+order: 9
 ---
 <!-- Generated from docs/docker-development.md by scripts/sync-docs.mjs — edit the source, then run `pnpm sync-docs`. -->
 This document describes how to use the Docker-based development environment for monkeypuzzle. This is the **preferred way to create reproducible issues** when contributing to the project.

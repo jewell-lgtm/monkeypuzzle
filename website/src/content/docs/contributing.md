@@ -1,6 +1,6 @@
 ---
 title: "Contributing"
-order: 9
+order: 10
 ---
 <!-- Generated from docs/contributing.md by scripts/sync-docs.mjs — edit the source, then run `pnpm sync-docs`. -->
 ## Development Setup

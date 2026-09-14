@@ -1,6 +1,6 @@
 ---
 title: "Command Reference"
-order: 2
+order: 3
 ---
 <!-- Generated from docs/commands.md by scripts/sync-docs.mjs — edit the source, then run `pnpm sync-docs`. -->
 ## Input Modes
@@ -106,11 +106,127 @@ mp completion powershell | Out-String | Invoke-Expression
 
 | Argument or flag                                                        | Completes To            |
 | ----------------------------------------------------------------------- | ----------------------- |
-| `mp switch`, `mp open`, `mp status`, `mp done`, `mp abandon`, `mp wait` (positional) | Piece names |
+| `mp switch`, `mp open`, `mp status`, `mp done`, `mp abandon`, `mp piece show`, `mp wait` (positional) | Piece names |
+| `mp branch show` / `delete` (positional)                              | mp-managed branch layers |
+| `mp worktree show` / `delete` (positional)                            | Piece names, branches, and worktree paths |
 | `--piece` / `--parent` on the piece verbs                               | Piece names             |
 | `mp config get` / `set`                                                 | Config keys, then values |
 | `mp init --pr-provider`                                                 | `github`, `gitlab`      |
 | `--main` on `update`, `sync`, `merge`, `cleanup`                        | Git branch names        |
+
+---
+
+## Atomic noun commands
+
+mp exposes its object model as regular noun commands. Singular and plural are
+equivalent: `branch`/`branches`, `worktree`/`worktrees`, `piece`/`pieces`,
+`stack`/`stacks`, and `inbox`/`inboxes`. The established flat piece verbs remain
+supported as concise workflow entry points.
+
+See [Atoms and workflows](/docs/atoms/) for ownership boundaries, invariants, and a
+table showing which atoms every workflow composes.
+
+### `mp branch` / `mp branches`
+
+Inspect and manage branch layers recorded in mp piece-stack metadata. Raw Git
+refs are not mp branch atoms; adopt them into a piece first.
+
+```bash
+mp branch                         # managed list (same as branch list)
+mp branch list
+mp branch show [branch]           # defaults to the current branch
+mp branch create <name>           # same transition as stack append
+mp branch create --prompt "Add API layer"
+mp branch delete [tip] [--force]
+```
+
+`create` appends and checks out a layer in the current piece. `delete` removes
+only that piece's checked-out stack tip and returns to its recorded base. It
+refuses dirty work, the initial piece branch, and a layer with a recorded PR
+unless `--force` is explicit. Read commands support `--json`; mutations accept
+stdin JSON and expose an example through `--schema`.
+
+### `mp piece` / `mp pieces`
+
+The noun-oriented aliases for piece operations:
+
+```bash
+mp piece                          # show the current piece
+mp piece show [piece]             # alias: status
+mp piece list [--all]             # alias: ls
+mp piece create                   # alias: new
+mp piece adopt <branch>
+mp piece sync | update | merge
+mp piece done [piece]
+mp piece abandon [piece]
+```
+
+The corresponding flat commands (`mp status`, `mp list`, `mp create`, and so
+on) have identical flags, input modes, output, and behavior.
+
+### `mp pr` / `mp prs`
+
+The bare command and `list` show PR/MR associations recorded on managed branch
+layers; `show` selects by number or branch and defaults to the current branch.
+These reads are local and do not discover unrelated repository PRs.
+
+```bash
+mp pr
+mp prs list --json
+mp pr show [number|branch]
+mp pr create
+mp pr ready
+```
+
+`stack status` and `inbox --refresh` are the workflows that reconcile those
+records with live forge state.
+
+### `mp worktree` / `mp worktrees`
+
+Inspect storage used by the current project's piece worktrees. The main checkout
+and unmanaged worktrees are included for context, but unmanaged rows are only
+adoption candidates. JSON rows include `size_bytes`, `in_inbox`, lifecycle and
+agent state, and a recorded PR number when present.
+
+```bash
+mp worktrees                         # terminal picker; non-TTY JSON list
+mp worktree list
+mp worktree show [path|branch|piece]
+mp worktree delete <path|branch|piece>
+mp worktree delete <selector> --delete-branch
+mp worktree delete <selector> --force
+echo '{"selector":"feat/tmp"}' | mp worktree delete
+mp worktree delete --schema
+```
+
+Bare `mp worktrees` is deliberately asymmetric. With stdin and stdout attached
+to a terminal it opens a two-step management picker whose default action is
+inspect-only. Without a TTY it only emits `{"worktrees":[…]}` and can never
+delete anything. `worktree list` is always a direct list.
+
+Deletion is only available for an mp-managed piece. It keeps the branch unless
+`--delete-branch` is explicit, refuses a dirty worktree unless `--force` is
+explicit, and routes through piece abandonment so children and inbox state are
+updated. The TUI offers `piece done` for merged rows. Unmanaged, main, and the
+checkout containing the current process are never deletion targets.
+
+For a disk-space cull, run bare `mp worktrees`, sort your decision from the size
+and lifecycle columns, then finish merged work or explicitly abandon work you no
+longer need. Since the inbox is a projection over pieces, either lifecycle
+transition removes that row from the next `mp inbox`; inspect-only leaves its
+rank, note, snooze, PR, and agent context untouched.
+
+### Completed collection vocabulary
+
+- `mp stack` accepts the plural `mp stacks`; `show`, `list`, and `ls` alias
+  `stack status`.
+- `mp inbox` accepts the plural `mp inboxes`; `inbox list`, `show`, and `ls`
+  run the same listing as bare `mp inbox`.
+- `mp project` already accepts `projects` and `proj`; its `list` accepts `ls`
+  and `status`. It also accepts `add`/`create`, `remove`/`delete`, and
+  `list`/`show` as equivalent CRUD vocabulary.
+- `mp pr` accepts `prs`, `mp agent` accepts `agents` (`agent read` also accepts
+  `show`), and `mp history` accepts `events`.
 
 ---
 
@@ -1049,7 +1165,11 @@ echo '{}' | mp adopt
 
 ## mp stack
 
-Whole-stack operations over pieces stacked via `--parent` (git-town-style). All operations are non-interactive: anything risky aborts cleanly and prints plain-English next steps (e.g. which PR base to change on GitHub).
+Manage base→head relationships. `append` extends the branch chain inside one
+piece worktree; `prepend` and `set-parent` edit the parent forest between
+pieces. Status and synchronization operate over the inter-piece forest. All
+operations are non-interactive: anything risky aborts cleanly and prints
+plain-English next steps (e.g. which PR base to change on the forge).
 
 ### mp stack status
 
@@ -1151,7 +1271,10 @@ mp stack graph --repo owner/name --provider gitlab --default-branch develop
 
 ### mp stack append / prepend
 
-`append` creates a new piece as a child of the current piece; `prepend` inserts a new piece between the current piece and its parent.
+`append` creates and checks out a new branch above the current stack tip in the
+same piece worktree. `prepend` creates a new piece between the current piece and
+its parent. Use `mp create --parent <piece>` to add a child piece in its own
+worktree.
 
 ```bash
 mp stack append --name child-feat
@@ -1161,8 +1284,8 @@ mp stack prepend --name base-feat
 
 | Flag       | Description                          | Default        |
 | ---------- | ------------------------------------ | -------------- |
-| `--name`   | Piece name                           | Auto-generated |
-| `--prompt` | Piece prompt (recorded in piece metadata; used to name the piece) | -              |
+| `--name`   | Branch name for append; piece name for prepend | Derived from prompt |
+| `--prompt` | Text used to derive the name; prepend also records it in piece metadata | - |
 
 ---
 

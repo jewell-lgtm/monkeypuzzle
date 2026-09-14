@@ -335,8 +335,17 @@ func TestCLI_StackAppend_CreatesBranchesInOnePieceWorktree(t *testing.T) {
 		t.Fatalf("unexpected second append result: %#v", api)
 	}
 
-	if got := strings.TrimSpace(gitOut(t, worktree, "branch", "--show-current")); got != "feat/rest-endpoints" {
-		t.Errorf("worktree is on %q, want stack tip feat/rest-endpoints", got)
+	stdout, stderr, err := env.runInDir(worktree, "stack", "append", "--prompt", "add cache layer")
+	if err != nil {
+		t.Fatalf("prompt append failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+	var prompted map[string]string
+	if err := json.Unmarshal([]byte(stdout), &prompted); err != nil || prompted["branch"] != "add-cache-layer" || prompted["base"] != "feat/rest-endpoints" {
+		t.Fatalf("unexpected prompt append: %#v err=%v", prompted, err)
+	}
+
+	if got := strings.TrimSpace(gitOut(t, worktree, "branch", "--show-current")); got != "add-cache-layer" {
+		t.Errorf("worktree is on %q, want stack tip add-cache-layer", got)
 	}
 	worktreeList := strings.Fields(gitOut(t, env.tmpDir, "worktree", "list", "--porcelain"))
 	worktreeCount := 0
@@ -366,6 +375,7 @@ func TestCLI_StackAppend_CreatesBranchesInOnePieceWorktree(t *testing.T) {
 		{"billing", "main"},
 		{"feat/orm-models", "billing"},
 		{"feat/rest-endpoints", "feat/orm-models"},
+		{"add-cache-layer", "feat/rest-endpoints"},
 	}
 	if len(stored.Stack) != len(want) {
 		t.Fatalf("stored stack has %d entries, want %d: %s", len(stored.Stack), len(want), metadata)
