@@ -87,6 +87,11 @@ jobs:
 
       - name: Set up pnpm
         uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          # The action reads packageManager from the repo root by default, and
+          # this repo has no root package.json. defaults.working-directory does
+          # not apply to action inputs, so the path is repo-relative.
+          package_json_file: website/package.json
 
       - name: Set up Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
