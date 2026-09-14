@@ -9,8 +9,11 @@ The inbox is one ranked list of every piece across every registered project.
 Unlike the rest of `mp`, it does not care which repo you are standing in — it
 works from anywhere, including outside a project.
 
-Every command emits JSON to stdout when piped or given `--json`. On a terminal
-the human table goes to **stderr**, so stdout stays parseable either way.
+`mp inbox` and the three editing verbs emit JSON to stdout when piped or given
+`--json`; on a terminal the human table goes to **stderr**, so stdout stays
+parseable either way. Two exceptions: `mp inbox next`/`prev` print a bare path
+unless you pass `--json`, and `mp history --json` emits JSON *lines*, one
+object per line, not a single document.
 
 ## Read it
 
@@ -28,8 +31,8 @@ Each row:
 | `id` | The piece's durable identifier. Unlike `key` it survives renames |
 | `rank` | Position in the list, 1-based |
 | `urgency` | `blocked` > `review` > `working` > `idle` > `merged` |
-| `agent_status` | Aggregate of the piece's agents: `blocked`, `working`, `done`, `idle` |
-| `agent_counts` | Per-status counts behind that aggregate |
+| `agent_status` | Aggregate of the piece's agents: `blocked`, `working`, `done`, `idle` — or `""` when no agent has reported, which is the common case |
+| `agent_counts` | Per-status counts behind that aggregate, or `null` when there are none |
 | `pr` | `{number, url, state, draft}` when the branch has one |
 | `note` | Free-form text you attached |
 | `snoozed` | Snooze already evaluated against now — no timestamp maths needed |
@@ -81,8 +84,12 @@ they just report where they would go.
 
 ```bash
 mp agent list --json --all     # every live agent across every project
-mp wait --timeout 5m           # block until no agent is working
 ```
+
+`mp wait --timeout 5m` blocks until no agent is working, but unlike everything
+else here it is **not** cross-project: it fails outside a git repo and only
+covers the pieces of the repo you are standing in. Run it per project, and do
+not report "everything has settled" from one repo's answer.
 
 ## What changed since last time
 
@@ -112,13 +119,22 @@ against your own record, and reconcile by reading `mp inbox --json` and
 `note` is free-form text shown in every picker a human uses. Treat it as theirs
 to read, not as a machine field to stuff structured data into.
 
+Two fields are always present but often empty: `agent_status` is `""` and
+`agent_counts` is `null` for any piece with no live agent. Switching on the
+four status values without handling `""` breaks on most rows.
+
 A piece created before ids existed reports no `id`. Reads never mint one, since
 writing metadata dirties the worktree and would make `mp cleanup` refuse the
 piece. Materialise one explicitly:
 
 ```bash
-mp piece show --piece fix-auth --ensure-id --json | jq -r .id
+mp --project api piece show --piece fix-auth --ensure-id --json | jq -r .id
 ```
+
+`--piece` takes a bare piece name and resolves it against the repo you are
+standing in; it rejects a `project/piece` key outright. The leading `--project`
+is what points it at another project, so split the `key` on `/` rather than
+passing it whole.
 
 ## Cautions
 

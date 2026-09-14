@@ -123,11 +123,14 @@ registered project and work from anywhere:
 ```bash
 mp inbox --json                      # every piece in flight, ranked
 mp agent list --json --all           # live agents across all projects
-mp wait --timeout 5m                 # block until no agent is working
 mp history --json --event 'pr.*' --since 24h
 mp project list --json               # what mp knows about
 mp go --json                         # switch across every project
 ```
+
+`mp wait --timeout 5m` blocks until no agent is working, but it is per-repo,
+not cross-project: it fails outside a git repo and only sees the pieces of the
+one you are in.
 
 The inbox has its own surface — rank, notes, snooze, and the piece `id` an
 external system keys on. That is the `monkeypuzzle-inbox` skill; use it rather
@@ -135,8 +138,10 @@ than re-deriving the JSON shape here.
 
 ## Remote projects
 
-`--host`, `--dir` and `--project` go **before** the verb and proxy the whole
-command over ssh to the box the repo lives on:
+`--host`, `--dir` and `--project` go **before** the verb. `--host` proxies the
+whole command over ssh. `--project` proxies only when that project is
+registered with a host, and otherwise just runs it in the project's local
+path. `--dir` is rejected without one of the other two.
 
 ```bash
 mp --host build-box status
