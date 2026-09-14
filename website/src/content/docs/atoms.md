@@ -104,6 +104,8 @@ not silently demote it to an unmanaged Git ref.
 
 A piece is mp's execution and lifecycle boundary. A local piece owns:
 
+- a durable `id`, minted at create or adopt, which outlives every renameable
+  thing about the piece;
 - one Git worktree;
 - an initial branch, plus any branches appended to its in-worktree stack;
 - metadata including its parent, prompt, merge marker, stack entries, agents,
@@ -129,6 +131,20 @@ entry points, not a second data model.
 A placed piece has the same identity and metadata contract, but its worktree
 lives on its placement host and commands that accept a piece selector proxy to
 that host.
+
+### Referring to a piece from outside mp
+
+`project/piece` is the selector a human types, but it is not an identity: it
+changes when either name changes. The `id` is the stable one, so it is what an
+external system should record. mp assigns it and never interprets it — there is
+no place in mp to store a foreign system's identifier, and that is deliberate.
+
+It appears on `mp piece show`, on `mp create --json`, on every `mp inbox --json`
+row, and on the hook-driven `mp history` events.
+
+A piece created before ids existed has none until something writes its metadata,
+and reads stay reads: minting an id dirties the worktree, which is enough to make
+`mp cleanup` refuse the piece. `mp piece show --ensure-id` mints one explicitly.
 
 ## Stack
 

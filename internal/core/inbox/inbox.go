@@ -49,7 +49,12 @@ type Options struct {
 // Row is one inbox entry: a piece plus its manual rank, annotations and the
 // derived urgency every UI orders by.
 type Row struct {
-	Key          string         `json:"key"` // project/piece
+	Key string `json:"key"` // project/piece
+	// ID is the piece's durable identifier; see piece.PieceMetadata.ID. It is
+	// what an external system should record to refer back to this piece, since
+	// Key changes when the piece or project is renamed. Empty for a piece that
+	// predates ids; `mp piece show` materialises one.
+	ID           string         `json:"id,omitempty"`
 	Project      string         `json:"project"`
 	Piece        string         `json:"piece"`
 	Rank         int            `json:"rank"`
@@ -264,6 +269,7 @@ func buildRow(p projectcmd.Info, it piece.PieceListItem, prInfo *PR, st *State, 
 	key := p.Name + "/" + it.Name
 	row := Row{
 		Key:          key,
+		ID:           it.ID,
 		Project:      p.Name,
 		Piece:        it.Name,
 		Host:         p.Host,

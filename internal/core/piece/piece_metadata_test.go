@@ -335,3 +335,120 @@ func TestDefaultPieceMetadata(t *testing.T) {
 		t.Errorf("expected empty default CreatedFromBranch, got %q", def.CreatedFromBranch)
 	}
 }
+
+func TestNewPieceIDIsUnique(t *testing.T) {
+	seen := map[string]bool{}
+	for range 1000 {
+		id := piece.NewPieceID()
+		if id == "" {
+			t.Fatal("empty piece id")
+		}
+		if seen[id] {
+			t.Fatalf("duplicate piece id %q", id)
+		}
+		seen[id] = true
+	}
+}
+
+// A piece id has to survive being put in a branch name, a tag, or a URL by
+// whatever external system records it.
+func TestNewPieceIDIsWordSafe(t *testing.T) {
+	id := piece.NewPieceID()
+	for _, r := range id {
+		isAlnum := (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')
+		if !isAlnum {
+			t.Errorf("piece id %q contains non-alphanumeric %q", id, r)
+		}
+	}
+}
+
+func TestWritePieceMetadataBackfillsID(t *testing.T) {
+	fs := adapters.NewMemoryFS()
+	worktreePath := "/workdir"
+	_ = fs.MkdirAll(filepath.Join(worktreePath, ".monkeypuzzle"), 0755)
+
+	// Metadata written before ids existed.
+	if err := piece.WritePieceMetadata(worktreePath, piece.PieceMetadata{Parent: "main"}, fs); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	got, err := piece.ReadPieceMetadata(worktreePath, fs)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if got.ID == "" {
+		t.Fatal("write did not backfill an id")
+	}
+}
+
+func TestWritePieceMetadataKeepsExistingID(t *testing.T) {
+	fs := adapters.NewMemoryFS()
+	worktreePath := "/workdir"
+	_ = fs.MkdirAll(filepath.Join(worktreePath, ".monkeypuzzle"), 0755)
+
+	const want = "KEEPTHISID00"
+	if err := piece.WritePieceMetadata(worktreePath, piece.PieceMetadata{ID: want, Parent: "main"}, fs); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	// A later write for an unrelated reason must not re-mint it.
+	metadata, err := piece.ReadPieceMetadata(worktreePath, fs)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	metadata.Merged = true
+	if err := piece.WritePieceMetadata(worktreePath, *metadata, fs); err != nil {
+		t.Fatalf("second write: %v", err)
+	}
+	got, err := piece.ReadPieceMetadata(worktreePath, fs)
+	if err != nil {
+		t.Fatalf("re-read: %v", err)
+	}
+	if got.ID != want {
+		t.Errorf("id = %q, want %q", got.ID, want)
+	}
+}
+
+func TestEnsurePieceIDIsStable(t *testing.T) {
+	fs := adapters.NewMemoryFS()
+	worktreePath := "/workdir"
+	_ = fs.MkdirAll(filepath.Join(worktreePath, ".monkeypuzzle"), 0755)
+
+	// Seed a piece with no id, the way one created before ids looks.
+	raw := []byte(`{"parent":"main","created_from_branch":"main"}`)
+	if err := fs.WriteFile(filepath.Join(worktreePath, ".monkeypuzzle", "piece-metadata.json"), raw, 0644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	first, err := piece.EnsurePieceID(worktreePath, fs)
+	if err != nil {
+		t.Fatalf("ensure: %v", err)
+	}
+	if first == "" {
+		t.Fatal("ensure returned an empty id")
+	}
+	second, err := piece.EnsurePieceID(worktreePath, fs)
+	if err != nil {
+		t.Fatalf("second ensure: %v", err)
+	}
+	if second != first {
+		t.Errorf("id changed between calls: %q then %q", first, second)
+	}
+
+	// And the rest of the metadata survived the backfill.
+	metadata, err := piece.ReadPieceMetadata(worktreePath, fs)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if metadata.Parent != "main" || metadata.CreatedFromBranch != "main" {
+		t.Errorf("backfill clobbered metadata: %+v", metadata)
+	}
+}
+
+func TestPieceMetadataIDOmittedWhenEmpty(t *testing.T) {
+	data, err := json.Marshal(piece.PieceMetadata{Parent: "main"})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if string(data) != `{"parent":"main","created_from_branch":""}` {
+		t.Errorf("empty id should be omitted, got %s", data)
+	}
+}

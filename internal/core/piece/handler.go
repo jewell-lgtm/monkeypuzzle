@@ -208,6 +208,7 @@ func (h *Handler) CreatePiece(ctx context.Context, pieceName string, opts Create
 
 	// Write piece metadata (parent-child relationship)
 	pieceMetadata := PieceMetadata{
+		ID:                NewPieceID(),
 		Parent:            parent,
 		CreatedFromBranch: currentBranch,
 		PlacementHost:     h.hooks.placementHost,
@@ -223,6 +224,7 @@ func (h *Handler) CreatePiece(ctx context.Context, pieceName string, opts Create
 
 	sessionName := h.pieceSessionName(repoRoot, pieceName)
 	info := PieceInfo{
+		ID:           pieceMetadata.ID,
 		Name:         pieceName,
 		WorktreePath: worktreePath,
 		SessionName:  sessionName,
@@ -457,6 +459,7 @@ func (h *Handler) AdoptPiece(ctx context.Context, input AdoptPieceInput) (PieceI
 
 	// Write piece metadata
 	pieceMetadata := PieceMetadata{
+		ID:                NewPieceID(),
 		Parent:            parent,
 		CreatedFromBranch: branchToAdopt,
 		PlacementHost:     h.hooks.placementHost,
@@ -470,6 +473,7 @@ func (h *Handler) AdoptPiece(ctx context.Context, input AdoptPieceInput) (PieceI
 
 	sessionName := h.pieceSessionName(repoRoot, pieceName)
 	info := PieceInfo{
+		ID:           pieceMetadata.ID,
 		Name:         pieceName,
 		WorktreePath: worktreePath,
 		SessionName:  sessionName,
@@ -599,8 +603,16 @@ func (h *Handler) Status(ctx context.Context, workDir string) (PieceStatus, erro
 		repoRoot = ""
 	}
 
+	// Read-only: minting an id here would dirty the worktree, which is enough
+	// to make `mp cleanup` refuse the piece. Use EnsurePieceID explicitly.
+	pieceID := ""
+	if metadata, err := ReadPieceMetadata(worktreePath, h.deps.FS); err == nil {
+		pieceID = metadata.ID
+	}
+
 	return PieceStatus{
 		InPiece:      true,
+		ID:           pieceID,
 		PieceName:    pieceName,
 		WorktreePath: worktreePath,
 		RepoRoot:     repoRoot,
@@ -2255,10 +2267,12 @@ func (h *Handler) ListPieces(ctx context.Context, repoRoot string) ([]PieceListI
 		// Read piece metadata for parent + agent info
 		parent := "main"
 		agentStatus := ""
+		pieceID := ""
 		branch := branchByPath[canonicalWorktreePath(worktreePath)]
 		var agentCounts map[string]int
 		if metadata, err := ReadPieceMetadata(worktreePath, h.deps.FS); err == nil {
 			parent = metadata.Parent
+			pieceID = metadata.ID
 			live := LiveAgents(metadata.Agents)
 			agentStatus = AggregateAgents(live)
 			agentCounts = CountAgents(live)
@@ -2270,6 +2284,7 @@ func (h *Handler) ListPieces(ctx context.Context, repoRoot string) ([]PieceListI
 		}
 
 		pieces = append(pieces, PieceListItem{
+			ID:           pieceID,
 			Name:         name,
 			WorktreePath: worktreePath,
 			SessionName:  sessionName,

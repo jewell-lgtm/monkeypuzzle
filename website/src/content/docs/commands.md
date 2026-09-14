@@ -1655,6 +1655,20 @@ from `done`. Non-zero on timeout.
 mp integration install claude
 ```
 
+### Piece identity
+
+Every piece carries an `id` that is minted once and never changes, unlike its
+name, branch, worktree path, or `project/piece` key. Record that when something
+outside mp needs to refer back to a piece.
+
+```bash
+mp piece show --json | jq -r .id
+mp piece show --ensure-id --json     # mint one for a piece that predates ids
+mp create --name auth --json | jq -r .id
+mp inbox --json | jq -r '.rows[] | "\(.id) \(.key)"'
+mp history --json --event piece.merged | jq -r .piece_id
+```
+
 ### mp claude skill
 
 ```bash
