@@ -37,7 +37,9 @@ func surfacePath(dir string) {
 // the shell is not left in a deleted directory; off a terminal the JSON
 // result already carries main_path, so only the wrapper is told.
 func surfaceRoot(wd, removedWorktree, root string, jsonMode bool) {
-	if root == "" || !piececmd.IsPathInside(wd, removedWorktree) {
+	// An empty wd would make IsPathInside resolve against the process's own
+	// directory, which is not what the caller asked about.
+	if wd == "" || root == "" || !piececmd.IsPathInside(wd, removedWorktree) {
 		return
 	}
 	noteCwd(root)
