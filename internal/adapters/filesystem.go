@@ -1,6 +1,7 @@
 package adapters
 
 import (
+	"errors"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -91,7 +92,15 @@ func (f *OSFS) Symlink(oldname, newname string) error {
 }
 
 func (f *OSFS) Readlink(name string) (string, error) {
-	return os.Readlink(f.path(name))
+	target, err := os.Readlink(f.path(name))
+	// Readlink on something that is not a symlink returns EINVAL, which does
+	// NOT satisfy errors.Is(err, os.ErrInvalid) — syscall.Errno.Is maps EPERM,
+	// EACCES, EEXIST, ENOENT, ENOSYS and ERANGE, but not this one. Normalise it
+	// so callers can use os.ErrInvalid against either FS implementation.
+	if errors.Is(err, syscall.EINVAL) {
+		return "", &os.PathError{Op: "readlink", Path: name, Err: os.ErrInvalid}
+	}
+	return target, err
 }
 
 func (f *OSFS) ReadDir(name string) ([]fs.DirEntry, error) {
@@ -245,6 +254,10 @@ func (f *MemoryFS) Symlink(oldname, newname string) error {
 	if filepath.IsAbs(newname) && len(newname) > 1 {
 		newname = newname[1:] // Remove leading slash to match lookup format
 	}
+	// Match os.Symlink, which refuses to clobber an existing path.
+	if _, exists := f.files[newname]; exists || f.dirs[newname] {
+		return &os.LinkError{Op: "symlink", Old: oldname, New: newname, Err: os.ErrExist}
+	}
 	// In memory filesystem, we just record the symlink as a file with special content
 	// For testing purposes, we store the target path
 	f.files[newname] = &memFile{
@@ -259,12 +272,17 @@ func (f *MemoryFS) Readlink(name string) (string, error) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 
-	file, ok := f.files[memPath(name)]
+	name = memPath(name)
+	// Match OSFS: a directory is not a symlink, so it is EINVAL, not ENOENT.
+	if f.dirs[name] {
+		return "", &os.PathError{Op: "readlink", Path: name, Err: os.ErrInvalid}
+	}
+	file, ok := f.files[name]
 	if !ok {
-		return "", os.ErrNotExist
+		return "", &os.PathError{Op: "readlink", Path: name, Err: os.ErrNotExist}
 	}
 	if file.mode&os.ModeSymlink == 0 {
-		return "", os.ErrInvalid
+		return "", &os.PathError{Op: "readlink", Path: name, Err: os.ErrInvalid}
 	}
 	return string(file.data), nil
 }

@@ -136,9 +136,14 @@ func (h *Handler) Install(root string, in Input) (Result, error) {
 		}
 	}
 
+	// The link is a convenience for one agent; the document is the deliverable.
+	// Failing the whole call would report nothing for a file already written.
 	link, err := h.linkForClaude(root, target.Name)
 	if err != nil {
-		return Result{}, err
+		h.deps.Output.Write(core.Message{
+			Type:    core.MsgWarning,
+			Content: fmt.Sprintf("wrote the skill but could not link %s: %v", filepath.Join(ClaudeDir, target.Name), err),
+		})
 	}
 
 	scope := ScopeProject
@@ -159,6 +164,15 @@ func (h *Handler) Install(root string, in Input) (Result, error) {
 	return result, nil
 }
 
+// warnOccupied reports a .claude/skills path mp will not touch. Leaving a
+// skill someone wrote by hand alone matters more than the convenience link.
+func (h *Handler) warnOccupied(name, why string) {
+	h.deps.Output.Write(core.Message{
+		Type:    core.MsgWarning,
+		Content: fmt.Sprintf("%s %s; leaving it alone", filepath.Join(ClaudeDir, name), why),
+	})
+}
+
 // linkForClaude points .claude/skills/<name> at the canonical .agents copy,
 // because Claude Code does not read .agents/skills. The link is relative so a
 // checked-in repo stays portable. Anything real already sitting at that path is
@@ -172,15 +186,14 @@ func (h *Handler) linkForClaude(root, name string) (string, error) {
 	case err == nil && target == rel:
 		return filepath.Join(ClaudeDir, name), nil
 	case err == nil:
-		// A link pointing elsewhere is one of ours to repoint.
-		if removeErr := h.deps.FS.Remove(linkPath); removeErr != nil {
-			return "", removeErr
-		}
+		// A link somewhere else is someone's deliberate choice, not stale state
+		// of ours to repoint.
+		h.warnOccupied(name, "is a link to "+target)
+		return "", nil
 	case errors.Is(err, os.ErrInvalid):
-		h.deps.Output.Write(core.Message{
-			Type:    core.MsgWarning,
-			Content: fmt.Sprintf("%s already exists and is not a link; leaving it alone", filepath.Join(ClaudeDir, name)),
-		})
+		// Upgrade path: mp wrote a real directory here before skills moved to
+		// .agents. Say what to do rather than deleting someone's files.
+		h.warnOccupied(name, "already exists and is not a link (remove it and re-run to link the canonical copy)")
 		return "", nil
 	case !errors.Is(err, os.ErrNotExist):
 		return "", err

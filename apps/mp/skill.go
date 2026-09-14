@@ -102,11 +102,17 @@ func runSkillList(_ *cobra.Command, _ []string) error {
 	return w.Flush()
 }
 
+// truncate cuts on rune boundaries: descriptions are prose and contain
+// multi-byte runes, so slicing bytes can emit a broken character.
 func truncate(s string, n int) string {
-	if len(s) <= n {
+	if n <= 1 {
+		return ""
+	}
+	r := []rune(s)
+	if len(r) <= n {
 		return s
 	}
-	return s[:n-1] + "…"
+	return string(r[:n-1]) + "…"
 }
 
 func runSkillShow(_ *cobra.Command, args []string) error {

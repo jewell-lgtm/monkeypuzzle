@@ -436,7 +436,6 @@ func TestCLI_SkillCreate(t *testing.T) {
 	defer env.cleanup()
 
 	env.initGitRepo()
-	env.initProject("test")
 
 	stdout, stderr, err := env.run("skill", "create")
 	if err != nil {
@@ -478,21 +477,79 @@ func TestCLI_SkillCreate_Idempotent(t *testing.T) {
 	defer env.cleanup()
 
 	env.initGitRepo()
-	env.initProject("test")
-
-	if _, stderr, err := env.run("skill", "create"); err != nil {
-		t.Fatalf("first create failed: %v\nstderr: %s", err, stderr)
-	}
+	// Deliberately no initProject: `mp init` writes the skill itself, so the
+	// first create here would already report unchanged and the test would
+	// assert nothing.
 	stdout, stderr, err := env.run("skill", "create")
 	if err != nil {
+		t.Fatalf("first create failed: %v\nstderr: %s", err, stderr)
+	}
+	var first map[string]any
+	if err := json.Unmarshal([]byte(stdout), &first); err != nil {
+		t.Fatalf("invalid JSON output: %v\noutput: %s", err, stdout)
+	}
+	if first["status"] != "created" {
+		t.Errorf("first status = %v, want created", first["status"])
+	}
+
+	stdout, stderr, err = env.run("skill", "create")
+	if err != nil {
 		t.Fatalf("second create failed: %v\nstderr: %s", err, stderr)
+	}
+	var second map[string]any
+	if err := json.Unmarshal([]byte(stdout), &second); err != nil {
+		t.Fatalf("invalid JSON output: %v\noutput: %s", err, stdout)
+	}
+	if second["status"] != "unchanged" {
+		t.Errorf("second status = %v, want unchanged", second["status"])
+	}
+}
+
+// TestCLI_SkillCreate_OccupiedLinkPath covers the upgrade path: an older mp
+// wrote .claude/skills/<name>/ as a real directory. This only fails on a real
+// filesystem, where readlink returns EINVAL.
+func TestCLI_SkillCreate_OccupiedLinkPath(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	env.initGitRepo()
+
+	legacy := filepath.Join(env.tmpDir, ".claude", "skills", "managing-monkeypuzzle")
+	if err := os.MkdirAll(legacy, 0755); err != nil {
+		t.Fatalf("seed legacy dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(legacy, "SKILL.md"), []byte("old content\n"), 0644); err != nil {
+		t.Fatalf("seed legacy file: %v", err)
+	}
+
+	stdout, stderr, err := env.run("skill", "create")
+	if err != nil {
+		t.Fatalf("skill create must not fail when the link path is occupied: %v\nstderr: %s", err, stderr)
 	}
 	var result map[string]any
 	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
 		t.Fatalf("invalid JSON output: %v\noutput: %s", err, stdout)
 	}
-	if result["status"] != "unchanged" {
-		t.Errorf("status = %v, want unchanged", result["status"])
+	if result["status"] != "created" {
+		t.Errorf("status = %v, want created", result["status"])
+	}
+	// The canonical document is written regardless.
+	if _, err := os.Stat(filepath.Join(env.tmpDir, ".agents", "skills", "managing-monkeypuzzle", "SKILL.md")); err != nil {
+		t.Errorf("canonical skill not written: %v", err)
+	}
+	// And the user's files are untouched.
+	body, err := os.ReadFile(filepath.Join(legacy, "SKILL.md"))
+	if err != nil || string(body) != "old content\n" {
+		t.Errorf("legacy file was modified or removed: %q, %v", body, err)
+	}
+	// The message has to be the actionable one. Readlink returns EINVAL here,
+	// which does not satisfy errors.Is(err, os.ErrInvalid) unless the FS adapter
+	// normalises it — without that the user gets a raw "invalid argument".
+	if !strings.Contains(stderr, "leaving it alone") {
+		t.Errorf("expected the actionable warning, got: %s", stderr)
+	}
+	if strings.Contains(stderr, "invalid argument") {
+		t.Errorf("raw readlink error leaked to the user: %s", stderr)
 	}
 }
 

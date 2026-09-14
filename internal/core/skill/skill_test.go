@@ -138,3 +138,58 @@ func TestSchemaKeepsBooleanFields(t *testing.T) {
 		t.Errorf("schema is missing the user field: %s", schema)
 	}
 }
+
+// The upgrade path: mp wrote a real directory at .claude/skills/<name> before
+// skills moved to .agents. It must not fail, and must not delete anything.
+func TestInstallLeavesRealDirectoryAlone(t *testing.T) {
+	h, fs := newTestHandler()
+
+	occupied := filepath.Join("/repo", skill.ClaudeDir, skill.DefaultSkill)
+	if err := fs.MkdirAll(occupied, skill.DefaultDirPerm); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	result, err := h.Install("/repo", skill.Input{})
+	if err != nil {
+		t.Fatalf("install must not fail when the link path is occupied: %v", err)
+	}
+	if result.Status != skill.StatusCreated {
+		t.Errorf("status = %q, want %q", result.Status, skill.StatusCreated)
+	}
+	if result.Link != "" {
+		t.Errorf("link = %q, want empty when mp declined to touch the path", result.Link)
+	}
+	// The canonical document is still the deliverable.
+	canonical := filepath.Join("/repo", skill.AgentsDir, skill.DefaultSkill, skill.SkillFile)
+	if _, err := fs.ReadFile(canonical); err != nil {
+		t.Errorf("canonical skill not written: %v", err)
+	}
+}
+
+// A link someone else made is their choice, not stale state to repoint.
+func TestInstallLeavesForeignSymlinkAlone(t *testing.T) {
+	h, fs := newTestHandler()
+
+	linkPath := filepath.Join("/repo", skill.ClaudeDir, skill.DefaultSkill)
+	if err := fs.MkdirAll(filepath.Join("/repo", skill.ClaudeDir), skill.DefaultDirPerm); err != nil {
+		t.Fatalf("seed dir: %v", err)
+	}
+	if err := fs.Symlink("../../mine", linkPath); err != nil {
+		t.Fatalf("seed link: %v", err)
+	}
+
+	result, err := h.Install("/repo", skill.Input{})
+	if err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	if result.Link != "" {
+		t.Errorf("link = %q, want empty", result.Link)
+	}
+	target, err := fs.Readlink(linkPath)
+	if err != nil {
+		t.Fatalf("the user's link was removed: %v", err)
+	}
+	if target != "../../mine" {
+		t.Errorf("link was repointed to %q", target)
+	}
+}
