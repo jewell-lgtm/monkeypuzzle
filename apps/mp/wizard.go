@@ -80,8 +80,10 @@ func commandSkipsConfigCheck(cmd *cobra.Command) bool {
 	case "mp shell-init", "mp doctor":
 		return true
 	}
+	// skill only writes a documentation file, so it works before the first-run
+	// wizard — teaching an agent about mp is a reasonable first move.
 	for c := cmd; c != nil; c = c.Parent() {
-		if c.Name() == "config" {
+		if c.Name() == "config" || c.Name() == "skill" {
 			return true
 		}
 	}

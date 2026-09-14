@@ -186,9 +186,11 @@ mp create --schema
 echo '{"name":"my-feature","skip_switch":true}' | mp create
 ```
 
-- **Claude Code skill.** `mp init` writes
-  `.claude/skills/managing-monkeypuzzle/SKILL.md` so Claude Code knows the CLI;
-  `mp claude skill` regenerates it.
+- **Agent skill.** `mp init` writes
+  `.agents/skills/managing-monkeypuzzle/SKILL.md` so an agent knows the CLI, and
+  links `.claude/skills/managing-monkeypuzzle` at it for Claude Code, which does
+  not read `.agents/skills/`. `mp skill create` regenerates both; `mp skill
+  create --user` installs outside any project.
 - **Agent status.** `mp integration install claude` merges hooks into the
   repo's `.claude/settings.json` that report each agent's state to mp
   (`blocked`, `working`, `done`, `idle`). With tmux or herdr configured, mp

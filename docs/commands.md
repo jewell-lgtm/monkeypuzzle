@@ -1666,10 +1666,30 @@ mp inbox --json | jq -r '.rows[] | "\(.id) \(.key)"'
 mp history --json --event piece.merged | jq -r .piece_id
 ```
 
-### mp claude skill
+### mp skill
 
 ```bash
-# Create or regenerate .claude/skills/managing-monkeypuzzle/SKILL.md, the
-# Claude Code skill describing the mp CLI. `mp init` writes it too.
-mp claude skill
+# What mp ships
+mp skill list
+mp skill show managing-monkeypuzzle
+
+# Write .agents/skills/<name>/SKILL.md and link .claude/skills/<name> at it.
+# `mp init` writes the default skill too. Re-run to refresh after upgrading mp;
+# the result says created, updated, or unchanged.
+mp skill create
+mp skill create managing-monkeypuzzle
+
+# Skills useful outside one project go under your home directory instead
+mp skill create --user
+
+echo '{"name":"managing-monkeypuzzle","user":false}' | mp skill create
+mp skill create --schema
 ```
+
+The canonical document lives in `.agents/skills/`, which is the portable
+location agents are converging on; `.claude/skills/<name>` is a relative
+symlink to it, because Claude Code does not read `.agents/skills/`. It is the
+same split the repo uses for `AGENTS.md` and its `CLAUDE.md` symlink.
+
+`mp claude skill` is the pre-rename spelling. It still works and writes the
+same files, but prints a deprecation notice.
