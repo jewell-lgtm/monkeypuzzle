@@ -90,6 +90,10 @@ func (f *OSFS) Symlink(oldname, newname string) error {
 	return os.Symlink(oldname, f.path(newname))
 }
 
+func (f *OSFS) Readlink(name string) (string, error) {
+	return os.Readlink(f.path(name))
+}
+
 func (f *OSFS) ReadDir(name string) ([]fs.DirEntry, error) {
 	return os.ReadDir(f.path(name))
 }
@@ -249,6 +253,20 @@ func (f *MemoryFS) Symlink(oldname, newname string) error {
 		modTime: time.Now(),
 	}
 	return nil
+}
+
+func (f *MemoryFS) Readlink(name string) (string, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+
+	file, ok := f.files[memPath(name)]
+	if !ok {
+		return "", os.ErrNotExist
+	}
+	if file.mode&os.ModeSymlink == 0 {
+		return "", os.ErrInvalid
+	}
+	return string(file.data), nil
 }
 
 func (f *MemoryFS) Rename(oldpath, newpath string) error {

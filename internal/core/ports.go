@@ -16,6 +16,9 @@ type FS interface {
 	Stat(name string) (fs.FileInfo, error)
 	Remove(name string) error
 	Symlink(oldname, newname string) error
+	// Readlink returns a symlink's target. Stat follows links, so this is the
+	// only way to tell a link from whatever it points at.
+	Readlink(name string) (string, error)
 	ReadDir(name string) ([]fs.DirEntry, error)
 	// Rename atomically replaces newpath with oldpath (same-directory renames
 	// only, which is all callers need for atomic write-temp-then-rename).

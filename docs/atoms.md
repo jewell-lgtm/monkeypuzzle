@@ -23,6 +23,7 @@ plural spellings are equivalent where the plural reads naturally:
 | **inbox** | A user-owned ordering and annotation of pieces across projects | `mp inbox` / `mp inboxes` |
 | **agent** | A live agent process reported from a piece | `mp agent` / `mp agents` |
 | **history event** | An immutable record of a completed mp transition | `mp history` / `mp events` |
+| **skill** | An agent skill document mp ships for this CLI | `mp skill` / `mp skills` |
 
 `show` addresses one object, `list` addresses a collection, `create` adds an
 object, and `delete` removes one when that operation is safe for the atom.
@@ -188,6 +189,29 @@ mp inbox next
 
 Deleting or finishing a piece removes it from the next inbox projection; inbox
 metadata is harmless if a piece temporarily disappears.
+
+## Skill
+
+A skill atom is a document that teaches an agent this CLI. mp ships the
+documents and materialises them; it does not track what an agent then does with
+one. The format is portable, so the canonical copy is written to
+`.agents/skills/<name>/SKILL.md` and `.claude/skills/<name>` is a relative
+symlink to it — Claude Code does not read `.agents/skills/`. The repo makes the
+same split between `AGENTS.md` and its `CLAUDE.md` symlink.
+
+```bash
+mp skill                          # list (also: mp skill list, mp skills)
+mp skill show managing-monkeypuzzle
+mp skill create                   # write the default skill into this repo
+mp skill create --user            # write it under your home directory instead
+```
+
+`create` is idempotent and reports `created`, `updated`, or `unchanged`, so it
+doubles as the refresh path after upgrading mp. A skill you wrote yourself at
+`.claude/skills/<name>` is never replaced — mp reports it and leaves it alone.
+
+Skills are documents, not state: `mp skill` works before the first-run config
+wizard, since teaching an agent about mp is a reasonable first move.
 
 ## Workflows are compositions
 

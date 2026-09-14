@@ -429,16 +429,18 @@ func TestCLI_PRCreate_Schema(t *testing.T) {
 	}
 }
 
-// TestCLI_ClaudeSkill tests mp claude skill creates skill file
-func TestCLI_ClaudeSkill(t *testing.T) {
+// TestCLI_SkillCreate tests that mp skill create writes the canonical document
+// and links it where Claude Code will find it.
+func TestCLI_SkillCreate(t *testing.T) {
 	env := setupTestEnv(t)
 	defer env.cleanup()
 
+	env.initGitRepo()
 	env.initProject("test")
 
-	stdout, stderr, err := env.run("claude", "skill")
+	stdout, stderr, err := env.run("skill", "create")
 	if err != nil {
-		t.Fatalf("claude skill failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+		t.Fatalf("skill create failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
 	}
 
 	var result map[string]any
@@ -446,10 +448,75 @@ func TestCLI_ClaudeSkill(t *testing.T) {
 		t.Fatalf("invalid JSON output: %v\noutput: %s", err, stdout)
 	}
 
-	// Verify skill file was created
-	skillPath := filepath.Join(env.tmpDir, ".claude", "skills", "managing-monkeypuzzle", "SKILL.md")
-	if _, err := os.Stat(skillPath); os.IsNotExist(err) {
-		t.Error("skill file not created")
+	canonical := filepath.Join(env.tmpDir, ".agents", "skills", "managing-monkeypuzzle", "SKILL.md")
+	body, err := os.ReadFile(canonical)
+	if err != nil {
+		t.Fatalf("canonical skill not created: %v", err)
+	}
+	// Nothing used to assert the content, so an empty document would have passed.
+	if !strings.Contains(string(body), "name: managing-monkeypuzzle") {
+		t.Error("skill document is missing its frontmatter name")
+	}
+
+	link := filepath.Join(env.tmpDir, ".claude", "skills", "managing-monkeypuzzle")
+	target, err := os.Readlink(link)
+	if err != nil {
+		t.Fatalf("claude link not created: %v", err)
+	}
+	if want := filepath.Join("..", "..", ".agents", "skills", "managing-monkeypuzzle"); target != want {
+		t.Errorf("link target = %q, want %q", target, want)
+	}
+	// The link must resolve, or the skill is invisible to Claude Code.
+	if _, err := os.Stat(filepath.Join(link, "SKILL.md")); err != nil {
+		t.Errorf("skill not readable through the link: %v", err)
+	}
+}
+
+// TestCLI_SkillCreate_Idempotent tests that re-running reports no change.
+func TestCLI_SkillCreate_Idempotent(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	env.initGitRepo()
+	env.initProject("test")
+
+	if _, stderr, err := env.run("skill", "create"); err != nil {
+		t.Fatalf("first create failed: %v\nstderr: %s", err, stderr)
+	}
+	stdout, stderr, err := env.run("skill", "create")
+	if err != nil {
+		t.Fatalf("second create failed: %v\nstderr: %s", err, stderr)
+	}
+	var result map[string]any
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("invalid JSON output: %v\noutput: %s", err, stdout)
+	}
+	if result["status"] != "unchanged" {
+		t.Errorf("status = %v, want unchanged", result["status"])
+	}
+}
+
+// TestCLI_ClaudeSkill_DeprecatedAlias tests the pre-rename spelling still works.
+func TestCLI_ClaudeSkill_DeprecatedAlias(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	env.initGitRepo()
+	env.initProject("test")
+
+	stdout, stderr, err := env.run("claude", "skill")
+	if err != nil {
+		t.Fatalf("claude skill failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "deprecated") {
+		t.Errorf("expected a deprecation notice on stderr, got: %s", stderr)
+	}
+	var result map[string]any
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("invalid JSON output: %v\noutput: %s", err, stdout)
+	}
+	if _, err := os.Stat(filepath.Join(env.tmpDir, ".agents", "skills", "managing-monkeypuzzle", "SKILL.md")); err != nil {
+		t.Errorf("alias did not write the skill: %v", err)
 	}
 }
 
@@ -465,7 +532,7 @@ func TestCLI_Init_CreatesSkill(t *testing.T) {
 	}
 
 	// Verify skill file was created
-	skillPath := filepath.Join(env.tmpDir, ".claude", "skills", "managing-monkeypuzzle", "SKILL.md")
+	skillPath := filepath.Join(env.tmpDir, ".agents", "skills", "managing-monkeypuzzle", "SKILL.md")
 	if _, err := os.Stat(skillPath); os.IsNotExist(err) {
 		t.Error("skill file not created during init")
 	}
@@ -483,7 +550,7 @@ func TestCLI_Init_SkipsSkill(t *testing.T) {
 	}
 
 	// Verify skill file was NOT created
-	skillPath := filepath.Join(env.tmpDir, ".claude", "skills", "managing-monkeypuzzle", "SKILL.md")
+	skillPath := filepath.Join(env.tmpDir, ".agents", "skills", "managing-monkeypuzzle", "SKILL.md")
 	if _, err := os.Stat(skillPath); !os.IsNotExist(err) {
 		t.Error("skill file should not be created when create_skill=false")
 	}

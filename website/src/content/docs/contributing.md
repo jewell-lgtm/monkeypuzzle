@@ -361,11 +361,12 @@ func runNewCmd(cmd *cobra.Command, args []string) error {
 
 ## Claude / Agent Skills
 
-The repo ships one skill under `.claude/skills/`:
+The repo ships one skill, canonically under `.agents/skills/`:
 
-- **`.claude/skills/managing-monkeypuzzle/SKILL.md` is generated** by `mp claude skill`. Re-run that command to regenerate it; do not hand-edit it, as your changes will be overwritten.
+- **`.agents/skills/managing-monkeypuzzle/SKILL.md` is generated** by `mp skill create`. Do not hand-edit it — edit its source, `internal/core/skill/assets/managing-monkeypuzzle.md`, then re-run the command.
+- **`.claude/skills/managing-monkeypuzzle` is a symlink** to that directory, because Claude Code does not read `.agents/skills/`. Both are committed.
 
-When `mp`'s CLI surface changes, run `mp claude skill` to refresh it.
+When `mp`'s CLI surface changes, edit the asset and run `mp skill create` to refresh the generated copy.
 
 ---
 
