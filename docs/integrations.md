@@ -190,7 +190,9 @@ echo '{"name":"my-feature","skip_switch":true}' | mp create
   `.agents/skills/managing-monkeypuzzle/SKILL.md` so an agent knows the CLI, and
   links `.claude/skills/managing-monkeypuzzle` at it for Claude Code, which does
   not read `.agents/skills/`. `mp skill create` regenerates both; `mp skill
-  create --user` installs outside any project.
+  create --user` installs outside any project. `mp skill list` shows what mp
+  ships; `monkeypuzzle-inbox` covers the cross-project inbox and is worth
+  installing at `--user` scope.
 - **Agent status.** `mp integration install claude` merges hooks into the
   repo's `.claude/settings.json` that report each agent's state to mp
   (`blocked`, `working`, `done`, `idle`). With tmux or herdr configured, mp

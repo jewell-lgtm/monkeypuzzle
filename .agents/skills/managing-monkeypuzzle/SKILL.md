@@ -115,6 +115,46 @@ mp move .DONOTCOMMIT/monkeypuzzle
 mp move .monkeypuzzle                # move back to the default
 ```
 
+## Working across projects
+
+The commands above act on the repo you are standing in. These span every
+registered project and work from anywhere:
+
+```bash
+mp inbox --json                      # every piece in flight, ranked
+mp agent list --json --all           # live agents across all projects
+mp history --json --event 'pr.*' --since 24h
+mp project list --json               # what mp knows about
+mp go --json                         # switch across every project
+```
+
+`mp wait --timeout 5m` blocks until no agent is working, but it is per-repo,
+not cross-project: it fails outside a git repo and only sees the pieces of the
+one you are in.
+
+The inbox has its own surface — rank, notes, snooze, and the piece `id` an
+external system keys on. That is the `monkeypuzzle-inbox` skill; use it rather
+than re-deriving the JSON shape here.
+
+## Remote projects
+
+`--host`, `--dir` and `--project` go **before** the verb. `--host` proxies the
+whole command over ssh. `--project` proxies only when that project is
+registered with a host, and otherwise just runs it in the project's local
+path. `--dir` is rejected without one of the other two.
+
+```bash
+mp --host build-box status
+mp --project api inbox --json        # proxied if that project has a host
+```
+
+## Piece identity
+
+Every piece has an `id` that outlives its name, branch and worktree path.
+`mp create --json` returns it, and `mp piece show --ensure-id` mints one for a
+piece that predates ids. Record that, not `project/piece`, when something
+outside mp needs to refer back to a piece.
+
 ## Typical flow
 
 1. `mp create` — worktree + session + on-piece-create hook
