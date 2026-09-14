@@ -3,6 +3,7 @@ package init_test
 import (
 	"context"
 	"encoding/json"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -276,4 +277,25 @@ func TestHandler_EnsureExclude(t *testing.T) {
 			t.Fatalf("expected nil without exec, got %v", err)
 		}
 	})
+}
+
+// The metadata lock mp leaves in a worktree has to be ignored, or it makes the
+// worktree dirty and `git worktree remove` — hence `mp cleanup` — refuses it.
+func TestPieceStateIsIgnored(t *testing.T) {
+	for _, want := range []string{"piece-metadata.json", "piece-metadata.json.lock", "pr-metadata.json"} {
+		t.Run(want, func(t *testing.T) {
+			fs := adapters.NewMemoryFS()
+			h := initcmd.NewHandler(core.Deps{FS: fs, Output: adapters.NewBufferOutput(), Exec: adapters.NewMockExec()})
+			if err := h.EnsureGitignore(".monkeypuzzle"); err != nil {
+				t.Fatalf("EnsureGitignore: %v", err)
+			}
+			body, err := fs.ReadFile(filepath.Join(".monkeypuzzle", ".gitignore"))
+			if err != nil {
+				t.Fatalf("read .gitignore: %v", err)
+			}
+			if !strings.Contains(string(body), want) {
+				t.Errorf(".gitignore is missing %q:\n%s", want, body)
+			}
+		})
+	}
 }

@@ -10,6 +10,8 @@ import (
 // PieceInfo contains information about a created piece worktree.
 // It includes the piece name, worktree path, and associated tmux session name.
 type PieceInfo struct {
+	// ID is the piece's durable identifier; see PieceMetadata.ID.
+	ID string `json:"id,omitempty"`
 	// Name is the unique identifier for this piece (e.g., "piece-20250127-143022")
 	Name string `json:"name"`
 	// WorktreePath is the absolute path to the git worktree directory
@@ -26,6 +28,8 @@ type PieceInfo struct {
 type PieceStatus struct {
 	// InPiece is true if the current directory is within a piece worktree
 	InPiece bool `json:"in_piece"`
+	// ID is the piece's durable identifier; see PieceMetadata.ID.
+	ID string `json:"id,omitempty"`
 	// PieceName is the name of the piece, only set when InPiece is true
 	PieceName string `json:"piece_name,omitempty"`
 	// WorktreePath is the path to the worktree, only set when InPiece is true
@@ -50,6 +54,9 @@ type PieceHierarchyStatus struct {
 
 // PieceListItem represents a piece available for switching.
 type PieceListItem struct {
+	// ID is the piece's durable identifier; see PieceMetadata.ID. Empty for a
+	// piece created before ids existed that has not been written since.
+	ID           string `json:"id,omitempty"`
 	Name         string `json:"name"`
 	WorktreePath string `json:"worktree_path"`
 	SessionName  string `json:"session_name"`

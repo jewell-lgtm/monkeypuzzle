@@ -148,6 +148,7 @@ var flagDonePiece string
 var flagDoneForce bool
 var flagMergeNoUpdateCheck bool
 var flagStatusPiece string
+var flagStatusEnsureID bool
 var flagDeleteBranch bool
 var flagOverwriteSession bool
 var flagPieceCreateSchema bool
@@ -232,6 +233,7 @@ func init() {
 	pieceStatusCmd.Flags().StringVar(&flagMainBranchLegacy, "main-branch", "", "Deprecated alias for --main")
 	_ = pieceStatusCmd.Flags().MarkDeprecated("main-branch", "use --main")
 	pieceStatusCmd.Flags().BoolVar(&flagPieceStatusJSON, "json", false, "Output JSON even on a terminal")
+	pieceStatusCmd.Flags().BoolVar(&flagStatusEnsureID, "ensure-id", false, "Mint and persist the piece's durable id if it does not have one yet")
 	pieceListCmd.Flags().BoolVar(&flagPieceListFlat, "flat", false, "Display pieces in a flat list instead of tree view")
 	pieceListCmd.Flags().BoolVar(&flagPieceListAll, "all", false, "List pieces across all registered projects")
 	pieceListCmd.Flags().BoolVar(&flagPieceListJSON, "json", false, "Output JSON even on a terminal")
@@ -555,6 +557,16 @@ func runPieceStatus(cmd *cobra.Command, args []string) error {
 	status, err := handler.GetPieceHierarchyStatus(ctx, wd, mainBranch)
 	if err != nil {
 		return err
+	}
+
+	// Opt-in, because minting an id writes metadata: that dirties the worktree,
+	// which is enough to make `mp cleanup` refuse the piece.
+	if flagStatusEnsureID && status.InPiece && status.ID == "" {
+		id, err := piececmd.EnsurePieceID(status.WorktreePath, adapters.NewOSFS(""))
+		if err != nil {
+			return err
+		}
+		status.ID = id
 	}
 
 	// Output to stderr for human-readable text

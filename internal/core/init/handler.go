@@ -170,6 +170,7 @@ func (h *Handler) EnsureGitignore(mpDir string) error {
 	gitignorePath := filepath.Join(mpDir, ".gitignore")
 	content := `# Piece worktree state (not tracked)
 piece-metadata.json
+piece-metadata.json.lock
 pr-metadata.json
 
 # Piece worktrees
@@ -187,6 +188,7 @@ func excludeEntries(mpDir string) []string {
 	rel := filepath.ToSlash(filepath.Clean(mpDir))
 	return []string{
 		rel + "/piece-metadata.json",
+		rel + "/piece-metadata.json.lock",
 		rel + "/pr-metadata.json",
 		rel + "/pieces/",
 		rel + "/logs/",

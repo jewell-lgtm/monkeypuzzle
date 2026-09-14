@@ -32,10 +32,14 @@ type Actor struct {
 
 // Event is one line of the log.
 type Event struct {
-	TS      string         `json:"ts"` // RFC3339 UTC
-	Event   string         `json:"event"`
-	Project string         `json:"project"`
-	Piece   string         `json:"piece"`
+	TS      string `json:"ts"` // RFC3339 UTC
+	Event   string `json:"event"`
+	Project string `json:"project"`
+	Piece   string `json:"piece"`
+	// PieceID is the piece's durable identifier; see piece.PieceMetadata.ID.
+	// It lets a consumer follow a piece across renames. Recorded for the
+	// hook-driven events, where the worktree is at hand.
+	PieceID string         `json:"piece_id,omitempty"`
 	Branch  string         `json:"branch,omitempty"`
 	Parent  string         `json:"parent,omitempty"`
 	Host    string         `json:"host,omitempty"`

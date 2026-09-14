@@ -112,6 +112,11 @@ func (h *HookRunner) record(hookName string, ctx HookContext) {
 		Branch:  ctx.Branch,
 		Parent:  ctx.Parent,
 	}
+	if ctx.WorktreePath != "" {
+		if metadata, err := ReadPieceMetadata(ctx.WorktreePath, h.fs); err == nil {
+			ev.PieceID = metadata.ID
+		}
+	}
 	switch {
 	case ctx.PRNumber != 0:
 		ev.Data = map[string]any{"pr_number": ctx.PRNumber, "pr_url": ctx.PRURL, "base": ctx.PRBaseBranch}
