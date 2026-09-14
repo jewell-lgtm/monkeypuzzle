@@ -143,7 +143,13 @@ func runWorktreeShow(cmd *cobra.Command, args []string) error {
 
 func runWorktreeDelete(cmd *cobra.Command, args []string) error {
 	if flagWorktreeSchema {
-		return cli.PrintJSON(worktreecmd.DeleteInput{Selector: "piece, branch, or path"})
+		// A map, not DeleteInput: its omitempty booleans would vanish from the
+		// example the caller is meant to edit.
+		return cli.PrintJSON(map[string]any{
+			"selector":      "piece, branch, or path",
+			"force":         false,
+			"delete_branch": false,
+		})
 	}
 	var input worktreecmd.DeleteInput
 	if cli.HasStdinData() {
@@ -287,7 +293,11 @@ func humanBytes(n int64) string {
 }
 
 func completeWorktrees(cmd *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-	rows, _, err := worktreeRows(cmd)
+	wd, err := os.Getwd()
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	rows, err := newWorktreeHandler().ListLight(cmd.Context(), wd)
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}

@@ -13,6 +13,7 @@ import (
 	"github.com/jewell-lgtm/monkeypuzzle/internal/adapters"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core/piece"
+	"github.com/jewell-lgtm/monkeypuzzle/internal/projectdir"
 )
 
 type Info struct {
@@ -58,7 +59,18 @@ func NewHandler(deps core.Deps, pieces *piece.Handler) *Handler {
 	return &Handler{deps: deps, git: adapters.NewGit(deps.Exec), pieces: pieces}
 }
 
+// List reports every worktree, including the on-disk size of each checkout.
 func (h *Handler) List(ctx context.Context, workDir string) ([]Info, error) {
+	return h.list(ctx, workDir, true)
+}
+
+// ListLight is List without SizeBytes. Sizing walks every file in every
+// checkout, which is far too slow for shell completion.
+func (h *Handler) ListLight(ctx context.Context, workDir string) ([]Info, error) {
+	return h.list(ctx, workDir, false)
+}
+
+func (h *Handler) list(ctx context.Context, workDir string, withSize bool) ([]Info, error) {
 	repoRoot, err := h.git.GetMainRepoRoot(ctx, workDir)
 	if err != nil {
 		return nil, fmt.Errorf("not in a git repository: %w", err)
@@ -96,15 +108,32 @@ func (h *Handler) List(ctx context.Context, workDir string) ([]Info, error) {
 		}
 	}
 	current := canonicalPath(workDir)
+	// Piece worktrees sit inside the main checkout, so several paths can
+	// contain the cwd. The deepest one is the worktree you are actually in.
+	currentWorktree := ""
+	for _, wt := range worktrees {
+		path := canonicalPath(wt.Path)
+		if path != current && !piece.IsPathInside(current, path) {
+			continue
+		}
+		if len(path) > len(currentWorktree) {
+			currentWorktree = path
+		}
+	}
+	piecesRel := filepath.Join(projectdir.RelDir(repoRoot), "pieces")
 	rows := make([]Info, 0, len(worktrees))
 	for _, wt := range worktrees {
 		path := canonicalPath(wt.Path)
 		isMain := path == canonicalPath(repoRoot)
 		managedRow, isManaged := managed[path]
+		var size int64
+		if withSize {
+			size = checkoutSize(wt.Path, isMain, piecesRel)
+		}
 		rows = append(rows, Info{
-			Path: wt.Path, Branch: wt.Branch, Main: isMain, Current: path == current || piece.IsPathInside(current, path),
+			Path: wt.Path, Branch: wt.Branch, Main: isMain, Current: path == currentWorktree,
 			Locked: wt.Locked, Prunable: wt.Prunable, Managed: isManaged, Piece: managedRow.name,
-			SizeBytes: checkoutSize(wt.Path, isMain), Inbox: isManaged, Lifecycle: managedRow.lifecycle, AgentStatus: managedRow.agent, PRNumber: managedRow.pr,
+			SizeBytes: size, Inbox: isManaged, Lifecycle: managedRow.lifecycle, AgentStatus: managedRow.agent, PRNumber: managedRow.pr,
 		})
 	}
 	sort.SliceStable(rows, func(i, j int) bool {
@@ -116,7 +145,7 @@ func (h *Handler) List(ctx context.Context, workDir string) ([]Info, error) {
 	return rows, nil
 }
 
-func checkoutSize(root string, main bool) int64 {
+func checkoutSize(root string, main bool, piecesRel string) int64 {
 	var total int64
 	_ = filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
@@ -124,7 +153,7 @@ func checkoutSize(root string, main bool) int64 {
 		}
 		if entry.IsDir() {
 			rel, _ := filepath.Rel(root, path)
-			if rel == ".git" || (main && rel == filepath.Join(".monkeypuzzle", "pieces")) {
+			if rel == ".git" || (main && rel == piecesRel) {
 				return filepath.SkipDir
 			}
 		}

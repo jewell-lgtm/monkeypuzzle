@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/adapters"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
@@ -619,10 +620,12 @@ func (h *Handler) Append(ctx context.Context, workDir string, in AppendInput) (A
 	}
 	branch := strings.TrimSpace(in.Name)
 	if branch == "" {
+		// SanitizePieceName falls back to the literal "piece", so a prompt with
+		// nothing nameable in it would silently produce that branch.
+		if !hasNameableRune(in.Prompt) {
+			return AppendResult{}, fmt.Errorf("stack branch name is required; --prompt %q contains no letters or digits to name a branch after", in.Prompt)
+		}
 		branch = piece.SanitizePieceName(in.Prompt)
-	}
-	if branch == "" {
-		return AppendResult{}, fmt.Errorf("stack branch name is required")
 	}
 	if h.git.LocalBranchExists(ctx, mainRepoRoot, branch) {
 		return AppendResult{}, fmt.Errorf("branch %q already exists", branch)
@@ -924,4 +927,15 @@ func forcePushMsg(piece string) string {
 
 func rebaseStillConflictedMsg(path string) string {
 	return fmt.Sprintf("Rebase still has unresolved conflicts in %s. Resolve them (the conflicted files), 'git add' them, then run 'mp stack continue' again. Or 'git rebase --abort' to back out.", path)
+}
+
+// hasNameableRune reports whether s has anything SanitizePieceName could build
+// a branch name from.
+func hasNameableRune(s string) bool {
+	for _, r := range s {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			return true
+		}
+	}
+	return false
 }

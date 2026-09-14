@@ -217,9 +217,13 @@ type RemoveResult struct {
 	BranchDeleted bool   `json:"branch_deleted"`
 }
 
-// RemoveSchema returns an example input document for stack removal.
+// RemoveSchema returns an example input document for stack removal. It is built
+// as a map so the omitempty booleans still appear in the example to edit.
 func RemoveSchema() ([]byte, error) {
-	return json.MarshalIndent(RemoveInput{Name: "stack-tip", Force: false}, "", "  ")
+	return json.MarshalIndent(map[string]any{
+		"name":  "stack-tip",
+		"force": false,
+	}, "", "  ")
 }
 
 // PrependInput holds input for `mp stack prepend` (insert a piece between the

@@ -56,7 +56,10 @@ func (h *Handler) List(ctx context.Context, workDir string) ([]ManagedInfo, erro
 			}
 			return nil, legacyErr
 		}
-		if legacy.PRNumber != 0 && (legacy.Branch == "" || legacy.Branch == branch.Name) {
+		// A legacy record predates stacks, so it names no branch. It belongs to
+		// the piece's initial layer; attaching it to every layer would report
+		// the same PR once per layer.
+		if legacy.PRNumber != 0 && (legacy.Branch == branch.Name || (legacy.Branch == "" && branch.Initial)) {
 			rows = append(rows, ManagedInfo{Number: legacy.PRNumber, URL: legacy.PRURL, Branch: branch.Name, Base: legacy.BaseBranch, Piece: branch.Piece, Status: "OPEN", Current: branch.Current})
 		}
 	}
