@@ -1204,14 +1204,17 @@ func runPieceAbandon(cmd *cobra.Command, args []string) error {
 		DeleteBranch: input.DeleteBranch,
 	}
 
+	// Before, not after: abandoning the piece you stand in deletes that
+	// directory, and os.Getwd then fails outright on Linux, silently skipping
+	// the hand-off that leaves the shell somewhere that still exists.
+	cwd, _ := os.Getwd()
+
 	result, err := handler.AbandonPiece(ctx, input.Name, opts)
 	if err != nil {
 		return err
 	}
 
-	if cwd, err := os.Getwd(); err == nil {
-		surfaceRoot(cwd, result.WorktreePath, result.MainPath, flagPieceAbandonJSON)
-	}
+	surfaceRoot(cwd, result.WorktreePath, result.MainPath, flagPieceAbandonJSON)
 	return emitResult(result, flagPieceAbandonJSON)
 }
 
@@ -1227,6 +1230,10 @@ func runPieceDone(cmd *cobra.Command, args []string) error {
 	}
 
 	ctx := cmd.Context()
+	// The caller's own directory, captured before anything is removed. It is
+	// not loc.workDir, which is the piece being finished — that would report a
+	// hand-off even when the caller stood somewhere else entirely.
+	callerCwd, _ := os.Getwd()
 	selector, err := pieceSelector(args, selectorFlag{"--piece", flagDonePiece})
 	if err != nil {
 		return err
@@ -1265,9 +1272,7 @@ func runPieceDone(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if cwd, err := os.Getwd(); err == nil {
-		surfaceRoot(cwd, result.WorktreePath, result.MainPath, flagPieceDoneJSON)
-	}
+	surfaceRoot(callerCwd, result.WorktreePath, result.MainPath, flagPieceDoneJSON)
 	cli.Hint("mp create, or mp go to pick up other work")
 	return emitResult(result, flagPieceDoneJSON)
 }

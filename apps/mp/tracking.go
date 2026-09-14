@@ -196,7 +196,7 @@ select another registered project. Safe to repeat.
 		if jsonOutput || !cli.IsTerminal() || !cli.IsStdoutTerminal() {
 			return printIndentedJSON(cmd, result)
 		}
-		fmt.Fprintf(cmd.ErrOrStderr(), "%s Settled piece: %s/%s\n", cli.GlyphOK, snapshot.Project, snapshot.Piece)
+		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "%s Settled piece: %s/%s\n", cli.GlyphOK, snapshot.Project, snapshot.Piece)
 		return nil
 	}
 	return cmd
