@@ -9,7 +9,7 @@ import (
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/adapters"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
-	"github.com/jewell-lgtm/monkeypuzzle/internal/core/claude"
+	"github.com/jewell-lgtm/monkeypuzzle/internal/core/skill"
 )
 
 const (
@@ -107,12 +107,11 @@ func (h *Handler) Run(input Input, workDir string) (Config, error) {
 
 	// Create Claude Code skill if requested
 	if input.CreateSkill != nil && *input.CreateSkill {
-		claudeHandler := claude.NewHandler(h.deps)
-		if _, err := claudeHandler.CreateSkill(workDir); err != nil {
+		if _, err := skill.NewHandler(h.deps).Install(workDir, skill.Input{}); err != nil {
 			// Non-fatal: log warning but don't fail init
 			h.deps.Output.Write(core.Message{
 				Type:    core.MsgWarning,
-				Content: "Failed to create Claude skill: " + err.Error(),
+				Content: "Failed to create agent skill: " + err.Error(),
 			})
 		}
 	}
@@ -146,8 +145,7 @@ func (h *Handler) Refresh(workDir, mpDir string) (Config, error) {
 	}
 	h.ensureExcludeWarn(workDir, mpDir)
 
-	claudeHandler := claude.NewHandler(h.deps)
-	if _, err := claudeHandler.CreateSkill(workDir); err != nil {
+	if _, err := skill.NewHandler(h.deps).Install(workDir, skill.Input{}); err != nil {
 		h.deps.Output.Write(core.Message{
 			Type:    core.MsgWarning,
 			Content: "Failed to refresh Claude skill: " + err.Error(),
