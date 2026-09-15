@@ -72,9 +72,10 @@ a bare `new-thing` from inside a project — that matches no row creates that
 piece on Enter, and `ctrl-o` (`alt-enter`) does the same over a name that does
 match. Both are the `mp switch --create` call `m g` makes, so an existing
 piece attaches and an existing branch is adopted rather than failing; `ctrl-o`
-with nothing typed — or a bare `project/` — drops into the full create flow
-(`m c`). A query that reads as a search and not a name (fzf's `^` `$` `!` `'`
-operators, or two terms) is refused instead of handed to git.
+with nothing typed — or a bare `alpha/`, which keeps alpha — drops into the
+full create flow (`m c`). A query that is a filter and not a name (fzf's `^`
+`$` `!` `'` operators, two terms, anything `git check-ref-format` refuses) is
+turned down instead of handed to git.
 
 The branch jump (`m g`) is repo-aware: it scopes to the project of the current
 pane's directory and takes whatever you paste — an existing piece attaches, an

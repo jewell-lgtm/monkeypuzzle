@@ -35,9 +35,10 @@ name as much as a filter, so `alpha/new-thing` — or a bare `new-thing` from
 inside a project — that matches no row mints it on Enter, and `ctrl-o`
 (`alt-enter`) does the same over a name that does match. It is one
 `mp switch --create` call, so an existing piece attaches and an existing
-branch is adopted rather than failing. A query that reads as a search and not
-a name — fzf's `^` `$` `!` `'` operators, or two terms — is refused instead of
-handed to git, and a bare `project/` asks for the name the long way round.
+branch is adopted rather than failing. A query that is a filter and not a name
+— fzf's `^` `$` `!` `'` operators, two terms, anything `git check-ref-format`
+refuses — is turned down instead of handed to git, and a bare `alpha/` asks
+for the name through the create picker, in alpha.
 
 The scripts drive mp through its stateless API and export `MP_MUX_PLUGIN=1`,
 which tells mp to perform the herdr workspace focus/create itself (see
