@@ -375,5 +375,20 @@ EOF
 }
 integration_step
 
+# Verify the popup command uses the installed CLI's explicit selectors.
+integration_show() {
+ local tmp actual
+ tmp="$(mktemp -d)"
+ cat >"$tmp/herdr" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$@"
+EOF
+ chmod +x "$tmp/herdr"
+ actual="$(HERDR_BIN_PATH="$tmp/herdr" bash "$SCRIPTS/show.sh" inbox)"
+ assert_eq "show: uses plugin and entrypoint selectors" "$actual" $'plugin\npane\nopen\n--plugin\nmonkeypuzzle\n--entrypoint\ninbox'
+ rm -rf "$tmp"
+}
+integration_show
+
 printf '\n%d passed, %d failed, %d skipped\n' "$PASS" "$FAIL" "$SKIP"
 [[ "$FAIL" -eq 0 ]]

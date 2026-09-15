@@ -65,7 +65,7 @@ command = "monkeypuzzle.open"
 description = "monkeypuzzle: open piece"
 
 [[keys.command]]
-key = "prefix+b"
+key = "prefix+u"
 type = "plugin_action"
 command = "monkeypuzzle.blocked"
 description = "monkeypuzzle: jump to blocked agent"
@@ -77,11 +77,15 @@ command = "monkeypuzzle.inbox"
 description = "monkeypuzzle: inbox"
 
 [[keys.command]]
-key = "prefix+n"
+key = "prefix+f"
 type = "plugin_action"
 command = "monkeypuzzle.next"
 description = "monkeypuzzle: next piece in the inbox"
 ```
+
+The examples preserve herdr’s sidebar (`prefix+b`) and tab navigation
+(`prefix+c`, `prefix+n`). Use `prefix+a` for `monkeypuzzle.create`,
+`prefix+u` for blocked agents, and `prefix+f` for the next piece.
 
 ## Hook coexistence
 
@@ -103,7 +107,11 @@ The scripts are structured so their `build_*` row-builders can be sourced and
 tested in isolation; the pickers have a `MP_PLUGIN_FILTER` seam that drives
 them non-interactively for the integration tests. See `test/run.sh`.
 
-Verified against the herdr docs; before the first release, smoke-check the
-exact CLI spellings against a live install (`herdr api schema`): the
-`plugin pane open` invocation in `scripts/show.sh`, popup `width`/`height`
-in the manifest, and whether manifests can declare default key bindings.
+The adapter targets the Herdr 0.9 CLI: list commands already emit JSON,
+wrapped in `result`, with `workspace_id`, `pane_id`, and `agent_status` fields.
+Agent kinds pass through without a provider allowlist. The list API supplies
+no process ID, so mp reports zero rather than inventing one.
+
+Run `MP_TEST_HERDR=1 go test ./internal/adapters -run HerdrLive -v` for an
+isolated live-server compatibility check. It requires herdr on PATH and
+permission to create local sockets and terminal processes.
