@@ -142,7 +142,8 @@ tmux attach -t mp/<project>/<piece>        # raw tmux attach
 
 The companion plugin in [`apps/tmux`](https://github.com/jewell-lgtm/monkeypuzzle/blob/main/apps/tmux/README.md) binds a
 `prefix m` chord table: an `fzf` popup for switching between pieces and
-branches (`prefix m p`), a paste-a-branch jump scoped to the current repo
+branches — or creating one by typing a name nothing matches (`prefix m p`), a
+paste-a-branch jump scoped to the current repo
 (`prefix m g`), piece creation (`prefix m c`), the inbox (`prefix m i`), agent
 focus (`prefix m a` / `m b`), and more. It reads state with `mp go --json` and
 `mp inbox --json` and hands the session work back to mp.
@@ -221,7 +222,7 @@ where mp holds data herdr doesn't:
 
 | Action | Description |
 | --- | --- |
-| `monkeypuzzle.open` | picker over every piece and project main mp knows about, **including pieces that have a worktree but no live workspace** — which herdr's own switcher cannot show |
+| `monkeypuzzle.open` | picker over every piece and project main mp knows about, **including pieces that have a worktree but no live workspace** — which herdr's own switcher cannot show; a typed name that matches no row creates that piece |
 | `monkeypuzzle.create` | pick a project, then name the piece or describe it as a prompt |
 | `monkeypuzzle.adopt` | adopt an existing local or remote branch as a piece |
 | `monkeypuzzle.inbox` | the ranked [inbox](/docs/workflow/#the-inbox), with rank, snooze and refresh in the picker |

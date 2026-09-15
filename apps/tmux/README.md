@@ -55,7 +55,7 @@ plugin claims a single key in the prefix table and puts everything in a
 
 | Chord (after prefix) | Action                                                        |
 | -------------------- | ------------------------------------------------------------- |
-| `m p`                | Switch: pick a piece, branch, or a project's main session     |
+| `m p`                | Switch: pick a piece, branch, or main session — or create one  |
 | `m g`                | Go to a branch: paste a name — switch, adopt, or create it    |
 | `m c`                | Create: pick a project, name the piece, create + switch       |
 | `m a`                | Agents: pick a live agent (blocked first), focus its pane     |
@@ -67,6 +67,13 @@ plugin claims a single key in the prefix table and puts everything in a
 
 The switch picker shows `project/piece` rows (plus each project's adoptable
 branches) with a preview pane of each piece's `git status` and recent commits.
+Whatever you type there is a name as much as a filter: `alpha/new-thing` — or
+a bare `new-thing` from inside a project — that matches no row creates that
+piece on Enter, and `ctrl-o` (`alt-enter`) does the same over a name that does
+match. Both are the `mp switch --create` call `m g` makes, so an existing
+piece attaches and an existing branch is adopted rather than failing; `ctrl-o`
+with nothing typed drops into the full create flow (`m c`).
+
 The branch jump (`m g`) is repo-aware: it scopes to the project of the current
 pane's directory and takes whatever you paste — an existing piece attaches, an
 existing local or remote branch is adopted as a piece, and a brand-new name
@@ -139,7 +146,8 @@ make test-tmux          # run the plugin test suite (bash + jq + fzf)
 
 The scripts are structured so their `build_*` row-builders can be sourced and
 tested in isolation; the switch flow has a `MP_PLUGIN_FILTER` seam that drives
-the picker non-interactively for the integration test. See `test/run.sh`.
+the picker non-interactively for the integration test (`MP_PLUGIN_KEY` names
+the key that closed it). See `test/run.sh`.
 
 ## Command lookup and startup errors
 
