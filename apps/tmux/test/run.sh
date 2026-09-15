@@ -104,6 +104,13 @@ if source "$SCRIPTS/helpers.sh" 2>/dev/null; then
 		"$(project_for_cwd "/repos/alphabet" "$rows")" ""
 	assert_eq "project_for_cwd: outside any project is empty" \
 		"$(project_for_cwd "/home/nobody" "$rows")" ""
+
+	assert_eq "split_project_query: a known project prefix scopes the target" \
+		"$(split_project_query "alpha/new-thing" "$rows")" $'alpha\tnew-thing'
+	assert_eq "split_project_query: an unknown prefix stays in the target" \
+		"$(split_project_query "feat/new-thing" "$rows")" $'\tfeat/new-thing'
+	assert_eq "split_project_query: a bare name names no project" \
+		"$(split_project_query "new-thing" "$rows")" $'\tnew-thing'
 else
 	fail "source helpers.sh" "could not source $SCRIPTS/helpers.sh"
 fi
@@ -222,6 +229,63 @@ EOF
 	rm -rf "$tmp"
 }
 integration_switch
+
+# ---- Integration: create a piece from the switch picker ----------------------------------------------
+integration_switch_create() {
+	if ! have jq || ! have fzf; then
+		skip "switch create integration" "needs jq + fzf"
+		return
+	fi
+	local tmp bin log
+	tmp="$(mktemp -d)"
+	bin="$tmp/bin"
+	log="$tmp/mp.log"
+	mkdir -p "$bin" "$tmp/repos/alpha/src"
+
+	# A real alpha path: project_for_cwd scopes from the cwd, and the create
+	# flow cds into the project it picks.
+	sed "s|/repos/alpha|$tmp/repos/alpha|g" >"$tmp/canned.json" < <(canned_json)
+	cat >"$bin/mp" <<EOF
+#!/usr/bin/env bash
+case "\$1" in
+  go) cat "$tmp/canned.json" ;;
+  switch|create) printf '%s\n' "\$*" > "$log" ;;
+  *) exit 2 ;;
+esac
+EOF
+	chmod +x "$bin/mp"
+
+	# A typed name that matches no row is created in the project it names.
+	PATH="$bin:$PATH" TMUX="fake,1,0" MP_PLUGIN_FILTER="alpha/new-thing" \
+		bash "$SCRIPTS/switch.sh" >/dev/null 2>&1
+	assert_eq "switch flow: an unmatched project/name creates that piece" \
+		"$(cat "$log" 2>/dev/null)" "switch --project alpha --create -- new-thing"
+
+	# Inside a project, a bare name needs no prefix.
+	rm -f "$log"
+	(cd "$tmp/repos/alpha/src" && PATH="$bin:$PATH" TMUX="fake,1,0" MP_PLUGIN_FILTER="new-thing" \
+		bash "$SCRIPTS/switch.sh" >/dev/null 2>&1)
+	assert_eq "switch flow: an unmatched bare name creates it in the cwd's project" \
+		"$(cat "$log" 2>/dev/null)" "switch --project alpha --create -- new-thing"
+
+	# The create key mints the query even when a row matches it.
+	rm -f "$log"
+	PATH="$bin:$PATH" TMUX="fake,1,0" MP_PLUGIN_FILTER="alpha/fix-login" MP_PLUGIN_KEY="ctrl-o" \
+		bash "$SCRIPTS/switch.sh" >/dev/null 2>&1
+	assert_eq "switch flow: the create key wins over a matching row" \
+		"$(cat "$log" 2>/dev/null)" "switch --project alpha --create -- fix-login"
+
+	# The create key with nothing typed falls through to the full create flow,
+	# which names the piece at its own prompt.
+	rm -f "$log"
+	(cd "$tmp" && PATH="$bin:$PATH" TMUX="fake,1,0" MP_PLUGIN_FILTER="" MP_PLUGIN_KEY="ctrl-o" \
+		bash "$SCRIPTS/switch.sh" <<<"from-the-prompt" >/dev/null 2>&1)
+	assert_eq "switch flow: the create key with no query hands off to create.sh" \
+		"$(cat "$log" 2>/dev/null)" "create --name from-the-prompt"
+
+	rm -rf "$tmp"
+}
+integration_switch_create
 
 # ---- Integration: branch jump (paste a target) ------------------------------
 integration_branch() {

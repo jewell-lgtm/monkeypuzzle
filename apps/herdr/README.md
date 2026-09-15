@@ -23,12 +23,19 @@ And with `mp config set multiplexer herdr`, `mp agent list` / `mp wait` /
 
 | Action (`monkeypuzzle.<id>`) | What it does                                                   |
 | ---------------------------- | -------------------------------------------------------------- |
-| `open`                       | Popup picker over every piece and project main mp knows about — including pieces with a worktree but **no live workspace yet**, which herdr's switcher can't show — with a git status/log preview. Hands off to `mp switch`. |
-| `create`                     | Popup: pick a project, name the piece (or leave blank and describe it as a prompt) → `mp create`. |
+| `open`                       | Popup picker over every piece and project main mp knows about — including pieces with a worktree but **no live workspace yet**, which herdr's switcher can't show — with a git status/log preview. Hands off to `mp switch`. Typing a name no row matches (or `ctrl-o` over one that does) creates that piece instead. |
+| `create`                     | Popup: pick a project, name the piece (or leave blank and describe it as a prompt) → `mp create`. `ctrl-o` in the `open` picker with nothing typed lands here. |
 | `adopt`                      | Popup picker over adoptable local/remote branches → `mp switch --branch` adopts one as a piece. |
 | `blocked`                    | No popup: `mp agent focus --blocked --all` jumps straight to the most urgent blocked agent across every registered project. |
 | `inbox`                      | Popup picker over `mp inbox --json`: every piece across every project — rank, urgency, `project/piece`, agent status, PR, note — in mp's order (snoozed rows last, dimmed), with the git status/log preview plus note and PR URL. Enter → `mp switch`; `ctrl-k`/`ctrl-j` move the row up/down, `ctrl-t` to the top, `ctrl-s` snoozes 2h, `ctrl-u` un-snoozes, `ctrl-r` refreshes PR state — each one `mp inbox …` verb, then a reload. |
 | `next` / `prev`              | No popup: `mp inbox next` / `prev` switches to the piece after/before the one you stand in (wrapping; snoozed rows skipped). mp's stderr — "… is the only piece in the inbox; staying put" — lands in the action log. |
+
+The `open` picker is also how you start a piece: whatever you type is a
+name as much as a filter, so `alpha/new-thing` — or a bare `new-thing` from
+inside a project — that matches no row mints it on Enter, and `ctrl-o`
+(`alt-enter`) does the same over a name that does match. It is one
+`mp switch --create` call, so an existing piece attaches and an existing
+branch is adopted rather than failing.
 
 The scripts drive mp through its stateless API and export `MP_MUX_PLUGIN=1`,
 which tells mp to perform the herdr workspace focus/create itself (see
@@ -118,7 +125,8 @@ make test-herdr        # run the plugin test suite (bash + jq + fzf)
 
 The scripts are structured so their `build_*` row-builders can be sourced and
 tested in isolation; the pickers have a `MP_PLUGIN_FILTER` seam that drives
-them non-interactively for the integration tests. See `test/run.sh`.
+them non-interactively for the integration tests (`MP_PLUGIN_KEY` names the
+key that closed the picker). See `test/run.sh`.
 
 The adapter targets the Herdr 0.9 CLI: list commands already emit JSON,
 wrapped in `result`, with `workspace_id`, `pane_id`, and `agent_status` fields.

@@ -139,7 +139,8 @@ tmux attach -t mp/<project>/<piece>        # raw tmux attach
 
 The companion plugin in [`apps/tmux`](../apps/tmux/README.md) binds a
 `prefix m` chord table: an `fzf` popup for switching between pieces and
-branches (`prefix m p`), a paste-a-branch jump scoped to the current repo
+branches — or creating one by typing a name nothing matches (`prefix m p`), a
+paste-a-branch jump scoped to the current repo
 (`prefix m g`), piece creation (`prefix m c`), the inbox (`prefix m i`), agent
 focus (`prefix m a` / `m b`), and more. It reads state with `mp go --json` and
 `mp inbox --json` and hands the session work back to mp.
@@ -167,7 +168,8 @@ With `mp config set multiplexer herdr`, pieces open as herdr workspaces
 labeled `mp/<project>/<piece>`, and mp reads herdr's own agent tracking
 instead of reading the screen. The [herdr plugin](../apps/herdr/README.md)
 adds pickers for what herdr can't show natively: pieces with no live
-workspace, adoptable branches, and the inbox.
+workspace, adoptable branches, and the inbox. Its piece picker creates too —
+a typed name that matches no row becomes a new piece.
 
 ### zellij and cmux
 
