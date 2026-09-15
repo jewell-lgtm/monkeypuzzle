@@ -1,7 +1,5 @@
 name: CI
 
-# Mirrors the verify steps in .woodpecker.yml. That pipeline needs a
-# self-hosted runner, so this is what actually gates a pull request.
 on:
   pull_request:
   push:
