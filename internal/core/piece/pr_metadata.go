@@ -20,6 +20,10 @@ type PRMetadata struct {
 	Branch     string    `json:"branch"`
 	BaseBranch string    `json:"base_branch"`
 	CreatedAt  time.Time `json:"created_at"`
+	// Draft mirrors the forge's draft flag as of the last mp operation that
+	// touched it (create sets it, `mp pr ready` clears it). Local UIs (e.g. the
+	// tmux picker) read it to badge pieces without a forge round-trip.
+	Draft bool `json:"draft,omitempty"`
 }
 
 // ReadPRMetadata reads PR metadata from a piece worktree
