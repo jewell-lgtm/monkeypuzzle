@@ -98,7 +98,9 @@ project_for_cwd() {
 # is drivable without a TTY.
 fzf_pick() {
 	if [[ -n "${MP_PLUGIN_FILTER+x}" ]]; then
-		fzf --delimiter=$'\t' --filter="$MP_PLUGIN_FILTER" | head -n1
+		# head closes the pipe on the first row, so fzf takes SIGPIPE and
+		# pipefail would surface 141 as a picker failure.
+		fzf --delimiter=$'\t' --filter="$MP_PLUGIN_FILTER" | head -n1 || true
 	else
 		fzf --delimiter=$'\t' "$@"
 	fi
@@ -138,14 +140,26 @@ split_project_query() {
 	printf '\t%s' "$query"
 }
 
+# valid_piece_target accepts only what git will take as a branch name. An fzf
+# query is search syntax — ^ $ ! ' | and spaces are operators — so anything
+# outside this set is a filter someone typed, never a name to create.
+valid_piece_target() {
+	case "${1:-}" in
+		"" | */ | /* | *//* | .* | *..* | *[!A-Za-z0-9._/-]*) return 1 ;;
+	esac
+}
+
 # create_from_query turns a picker query into a piece, given project rows in
 # $2. The project comes from the query's prefix, else the cwd, else a picker;
 # the rest goes to `mp switch --create`, which attaches to a piece or adopts a
 # branch of that name rather than failing. An empty query hands off to the full
-# create flow, where a piece can also be described as a prompt.
+# create flow, where a piece can also be described as a prompt, and a query
+# that is not a usable name is refused rather than handed to git.
 create_from_query() {
 	local query="$1" rows="$2" pair proj target selection dir
-	if [[ -z "$query" ]]; then
+	# Nothing typed, or a project prefix with no name after it: no name to
+	# create, so ask for one the long way round.
+	if [[ -z "$query" || "$query" == */ ]]; then
 		dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 		exec bash "$dir/create.sh"
 	fi
@@ -153,6 +167,7 @@ create_from_query() {
 	pair="$(split_project_query "$query" "$rows")"
 	proj="${pair%%$'\t'*}"
 	target="${pair#*$'\t'}"
+	valid_piece_target "$target" || die "\"$query\" reads as a search, not a piece name — nothing to create"
 	[[ -n "$proj" ]] || proj="$(project_for_cwd "${PWD:-}" "$rows")"
 	if [[ -z "$proj" ]]; then
 		selection="$(printf '%s\n' "$rows" | fzf_pick \

@@ -47,7 +47,7 @@ main() {
 	out="$(printf '%s\n' "$rows" | fzf_pick_or_create \
 		--with-nth=1 \
 		--prompt='piece> ' \
-		--header='enter: open  ctrl-o: create what you typed' \
+		--header='enter: open — a name nothing matches creates it  ctrl-o: create what you typed' \
 		--preview='git -C {4} -c color.ui=always status -sb 2>/dev/null; echo; git -C {4} log --oneline -5 2>/dev/null' \
 		--preview-window='right,50%')" || rc=$?
 	# 1 is "typed a name that matches nothing" — a create, not a failure.

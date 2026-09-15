@@ -115,6 +115,14 @@ if source "$SCRIPTS/helpers.sh" 2>/dev/null; then
 		"$(split_project_query "feat/new-thing" "$rows")" $'\tfeat/new-thing'
 	assert_eq "split_project_query: a bare name names no project" \
 		"$(split_project_query "new-thing" "$rows")" $'\tnew-thing'
+
+	target_verdict() { if valid_piece_target "$1"; then echo name; else echo search; fi; }
+	assert_eq "valid_piece_target: a plain name is a name" "$(target_verdict "new-thing")" "name"
+	assert_eq "valid_piece_target: a branch path is a name" "$(target_verdict "feat/login-v2.1")" "name"
+	assert_eq "valid_piece_target: an fzf anchor is a search" "$(target_verdict "^new-thing")" "search"
+	assert_eq "valid_piece_target: two terms are a search" "$(target_verdict "alpha login")" "search"
+	assert_eq "valid_piece_target: an exact-match quote is a search" "$(target_verdict "'\''fix")" "search"
+	assert_eq "valid_piece_target: a trailing slash is not a name" "$(target_verdict "alpha/")" "search"
 else
 	fail "source helpers.sh" "could not source $SCRIPTS/helpers.sh"
 fi
@@ -207,7 +215,7 @@ integration_open_create() {
 		skip "open create integration" "needs jq + fzf"
 		return
 	fi
-	local tmp bin log
+	local tmp bin log err rc
 	tmp="$(mktemp -d)"
 	bin="$tmp/bin"
 	log="$tmp/mp.log"
@@ -252,6 +260,25 @@ EOF
 	(cd "$tmp" && PATH="$bin:$PATH" HERDR_ENV=1 MP_PLUGIN_FILTER="" MP_PLUGIN_KEY="ctrl-o" \
 		bash "$SCRIPTS/open.sh" <<<"from-the-prompt" >/dev/null 2>&1)
 	assert_eq "open flow: the create key with no query hands off to create.sh" \
+		"$(cat "$log" 2>/dev/null)" "create --name from-the-prompt"
+
+	# A query that reads as a search is refused, loudly, with nothing created.
+	rm -f "$log"
+	err="$(PATH="$bin:$PATH" HERDR_ENV=1 MP_PLUGIN_FILTER="^new-thing" \
+		bash "$SCRIPTS/open.sh" 2>&1 >/dev/null)"
+	rc=$?
+	assert_eq "open flow: a search-syntax query creates nothing" "$(cat "$log" 2>/dev/null)" ""
+	assert_eq "open flow: a search-syntax query fails visibly" "$rc" "1"
+	case "$err" in
+		*"reads as a search"*) ok "open flow: says why it created nothing" ;;
+		*) fail "open flow: says why it created nothing" "$err" ;;
+	esac
+
+	# A project prefix with no name after it needs a name, not a branch called "alpha/".
+	rm -f "$log"
+	(cd "$tmp" && PATH="$bin:$PATH" HERDR_ENV=1 MP_PLUGIN_FILTER="alpha/" MP_PLUGIN_KEY="ctrl-o" \
+		bash "$SCRIPTS/open.sh" <<<"from-the-prompt" >/dev/null 2>&1)
+	assert_eq "open flow: a trailing slash asks for a name" \
 		"$(cat "$log" 2>/dev/null)" "create --name from-the-prompt"
 
 	rm -rf "$tmp"
