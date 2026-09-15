@@ -38,7 +38,7 @@ main() {
 		--with-nth=1 \
 		--prompt='agent> ' \
 		--preview='tmux capture-pane -p -t {3} 2>/dev/null || echo "(no live pane)"' \
-		--preview-window='right,60%')" || exit 0
+		--preview-window='right,60%')" || picker_exit "$?"
 	[[ -n "$selection" ]] || exit 0
 
 	id="$(cut -f2 <<<"$selection")"

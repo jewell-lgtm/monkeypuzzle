@@ -17,6 +17,28 @@ mp_bin() {
 	printf '%s' "${MP_PLUGIN_BIN:-mp}"
 }
 
+# Keep the caller's command precedence, then search common user/package installs.
+# GUI-launched tmux servers may inherit only the system PATH. Do not source
+# shell startup files: they may print output or run interactive commands.
+setup_path() {
+	local dir
+	for dir in "${HOME}/.local/bin" /opt/homebrew/bin /usr/local/bin; do
+		case ":${PATH:-}:" in
+			*":$dir:"*) ;;
+			*) PATH="${PATH:+$PATH:}$dir" ;;
+		esac
+	done
+	export PATH
+}
+
+# fzf uses 1 for no match and 130 for cancellation; other errors must surface.
+picker_exit() {
+	case "$1" in
+		1|130) exit 0 ;;
+		*) exit "$1" ;;
+	esac
+}
+
 # die prints a message to stderr and exits non-zero.
 die() {
 	printf 'monkeypuzzle-tmux: %s\n' "$*" >&2
@@ -27,12 +49,16 @@ die() {
 require_cmd() {
 	local cmd
 	for cmd in "$@"; do
-		command -v "$cmd" >/dev/null 2>&1 || die "required command not found: $cmd"
+		command -v "$cmd" >/dev/null 2>&1 || die "Required command not found: $cmd
+Install the missing command and add its directory to tmux's PATH.
+For mp, set @monkeypuzzle-bin in ~/.tmux.conf to its absolute path.
+Searched PATH: $PATH"
 	done
 }
 
 # ensure_env verifies we are inside tmux and the tools we need are present.
 ensure_env() {
+	setup_path
 	[[ -n "${TMUX:-}" ]] || die "not inside a tmux session"
 	require_cmd "$(mp_bin)" jq fzf
 }

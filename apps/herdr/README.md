@@ -41,6 +41,19 @@ which tells mp to perform the herdr workspace focus/create itself (see
 - `herdr` (the plugin runs inside it)
 - [`fzf`](https://github.com/junegunn/fzf) ≥ 0.71 and [`jq`](https://stedolan.github.io/jq/) — the pickers
 
+### Command lookup and startup errors
+
+The plugin keeps herdr's existing `PATH` order, then adds `~/.local/bin`,
+`/opt/homebrew/bin`, and `/usr/local/bin`. This also works when herdr starts
+from a desktop app with only system directories in its environment.
+For another install location, add it to the environment used to launch
+herdr, or set `MP_PLUGIN_BIN` to the absolute path of `mp` there.
+
+Missing-command errors name the command and show the searched `PATH`.
+Failed picker panes keep their error visible until you press Enter;
+cancelling a picker still closes it immediately. Direct actions report
+errors in `herdr plugin log list`.
+
 ## Install
 
 ```bash
@@ -65,7 +78,7 @@ command = "monkeypuzzle.open"
 description = "monkeypuzzle: open piece"
 
 [[keys.command]]
-key = "prefix+b"
+key = "prefix+u"
 type = "plugin_action"
 command = "monkeypuzzle.blocked"
 description = "monkeypuzzle: jump to blocked agent"
@@ -77,11 +90,15 @@ command = "monkeypuzzle.inbox"
 description = "monkeypuzzle: inbox"
 
 [[keys.command]]
-key = "prefix+n"
+key = "prefix+f"
 type = "plugin_action"
 command = "monkeypuzzle.next"
 description = "monkeypuzzle: next piece in the inbox"
 ```
+
+The examples preserve herdr’s sidebar (`prefix+b`) and tab navigation
+(`prefix+c`, `prefix+n`). Use `prefix+a` for `monkeypuzzle.create`,
+`prefix+u` for blocked agents, and `prefix+f` for the next piece.
 
 ## Hook coexistence
 
@@ -103,7 +120,11 @@ The scripts are structured so their `build_*` row-builders can be sourced and
 tested in isolation; the pickers have a `MP_PLUGIN_FILTER` seam that drives
 them non-interactively for the integration tests. See `test/run.sh`.
 
-Verified against the herdr docs; before the first release, smoke-check the
-exact CLI spellings against a live install (`herdr api schema`): the
-`plugin pane open` invocation in `scripts/show.sh`, popup `width`/`height`
-in the manifest, and whether manifests can declare default key bindings.
+The adapter targets the Herdr 0.9 CLI: list commands already emit JSON,
+wrapped in `result`, with `workspace_id`, `pane_id`, and `agent_status` fields.
+Agent kinds pass through without a provider allowlist. The list API supplies
+no process ID, so mp reports zero rather than inventing one.
+
+Run `MP_TEST_HERDR=1 go test ./internal/adapters -run HerdrLive -v` for an
+isolated live-server compatibility check. It requires herdr on PATH and
+permission to create local sockets and terminal processes.

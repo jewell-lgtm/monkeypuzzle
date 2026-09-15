@@ -10,7 +10,8 @@
 id = "monkeypuzzle"
 name = "Monkeypuzzle"
 version = "0.1.0"
-min_herdr_version = "0.7.0"
+min_herdr_version = "0.9.0"
+platforms = ["linux", "macos"]
 description = "Worktree-per-piece git flow: open, create, and adopt pieces; the inbox; jump to the blocked agent"
 
 # Picker actions open their popup pane; blocked / next / prev are direct
@@ -64,7 +65,7 @@ title = "Open piece"
 placement = "popup"
 width = "80%"
 height = 20
-command = ["bash", "scripts/open.sh"]
+command = ["bash", "scripts/pane.sh", "open"]
 
 [[panes]]
 id = "create"
@@ -72,7 +73,7 @@ title = "New piece"
 placement = "popup"
 width = "80%"
 height = 20
-command = ["bash", "scripts/create.sh"]
+command = ["bash", "scripts/pane.sh", "create"]
 
 [[panes]]
 id = "adopt"
@@ -80,7 +81,7 @@ title = "Adopt branch"
 placement = "popup"
 width = "80%"
 height = 20
-command = ["bash", "scripts/adopt.sh"]
+command = ["bash", "scripts/pane.sh", "adopt"]
 
 [[panes]]
 id = "inbox"
@@ -88,4 +89,4 @@ title = "Inbox"
 placement = "popup"
 width = "80%"
 height = 20
-command = ["bash", "scripts/inbox.sh"]
+command = ["bash", "scripts/pane.sh", "inbox"]

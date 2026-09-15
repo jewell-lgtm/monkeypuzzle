@@ -14,7 +14,7 @@ import (
 // (https://herdr.dev), mapping each piece to a workspace — "one workspace per
 // repo, task, or investigation" is herdr's own model, so no translation is
 // involved. herdr targets workspaces by id, not label, so every operation
-// resolves the session name against `herdr workspace list --json` first: mp
+// resolves the session name against `herdr workspace list` first: mp
 // names the workspaces it creates via --label.
 //
 // Everything goes through the herdr CLI, which mirrors the socket API 1:1 and
@@ -30,17 +30,31 @@ func NewHerdrMultiplexer(exec core.Exec) *HerdrMultiplexer {
 	return &HerdrMultiplexer{exec: exec}
 }
 
+// The CLI wraps socket results even when stdout is piped. Reject missing
+// results so a protocol mismatch cannot masquerade as an empty workspace list.
+func decodeHerdrResult(out []byte, target any) error {
+	var response struct {
+		Result json.RawMessage `json:"result"`
+	}
+	if err := json.Unmarshal(out, &response); err != nil {
+		return err
+	}
+	if len(response.Result) == 0 || string(response.Result) == "null" {
+		return fmt.Errorf("herdr response has no result")
+	}
+	return json.Unmarshal(response.Result, target)
+}
+
 type herdrWorkspaceList struct {
 	Workspaces []struct {
-		ID    string `json:"id"`
+		ID    string `json:"workspace_id"`
 		Label string `json:"label"`
 	} `json:"workspaces"`
 }
 
 type herdrPane struct {
-	ID      string `json:"id"`
-	Command string `json:"command"`
-	PID     int    `json:"pid"`
+	ID      string `json:"pane_id"`
+	Command string `json:"agent"`
 	Focused bool   `json:"focused"`
 }
 
@@ -52,12 +66,12 @@ type herdrPaneList struct {
 // no workspace carries that label. Matching is exact: "mp/dearest" must not
 // match "mp/dearest-mobileapp".
 func (h *HerdrMultiplexer) lookupWorkspace(ctx context.Context, sessionName string) (string, error) {
-	out, err := h.exec.Run(ctx, "herdr", "workspace", "list", "--json")
+	out, err := h.exec.Run(ctx, "herdr", "workspace", "list")
 	if err != nil {
 		return "", fmt.Errorf("failed to list herdr workspaces: %w", err)
 	}
 	var list herdrWorkspaceList
-	if err := json.Unmarshal(out, &list); err != nil {
+	if err := decodeHerdrResult(out, &list); err != nil {
 		return "", fmt.Errorf("failed to parse herdr workspace list: %w", err)
 	}
 	for _, w := range list.Workspaces {
@@ -136,12 +150,12 @@ func (h *HerdrMultiplexer) Name() string {
 
 // listPanes enumerates the panes of a workspace by id.
 func (h *HerdrMultiplexer) listPanes(ctx context.Context, workspaceID string) ([]herdrPane, error) {
-	out, err := h.exec.Run(ctx, "herdr", "pane", "list", workspaceID, "--json")
+	out, err := h.exec.Run(ctx, "herdr", "pane", "list", "--workspace", workspaceID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list herdr panes: %w", err)
 	}
 	var list herdrPaneList
-	if err := json.Unmarshal(out, &list); err != nil {
+	if err := decodeHerdrResult(out, &list); err != nil {
 		return nil, fmt.Errorf("failed to parse herdr pane list: %w", err)
 	}
 	return list.Panes, nil
@@ -178,20 +192,15 @@ func (h *HerdrMultiplexer) resolvePaneTarget(ctx context.Context, target string)
 	return "", fmt.Errorf("no panes in herdr workspace %q", target)
 }
 
-// SendText types text into the target pane followed by Enter. The text goes
-// via send-text (literal, no key-combo parsing; "--" keeps leading-dash text
-// from parsing as flags) and Enter via a second send-keys call so it is
-// interpreted as the key, not the word — same split as the tmux adapter.
+// SendText submits text and Enter atomically through herdr's pane run command.
+// Herdr handles the pane's bracketed-paste mode and submission timing.
 func (h *HerdrMultiplexer) SendText(ctx context.Context, target, text string) error {
 	pane, err := h.resolvePaneTarget(ctx, target)
 	if err != nil {
 		return err
 	}
-	if _, err := h.exec.Run(ctx, "herdr", "pane", "send-text", pane, "--", text); err != nil {
-		return fmt.Errorf("failed to send text to pane: %w", err)
-	}
-	if _, err := h.exec.Run(ctx, "herdr", "pane", "send-keys", pane, "enter"); err != nil {
-		return fmt.Errorf("failed to send Enter to pane: %w", err)
+	if _, err := h.exec.Run(ctx, "herdr", "pane", "run", pane, text); err != nil {
+		return fmt.Errorf("failed to submit text to pane: %w", err)
 	}
 	return nil
 }
@@ -222,15 +231,17 @@ func (h *HerdrMultiplexer) ListPanes(ctx context.Context, sessionName string) ([
 	if err != nil {
 		return nil, err
 	}
+	// Pane list exposes the recognized agent, but no process ID.
 	var infos []core.PaneInfo
 	for _, p := range panes {
-		infos = append(infos, core.PaneInfo{ID: p.ID, Command: p.Command, PID: p.PID})
+		infos = append(infos, core.PaneInfo{ID: p.ID, Command: p.Command, PID: 0})
 	}
 	return infos, nil
 }
 
 // FocusPane focuses the workspace named sessionName, then (if pane is given)
-// the pane itself. Best-effort past the workspace focus: a pane focus failure
+// the agent in that pane. The CLI only supports directional raw-pane focus.
+// Best-effort past the workspace focus: a pane focus failure
 // (e.g. a pane that closed) is not fatal — the client still lands in the
 // right workspace.
 func (h *HerdrMultiplexer) FocusPane(ctx context.Context, sessionName, pane string) error {
@@ -247,7 +258,7 @@ func (h *HerdrMultiplexer) FocusPane(ctx context.Context, sessionName, pane stri
 	if pane == "" {
 		return nil
 	}
-	_, _ = h.exec.Run(ctx, "herdr", "pane", "focus", pane)
+	_, _ = h.exec.Run(ctx, "herdr", "agent", "focus", pane)
 	return nil
 }
 
@@ -258,10 +269,9 @@ func (h *HerdrMultiplexer) CurrentPane() string {
 
 type herdrAgentList struct {
 	Agents []struct {
-		Pane  string `json:"pane"`
+		Pane  string `json:"pane_id"`
 		Agent string `json:"agent"`
-		State string `json:"state"`
-		PID   int    `json:"pid"`
+		State string `json:"agent_status"`
 	} `json:"agents"`
 }
 
@@ -278,12 +288,12 @@ func (h *HerdrMultiplexer) ObserveAgents(ctx context.Context, sessionName string
 	if id == "" {
 		return nil, nil
 	}
-	out, err := h.exec.Run(ctx, "herdr", "agent", "list", "--json")
+	out, err := h.exec.Run(ctx, "herdr", "agent", "list")
 	if err != nil {
 		return nil, fmt.Errorf("failed to list herdr agents: %w", err)
 	}
 	var list herdrAgentList
-	if err := json.Unmarshal(out, &list); err != nil {
+	if err := decodeHerdrResult(out, &list); err != nil {
 		return nil, fmt.Errorf("failed to parse herdr agent list: %w", err)
 	}
 	var observations []core.AgentObservation
@@ -295,7 +305,6 @@ func (h *HerdrMultiplexer) ObserveAgents(ctx context.Context, sessionName string
 			Pane:   a.Pane,
 			Kind:   strings.ToLower(a.Agent),
 			Status: mapHerdrAgentState(a.State),
-			PID:    a.PID,
 		})
 	}
 	return observations, nil

@@ -10,7 +10,7 @@ source "$DIR/helpers.sh"
 main() {
 	set -euo pipefail
 	[[ $# -eq 1 ]] || die "usage: show.sh <pane-id>"
-	exec "$(herdr_bin)" plugin pane open "monkeypuzzle.$1"
+	exec "$(herdr_bin)" plugin pane open --plugin monkeypuzzle --entrypoint "$1"
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then

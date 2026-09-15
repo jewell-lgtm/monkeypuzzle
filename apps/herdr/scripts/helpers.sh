@@ -2,7 +2,7 @@
 # Shared helpers for the monkeypuzzle herdr plugin scripts.
 #
 # Sourced by every script in this directory. This file defines functions and
-# one export only — it performs no work at source time — so the test runner
+# exports only — it performs no work at source time — so the test runner
 # can source the scripts and call their build_* functions without tripping
 # guards.
 
@@ -23,6 +23,28 @@ herdr_bin() {
 	printf '%s' "${HERDR_BIN_PATH:-herdr}"
 }
 
+# Keep the caller's command precedence, then search common user/package installs.
+# GUI-launched herdr servers may inherit only the system PATH. Do not source
+# shell startup files: they may print output or run interactive commands.
+setup_path() {
+	local dir
+	for dir in "${HOME}/.local/bin" /opt/homebrew/bin /usr/local/bin; do
+		case ":${PATH:-}:" in
+			*":$dir:"*) ;;
+			*) PATH="${PATH:+$PATH:}$dir" ;;
+		esac
+	done
+	export PATH
+}
+
+# fzf uses 1 for no match and 130 for cancellation; other errors must surface.
+picker_exit() {
+	case "$1" in
+		1|130) exit 0 ;;
+		*) exit "$1" ;;
+	esac
+}
+
 # die prints a message to stderr and exits non-zero.
 die() {
 	printf 'monkeypuzzle-herdr: %s\n' "$*" >&2
@@ -33,12 +55,16 @@ die() {
 require_cmd() {
 	local cmd
 	for cmd in "$@"; do
-		command -v "$cmd" >/dev/null 2>&1 || die "required command not found: $cmd"
+		command -v "$cmd" >/dev/null 2>&1 || die "Required command not found: $cmd
+Install the missing command and add its directory to herdr's PATH.
+For mp, you can also set MP_PLUGIN_BIN to its absolute path.
+Searched PATH: $PATH"
 	done
 }
 
 # ensure_env verifies we run inside herdr and the tools we need are present.
 ensure_env() {
+	setup_path
 	[[ "${HERDR_ENV:-}" == "1" ]] || die "not inside a herdr session"
 	require_cmd "$(mp_bin)" jq fzf
 }

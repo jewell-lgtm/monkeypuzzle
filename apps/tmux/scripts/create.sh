@@ -22,7 +22,7 @@ main() {
 	selection="$(printf '%s\n' "$rows" | fzf_pick \
 		--with-nth=1 \
 		--prompt='project> ' \
-		--query="$query")" || exit 0
+		--query="$query")" || picker_exit "$?"
 	[[ -n "$selection" ]] || exit 0
 	proj_path="$(cut -f3 <<<"$selection")"
 

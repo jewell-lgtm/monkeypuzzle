@@ -375,5 +375,64 @@ EOF
 }
 integration_step
 
+# Verify the popup command uses the installed CLI's explicit selectors.
+integration_show() {
+ local tmp actual
+ tmp="$(mktemp -d)"
+ cat >"$tmp/herdr" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$@"
+EOF
+ chmod +x "$tmp/herdr"
+ actual="$(HERDR_BIN_PATH="$tmp/herdr" bash "$SCRIPTS/show.sh" inbox)"
+ assert_eq "show: uses plugin and entrypoint selectors" "$actual" $'plugin\npane\nopen\n--plugin\nmonkeypuzzle\n--entrypoint\ninbox'
+ rm -rf "$tmp"
+}
+integration_show
+
+# ---- Startup environment and failure propagation ----------------------------
+integration_startup() {
+	local tmp err rc
+	tmp="$(mktemp -d)"
+	mkdir -p "$tmp/.local/bin" "$tmp/first"
+	printf '#!/bin/sh\nexit 0\n' >"$tmp/.local/bin/mp"
+	chmod +x "$tmp/.local/bin/mp"
+	assert_eq "PATH: finds a user install with a system-only inherited PATH" \
+		"$(HOME="$tmp" PATH=/usr/bin:/bin bash -c 'source "$1"; setup_path; command -v mp' _ "$SCRIPTS/helpers.sh")" \
+		"$tmp/.local/bin/mp"
+	cp "$tmp/.local/bin/mp" "$tmp/first/mp"
+	assert_eq "PATH: preserves an existing command override" \
+		"$(HOME="$tmp" PATH="$tmp/first:/usr/bin:/bin" bash -c 'source "$1"; setup_path; command -v mp' _ "$SCRIPTS/helpers.sh")" \
+		"$tmp/first/mp"
+	err="$(HERDR_ENV=1 MP_PLUGIN_BIN="$tmp/missing-mp" bash "$SCRIPTS/pane.sh" inbox </dev/null 2>&1)"
+	rc=$?
+	assert_eq "pane: missing dependency retains failure status" "$rc" 1
+	case "$err" in
+		*"Required command not found: $tmp/missing-mp"*"MP_PLUGIN_BIN"*"Searched PATH:"*"picker failed"*) ok "pane: actionable dependency error" ;;
+		*) fail "pane: actionable dependency error" "$err" ;;
+	esac
+	for rc in 1 130 2; do
+		bash -c 'source "$1"; picker_exit "$2"' _ "$SCRIPTS/helpers.sh" "$rc"
+		got=$?
+		if [[ "$rc" == 2 ]]; then
+			assert_eq "picker: fzf errors remain failures" "$got" 2
+		else
+			assert_eq "picker: fzf cancellation/no-match ($rc) closes normally" "$got" 0
+		fi
+	done
+	rm -rf "$tmp"
+}
+integration_startup
+
+if have python3; then
+	if python3 "$SCRIPTS/../test/pane_test.py"; then
+		ok "all picker panes: terminal errors wait for dismissal and preserve exit code"
+	else
+		fail "pane: terminal error waits for dismissal" "see Python assertion above"
+	fi
+else
+	skip "pane terminal test" "needs python3"
+fi
+
 printf '\n%d passed, %d failed, %d skipped\n' "$PASS" "$FAIL" "$SKIP"
 [[ "$FAIL" -eq 0 ]]

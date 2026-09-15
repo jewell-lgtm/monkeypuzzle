@@ -11,12 +11,19 @@ source "$DIR/helpers.sh"
 
 main() {
 	set -uo pipefail
+	setup_path
+	local dependency_error
+	dependency_error="$(require_cmd "$(mp_bin)" 2>&1)" || {
+		tmux display-message "monkeypuzzle: $dependency_error"
+		return 1
+	}
 	# $1 is the invoking pane's cwd — kept as a sane cwd for mp.
 	cd "${1:-.}" 2>/dev/null || true
 
-	local err
+	local err rc
 	err="$("$(mp_bin)" agent focus --blocked --all 2>&1 1>/dev/null)"
-	[[ -n "$err" ]] || return 0
+	rc=$?
+	[[ -n "$err" ]] || return "$rc"
 
 	# The known soft case gets its own friendly wording; any other stderr
 	# (a real failure — mp missing, registry unreadable, ...) is relayed
@@ -27,6 +34,7 @@ main() {
 	else
 		tmux display-message "monkeypuzzle: $err"
 	fi
+	return "$rc"
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then

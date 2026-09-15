@@ -474,5 +474,49 @@ EOF
 }
 integration_step
 
+# ---- Startup environment and failure propagation ----------------------------
+integration_startup() {
+	local tmp err rc
+	tmp="$(mktemp -d)"
+	mkdir -p "$tmp/.local/bin" "$tmp/first"
+	printf '#!/bin/sh\nexit 0\n' >"$tmp/.local/bin/mp"
+	chmod +x "$tmp/.local/bin/mp"
+	assert_eq "PATH: finds a user install with a system-only inherited PATH" \
+		"$(HOME="$tmp" PATH=/usr/bin:/bin bash -c 'source "$1"; setup_path; command -v mp' _ "$SCRIPTS/helpers.sh")" \
+		"$tmp/.local/bin/mp"
+	cp "$tmp/.local/bin/mp" "$tmp/first/mp"
+	assert_eq "PATH: preserves an existing command override" \
+		"$(HOME="$tmp" PATH="$tmp/first:/usr/bin:/bin" bash -c 'source "$1"; setup_path; command -v mp' _ "$SCRIPTS/helpers.sh")" \
+		"$tmp/first/mp"
+	err="$(TMUX=test MP_PLUGIN_BIN="$tmp/missing-mp" bash "$SCRIPTS/pane.sh" inbox.sh </dev/null 2>&1)"
+	rc=$?
+	assert_eq "pane: missing dependency retains failure status" "$rc" 1
+	case "$err" in
+		*"Required command not found: $tmp/missing-mp"*"@monkeypuzzle-bin"*"Searched PATH:"*"picker failed"*) ok "pane: actionable dependency error" ;;
+		*) fail "pane: actionable dependency error" "$err" ;;
+	esac
+	for rc in 1 130 2; do
+		bash -c 'source "$1"; picker_exit "$2"' _ "$SCRIPTS/helpers.sh" "$rc"
+		got=$?
+		if [[ "$rc" == 2 ]]; then
+			assert_eq "picker: fzf errors remain failures" "$got" 2
+		else
+			assert_eq "picker: fzf cancellation/no-match ($rc) closes normally" "$got" 0
+		fi
+	done
+	rm -rf "$tmp"
+}
+integration_startup
+
+if have python3; then
+	if python3 "$SCRIPTS/../test/pane_test.py"; then
+		ok "all picker panes: terminal errors wait for dismissal and preserve exit code"
+	else
+		fail "pane: terminal error waits for dismissal" "see Python assertion above"
+	fi
+else
+	skip "pane terminal test" "needs python3"
+fi
+
 printf '\n%d passed, %d failed, %d skipped\n' "$PASS" "$FAIL" "$SKIP"
 [[ "$FAIL" -eq 0 ]]
