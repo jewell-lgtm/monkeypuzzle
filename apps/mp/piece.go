@@ -994,20 +994,27 @@ func runPieceCleanup(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("not in a git repository")
 	}
 
-	// Cleanup is dry-run by default. Always preview first, then decide whether to
-	// apply: --apply (or --force) opts in, --dry-run stays a preview, an
-	// interactive terminal is asked to confirm, and any other (non-interactive)
-	// caller previews.
-	output, err := cleanupPass(ctx, handler, repoRoot, input.MainBranch, true)
-	if err != nil {
-		return err
-	}
-	if output.Links, err = checkLinks(repoRoot, deps.FS, true); err != nil {
-		return err
+	// Cleanup is dry-run by default: preview, then decide whether to apply.
+	// --apply (or --yes) opts in, --dry-run stays a preview, an interactive
+	// terminal is asked to confirm, and any other (non-interactive) caller
+	// previews.
+	//
+	// A caller who has already opted in needs no preview. Running one anyway
+	// scanned every piece a second time — each one a git and forge lookup — and
+	// announced "[dry-run] Would cleanup X" on the line above cleaning X.
+	preDecided := input.Apply || flagPieceCleanupYes
+	var output cleanupOutput
+	if !preDecided {
+		if output, err = cleanupPass(ctx, handler, repoRoot, input.MainBranch, true); err != nil {
+			return err
+		}
+		if output.Links, err = checkLinks(repoRoot, deps.FS, true); err != nil {
+			return err
+		}
 	}
 
 	anythingToDo := len(output.CleanedPieces) > 0 || len(output.RemovedProjects) > 0 || droppableLinks(output.Links) > 0
-	apply, err := resolveApply(input.Apply || flagPieceCleanupYes, input.DryRun, anythingToDo, func() (bool, error) {
+	apply, err := resolveApply(preDecided, input.DryRun, anythingToDo, func() (bool, error) {
 		return confirmApply("Clean up merged pieces?", cleanupSummary(output))
 	})
 	if err != nil {
