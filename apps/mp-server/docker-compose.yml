@@ -1,5 +1,5 @@
-# Brings up the full mp-server stack: Postgres (app cache) + a Temporal dev
-# server + the web/MCP server + the sync worker.
+# Private piece registry: Postgres + mp-server. PR monitoring is optional:
+# PR_SYNC_ENABLED=true docker compose --profile pr-monitoring up --build
 #
 #   cp .env.example .env   # fill in WorkOS creds + secrets
 #   docker compose up --build
@@ -22,6 +22,7 @@ services:
     volumes: ["pgdata:/var/lib/postgresql/data"]
 
   temporal:
+    profiles: [pr-monitoring]
     # Lightweight in-memory dev server (frontend 7233, web UI 8233).
     image: temporalio/temporal:latest
     command: ["server", "start-dev", "--ip", "0.0.0.0", "--log-level", "warn"]
@@ -36,6 +37,7 @@ services:
     environment:
       DATABASE_URL: postgres://mp:mp@postgres:5432/mp?sslmode=disable
       TEMPORAL_HOSTPORT: temporal:7233
+      PR_SYNC_ENABLED: ${PR_SYNC_ENABLED:-false}
       # GitLab login is opt-in: set the OAuth client id/secret in .env to enable
       # the "Sign in with GitLab" leg. GITLAB_BASE_URL defaults to gitlab.com.
       GITLAB_BASE_URL: ${GITLAB_BASE_URL:-https://gitlab.com}
@@ -44,9 +46,9 @@ services:
     ports: ["8080:8080"]
     depends_on:
       postgres: {condition: service_healthy}
-      temporal: {condition: service_started}
 
   mp-worker:
+    profiles: [pr-monitoring]
     build:
       context: ../..
       dockerfile: apps/mp-server/Dockerfile
@@ -55,6 +57,7 @@ services:
     environment:
       DATABASE_URL: postgres://mp:mp@postgres:5432/mp?sslmode=disable
       TEMPORAL_HOSTPORT: temporal:7233
+      PR_SYNC_ENABLED: "true"
       # The worker reads GitLab projects/MRs; it needs the base URL but no OAuth
       # secrets (the access token is decrypted from the store per user).
       GITLAB_BASE_URL: ${GITLAB_BASE_URL:-https://gitlab.com}

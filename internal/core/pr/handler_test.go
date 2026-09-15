@@ -322,6 +322,46 @@ func TestCreatePR_UsesParentBranchAsBase(t *testing.T) {
 	}
 }
 
+func TestCreatePR_UsesCurrentStackEntryBase(t *testing.T) {
+	fs := adapters.NewMemoryFS()
+	mockExec := adapters.NewMockExec()
+	output := adapters.NewBufferOutput()
+	worktreePath := "/pieces/test-piece"
+	mainRepoPath := "/repo"
+	setupTestPieceWorktree(t, mockExec, fs, worktreePath, mainRepoPath)
+
+	metadata := piece.PieceMetadata{
+		Parent: "main",
+		Stack: []piece.StackEntry{
+			{Branch: "feat/schema", Base: "main"},
+			{Branch: "test-piece", Base: "feat/schema"},
+		},
+	}
+	data, _ := json.Marshal(metadata)
+	_ = fs.WriteFile(filepath.Join(worktreePath, ".monkeypuzzle", "piece-metadata.json"), data, 0o644)
+
+	mockExec.AddResponse("git", []string{"push", "-u", "origin", "HEAD"}, []byte(""), nil)
+	mockExec.AddResponse("gh", []string{"pr", "create", "--title", "ORM models", "--body", "", "--base", "feat/schema"},
+		[]byte("https://github.com/owner/repo/pull/53\n"), nil)
+
+	handler := pr.NewHandler(core.Deps{FS: fs, Output: output, Exec: mockExec})
+	result, err := handler.CreatePR(context.Background(), worktreePath, pr.Input{Title: "ORM models"})
+	if err != nil {
+		t.Fatalf("CreatePR failed: %v", err)
+	}
+	if result.PRNumber != 53 {
+		t.Errorf("PR number = %d, want 53", result.PRNumber)
+	}
+
+	stored, err := piece.ReadPieceMetadata(worktreePath, fs)
+	if err != nil {
+		t.Fatalf("read metadata: %v", err)
+	}
+	if got := stored.Stack[1]; got.PRNumber != 53 || got.PRURL != result.PRURL || got.Status != "OPEN" {
+		t.Errorf("stack PR metadata = %+v, want PR #53 OPEN", got)
+	}
+}
+
 func TestCreatePR_ExplicitBaseOverridesParent(t *testing.T) {
 	fs := adapters.NewMemoryFS()
 	mockExec := adapters.NewMockExec()

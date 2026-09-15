@@ -39,16 +39,32 @@ the host, so the remote surface is byte-identical — flags, stdin JSON, JSON
 out. See [Remote development](remote-development.md) and
 [`mp remote doctor`](#mp-remote).
 
-**Session management is interactive-only.** mp creates or switches a
-multiplexer session **only** when driven interactively — a real terminal on
-stdin (isatty) **and** running inside the configured multiplexer (`$TMUX` for
-tmux, `$ZELLIJ` for zellij, `$CMUX_WORKSPACE_ID` for cmux). Agents and scripts
-(flags / stdin JSON, output captured) have no controlling terminal, so
-`create`/`switch`/`go` skip the multiplexer and return the worktree path
-instead (in JSON, or on stdout for `cd $(mp switch …)`). The in-session env
-vars are inherited by child processes, so they are not sufficient on their
-own — the TTY check is what keeps an agent from creating a stray session or
-hijacking the human's terminal.
+**Multiplexer sessions** are optional (the default `multiplexer` is `none`).
+When one is configured, mp manages its sessions only when driven
+interactively from inside it; see
+[Sessions are interactive-only](integrations.md#sessions-are-interactive-only).
+Otherwise the verbs that land you in a worktree print its path.
+
+---
+
+## mp shell-init
+
+Print a shell function that makes your shell follow mp into the worktree.
+See [Integrations](integrations.md#follow-mp-into-the-worktree-mp-shell-init)
+for how it works.
+
+```bash
+eval "$(mp shell-init zsh)"       # ~/.zshrc
+eval "$(mp shell-init bash)"      # ~/.bashrc
+mp shell-init fish | source       # ~/.config/fish/config.fish
+```
+
+The function runs `mp` with `MP_CWD_FILE` set to a temp file and `cd`s to the
+directory mp writes there. It also exports `MP_SHELL_INIT=1`, which
+[`mp doctor`](#mp-doctor) checks. Verbs that write the file: `switch`, `go`,
+`create`, `adopt`, `inbox next`/`prev`, `agent focus`, and
+`done`/`abandon`/`cleanup` when they remove the worktree you're standing in.
+mp's stdout and exit code are unchanged.
 
 ---
 
@@ -85,13 +101,129 @@ mp completion powershell | Out-String | Invoke-Expression
 
 ### What completes
 
-| Flag                            | Completes To            |
-| ------------------------------- | ----------------------- |
-| `mp abandon --name`       | Available piece names   |
-| `mp init --pr-provider`         | `github`, `gitlab`      |
-| `mp update --main`        | Git branch names        |
-| `mp sync --main`          | Git branch names        |
-| `mp merge --main`         | Git branch names        |
+| Argument or flag                                                        | Completes To            |
+| ----------------------------------------------------------------------- | ----------------------- |
+| `mp switch`, `mp open`, `mp status`, `mp done`, `mp abandon`, `mp piece show`, `mp wait` (positional) | Piece names |
+| `mp branch show` / `delete` (positional)                              | mp-managed branch layers |
+| `mp worktree show` / `delete` (positional)                            | Piece names, branches, and worktree paths |
+| `--piece` / `--parent` on the piece verbs                               | Piece names             |
+| `mp config get` / `set`                                                 | Config keys, then values |
+| `mp init --pr-provider`                                                 | `github`, `gitlab`      |
+| `--main` on `update`, `sync`, `merge`, `cleanup`                        | Git branch names        |
+
+---
+
+## Atomic noun commands
+
+mp exposes its object model as regular noun commands. Singular and plural are
+equivalent: `branch`/`branches`, `worktree`/`worktrees`, `piece`/`pieces`,
+`stack`/`stacks`, and `inbox`/`inboxes`. The established flat piece verbs remain
+supported as concise workflow entry points.
+
+See [Atoms and workflows](atoms.md) for ownership boundaries, invariants, and a
+table showing which atoms every workflow composes.
+
+### `mp branch` / `mp branches`
+
+Inspect and manage branch layers recorded in mp piece-stack metadata. Raw Git
+refs are not mp branch atoms; adopt them into a piece first.
+
+```bash
+mp branch                         # managed list (same as branch list)
+mp branch list
+mp branch show [branch]           # defaults to the current branch
+mp branch create <name>           # same transition as stack append
+mp branch create --prompt "Add API layer"
+mp branch delete [tip] [--force]
+```
+
+`create` appends and checks out a layer in the current piece. `delete` removes
+only that piece's checked-out stack tip and returns to its recorded base. It
+refuses dirty work, the initial piece branch, and a layer with a recorded PR
+unless `--force` is explicit. Read commands support `--json`; mutations accept
+stdin JSON and expose an example through `--schema`.
+
+### `mp piece` / `mp pieces`
+
+The noun-oriented aliases for piece operations:
+
+```bash
+mp piece                          # show the current piece
+mp piece show [piece]             # alias: status
+mp piece list [--all]             # alias: ls
+mp piece create                   # alias: new
+mp piece adopt <branch>
+mp piece sync | update | merge
+mp piece done [piece]
+mp piece abandon [piece]
+```
+
+The corresponding flat commands (`mp status`, `mp list`, `mp create`, and so
+on) have identical flags, input modes, output, and behavior.
+
+### `mp pr` / `mp prs`
+
+The bare command and `list` show PR/MR associations recorded on managed branch
+layers; `show` selects by number or branch and defaults to the current branch.
+These reads are local and do not discover unrelated repository PRs.
+
+```bash
+mp pr
+mp prs list --json
+mp pr show [number|branch]
+mp pr create
+mp pr ready
+```
+
+`stack status` and `inbox --refresh` are the workflows that reconcile those
+records with live forge state.
+
+### `mp worktree` / `mp worktrees`
+
+Inspect storage used by the current project's piece worktrees. The main checkout
+and unmanaged worktrees are included for context, but unmanaged rows are only
+adoption candidates. JSON rows include `size_bytes`, `in_inbox`, lifecycle and
+agent state, and a recorded PR number when present.
+
+```bash
+mp worktrees                         # terminal picker; non-TTY JSON list
+mp worktree list
+mp worktree show [path|branch|piece]
+mp worktree delete <path|branch|piece>
+mp worktree delete <selector> --delete-branch
+mp worktree delete <selector> --force
+echo '{"selector":"feat/tmp"}' | mp worktree delete
+mp worktree delete --schema
+```
+
+Bare `mp worktrees` is deliberately asymmetric. With stdin and stdout attached
+to a terminal it opens a two-step management picker whose default action is
+inspect-only. Without a TTY it only emits `{"worktrees":[…]}` and can never
+delete anything. `worktree list` is always a direct list.
+
+Deletion is only available for an mp-managed piece. It keeps the branch unless
+`--delete-branch` is explicit, refuses a dirty worktree unless `--force` is
+explicit, and routes through piece abandonment so children and inbox state are
+updated. The TUI offers `piece done` for merged rows. Unmanaged, main, and the
+checkout containing the current process are never deletion targets.
+
+For a disk-space cull, run bare `mp worktrees`, sort your decision from the size
+and lifecycle columns, then finish merged work or explicitly abandon work you no
+longer need. Since the inbox is a projection over pieces, either lifecycle
+transition removes that row from the next `mp inbox`; inspect-only leaves its
+rank, note, snooze, PR, and agent context untouched.
+
+### Completed collection vocabulary
+
+- `mp stack` accepts the plural `mp stacks`; `show`, `list`, and `ls` alias
+  `stack status`.
+- `mp inbox` accepts the plural `mp inboxes`; `inbox list`, `show`, and `ls`
+  run the same listing as bare `mp inbox`.
+- `mp project` already accepts `projects` and `proj`; its `list` accepts `ls`
+  and `status`. It also accepts `add`/`create`, `remove`/`delete`, and
+  `list`/`show` as equivalent CRUD vocabulary.
+- `mp pr` accepts `prs`, `mp agent` accepts `agents` (`agent read` also accepts
+  `show`), and `mp history` accepts `events`.
 
 ---
 
@@ -148,6 +280,14 @@ Creates the monkeypuzzle directory (default `.monkeypuzzle/`):
 └── .gitignore           # Ignores pieces/ and per-piece metadata
 ```
 
+The same per-piece paths are also added to the repo's local
+`.git/info/exclude`, which git honours in every worktree. That keeps a piece's
+`piece-metadata.json` invisible to git even when the piece was branched from a
+commit that predates the committed `.gitignore` (e.g. the first pieces after
+`mp init`, before that scaffold is committed), so `mp cleanup` and clean-tree
+checks never trip over mp's own state. `mp init`, `mp reinit`, `mp move` and
+piece creation all refresh it.
+
 ### Providers
 
 **PR Providers:**
@@ -191,6 +331,8 @@ Creation is gated: on a terminal you're asked to confirm; non-interactively an u
 | `--branch`  | Git branch to adopt as a piece (attaches if it already is one)         |
 | `--create`  | Allow an unmatched target to create a new piece                        |
 | `--all`     | Interactive picker across all registered projects                      |
+| `--open`    | Also open the worktree with your opener (see [`mp open`](#mp-open))    |
+| `--with`    | Opener command for `--open` (overrides `$MP_OPEN` and `open_command`)  |
 | `--schema`  | Print an example input document and exit                              |
 
 `TARGET`, `--piece`, and `--branch` are mutually exclusive. Omit all of them (with `--project`) to attach that project's main worktree. Without `--project`, mp resolves the project from the current directory — any init'd repo works, registered or not.
@@ -215,11 +357,68 @@ Type to filter, ↑/↓ to move, `enter` to select, `esc` to cancel. The picker 
    multiplexer** (real TTY on stdin *and* the adapter's in-session env var set).
    When no multiplexer is configured, or when called by an agent/script or from
    a terminal outside it, it prints the worktree path instead so
-   `cd $(mp switch ...)` works.
+   `cd "$(mp switch ...)"` works (and the [`mp shell-init`](#mp-shell-init)
+   wrapper `cd`s there for you).
 
 ### Non-interactive shape
 
 `mp go --json` (and the JSON form of `mp switch` when stdout isn't a TTY) includes per-project `pieces` and `branches` arrays so callers can build their own pickers.
+
+---
+
+## mp open
+
+Open a piece's worktree in your editor, IDE, or a new terminal window. See
+[Integrations](integrations.md#editor-and-terminal-mp-open) for recipes.
+
+### Usage
+
+```bash
+mp open                                  # the piece you're in, else the main worktree
+mp open add-login                        # a piece or branch, resolved like `mp switch`
+mp open add-login --with 'zed {path}'    # opener for this call only
+MP_OPEN='code {path}' mp open add-login
+```
+
+`TARGET` resolves like [`mp switch`](#mp-switch) (a piece by name or by its
+branch, or a local/remote branch, adopted first), but `mp open` never creates
+a piece. A piece placed on a box is refused with its host and path.
+
+### Flags
+
+| Flag     | Description                                                        |
+| -------- | ------------------------------------------------------------------ |
+| `--with` | Opener command for this call (overrides `$MP_OPEN` and `open_command`) |
+| `--json` | Output JSON even on a terminal                                     |
+
+### Opener
+
+The first of `--with`, `$MP_OPEN`, or the `open_command` config key. It is a
+command template with the placeholders `{path}`, `{piece}`, `{project}` and
+`{branch}`; each value is shell-quoted before substitution, and a template with
+no placeholder gets the path appended (`code` = `code {path}`). mp runs it
+with `sh -c` in the worktree. With no opener configured, `mp open` prints the
+worktree path on stdout and a list of `mp config set open_command …` recipes on
+stderr.
+
+`mp create --open` and `mp switch --open` run the same opener after landing in
+the worktree; an opener failure there is a warning, not an error.
+
+### Output
+
+```json
+{
+  "piece": "add-login",
+  "project": "demo",
+  "path": "/home/user/demo/.monkeypuzzle/pieces/add-login",
+  "branch": "add-login",
+  "command": "zed '/home/user/demo/.monkeypuzzle/pieces/add-login'",
+  "opened": true
+}
+```
+
+`branch` and `command` are omitted when empty; with no opener configured
+there is no `command` and `opened` is `false`.
 
 ---
 
@@ -306,8 +505,8 @@ mp flatten --schema
 ```json
 {
   "removed": [
-    { "piece_name": "piece-a", "worktree_path": "/…/pieces/abc123/piece-a", "branch_name": "piece-a" },
-    { "piece_name": "piece-b", "worktree_path": "/…/pieces/abc123/piece-b", "branch_name": "piece-b" }
+    { "piece_name": "piece-a", "worktree_path": "/home/user/repo/.monkeypuzzle/pieces/piece-a", "branch_name": "piece-a" },
+    { "piece_name": "piece-b", "worktree_path": "/home/user/repo/.monkeypuzzle/pieces/piece-b", "branch_name": "piece-b" }
   ],
   "count": 2,
   "main_path": "/home/user/repo"
@@ -321,7 +520,7 @@ Pieces that could not be removed (e.g. uncommitted changes without `--force`) ap
 
 ## mp status
 
-Show a piece's status. Defaults to the piece you're standing in (or the main repo); name one positionally or with `--piece` to inspect it from anywhere in the repo.
+Show a piece's status. Defaults to the piece you're standing in (or the main repo); name one positionally or with `--piece` to inspect it from anywhere in the repo. A piece placed on a box (`mp create --remote`) is proxied there — see [Remote development](remote-development.md#working-on-a-placed-piece).
 
 ### Usage
 
@@ -338,8 +537,11 @@ JSON to stdout:
 {
   "in_piece": true,
   "piece_name": "piece-20241226-143022",
-  "worktree_path": "/home/user/.local/share/monkeypuzzle/pieces/abc123def456/piece-20241226-143022",
-  "repo_root": "/home/user/projects/myproject"
+  "worktree_path": "/home/user/projects/myproject/.monkeypuzzle/pieces/piece-20241226-143022",
+  "repo_root": "/home/user/projects/myproject",
+  "parent": "main",
+  "stack_depth": 1,
+  "can_merge": true
 }
 ```
 
@@ -349,7 +551,8 @@ Human-readable message to stderr.
 
 ## mp create
 
-Create a new piece (git worktree + multiplexer session).
+Create a new piece: a git worktree on its own branch (plus a multiplexer
+session, if you use one). Alias: `mp new`.
 
 ### Usage
 
@@ -359,6 +562,8 @@ mp create --name my-feature
 mp create --prompt "add dark mode"        # name auto-generated from the prompt
 mp create --parent parent-piece           # stack on another piece
 mp create --skip-switch  # Don't auto-switch to new piece
+mp create --name my-feature --open        # also open it in your editor
+mp create --remote wire --name fix-auth   # place the piece on the ssh box "wire"
 ```
 
 ### Flags
@@ -370,16 +575,19 @@ mp create --skip-switch  # Don't auto-switch to new piece
 | `-p, --parent`        | Parent piece name to branch from (stacks the piece) | `main`       |
 | `--skip-switch`       | Don't switch to the new piece after creation      | `false`        |
 | `--overwrite-session` | Replace existing main repo multiplexer session    | `false`        |
-| `--agent`             | Launch an agent in the new piece: `claude` or `codex`. With a session, the launch line is typed into it; without one it runs headless with `--prompt` (output to `.monkeypuzzle/logs/`) | - |
+| `--open`              | Also open the new worktree with your opener (see [`mp open`](#mp-open)) | `false` |
+| `--with`              | Opener command for `--open` (overrides `$MP_OPEN` and `open_command`) | -  |
+| `--remote`            | Place the piece on this ssh box: the worktree, hooks, agent and PR live there, the project stays here. First use clones + `mp init`s the repo on the box under `~/.local/share/mp/<project>`. `--parent` must be `main` or a piece already on the same box. Also `"remote"` in stdin JSON. See [Remote development](remote-development.md#placing-a-piece-on-a-box) | - |
 
 ### What it does
 
 1. Detects current git repository root
 2. Generates piece name: `piece-YYYYMMDD-HHMMSS` (or uses `--name`)
-3. Creates git worktree at `~/.local/share/monkeypuzzle/pieces/<piece-name>`
+3. Creates git worktree at `<repo>/.monkeypuzzle/pieces/<piece-name>` on a new branch
 4. Fires the `on-piece-create.sh` hook (if exists) in the background — see below
 5. **Switches to the new piece** (unless `--skip-switch` is set) — but only when
-   run interactively (see below); otherwise prints the worktree path
+   run interactively inside a multiplexer (see below); otherwise prints the
+   worktree path
 
 The `on-piece-create.sh` hook is **fire-and-forget**: it runs detached in the
 background so its setup work (dependency installs, submodule init) never blocks
@@ -392,35 +600,31 @@ worktree is always kept regardless of how the hook fares.
 The auto-switch only manages a session when run **interactively from inside the
 configured multiplexer** (a real TTY on stdin *and* the adapter's in-session env
 var set): it moves your existing client/tab/workspace to the piece's session.
-Run by an agent or script, or from a terminal outside the multiplexer, it
-creates no session and prints the worktree path instead — so `--skip-switch` is
-only needed to suppress switching in an interactive session.
+Run by an agent or script, from a terminal outside the multiplexer, or with no
+multiplexer configured, it creates no session and prints the worktree path
+instead (the [`mp shell-init`](#mp-shell-init) wrapper `cd`s there) — so
+`--skip-switch` is only needed to suppress switching in an interactive session.
 
 ### Output
 
-JSON to stdout:
+JSON to stdout (non-TTY or `--json`):
 
 ```json
 {
   "name": "piece-20241226-143022",
-  "worktree_path": "/home/user/.local/share/monkeypuzzle/pieces/abc123def456/piece-20241226-143022",
-  "session_name": "mp-piece-piece-20241226-143022"
+  "worktree_path": "/home/user/projects/myproject/.monkeypuzzle/pieces/piece-20241226-143022",
+  "session_name": "mp/myproject/piece-20241226-143022"
 }
 ```
 
+`session_name` is the name the piece's session has, or would have, under a
+multiplexer: `mp/<project>/<piece>`.
+
 ### Piece storage
 
-Pieces are stored in repo-scoped directories within the XDG data directory:
-
-- Linux: `~/.local/share/monkeypuzzle/pieces/{repo-hash}/`
-- macOS: `~/Library/Application Support/monkeypuzzle/pieces/{repo-hash}/`
-- `$XDG_DATA_HOME/monkeypuzzle/pieces/{repo-hash}/` if set
-
-The `{repo-hash}` is a unique identifier derived from the repository's absolute root path. This ensures:
-
-- Each repository has its own isolated pieces directory
-- No naming conflicts between different repositories
-- Easier management of pieces per project
+Piece worktrees live inside the repo, at `<repo>/.monkeypuzzle/pieces/<piece-name>/`
+(or under the directory chosen with `mp init --dir`). `mp init` gitignores the
+`pieces/` directory.
 
 ---
 
@@ -448,8 +652,124 @@ mp list --all     # across all registered projects
 ```json
 [
   { "name": "feature-auth", "worktree_path": "/path", "parent": "main", "mod_time": "2025-01-04T10:00:00Z" },
-  { "name": "auth-oauth", "worktree_path": "/path", "parent": "feature-auth", "mod_time": "2025-01-04T11:00:00Z" }
+  { "name": "auth-oauth", "worktree_path": "/path", "parent": "feature-auth", "mod_time": "2025-01-04T11:00:00Z" },
+  { "name": "fix-auth", "worktree_path": "/home/u/.local/share/mp/api/.monkeypuzzle/pieces/fix-auth", "host": "wire", "state": "unknown", "parent": "main" }
 ]
+```
+
+Pieces placed on a box (`mp create --remote`, see [Remote development](remote-development.md)) are listed too: `host` names the box, `worktree_path` is a path **on the box**, and `state` is `unknown` until refreshed or `pending` while the remote create is in flight. Local pieces carry neither field.
+
+---
+
+## mp inbox
+
+Your pieces across **every** registered project as one ordered list. Each row
+is a piece (`project/piece`) with the live state mp already knows — agent
+status, PR state, whether it merged — plus your own rank and note. Every
+picker and dashboard is a view over `mp inbox --json`.
+
+### Usage
+
+```bash
+mp inbox                     # table on a terminal (stderr); JSON when piped
+mp inbox --json | jq .rows   # {"rows":[…]}
+mp inbox --sort urgency      # blocked first, then review/working/idle/merged
+mp inbox --refresh           # re-fetch PR state instead of the 2-minute cache
+```
+
+Works from any directory. An init'd repo you are standing in is included
+even if it was never registered.
+
+### Ordering
+
+1. Rows you have ranked (the `order` list in the state file), in that order.
+2. Everything else by urgency — `blocked` > `review` > `working` > `idle` >
+   `merged` — newest first.
+3. Snoozed rows (`snoozed_until` in the future) sit at the bottom of every
+   sort mode; they keep their urgency.
+
+`--sort urgency` puts urgency ahead of your order. Urgency is derived, never
+stored: an agent waiting on you is `blocked`; an open non-draft PR or a
+finished agent is `review`; a running agent is `working`; a merged PR is
+`merged`; anything else is `idle`.
+
+### Flags
+
+| Flag        | Description                                             | Default |
+| ----------- | ------------------------------------------------------- | ------- |
+| `--sort`    | `rank` (your order, urgency breaks ties) or `urgency`   | `rank`  |
+| `--refresh` | Bypass the per-project PR cache                         | `false` |
+| `--json`    | Output JSON even on a terminal                          | `false` |
+
+### Output
+
+```json
+{
+  "rows": [
+    {
+      "key": "api/fix-auth", "project": "api", "piece": "fix-auth", "rank": 1,
+      "branch": "fix-auth", "parent": "main",
+      "worktree_path": "/code/api/.monkeypuzzle/pieces/fix-auth",
+      "session_name": "mp/api/fix-auth", "has_session": true,
+      "agent_status": "blocked", "agent_counts": { "blocked": 1 },
+      "pr": { "number": 12, "url": "https://github.com/o/api/pull/12", "state": "open", "draft": true },
+      "merged": false, "urgency": "blocked",
+      "note": "waiting on review", "snoozed_until": "2026-09-10T09:00:00Z",
+      "snoozed": true,
+      "updated_at": "2026-09-09T11:42:00Z"
+    }
+  ]
+}
+```
+
+`host`, `pr`, `note` and `snoozed_until` are omitted when empty. `snoozed` is
+`snoozed_until` evaluated at list time, so pickers never compare timestamps.
+
+### State file
+
+`$MP_CONFIG_DIR/inbox.json` (default `~/.config/monkeypuzzle/inbox.json`),
+next to the user config:
+
+```json
+{
+  "version": 1,
+  "order": ["monkeypuzzle/inbox-list", "api/fix-auth"],
+  "notes": { "api/fix-auth": "waiting on review" },
+  "snoozed": { "api/fix-auth": "2026-09-10T09:00:00Z" },
+  "cache": { "api/fix-auth": { "pr": { "number": 12, "…": "…" }, "fetched_at": "…" } }
+}
+```
+
+Keys are `project/piece`. Every list drops keys whose piece no longer exists
+and refreshes stale `cache` entries (one forge call per project, reused for
+120s). A forge that is unreachable warns on stderr and leaves `pr` empty; it
+never fails the list.
+
+### Subcommands
+
+Every subcommand takes flags or stdin JSON (`--schema` prints the shape),
+writes JSON to stdout and a one-liner to stderr on a terminal, and records a
+history event (`inbox.moved`, `inbox.noted`, `inbox.snoozed`).
+
+| Subcommand                                   | What it does                                                                                                     |
+| -------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `mp inbox move PIECE --top\|--bottom\|--up [N]\|--down [N]\|--before PIECE\|--after PIECE` | Re-rank; exactly one placement. The first move pins every row's current rank. Prints `{"key","rank","from_rank"}`. |
+| `mp inbox note PIECE [text]`                 | Set the note; empty text or `--clear` removes it. Prints `{"key","note"}`.                                       |
+| `mp inbox snooze PIECE --for 2d\|--until RFC3339\|--clear` | Park the row at the bottom (next/prev skip it) until then. Prints `{"key","snoozed_until"}` (`null` after `--clear`). |
+| `mp inbox next` / `mp inbox prev`            | Switch to the row after/before the piece you stand in, wrapping; snoozed rows skipped; `--sort urgency` respected. Same switch as `mp switch` (multiplexer, else the path on stdout); `--json` prints the switch result. Outside a piece `next` is rank 1, `prev` the last row. |
+| `mp inbox refresh`                           | `mp inbox --refresh`.                                                                                            |
+
+`PIECE` is `project/piece`, or a bare piece name: inside a repo that means
+this project's piece first; elsewhere it must be unique across projects, or
+the command fails naming the candidates.
+
+```bash
+mp inbox move fix-auth --top             # inside api/: api/fix-auth
+mp inbox move web/fix-auth --after nav   # explicit project; nav is unique
+mp inbox note fix-auth "waiting on review"
+mp inbox snooze fix-auth --for 2d
+echo '{"piece":"api/fix-auth","up":2}' | mp inbox move
+cd "$(mp inbox next)"                    # outside a multiplexer
 ```
 
 ---
@@ -547,11 +867,76 @@ configured but unreachable, `mp sync` warns and falls back to the local parent.
 
 Merge piece back to main branch.
 
+### Where the merge happens
+
+`mp merge` lands a piece one of two ways:
+
+| Strategy | What it does |
+| -------- | ------------ |
+| `local` (default) | Squash-merges the piece branch into the target branch in the main checkout. Nothing touches the forge. |
+| `forge` | Squash-merges the piece's **open PR/MR** through the forge CLI, then fast-forwards the local target branch onto the result. |
+
+The strategy is resolved most-specific-first: the per-call flag, then the
+project's `merge.strategy`, then the user-level `merge_strategy`, then `local`.
+
+```jsonc
+// .monkeypuzzle/monkeypuzzle.json — the project's answer, shared by everyone
+// who checks it out
+{
+  "version": "1",
+  "project": { "name": "alpha" },
+  "pr": { "provider": "github" },
+  "merge": { "strategy": "forge" }
+}
+```
+
+```bash
+mp config set merge_strategy forge   # your fallback for projects that declare none
+mp merge --forge                     # this call only
+mp merge --local                     # this call only, whatever the config says
+```
+
+Under `forge`, `mp merge` refuses rather than land the work by a route the
+project did not ask for. Every one of these is checked **before** the
+`before-piece-merge` hook runs, so a refused merge leaves no half-done side
+effects behind:
+
+| Refusal | Why | Way forward |
+| ------- | --- | ----------- |
+| No open PR/MR for the branch | Merging on the forge is a claim that the work went through a review surface; mp will not quietly merge it locally instead | [`mp pr create`](#mp-pr-create), or `--local` |
+| The open PR targets a different base | The forge merges a PR into its own base, not the branch you named, so mp would be reporting a merge that did not happen | [`mp stack set-parent`](#mp-stack) to re-point it, or `--local` |
+| The PR is still a draft | Flipping a draft to ready is a deliberate step, never something merge does for you | [`mp pr ready`](#mp-pr-ready) |
+| The branch has commits that were never pushed | The PR does not contain them, so merging it would land less than the piece holds | push first, or `--local` |
+| `origin/<branch>` cannot be compared against | The "is everything in the PR?" check could not run, and mp will not merge as though it had passed | fetch the branch, or `--local` |
+
+The result carries `"strategy"` and, for a forge merge, the `"pr_number"` it
+merged. Both strategies record the same durable merged marker, so
+[`mp done`](#mp-done) and [`mp cleanup`](#mp-cleanup) behave identically after
+either. The forge merge leaves the source branch alone — mp owns the branch's
+life through `mp done` / `mp abandon`.
+
+After the forge merges, mp fast-forwards the local target onto the result in
+whichever worktree holds it — the main checkout for `main`, or the parent
+piece's own worktree when a stacked piece merges into its parent, so the parent
+actually receives the child's work.
+
+By default `mp merge` refuses when the target branch has commits the piece lacks (run [`mp update`](#mp-update) to pull them in). The gate is a policy, not a rule — bypass it any of three ways; the merge then proceeds with a warning and any conflicts surface from git:
+
+| Bypass       | Spelling                                       | Scope     |
+| ------------ | ---------------------------------------------- | --------- |
+| CLI flag     | `mp merge --no-update-check`                   | this call |
+| stdin JSON   | `echo '{"no_update_check":true}' \| mp merge`  | this call |
+| user config  | `mp config set merge_require_updated false`    | always    |
+
+The result carries `"update_check_skipped": true` when the gate was bypassed.
+
 ### Usage
 
 ```bash
 mp merge                   # Merge to 'main'
 mp merge --main develop  # Merge to 'develop'
+mp merge --no-update-check       # target ahead: merge anyway
+echo '{"no_update_check":true}' | mp merge
 ```
 
 ### Flags
@@ -562,11 +947,14 @@ mp merge --main develop  # Merge to 'develop'
 | `--force`              | Merge even if the piece has child pieces (children are **not** re-homed) | `false` |
 | `--reparent-children`  | Merge a piece with children, re-homing them onto the merge target        | `false` |
 | `--reparent-strategy`  | How to re-home children: `rebase` (rewrites history) or `merge` (no force-push) | `rebase` |
+| `--forge`              | Merge the piece's open PR/MR on the forge for this call                  | config  |
+| `--local`              | Squash-merge into the target branch here for this call                   | config  |
+| `--no-update-check`    | Merge even if the target has commits not in the piece (conflicts surface from git) | `false` |
 
 ### Requirements
 
 - Must be run from within a piece worktree
-- **Main branch must not be ahead** - Fails if main has commits not in piece
+- **Main branch not ahead** - By default fails if main has commits not in piece (`--no-update-check` bypasses, see above)
 - **No unmerged child pieces** - Fails if the piece has children, unless you pass `--reparent-children` (re-homes them) or `--force` (leaves them orphaned)
 
 ### What it does
@@ -583,7 +971,7 @@ If any hook fails, the operation is aborted.
 
 ### Safety check
 
-If main has commits not in the piece, merge fails. Run `mp update` first to incorporate those changes.
+If main has commits not in the piece, merge fails by default. Run `mp update` first to incorporate those changes, or bypass the check as above.
 
 ---
 
@@ -623,6 +1011,15 @@ meaning everywhere else (override a safety check). Use `--apply` or `--yes`.
 3. Previews the merged pieces and stale projects that would be removed
 4. With `--apply` (or an interactive confirmation): removes each worktree, kills
    its multiplexer session, and prunes registry entries for deleted projects
+5. Child pieces of a removed piece are re-homed onto its parent (usually main)
+   so they never become orphans — metadata only; run `mp stack sync` to restack
+   them. Re-homed children are listed under `reparented_children`.
+6. Checks each placement (`mp create --remote`) against its box: drops
+   stale links (gone on the box) and pending links (create never finished)
+   the box has nothing for, heals a pending link whose piece the box does
+   have, and drops the box's hidden registry row once no links to it
+   remain. Unreachable boxes keep their links. JSON: `links[]` with
+   `present`/`pending`/`healed`/`dropped`.
 
 ---
 
@@ -660,7 +1057,7 @@ mp abandon foo --delete-branch          # Also delete git branch
 ```json
 {
   "piece_name": "my-feature",
-  "worktree_path": "/home/user/.local/share/monkeypuzzle/pieces/abc123def456/my-feature",
+  "worktree_path": "/home/user/repo/.monkeypuzzle/pieces/my-feature",
   "branch_name": "my-feature",
   "branch_deleted": true
 }
@@ -724,7 +1121,23 @@ mp pr ready --schema        # prints {} — ready takes no input
 
 ## mp done
 
-Clean up a piece (worktree + multiplexer session) after its branch has been merged. Defaults to the piece you're standing in; name one positionally or with `--piece` to finish it from anywhere in the repo. Verifies the piece is merged first — use [`mp abandon`](#mp-abandon) for unmerged pieces.
+Clean up a piece (worktree + multiplexer session) after its branch has been merged. Defaults to the piece you're standing in; name one positionally or with `--piece` to finish it from anywhere in the repo.
+
+By default `mp done` refuses a piece whose branch is not merged. The gate is a policy, not a rule — bypass it any of three ways; all keep the branch (only the worktree and session go), warn that the piece is unmerged, and warn how many commits its upstream lacks:
+
+| Bypass       | Spelling                                  | Scope     |
+| ------------ | ----------------------------------------- | --------- |
+| CLI flag     | `mp done --force`                         | this call |
+| stdin JSON   | `echo '{"force":true}' \| mp done`        | this call |
+| user config  | `mp config set done_require_merged false` | always    |
+
+The result carries `"forced": true` when the gate was bypassed. To drop the branch as well, use [`mp abandon`](#mp-abandon).
+
+Child pieces of the finished piece are re-homed onto its parent (metadata only,
+listed under `reparented_children`); run `mp stack sync` to restack them. The
+same happens on `mp abandon` and `mp cleanup`.
+
+Naming a piece placed on a box runs `done` there and drops the placement (same for `abandon`).
 
 ### Usage
 
@@ -732,6 +1145,8 @@ Clean up a piece (worktree + multiplexer session) after its branch has been merg
 mp done
 mp done my-feature
 mp done --main develop
+mp done --force                  # unmerged: remove worktree, keep branch
+echo '{"force":true}' | mp done
 ```
 
 ### Flags
@@ -740,6 +1155,33 @@ mp done --main develop
 | --------------- | --------------------------------------------- | ------- |
 | `--piece`       | Piece to finish (or pass it positionally)     | current |
 | `--main` | Main branch to check merge status against (`--main-branch` deprecated) | `main`  |
+| `--force`       | Clean up even if not merged (branch kept locally) | `false` |
+
+---
+
+## mp settle
+
+Remove a published piece from your private mp-server registry without declaring
+a workflow outcome. Settling does not touch the branch, worktree, PR, session,
+or local piece. Use `mp done` after merge and `mp abandon` when intentionally
+discarding work.
+
+It defaults to the piece you are standing in and accepts the same positional or
+`--piece` selector as `status`, `done`, and `abandon`. From another registered
+project, put the global selector before the verb: `mp --project api settle fix-auth`.
+The operation is safe to repeat.
+
+```bash
+mp settle
+mp settle old-feature
+mp settle --piece old-feature --json
+mp --project api settle old-feature
+echo '{"piece":"old-feature"}' | mp settle
+```
+
+`MP_SERVER_URL` and `MP_SERVER_TOKEN` configure the registry. `--server`
+overrides the URL for one call; `--schema` prints the stdin document shape.
+See [the piece registry](server-tracking.md).
 
 ---
 
@@ -775,7 +1217,11 @@ echo '{}' | mp adopt
 
 ## mp stack
 
-Whole-stack operations over pieces stacked via `--parent` (git-town-style). All operations are non-interactive: anything risky aborts cleanly and prints plain-English next steps (e.g. which PR base to change on GitHub).
+Manage base→head relationships. `append` extends the branch chain inside one
+piece worktree; `prepend` and `set-parent` edit the parent forest between
+pieces. Status and synchronization operate over the inter-piece forest. All
+operations are non-interactive: anything risky aborts cleanly and prints
+plain-English next steps (e.g. which PR base to change on the forge).
 
 ### mp stack status
 
@@ -825,7 +1271,7 @@ mp stack sync --stack             # limit the preview to the current piece's sta
 | `--dry-run`  | Preview only; never prompt, never change anything    | `false`       |
 | `--from`     | Upstream ref to update main from (fetch + fast-forward) | `origin/<main>` |
 | `--strategy` | Sync strategy: `merge` or `rebase`                   | `merge`       |
-| `--push`     | Push each branch after syncing                       | `false`       |
+| `--push`     | Push each branch after syncing; already-merged pieces are skipped (listed under `merged`) | `false` |
 | `--stack`    | Limit to the current piece's stack (run from a piece) | `false`      |
 | `--main`     | Main branch name                                     | `main`        |
 
@@ -877,7 +1323,10 @@ mp stack graph --repo owner/name --provider gitlab --default-branch develop
 
 ### mp stack append / prepend
 
-`append` creates a new piece as a child of the current piece; `prepend` inserts a new piece between the current piece and its parent.
+`append` creates and checks out a new branch above the current stack tip in the
+same piece worktree. `prepend` creates a new piece between the current piece and
+its parent. Use `mp create --parent <piece>` to add a child piece in its own
+worktree.
 
 ```bash
 mp stack append --name child-feat
@@ -887,8 +1336,8 @@ mp stack prepend --name base-feat
 
 | Flag       | Description                          | Default        |
 | ---------- | ------------------------------------ | -------------- |
-| `--name`   | Piece name                           | Auto-generated |
-| `--prompt` | Piece prompt (recorded in piece metadata; used to name the piece) | -              |
+| `--name`   | Branch name for append; piece name for prepend | Derived from prompt |
+| `--prompt` | Text used to derive the name; prepend also records it in piece metadata | - |
 
 ---
 
@@ -907,18 +1356,26 @@ echo '{"host":"wire","path":"code/api"}' | mp project add
 
 mp project list                      # human-readable table (alias: ls, status)
 mp project list --json               # machine output
+mp project list --all                # include hidden rows (box-side clones of placed pieces)
 
 mp project remove my-project         # unregister (alias: rm); repo on disk untouched
 mp project remove --target /path/to/repo
 ```
 
-`mp project list` shows best-effort live state per project (current branch, number of pieces). Remote projects show as `(remote)` with a `host:path` location; their JSON rows carry a `"host"` field. The `HOST:PATH` form resolves the path to an absolute path on the host at add time and requires the repo to already be `mp init`-ed there — see [Remote development](remote-development.md).
+`mp project list` shows best-effort live state per project (current branch, number of pieces). Remote projects show as `(remote)` with a `host:path` location; their JSON rows carry a `"host"` field. Rows with `"hidden": true` are bookkeeping for placed pieces (`mp create --remote`, see [Remote development](remote-development.md)) — shown as `(hidden)` only with `--all`; their `"linked_from"` is the controller-side repo root. The `HOST:PATH` form resolves the path to an absolute path on the host at add time and requires the repo to already be `mp init`-ed there — see [Remote development](remote-development.md).
 
 ---
 
 ## mp go
 
 A **repo switcher**: jump to any registered project's worktree from anywhere. With a terminal it opens an interactive fuzzy picker where each repo starts **collapsed** (one row per repo). Press `→` to expand a repo and reveal its pieces and branches; `←` collapses it again. Pressing `Enter` on a collapsed repo jumps straight to its **main worktree**. Typing filters across everything (collapsed or not), and the list scrolls (`↑/↓`, `PgUp/PgDn`), sizing its window to the terminal height. A single registered repo starts expanded.
+
+On a piece row the picker also ends the piece's life: `^D` finishes it
+(`mp done`) and `^X` abandons it (`mp abandon`). Both confirm first, and the
+confirmation offers the `--force` escalation — finish an unmerged piece,
+discard an abandoned one's uncommitted changes — so a refusal does not send
+you back to the shell. The picker reopens on the updated list afterwards; the
+keys are inert on project, branch, and create rows, which have no lifecycle.
 
 With `--json` (or no TTY) it prints the **full per-project detail** (`pieces`, `branches`) so automation can build its own pickers.
 
@@ -951,34 +1408,87 @@ Remote-host utilities for the ssh proxy (see [Remote development](remote-develop
 
 ```bash
 mp remote doctor wire     # probe one ssh host
-mp remote doctor          # probe every host in the project registry
+mp remote doctor          # probe every box in the project registry (hidden rows included)
 ```
+
+Per box the JSON also carries `pending_links` — `project/piece` placements
+whose `mp create --remote` never finished (`mp cleanup` in that project
+heals or drops them) — and, when a path was probed, `dir`/`init` (is it an mp
+project there).
 
 Like `mp config`, `doctor` uses positional args — there is no JSON-stdin mode.
 It reports, per host: key-based (BatchMode) ssh reachability, the remote
-`mp` version vs the local one, and `git`/`tmux`/`gh` presence plus `gh` auth
-state. Human summary on stderr, JSON array on stdout; exits non-zero if a host
+`mp` version vs the local one, `git` and `gh` presence plus `gh` auth state,
+and whether `tmux`/`herdr` are installed (only relevant if you use one there). Human summary on stderr, JSON array on stdout; exits non-zero if a host
 is unreachable or missing `mp`/`git`. Run it once after setting up a host, and
 first whenever a proxied command misbehaves.
 
 ---
 
+## mp doctor
+
+Check this machine's mp setup. Changes nothing. For a remote host, use
+[`mp remote doctor`](#mp-remote).
+
+```bash
+mp doctor          # report on stderr (a terminal); JSON on stdout when piped
+mp doctor --json   # JSON even on a terminal
+```
+
+It checks, in order: the user config file, the configured multiplexer
+(installed? is this terminal inside it?), whether the
+[`mp shell-init`](#mp-shell-init) wrapper is loaded, what [`mp open`](#mp-open)
+will run, `git`, and, inside a project, the forge CLI for its provider (`gh`
+or `glab`, installed and authenticated) and whether Claude Code hooks report
+to mp. Each check is `ok`, `warn` or `info`, with a fix when there is one:
+
+```
+mp 5bc4f64
+  ✓ config           /home/user/.config/monkeypuzzle/config.json
+  ✓ multiplexer      none — mp prints worktree paths instead of managing sessions
+  ✓ shell-init       loaded — mp follows you into the worktree
+  · open_command     unset — `mp open` only prints the path
+      mp config set open_command 'code {path}'
+  ✓ git              present
+  · project          /home/user/demo is a git repo but not an mp project
+      mp init
+```
+
+JSON: `{"version": "…", "checks": [{"name", "status", "detail", "fix"}]}`.
+
+---
+
 ## mp config
 
-Get and set user-level configuration (stored under `~/.config/monkeypuzzle/`). Uses positional args, not JSON stdin.
+Get and set user-level configuration (`config.json` in the user config
+directory, `$MP_CONFIG_DIR` if set; `mp doctor` prints the path). Uses
+positional args, not JSON stdin.
+
+Until the file exists, mp refuses to run most commands (`help`, `completion`,
+`config`, `shell-init`, `doctor` and `--schema` work without it): on a
+terminal the first `mp` command offers a setup wizard that picks the
+multiplexer; elsewhere it asks you to run `mp config set multiplexer …`.
 
 ### Usage
 
 ```bash
 mp config get multiplexer
-mp config set multiplexer tmux   # tmux, zellij, cmux, or none
+mp config set multiplexer none   # tmux, zellij, cmux, herdr, or none
+mp config set open_command 'code {path}'  # what `mp open` runs
+mp config set done_require_merged false   # let `mp done` clean up unmerged pieces
+mp config set merge_require_updated false # let `mp merge` proceed when the target is ahead
+mp config set merge_strategy forge        # merge PRs on the forge where a project doesn't say otherwise
 ```
 
 ### Keys
 
-| Key           | Description                                | Values                |
-| ------------- | ------------------------------------------ | --------------------- |
-| `multiplexer` | Terminal multiplexer for piece sessions    | `tmux`, `zellij`, `cmux`, `none` |
+| Key                   | Description                                | Values                |
+| --------------------- | ------------------------------------------ | --------------------- |
+| `multiplexer`         | Terminal multiplexer for piece sessions ([Integrations](integrations.md#multiplexers)) | `none` (default), `tmux`, `zellij`, `cmux`, `herdr` |
+| `open_command`        | Command template [`mp open`](#mp-open) runs | e.g. `code {path}`; placeholders `{path}` `{piece}` `{project}` `{branch}`; unset by default |
+| `done_require_merged` | Whether [`mp done`](#mp-done) refuses unmerged pieces (`--force` bypasses per call) | `true` (default), `false` |
+| `merge_require_updated` | Whether [`mp merge`](#mp-merge) refuses when the target is ahead (`--no-update-check` bypasses per call) | `true` (default), `false` |
+| `merge_strategy` | Fallback for [`mp merge`](#mp-merge) in projects whose config declares no `merge.strategy` | `local` (default), `forge` |
 
 ---
 
@@ -1000,6 +1510,7 @@ Hooks are executable shell scripts in `.monkeypuzzle/hooks/` that run at key poi
 | `is-piece-done.sh`       | Consulted by `mp cleanup` / `mp merge`'s merge-status check | Blocking; exit 0 means "treat as merged" — use to recognise squash-merges a plain branch-ancestry check would miss |
 | `agent-blocked.sh`       | Piece's aggregate agent status transitions to `blocked` | Detached |
 | `agent-done.sh`          | Piece's aggregate agent status transitions to `done`    | Detached |
+| `on-box-connect.sh`      | First `mp create --remote=<box>` of a project on a box (controller-side) | Blocking; replaces the built-in clone + `mp init` + hook rsync entirely; non-zero aborts the placement. Env: `MP_BOX`, `MP_REMOTE_PATH`, `MP_REPO_URL`, `MP_PROJECT`, `MP_HOOKS_DIR` |
 
 ### Environment Variables
 
@@ -1011,7 +1522,7 @@ All hooks receive these environment variables:
 | `MP_WORKTREE_PATH` | Absolute path to worktree       |
 | `MP_REPO_ROOT`     | Absolute path to main repo      |
 | `MP_MAIN_BRANCH`   | Main branch name (merge/update) |
-| `MP_SESSION_NAME`  | Multiplexer session name (create) |
+| `MP_SESSION_NAME`  | Multiplexer session name (create; set only when a multiplexer is configured) |
 | `MP_PR_NUMBER`     | PR/MR number (PR hooks)         |
 | `MP_PR_URL`        | PR/MR URL (PR hooks)            |
 | `MP_PR_BASE_BRANCH`| PR/MR base branch (PR hooks)    |
@@ -1019,6 +1530,13 @@ All hooks receive these environment variables:
 | `MP_AGENT_KIND`    | Agent kind, e.g. `claude` (agent hooks) |
 | `MP_AGENT_STATUS`  | New piece aggregate status (agent hooks) |
 | `MP_AGENT_PANE`    | Multiplexer pane the agent runs in (agent hooks) |
+| `MP_PLACEMENT_HOST` | Box name as the controller knows it (box-side hooks in a placed piece's worktree; read from the piece metadata the box-side create wrote, so any invocation there sees it) |
+| `MP_REMOTE`        | `1` when the hook runs on a box for a placed piece |
+| `MP_BOX`           | ssh destination being connected (`on-box-connect.sh`) |
+| `MP_REMOTE_PATH`   | Intended clone path on the box, unexpanded `$HOME/.local/share/mp/<project>` (`on-box-connect.sh`) |
+| `MP_REPO_URL`      | The project's `origin` URL (`on-box-connect.sh`) |
+| `MP_PROJECT`       | Project name (`on-box-connect.sh`) |
+| `MP_HOOKS_DIR`     | Controller-side `.monkeypuzzle/hooks/` (`on-box-connect.sh`) |
 
 ### Behavior
 
@@ -1040,7 +1558,68 @@ go test ./... || exit 1
 
 ---
 
-## mp agent
+## mp history
+
+Read the append-only history log: one line per lifecycle event, across every repository on this machine. Recording never fails a verb — a write error is a stderr warning.
+
+### Usage
+
+```bash
+mp history                          # last 50 events, table on a terminal
+mp history --project mp --since 24h
+mp history --event 'pr.*' -n 10
+mp history --piece login --json | jq .
+```
+
+### Flags
+
+| Flag            | Description                                                  | Default |
+| --------------- | ------------------------------------------------------------ | ------- |
+| `--project`     | Only events for this project name                            | all     |
+| `--piece`       | Only events for this piece                                   | all     |
+| `--event`       | Exact event name, or a prefix with a trailing `*` (`pr.*`)   | all     |
+| `--since`       | Only events newer than this Go duration (`24h`, `30m`)       | all     |
+| `-n`, `--limit` | Keep the last N matching events (`0` = all)                  | `50`    |
+| `--json`        | JSON lines on stdout even on a terminal                      |         |
+
+### File
+
+`$MP_HISTORY_FILE`, else `${XDG_STATE_HOME:-~/.local/state}/monkeypuzzle/history.jsonl`. One JSON object per line:
+
+```json
+{"ts":"2026-09-09T10:12:03Z","event":"pr.created","project":"mp","piece":"history-log","branch":"history-log","actor":{"kind":"agent","id":"claude-1"},"data":{"pr_number":83,"pr_url":"https://github.com/…/pull/83","base":"main"}}
+```
+
+`actor.kind` is `agent` when `CLAUDECODE` or `MP_AGENT_ID` is set, else `user`. `branch`, `parent`, `host` and `data` are present only when they carry something.
+
+### Events
+
+| Event             | Fired by                                       |
+| ----------------- | ---------------------------------------------- |
+| `piece.created`   | `mp create`, `mp adopt` (also `piece.adopted`) |
+| `piece.switched`  | `mp switch`                                    |
+| `piece.updated`   | `mp update`, `mp sync`                         |
+| `piece.merged`    | `mp merge`                                     |
+| `piece.done`      | `mp done`                                      |
+| `piece.abandoned` | `mp abandon`                                   |
+| `piece.cleaned`   | `mp cleanup` (per removed piece)               |
+| `pr.created`      | `mp pr create` (`data`: `pr_number`, `pr_url`, `base`) |
+| `pr.ready`        | `mp pr ready`                                  |
+| `agent.blocked`, `agent.done` | `mp agent report` aggregate transitions |
+| `stack.synced`    | `mp stack sync` apply (`data.pieces`: pieces touched) |
+
+Hook-backed events fire whether or not the hook script exists. Output follows the usual contract: non-TTY or `--json` prints JSON lines (oldest first) on stdout; a terminal gets a table on stderr.
+
+---
+
+## Agent commands
+
+Optional: these verbs track coding agents running in piece worktrees. See
+[Integrations](integrations.md#coding-agents) for how they fit together. Every
+other command is already agent-ready: flags or stdin JSON in, JSON out (see
+[Input Modes](#input-modes)).
+
+### mp agent
 
 Track agent processes (Claude Code, codex, …) running inside piece worktrees.
 Each piece aggregates its agents' statuses by severity — `blocked` > `working`
@@ -1052,7 +1631,11 @@ processes in a piece session's panes (tmux) and classify their state from the
 visible screen: an open permission dialog is `blocked`, a running spinner is
 `working`, a resting prompt is `idle`. Nothing is written into the agent's
 own configuration. Detection is deliberately strict about `blocked`, so a
-phrase in conversation text never raises a false alarm.
+phrase in conversation text never raises a false alarm. On herdr, mp skips
+the screen entirely and reads the multiplexer's own agent tracking, which
+also covers the `done` state and agents beyond claude/codex. With no
+multiplexer there are no panes to read, so agents show up only through the
+integration hooks below.
 
 **Optional precision.** `mp integration install claude` wires Claude Code's
 own hooks to `mp agent report`, which adds what a screen can't show: the
@@ -1091,8 +1674,8 @@ mp agent read my-piece
 mp agent send my-piece "yes, and add tests"
 ```
 
-`read` / `send` need a multiplexer with pane support (tmux). They are not
-TTY-gated: an orchestrating agent may drive its workers with them.
+`read` / `send` need a multiplexer with pane support (tmux, herdr). They are
+not TTY-gated: an orchestrating agent may drive its workers with them.
 
 ```bash
 # Switch the client straight to an agent's pane — the CLI form of the tmux
@@ -1108,14 +1691,14 @@ switch (`mp switch` semantics: attaches an existing worktree, never adopts or
 creates). `--blocked` with nothing blocked exits 0 with a warning on stderr
 and no stdout output — nothing to report.
 
-## mp wait
+### mp wait
 
 Block until agents settle — no agent `working` in the target pieces.
 
 ```bash
 # Fan out, then wait for the whole flock
-mp create --name a --agent claude --prompt "..." --skip-switch
-mp create --name b --agent claude --prompt "..." --skip-switch
+mp create --name a --skip-switch --json   # worktree_path: start a worker there
+mp create --name b --skip-switch --json
 mp wait && mp agent list
 
 mp wait a b --timeout 30m --interval 5s
@@ -1124,7 +1707,7 @@ mp wait a b --timeout 30m --interval 5s
 Exits 0 when settled; the JSON `pieces[].aggregate` distinguishes `blocked`
 from `done`. Non-zero on timeout.
 
-## mp integration
+### mp integration
 
 ```bash
 # Merge mp's agent-report hooks into .claude/settings.json at the repo root.
@@ -1133,21 +1716,44 @@ from `done`. Non-zero on timeout.
 mp integration install claude
 ```
 
-## AI Agent Integration
+### Piece identity
 
-Monkeypuzzle is designed for programmatic use:
+Every piece carries an `id` that is minted once and never changes, unlike its
+name, branch, worktree path, or `project/piece` key. Record that when something
+outside mp needs to refer back to a piece.
 
 ```bash
-# Example-input workflow
-mp init --schema | jq '.name = "myproject"' | mp init
-
-# Check status programmatically
-STATUS=$(mp status)
-IN_PIECE=$(echo "$STATUS" | jq -r '.in_piece')
-
-# Parse piece creation output
-OUTPUT=$(mp create)
-WORKTREE=$(echo "$OUTPUT" | jq -r '.worktree_path')
+mp piece show --json | jq -r .id
+mp piece show --ensure-id --json     # mint one for a piece that predates ids
+mp create --name auth --json | jq -r .id
+mp inbox --json | jq -r '.rows[] | "\(.id) \(.key)"'
+mp history --json --event piece.merged | jq -r .piece_id
 ```
 
-All commands output JSON to stdout for machine parsing, text to stderr for humans.
+### mp skill
+
+```bash
+# What mp ships
+mp skill list
+mp skill show managing-monkeypuzzle
+
+# Write .agents/skills/<name>/SKILL.md and link .claude/skills/<name> at it.
+# `mp init` writes the default skill too. Re-run to refresh after upgrading mp;
+# the result says created, updated, or unchanged.
+mp skill create
+mp skill create managing-monkeypuzzle
+
+# Skills useful outside one project go under your home directory instead
+mp skill create --user
+
+echo '{"name":"managing-monkeypuzzle","user":false}' | mp skill create
+mp skill create --schema
+```
+
+The canonical document lives in `.agents/skills/`, which is the portable
+location agents are converging on; `.claude/skills/<name>` is a relative
+symlink to it, because Claude Code does not read `.agents/skills/`. It is the
+same split the repo uses for `AGENTS.md` and its `CLAUDE.md` symlink.
+
+`mp claude skill` is the pre-rename spelling. It still works and writes the
+same files, but prints a deprecation notice.

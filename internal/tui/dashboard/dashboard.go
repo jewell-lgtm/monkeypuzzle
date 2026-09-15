@@ -10,6 +10,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/jewell-lgtm/monkeypuzzle/pkg/fuzzy"
 	"github.com/jewell-lgtm/monkeypuzzle/pkg/styles"
@@ -21,9 +22,18 @@ import (
 const MaxVisibleRows = 20
 
 // dashboardChrome is the number of non-row lines the view reserves (banner,
-// blank lines, the scroll hints, the filter input, and the help line) when
-// sizing the scrolling window to the terminal height.
+// blank lines, the scroll hints, the filter input, and one line of help) when
+// sizing the scrolling window to the terminal height. A help line that wraps
+// costs further rows; windowSize subtracts those too.
 const dashboardChrome = 7
+
+// helpFull and helpShort are the key hints under the filter input. The full
+// form needs a wide terminal, so a narrow one gets the abbreviated keys rather
+// than a hint that wraps over the rows it is meant to explain.
+const (
+	helpFull  = "type to filter • ↑/↓ move • →/← expand • enter select • ^d done • ^x abandon • esc cancel"
+	helpShort = "↑/↓ • →/← • enter • ^d done • ^x abandon • esc"
+)
 
 // minVisibleRows keeps at least a few rows visible on very short terminals.
 const minVisibleRows = 3
@@ -36,6 +46,17 @@ const (
 	RowPiece
 	RowBranch
 	RowNewPiece
+)
+
+// Action is what the user asked for on the row they left the picker on.
+// The zero value is a plain switch; the lifecycle actions are only offered on
+// piece rows, and the caller confirms and runs them.
+type Action string
+
+const (
+	ActionSwitch  Action = ""
+	ActionDone    Action = "done"
+	ActionAbandon Action = "abandon"
 )
 
 // Row is one selectable line in the dashboard.
@@ -93,9 +114,11 @@ type Model struct {
 	SessionLabel string
 
 	// Scrolling. offset is the index of the first visible filtered row; height
-	// is the last known terminal height (0 until the first WindowSizeMsg).
+	// and width are the last known terminal size (0 until the first
+	// WindowSizeMsg).
 	offset int
 	height int
+	width  int
 
 	// Expand/collapse. collapsed[projectKey] hides a project's child rows
 	// (pieces/branches/new-piece) until expanded; hasChild marks which
@@ -112,16 +135,40 @@ type Model struct {
 	loadCmd tea.Cmd
 	Err     error
 
+	// Action is the lifecycle action the selected row was left with. Enter
+	// leaves it ActionSwitch; ctrl+d / ctrl+x on a piece row set it instead.
+	Action Action
+
 	Cancelled bool
 }
 
+// helpLine is the key hint rendered under the filter input, picked to fit the
+// terminal. It depends only on the width, so the layout does not shift as the
+// selection moves.
+func (m Model) helpLine() string {
+	if m.width > 0 && m.width < lipgloss.Width(helpFull) {
+		return helpShort
+	}
+	return helpFull
+}
+
+// helpLines is how many terminal rows the help hint occupies once wrapped.
+func (m Model) helpLines() int {
+	if m.width <= 0 {
+		return 1
+	}
+	w := lipgloss.Width(m.helpLine())
+	return (w + m.width - 1) / m.width
+}
+
 // windowSize returns how many rows fit on screen: the terminal height minus the
-// fixed chrome, falling back to MaxVisibleRows before the size is known.
+// fixed chrome and any rows the help hint wraps onto, falling back to
+// MaxVisibleRows before the size is known.
 func (m Model) windowSize() int {
 	if m.height <= 0 {
 		return MaxVisibleRows
 	}
-	n := m.height - dashboardChrome
+	n := m.height - dashboardChrome - (m.helpLines() - 1)
 	if n < minVisibleRows {
 		return minVisibleRows
 	}
@@ -312,7 +359,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.frame++
 		return m, spinnerTick()
 	case tea.WindowSizeMsg:
-		m.height = msg.Height
+		m.height, m.width = msg.Height, msg.Width
 		m.clampScroll()
 		return m, nil
 	case tea.KeyMsg:
@@ -326,6 +373,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if len(m.Filtered) == 0 {
 				m.Cancelled = true
+			}
+			return m, tea.Quit
+		case "ctrl+d", "ctrl+x":
+			if m.Loading {
+				return m, nil
+			}
+			// Only a piece has a lifecycle to end. On anything else the key
+			// is inert rather than acting on a neighbouring row.
+			if r, ok := m.SelectedRow(); !ok || r.Kind != RowPiece {
+				return m, nil
+			}
+			if msg.String() == "ctrl+d" {
+				m.Action = ActionDone
+			} else {
+				m.Action = ActionAbandon
 			}
 			return m, tea.Quit
 		case "up", "ctrl+p":
@@ -424,7 +486,7 @@ func (m Model) View() string {
 	b.WriteString("\n")
 	b.WriteString(m.Input.View())
 	b.WriteString("\n")
-	b.WriteString(styles.Subtle.Render("type to filter • ↑/↓ move • →/← expand • enter select • esc cancel"))
+	b.WriteString(styles.Subtle.Render(m.helpLine()))
 	return b.String()
 }
 

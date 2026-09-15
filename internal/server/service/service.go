@@ -1,12 +1,13 @@
 // Package service is the shared, presentation-agnostic read layer for mp
 // server. Both presentation adapters — the HTML/Alpine UI (humans) and the MCP
 // server (agents) — call it, mirroring the CLI's "humans and agents share one
-// API" design. It reads only from the store (the GitHub cache) and builds PR
-// stacks via internal/stackgraph; it never calls GitHub directly.
+// API" design. Its primary read is the private piece registry. Optional PR
+// views use the secondary forge cache and internal/stackgraph.
 package service
 
 import (
 	"context"
+	"errors"
 	"log"
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/server/auth/crypto"
@@ -14,6 +15,7 @@ import (
 	"github.com/jewell-lgtm/monkeypuzzle/internal/server/store"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/server/sync"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/stackgraph"
+	"github.com/jewell-lgtm/monkeypuzzle/pkg/tracking"
 )
 
 // Service is the read API plus sync triggering. All reads are scoped to a user.
@@ -35,6 +37,16 @@ type Service struct {
 func New(s store.Store, t sync.SyncTrigger, runner mprunner.MpRunner, cipher crypto.TokenCipher, useMpCLI bool) *Service {
 	return &Service{store: s, trigger: t, runner: runner, cipher: cipher, useMpCLI: useMpCLI}
 }
+
+// ListPieces is the primary registry read: a developer's published pieces across
+// machines and projects. It has no forge or background-worker dependency.
+func (s *Service) ListPieces(ctx context.Context, userID int64) ([]tracking.Item, error) {
+	return s.store.ListTrackedItems(ctx, userID)
+}
+
+var ErrPRSyncDisabled = errors.New("PR monitoring is disabled")
+
+func (s *Service) PRSyncEnabled() bool { return s.trigger != nil }
 
 // RepoStacks is a repo together with its reconstructed PR stacks.
 type RepoStacks struct {
@@ -114,11 +126,17 @@ func (s *Service) stacksViaMp(ctx context.Context, userID int64, repo store.Repo
 
 // StartSync triggers a refresh of the user's GitHub data.
 func (s *Service) StartSync(ctx context.Context, userID int64) (string, error) {
+	if !s.PRSyncEnabled() {
+		return "", ErrPRSyncDisabled
+	}
 	return s.trigger.StartSync(ctx, userID)
 }
 
 // SyncStatus reports the user's current sync status.
 func (s *Service) SyncStatus(ctx context.Context, userID int64) (store.SyncStatus, error) {
+	if !s.PRSyncEnabled() {
+		return store.SyncStatus{}, ErrPRSyncDisabled
+	}
 	return s.trigger.SyncStatus(ctx, userID)
 }
 

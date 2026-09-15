@@ -186,10 +186,44 @@ func WithSyncDefaults(in SyncInput) SyncInput {
 	return SyncInput{MainBranch: main, From: from, Strategy: strategy, Push: in.Push, Stack: in.Stack, DryRun: in.DryRun, Apply: in.Apply}
 }
 
-// AppendInput holds input for `mp stack append` (create a child of the current piece).
+// AppendInput holds input for `mp stack append` (create a branch layer in the
+// current piece). Prompt is used only to derive the branch name.
 type AppendInput struct {
 	Name   string `json:"name,omitempty"`
 	Prompt string `json:"prompt,omitempty"`
+}
+
+// AppendResult reports the branch layer added to an existing piece worktree.
+type AppendResult struct {
+	Piece        string `json:"piece"`
+	WorktreePath string `json:"worktree_path"`
+	Branch       string `json:"branch"`
+	Base         string `json:"base"`
+}
+
+// RemoveInput identifies the managed stack tip to remove. Name may be empty,
+// in which case the current branch is used.
+type RemoveInput struct {
+	Name  string `json:"name,omitempty"`
+	Force bool   `json:"force,omitempty"`
+}
+
+// RemoveResult reports the branch layer removed from an existing piece.
+type RemoveResult struct {
+	Piece         string `json:"piece"`
+	WorktreePath  string `json:"worktree_path"`
+	Branch        string `json:"branch"`
+	Base          string `json:"base"`
+	BranchDeleted bool   `json:"branch_deleted"`
+}
+
+// RemoveSchema returns an example input document for stack removal. It is built
+// as a map so the omitempty booleans still appear in the example to edit.
+func RemoveSchema() ([]byte, error) {
+	return json.MarshalIndent(map[string]any{
+		"name":  "stack-tip",
+		"force": false,
+	}, "", "  ")
 }
 
 // PrependInput holds input for `mp stack prepend` (insert a piece between the

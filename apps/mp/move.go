@@ -10,6 +10,9 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/jewell-lgtm/monkeypuzzle/internal/adapters"
+	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
+	initcmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/init"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/projectdir"
 	"github.com/jewell-lgtm/monkeypuzzle/pkg/cli"
 )
@@ -112,6 +115,10 @@ func runMove(cmd *cobra.Command, args []string) error {
 	// Record (or clear) the mapping.
 	if err := projectdir.Set(repoRoot, newRel); err != nil {
 		return fmt.Errorf("monkeypuzzle directory moved to %s but failed to record the mapping: %w", newAbs, err)
+	}
+	deps := core.NewDeps(adapters.NewOSFS(""), adapters.NewTextOutput(os.Stderr), adapters.NewOSExec(), nil, nil)
+	if err := initcmd.NewHandler(deps).EnsureExclude(cmd.Context(), repoRoot, newRel); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: failed to update git info/exclude: %v\n", err)
 	}
 
 	res := moveResult{

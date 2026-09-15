@@ -51,6 +51,10 @@ func (h *Handler) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /auth/callback", h.callback)
 	mux.HandleFunc("POST /logout", h.logout)
 	mux.HandleFunc("GET /{$}", h.requireAuth(h.dashboard))
+	if !h.deps.Service.PRSyncEnabled() {
+		return
+	}
+	mux.HandleFunc("GET /repositories", h.requireAuth(h.repositories))
 	mux.HandleFunc("GET /partials/repos", h.requireAuth(h.partialRepos))
 	mux.HandleFunc("GET /repos/{owner}/{name}", h.requireAuth(h.repoPage))
 	mux.HandleFunc("POST /sync", h.requireAuth(h.startSync))
@@ -66,6 +70,7 @@ const userIDKey ctxKey = iota
 // valid signature is trusted without a store round-trip.
 func (h *Handler) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
 		val, err := session.Read(r)
 		if err != nil {
 			http.Redirect(w, r, "/login", http.StatusSeeOther)

@@ -1,0 +1,703 @@
+//go:build integration
+
+package main_test
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"syscall"
+	"testing"
+	"time"
+)
+
+// seqShim installs fake `ssh` and `rsync` binaries that replay one canned
+// response per call (stdout-N / exit-N files, 1-based) and record each call's
+// argv-N / stdin-N, so multi-round-trip flows like `mp create --remote` run
+// without a box. Unlisted calls succeed with empty output.
+type seqShim struct {
+	dir  string
+	path string
+}
+
+func newSeqShim(t *testing.T, e *testEnv, responses ...shimResponse) seqShim {
+	t.Helper()
+	dir := filepath.Join(e.tmpDir, "seq-shim")
+	_ = os.RemoveAll(dir) // a fresh shim restarts the call counter
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for i, r := range responses {
+		n := strconv.Itoa(i + 1)
+		if err := os.WriteFile(filepath.Join(dir, "stdout-"+n), []byte(r.stdout), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "exit-"+n), []byte(strconv.Itoa(r.exit)), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	script := fmt.Sprintf(`#!/bin/sh
+cd %q
+n=$(cat counter 2>/dev/null || echo 0); n=$((n+1)); echo $n > counter
+printf '%%s\n' "$(basename "$0")" "$@" > argv-$n
+cat > stdin-$n
+[ -f stdout-$n ] && cat stdout-$n
+code=0; [ -f exit-$n ] && code=$(cat exit-$n)
+exit $code
+`, dir)
+	for _, name := range []string{"ssh", "rsync"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return seqShim{dir: dir, path: dir + string(os.PathListSeparator) + os.Getenv("PATH")}
+}
+
+type shimResponse struct {
+	stdout string
+	exit   int
+}
+
+func (s seqShim) calls(t *testing.T) int {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(s.dir, "counter"))
+	if err != nil {
+		return 0
+	}
+	n, _ := strconv.Atoi(strings.TrimSpace(string(data)))
+	return n
+}
+
+func (s seqShim) argv(t *testing.T, n int) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(s.dir, "argv-"+strconv.Itoa(n)))
+	if err != nil {
+		t.Fatalf("shim call %d not recorded: %v", n, err)
+	}
+	return string(data)
+}
+
+const (
+	boxProject = "/home/u/.local/share/mp/placed-proj"
+	probeOK    = "mp=mp version v9.9.9\ngit=yes\ntmux=yes\ngh=yes\ngh_auth=yes\ninit=yes\n"
+	probeNoMP  = "mp=missing\ngit=yes\ntmux=no\ngh=no\ngh_auth=no\ninit=no\n"
+	probeNoIni = "mp=mp version v9.9.9\ngit=yes\ntmux=yes\ngh=yes\ngh_auth=yes\ninit=no\n"
+)
+
+func createJSON(name string) string {
+	return fmt.Sprintf(`{"name":%q,"worktree_path":"%s/.monkeypuzzle/pieces/%s","session_name":"mp/placed-proj/%s"}`, name, boxProject, name, name)
+}
+
+// placeEnv is a local project with an origin, ready to place pieces from.
+func placeEnv(t *testing.T) *testEnv {
+	t.Helper()
+	e := setupTestEnv(t)
+	t.Cleanup(e.cleanup)
+	e.initGitRepo()
+	e.initProject("placed-proj")
+	e.addBareOrigin()
+	return e
+}
+
+func readPlacements(t *testing.T, e *testEnv) map[string]map[string]any {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(e.tmpDir, ".monkeypuzzle", "placements.json"))
+	if os.IsNotExist(err) {
+		return map[string]map[string]any{}
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	var p map[string]map[string]any
+	if err := json.Unmarshal(data, &p); err != nil {
+		t.Fatalf("placements.json: %v\n%s", err, data)
+	}
+	return p
+}
+
+func readRegistry(t *testing.T, e *testEnv) string {
+	t.Helper()
+	data, _ := os.ReadFile(filepath.Join(e.dataDir, "projects.json"))
+	return string(data)
+}
+
+func TestCLI_CreateRemote_HappyPath(t *testing.T) {
+	e := placeEnv(t)
+	hooks := filepath.Join(e.tmpDir, ".monkeypuzzle", "hooks")
+	if err := os.MkdirAll(hooks, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	shim := newSeqShim(t, e,
+		shimResponse{stdout: boxProject + "\n"}, // 1 connect: clone + init, prints resolved path
+		shimResponse{},                          // 2 rsync hooks
+		shimResponse{stdout: probeOK},           // 3 doctor probe
+		shimResponse{stdout: createJSON("fix-auth")},
+		shimResponse{stdout: probeOK}, // second create: already connected, probe only
+		shimResponse{stdout: createJSON("fix-auth-2")},
+	)
+
+	stdout, stderr, err := runProxy(e, shim.path, "", nil, "create", "--remote", "wire", "--name", "fix-auth")
+	if err != nil {
+		t.Fatalf("create --remote: %v\nstderr: %s", err, stderr)
+	}
+	if shim.calls(t) != 4 {
+		t.Fatalf("shim calls = %d, want 4 (connect, rsync, doctor, create)", shim.calls(t))
+	}
+	connect := shim.argv(t, 1)
+	// "Cloned" = git can verify HEAD there; the clone lands in <dir>.tmp and
+	// is renamed in, so a partial clone is never taken for a connected box.
+	dir := `"$HOME"/'\''.local/share/mp/placed-proj'\''`
+	for _, want := range []string{"ssh\n", "BatchMode=yes", "wire\n", "placed-proj", "readlink -f", `'\''init'\'' '\''--name'\'' '\''placed-proj'\'' '\''--pr-provider'\'' '\''github'\''`, ".local/share/mp",
+		"if ! git -C " + dir + " rev-parse --verify HEAD",
+		"git clone " + `'\''` + e.tmpDir + `/origin.git'\'' ` + dir + ".tmp",
+		"mv " + dir + ".tmp " + dir + "\n",
+	} {
+		if !strings.Contains(connect, want) {
+			t.Errorf("connect argv missing %q:\n%s", want, connect)
+		}
+	}
+	if strings.Contains(connect, "/.git ]") {
+		t.Errorf("connect must not trust a bare .git dir:\n%s", connect)
+	}
+	if rs := shim.argv(t, 2); !strings.HasPrefix(rs, "rsync\n-a\n-e\nssh -o BatchMode=yes -o ConnectTimeout=5\n--\n") || !strings.Contains(rs, "wire:"+boxProject+"/.monkeypuzzle/hooks/") {
+		t.Errorf("rsync argv = %q", rs)
+	}
+	if probe := shim.argv(t, 3); !strings.Contains(probe, `init=$(test -f '\''`+boxProject+`/.monkeypuzzle/monkeypuzzle.json'\''`) {
+		t.Errorf("doctor probe lacks --dir init check:\n%s", probe)
+	}
+	create := shim.argv(t, 4)
+	for _, want := range []string{`cd '\''` + boxProject + `'\''`, `'\''create'\'' '\''--name'\'' '\''fix-auth'\'' '\''--skip-switch'\'' '\''--json'\''`} {
+		if !strings.Contains(create, want) {
+			t.Errorf("create argv missing %q:\n%s", want, create)
+		}
+	}
+	if strings.Contains(create, "--parent") {
+		t.Errorf("main parent must not be forwarded:\n%s", create)
+	}
+	var info struct {
+		Name, WorktreePath, Host string
+	}
+	if err := json.Unmarshal([]byte(stdout), &struct {
+		Name         *string `json:"name"`
+		WorktreePath *string `json:"worktree_path"`
+		Host         *string `json:"host"`
+	}{&info.Name, &info.WorktreePath, &info.Host}); err != nil {
+		t.Fatalf("stdout not JSON: %v\n%s", err, stdout)
+	}
+	if info.Host != "wire" || info.Name != "fix-auth" || !strings.HasPrefix(info.WorktreePath, boxProject) {
+		t.Errorf("create JSON = %+v", info)
+	}
+
+	p := readPlacements(t, e)
+	link := p["fix-auth"]
+	if link == nil || link["box"] != "wire" || link["pending"] == true || link["remote_path"] != boxProject+"/.monkeypuzzle/pieces/fix-auth" || link["remote_project"] != boxProject {
+		t.Errorf("placement = %+v", link)
+	}
+	reg := readRegistry(t, e)
+	for _, want := range []string{`"name": "placed-proj@wire"`, `"host": "wire"`, `"hidden": true`, `"path": "` + boxProject + `"`, `"linked_from":`} {
+		if !strings.Contains(reg, want) {
+			t.Errorf("registry missing %s:\n%s", want, reg)
+		}
+	}
+
+	// It shows up in the local list, placed.
+	stdout, _, _ = runProxy(e, shim.path, "", nil, "list", "--flat", "--json")
+	if !strings.Contains(stdout, `"name": "fix-auth"`) || !strings.Contains(stdout, `"host": "wire"`) {
+		t.Errorf("list missing placed piece:\n%s", stdout)
+	}
+
+	// Second placement on a connected box skips connect; stacked parent is
+	// forwarded; stdin JSON "remote" works.
+	_, stderr, err = runProxy(e, shim.path, `{"name":"fix-auth-2","parent":"fix-auth","remote":"wire"}`, nil, "create")
+	if err != nil {
+		t.Fatalf("second create --remote: %v\nstderr: %s", err, stderr)
+	}
+	if shim.calls(t) != 6 {
+		t.Errorf("shim calls = %d, want 6 (no reconnect)", shim.calls(t))
+	}
+	if create := shim.argv(t, 6); !strings.Contains(create, `'\''--parent'\'' '\''fix-auth'\''`) {
+		t.Errorf("parent not forwarded:\n%s", create)
+	}
+	if strings.Count(readRegistry(t, e), `"placed-proj@wire"`) != 1 {
+		t.Error("registry row duplicated")
+	}
+}
+
+func TestCLI_CreateRemote_Unreachable(t *testing.T) {
+	e := placeEnv(t)
+	shim := newSeqShim(t, e, shimResponse{exit: 255})
+
+	_, stderr, err := runProxy(e, shim.path, "", nil, "create", "--remote", "wire", "--name", "fix-auth")
+	if err == nil || !strings.Contains(stderr, "box unreachable") {
+		t.Fatalf("err = %v stderr = %q, want ErrBoxUnreachable", err, stderr)
+	}
+	if len(readPlacements(t, e)) != 0 {
+		t.Error("pending link not removed after ssh failure")
+	}
+	if strings.Contains(readRegistry(t, e), "wire") {
+		t.Error("registry row written for unconnected box")
+	}
+}
+
+func TestCLI_CreateRemote_ConnectFails(t *testing.T) {
+	e := placeEnv(t)
+	shim := newSeqShim(t, e, shimResponse{exit: 128})
+
+	_, stderr, err := runProxy(e, shim.path, "", nil, "create", "--remote", "wire", "--name", "fix-auth")
+	if err == nil || !strings.Contains(stderr, "box connect failed") {
+		t.Fatalf("err = %v stderr = %q, want ErrBoxConnect", err, stderr)
+	}
+	if len(readPlacements(t, e)) != 0 {
+		t.Error("pending link not removed after connect failure")
+	}
+}
+
+func TestCLI_CreateRemote_NotInitialised(t *testing.T) {
+	e := placeEnv(t)
+	shim := newSeqShim(t, e,
+		shimResponse{stdout: boxProject + "\n"},
+		shimResponse{stdout: probeNoIni},
+	)
+	_, stderr, err := runProxy(e, shim.path, "", nil, "create", "--remote", "wire", "--name", "fix-auth")
+	if err == nil || !strings.Contains(stderr, "not an mp project") {
+		t.Fatalf("err = %v stderr = %q, want ErrBoxNotInitialised", err, stderr)
+	}
+	if len(readPlacements(t, e)) != 0 {
+		t.Error("pending link not removed")
+	}
+	if strings.Contains(readRegistry(t, e), "wire") {
+		t.Error("registry row written before the box passed doctor")
+	}
+
+	// Missing mp on the box.
+	e2 := placeEnv(t)
+	shim2 := newSeqShim(t, e2,
+		shimResponse{stdout: boxProject + "\n"},
+		shimResponse{stdout: probeNoMP},
+	)
+	_, stderr, err = runProxy(e2, shim2.path, "", nil, "create", "--remote", "wire", "--name", "fix-auth")
+	if err == nil || !strings.Contains(stderr, "mp is not installed on the box") {
+		t.Fatalf("err = %v stderr = %q, want ErrRemoteMPMissing", err, stderr)
+	}
+}
+
+func TestCLI_CreateRemote_DuplicateName(t *testing.T) {
+	e := placeEnv(t)
+	shim := newSeqShim(t, e)
+	if _, stderr, err := runProxy(e, shim.path, "", nil, "create", "--name", "taken", "--skip-switch"); err != nil {
+		t.Fatalf("local create: %v\n%s", err, stderr)
+	}
+	_, stderr, err := runProxy(e, shim.path, "", nil, "create", "--remote", "wire", "--name", "taken")
+	if err == nil || !strings.Contains(stderr, "piece already exists") {
+		t.Fatalf("err = %v stderr = %q, want ErrPieceExists", err, stderr)
+	}
+	if shim.calls(t) != 0 {
+		t.Error("ssh invoked despite local validation failure")
+	}
+	if len(readPlacements(t, e)) != 0 {
+		t.Error("link written for a rejected name")
+	}
+
+	// Invalid box name fails before anything too.
+	_, stderr, err = runProxy(e, shim.path, "", nil, "create", "--remote", "-oProxyCommand=x", "--name", "fresh")
+	if err == nil || !strings.Contains(stderr, "invalid ssh host") {
+		t.Errorf("bad box: err = %v stderr = %q", err, stderr)
+	}
+}
+
+func TestCLI_CreateRemote_CrossBoxParent(t *testing.T) {
+	e := placeEnv(t)
+	shim := newSeqShim(t, e)
+	if _, stderr, err := runProxy(e, shim.path, "", nil, "create", "--name", "local-parent", "--skip-switch"); err != nil {
+		t.Fatalf("local create: %v\n%s", err, stderr)
+	}
+	placements := `{"on-other":{"box":"other","remote_path":"/x/.monkeypuzzle/pieces/on-other"},"half":{"box":"wire","pending":true}}`
+	if err := os.WriteFile(filepath.Join(e.tmpDir, ".monkeypuzzle", "placements.json"), []byte(placements), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, parent := range []string{"local-parent", "on-other", "half", "nope"} {
+		_, stderr, err := runProxy(e, shim.path, "", nil, "create", "--remote", "wire", "--name", "child", "--parent", parent)
+		if err == nil || !strings.Contains(stderr, "parent must be main or a piece on the same box") {
+			t.Errorf("parent %s: err = %v stderr = %q, want ErrCrossBoxParent", parent, err, stderr)
+		}
+	}
+	if shim.calls(t) != 0 {
+		t.Error("ssh invoked despite parent validation failure")
+	}
+	if _, ok := readPlacements(t, e)["child"]; ok {
+		t.Error("link written for rejected child")
+	}
+}
+
+func TestCLI_CreateRemote_RemoteCreateFails(t *testing.T) {
+	e := placeEnv(t)
+	shim := newSeqShim(t, e,
+		shimResponse{stdout: boxProject + "\n"},
+		shimResponse{stdout: probeOK},
+		shimResponse{stdout: "", exit: 1}, // box-side mp create fails
+	)
+	_, stderr, err := runProxy(e, shim.path, "", nil, "create", "--remote", "wire", "--name", "fix-auth")
+	exitErr, ok := err.(*exec.ExitError)
+	if !ok || exitErr.ExitCode() == 0 || !strings.Contains(stderr, "remote create on wire failed") {
+		t.Fatalf("err = %v stderr = %q", err, stderr)
+	}
+	if len(readPlacements(t, e)) != 0 {
+		t.Error("link must be removed when the box-side create fails")
+	}
+	// The box is connected: its row stays so the next attempt skips connect.
+	if !strings.Contains(readRegistry(t, e), `"placed-proj@wire"`) {
+		t.Error("registry row should survive a failed create")
+	}
+}
+
+func TestCLI_CreateRemote_Schema(t *testing.T) {
+	e := setupTestEnv(t)
+	defer e.cleanup()
+	stdout, _, err := e.run("create", "--schema")
+	if err != nil || !strings.Contains(stdout, `"remote"`) {
+		t.Errorf("schema missing remote: %v\n%s", err, stdout)
+	}
+}
+
+// writeConnectHook installs a controller-side on-box-connect.sh that records
+// its env (one file per run, so call counts are observable) and exits code.
+func writeConnectHook(t *testing.T, e *testEnv, code int) (envDir string) {
+	t.Helper()
+	hooks := filepath.Join(e.tmpDir, ".monkeypuzzle", "hooks")
+	envDir = filepath.Join(e.tmpDir, "hook-env")
+	if err := os.MkdirAll(hooks, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(envDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	script := fmt.Sprintf("#!/bin/sh\nenv | grep '^MP_' > %q/run-$$\necho 'hook says no' >&2\nexit %d\n", envDir, code)
+	if err := os.WriteFile(filepath.Join(hooks, "on-box-connect.sh"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return envDir
+}
+
+func hookRuns(t *testing.T, envDir string) []string {
+	t.Helper()
+	entries, _ := os.ReadDir(envDir)
+	var runs []string
+	for _, en := range entries {
+		data, _ := os.ReadFile(filepath.Join(envDir, en.Name()))
+		runs = append(runs, string(data))
+	}
+	return runs
+}
+
+func TestCLI_CreateRemote_ConnectHook_ReplacesBuiltin(t *testing.T) {
+	e := placeEnv(t)
+	envDir := writeConnectHook(t, e, 0)
+	shim := newSeqShim(t, e,
+		shimResponse{stdout: boxProject + "\n"}, // 1 readlink only: hook did the clone
+		shimResponse{stdout: probeOK},           // 2 doctor probe
+		shimResponse{stdout: createJSON("fix-auth")},
+		shimResponse{stdout: probeOK}, // second create: connected, no hook
+		shimResponse{stdout: createJSON("fix-auth-2")},
+	)
+
+	_, stderr, err := runProxy(e, shim.path, "", nil, "create", "--remote", "wire", "--name", "fix-auth")
+	if err != nil {
+		t.Fatalf("create --remote: %v\nstderr: %s", err, stderr)
+	}
+	if shim.calls(t) != 3 {
+		t.Fatalf("shim calls = %d, want 3 (readlink, doctor, create) — hook must replace clone+init+rsync", shim.calls(t))
+	}
+	resolve := shim.argv(t, 1)
+	if strings.Contains(resolve, "git clone") || !strings.Contains(resolve, "readlink -f") || !strings.Contains(resolve, ".local/share/mp") {
+		t.Errorf("post-hook resolve should only readlink the clone:\n%s", resolve)
+	}
+	for n := 1; n <= 3; n++ {
+		if strings.HasPrefix(shim.argv(t, n), "rsync") {
+			t.Errorf("rsync ran although the hook owns the box (call %d)", n)
+		}
+	}
+
+	runs := hookRuns(t, envDir)
+	if len(runs) != 1 {
+		t.Fatalf("hook ran %d times, want 1", len(runs))
+	}
+	origin, _ := exec.Command("git", "-C", e.tmpDir, "remote", "get-url", "origin").Output()
+	for _, want := range []string{
+		"MP_BOX=wire\n",
+		"MP_REMOTE_PATH=$HOME/.local/share/mp/placed-proj\n",
+		"MP_REPO_URL=" + strings.TrimSpace(string(origin)) + "\n",
+		"MP_PROJECT=placed-proj\n",
+		"MP_HOOKS_DIR=", // repo root may be symlink-resolved (/private on macOS)
+		"/.monkeypuzzle/hooks\n",
+	} {
+		if !strings.Contains(runs[0], want) {
+			t.Errorf("hook env missing %q:\n%s", want, runs[0])
+		}
+	}
+	for _, never := range []string{"MP_HOST=", "MP_PLACEMENT_HOST=", "MP_REMOTE=1"} {
+		if strings.Contains(runs[0], never) {
+			t.Errorf("controller-side hook env must not carry %s:\n%s", never, runs[0])
+		}
+	}
+
+	// D4: the proxied create tells the box it's a placement; MP_HOST never.
+	create := shim.argv(t, 3)
+	if !strings.Contains(create, `export MP_PLACEMENT_HOST='\''wire'\'' MP_REMOTE=1; `) {
+		t.Errorf("create argv lacks placement exports:\n%s", create)
+	}
+	if strings.Contains(create, "MP_HOST") {
+		t.Errorf("MP_HOST leaked into proxied create:\n%s", create)
+	}
+
+	// Connected marker = hidden registry row → second placement skips the hook.
+	if _, stderr, err := runProxy(e, shim.path, "", nil, "create", "--remote", "wire", "--name", "fix-auth-2"); err != nil {
+		t.Fatalf("second create: %v\n%s", err, stderr)
+	}
+	if got := len(hookRuns(t, envDir)); got != 1 {
+		t.Errorf("hook ran %d times after second placement, want 1", got)
+	}
+	if shim.calls(t) != 5 {
+		t.Errorf("shim calls = %d, want 5", shim.calls(t))
+	}
+}
+
+func TestCLI_CreateRemote_ConnectHook_FailureAborts(t *testing.T) {
+	e := placeEnv(t)
+	envDir := writeConnectHook(t, e, 3)
+	shim := newSeqShim(t, e, shimResponse{stdout: boxProject + "\n"})
+
+	_, stderr, err := runProxy(e, shim.path, "", nil, "create", "--remote", "wire", "--name", "fix-auth")
+	if err == nil {
+		t.Fatal("create --remote succeeded despite failing hook")
+	}
+	if !strings.Contains(stderr, "box connect failed") || !strings.Contains(stderr, "on-box-connect.sh") || !strings.Contains(stderr, "hook says no") {
+		t.Errorf("stderr should name ErrBoxConnect, the hook and its stderr:\n%s", stderr)
+	}
+	if shim.calls(t) != 0 {
+		t.Errorf("ssh ran %d times after hook failure, want 0", shim.calls(t))
+	}
+	if len(readPlacements(t, e)) != 0 {
+		t.Error("pending link not removed after hook failure")
+	}
+	if strings.Contains(readRegistry(t, e), "wire") {
+		t.Error("registry row written although connect failed")
+	}
+	// Not connected → retried (and still failing) on the next attempt.
+	_, _, _ = runProxy(e, shim.path, "", nil, "create", "--remote", "wire", "--name", "fix-auth")
+	if got := len(hookRuns(t, envDir)); got != 2 {
+		t.Errorf("hook ran %d times across two failed attempts, want 2", got)
+	}
+}
+
+func TestCLI_Placed_ProxyExportsPlacement(t *testing.T) {
+	e := placedEnv(t, "")
+	shimDir, path := sshShim(t, e, `{"in_piece":true}`, 0)
+	if _, stderr, err := runProxy(e, path, "", nil, "status", "fix-auth", "--json"); err != nil {
+		t.Fatalf("status placed: %v\n%s", err, stderr)
+	}
+	argv := shimFile(t, shimDir, "argv")
+	if !strings.Contains(argv, `export MP_PLACEMENT_HOST='\''wire'\'' MP_REMOTE=1; `) {
+		t.Errorf("placed verb lacks placement exports:\n%s", argv)
+	}
+	if strings.Contains(argv, "MP_HOST") {
+		t.Errorf("MP_HOST leaked:\n%s", argv)
+	}
+	// Plain proxying is not a placement.
+	if _, _, err := runProxy(e, path, "", nil, "--host", "wire", "list"); err != nil {
+		t.Fatal(err)
+	}
+	if argv := shimFile(t, shimDir, "argv"); strings.Contains(argv, "MP_PLACEMENT_HOST") || strings.Contains(argv, "MP_REMOTE=") {
+		t.Errorf("plain --host proxy exported placement vars:\n%s", argv)
+	}
+}
+
+func TestCLI_CreateRemote_RsyncFails(t *testing.T) {
+	e := placeEnv(t)
+	if err := os.MkdirAll(filepath.Join(e.tmpDir, ".monkeypuzzle", "hooks"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	shim := newSeqShim(t, e,
+		shimResponse{stdout: boxProject + "\n"},
+		shimResponse{exit: 23}, // rsync
+	)
+	_, stderr, err := runProxy(e, shim.path, "", nil, "create", "--remote", "wire", "--name", "fix-auth")
+	if err == nil || !strings.Contains(stderr, "box connect failed") || !strings.Contains(stderr, "shipping hooks") {
+		t.Fatalf("err = %v stderr = %q, want ErrBoxConnect from rsync", err, stderr)
+	}
+	if shim.calls(t) != 2 {
+		t.Errorf("shim calls = %d, want 2 (no doctor after a failed rsync)", shim.calls(t))
+	}
+	if len(readPlacements(t, e)) != 0 {
+		t.Error("pending link not removed after rsync failure")
+	}
+	if strings.Contains(readRegistry(t, e), "wire") {
+		t.Error("registry row written although connect failed")
+	}
+}
+
+func TestCLI_CreateRemote_DoctorUnreachable(t *testing.T) {
+	e := placeEnv(t)
+	shim := newSeqShim(t, e,
+		shimResponse{stdout: boxProject + "\n"},
+		shimResponse{exit: 255}, // box went away between connect and doctor
+	)
+	_, stderr, err := runProxy(e, shim.path, "", nil, "create", "--remote", "wire", "--name", "fix-auth")
+	if err == nil || !strings.Contains(stderr, "box unreachable") {
+		t.Fatalf("err = %v stderr = %q, want ErrBoxUnreachable", err, stderr)
+	}
+	if len(readPlacements(t, e)) != 0 {
+		t.Error("pending link not removed")
+	}
+	if strings.Contains(readRegistry(t, e), "wire") {
+		t.Error("registry row written before the box passed doctor")
+	}
+}
+
+func TestCLI_CreateRemote_BadCreateOutput(t *testing.T) {
+	for _, out := range []string{"not json", `{"name":"fix-auth"}`} {
+		e := placeEnv(t)
+		shim := newSeqShim(t, e,
+			shimResponse{stdout: boxProject + "\n"},
+			shimResponse{stdout: probeOK},
+			shimResponse{stdout: out}, // exit 0, no worktree_path
+		)
+		_, stderr, err := runProxy(e, shim.path, "", nil, "create", "--remote", "wire", "--name", "fix-auth")
+		if err == nil || !strings.Contains(stderr, "returned no worktree_path") {
+			t.Fatalf("%q: err = %v stderr = %q", out, err, stderr)
+		}
+		if len(readPlacements(t, e)) != 0 {
+			t.Errorf("%q: link must be removed when the box's answer is unusable", out)
+		}
+		if !strings.Contains(readRegistry(t, e), `"placed-proj@wire"`) {
+			t.Errorf("%q: registry row should survive (box is connected)", out)
+		}
+	}
+}
+
+// Placements onto one box serialise: a second `mp create --remote` waits
+// for the first to finish connecting instead of racing it into the same
+// clone dir and registry row.
+func TestCLI_CreateRemote_SerialisedPerBox(t *testing.T) {
+	e := placeEnv(t)
+	shim := newSeqShim(t, e,
+		shimResponse{stdout: boxProject + "\n"},
+		shimResponse{stdout: probeOK},
+		shimResponse{stdout: createJSON("fix-auth")},
+	)
+	root, _ := filepath.EvalSymlinks(e.tmpDir)
+	lockPath := filepath.Join(root, ".monkeypuzzle", "box-wire.lock")
+	lock, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := exec.Command(e.binPath, "create", "--remote", "wire", "--name", "fix-auth")
+	cmd.Dir = e.tmpDir
+	cmd.Env = append(e.env(), "PATH="+shim.path)
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+
+	// Held lock: the link is claimed, nothing has touched the box.
+	deadline := time.Now().Add(5 * time.Second)
+	for readPlacements(t, e)["fix-auth"] == nil && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	time.Sleep(300 * time.Millisecond)
+	select {
+	case err := <-done:
+		t.Fatalf("create finished while the box lock was held: %v\n%s", err, stderr.String())
+	default:
+	}
+	if shim.calls(t) != 0 {
+		t.Errorf("ssh ran %d times while the box lock was held", shim.calls(t))
+	}
+	if link := readPlacements(t, e)["fix-auth"]; link == nil || link["pending"] != true {
+		t.Errorf("pending link = %+v", link)
+	}
+
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_UN); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("create after unlock: %v\n%s", err, stderr.String())
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("create did not proceed after the box lock was released")
+	}
+	if shim.calls(t) != 3 {
+		t.Errorf("shim calls = %d, want 3", shim.calls(t))
+	}
+	if link := readPlacements(t, e)["fix-auth"]; link == nil || link["pending"] == true {
+		t.Errorf("placement = %+v, want placed", link)
+	}
+}
+
+// Box side of a placement: the proxied create runs with MP_PLACEMENT_HOST in
+// its env and persists it into the piece metadata, so a later mp run in
+// that worktree with no such env (an agent's session on the box) still
+// hands hooks MP_PLACEMENT_HOST/MP_REMOTE.
+func TestCLI_BoxSideCreate_PersistsPlacementForHooks(t *testing.T) {
+	e := placeEnv(t)
+	_, stderr, err := runProxy(e, os.Getenv("PATH"), "", map[string]string{"MP_PLACEMENT_HOST": "wire", "MP_REMOTE": "1"}, "create", "--name", "on-box", "--skip-switch")
+	if err != nil {
+		t.Fatalf("box-side create: %v\n%s", err, stderr)
+	}
+	wt := filepath.Join(e.tmpDir, ".monkeypuzzle", "pieces", "on-box")
+	meta, err := os.ReadFile(filepath.Join(wt, ".monkeypuzzle", "piece-metadata.json"))
+	if err != nil || !strings.Contains(string(meta), `"placement_host": "wire"`) {
+		t.Fatalf("piece metadata lacks placement_host: %v\n%s", err, meta)
+	}
+	// Local creates never carry one.
+	if _, stderr, err := runProxy(e, os.Getenv("PATH"), "", nil, "create", "--name", "local", "--skip-switch"); err != nil {
+		t.Fatalf("local create: %v\n%s", err, stderr)
+	}
+	if meta, _ := os.ReadFile(filepath.Join(e.tmpDir, ".monkeypuzzle", "pieces", "local", ".monkeypuzzle", "piece-metadata.json")); strings.Contains(string(meta), "placement_host") {
+		t.Errorf("local piece metadata carries placement_host:\n%s", meta)
+	}
+
+	// A hook fired from a plain, un-proxied invocation in the worktree.
+	hooks := filepath.Join(e.tmpDir, ".monkeypuzzle", "hooks")
+	envFile := filepath.Join(e.tmpDir, "hook-env")
+	if err := os.MkdirAll(hooks, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	script := fmt.Sprintf("#!/bin/sh\nenv | grep '^MP_' > %q\n", envFile)
+	if err := os.WriteFile(filepath.Join(hooks, "agent-blocked.sh"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(e.binPath, "agent", "report", "--id", "s1", "--kind", "claude", "--status", "blocked", "--pid", strconv.Itoa(os.Getpid()))
+	cmd.Dir = wt
+	cmd.Env = e.env()
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("agent report: %v\n%s", err, out)
+	}
+	var got []byte
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
+		if got, _ = os.ReadFile(envFile); len(got) > 0 {
+			break
+		}
+	}
+	for _, want := range []string{"MP_PLACEMENT_HOST=wire\n", "MP_REMOTE=1\n", "MP_PIECE_NAME=on-box\n"} {
+		if !strings.Contains(string(got), want) {
+			t.Errorf("hook env (no MP_* in the invocation) missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(string(got), "MP_HOST=") {
+		t.Errorf("MP_HOST in hook env:\n%s", got)
+	}
+}

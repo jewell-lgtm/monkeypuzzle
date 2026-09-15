@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"text/tabwriter"
 
 	"github.com/spf13/cobra"
 
@@ -19,16 +20,21 @@ import (
 var prCmd = &cobra.Command{
 	Use:   "pr",
 	Short: "Manage pull requests",
-	Long:  `Commands for managing pull requests for pieces.`,
+	Long:  `Inspect PR/MR associations recorded on mp branch layers, or create and advance them.`,
+	Args:  cobra.NoArgs,
+	RunE:  runPRList,
 }
+
+var prListCmd = &cobra.Command{Use: "list", Aliases: []string{"ls"}, Short: "List PRs recorded on managed branches", Args: cobra.NoArgs, RunE: runPRList}
+var prShowCmd = &cobra.Command{Use: "show [number|branch]", Aliases: []string{"status"}, Short: "Show a recorded PR", Args: cobra.MaximumNArgs(1), RunE: runPRShow}
 
 var prCreateCmd = &cobra.Command{
 	Use:   "create",
-	Short: "Create a pull request for the current piece",
-	Long: `Create a GitHub pull request for the current piece worktree.
-Pushes the branch to origin and creates a PR using the gh CLI.
+	Short: "Create a PR/MR for the current piece",
+	Long: `Create a pull or merge request for the current piece worktree. Pushes the
+branch to origin and uses the provider configured by mp init (GitHub or GitLab).
 
-When no title is provided, the piece name is used as the default PR title.`,
+When no title is provided, the piece name is used.`,
 	Args: cobra.NoArgs,
 	RunE: runPRCreate,
 }
@@ -52,20 +58,69 @@ var (
 	flagPRJSON        bool
 	flagPRReadySchema bool
 	flagPRReadyJSON   bool
+	flagPRListJSON    bool
 )
 
 func init() {
-	prCreateCmd.Flags().StringVar(&flagPRTitle, "title", "", "PR title (default: piece name)")
-	prCreateCmd.Flags().StringVar(&flagPRBody, "body", "", "PR description")
+	prCreateCmd.Flags().StringVar(&flagPRTitle, "title", "", "PR/MR title (default: piece name)")
+	prCreateCmd.Flags().StringVar(&flagPRBody, "body", "", "PR/MR description")
 	prCreateCmd.Flags().StringVar(&flagPRBase, "base", "", "Base branch to merge into (default: auto-detect from parent)")
 	prCreateCmd.Flags().BoolVar(&flagPRDraft, "draft", false, "Open the PR/MR as a draft")
 	prCreateCmd.Flags().BoolVar(&flagPRSchema, "schema", false, "Print an example input document and exit")
 	prCreateCmd.Flags().BoolVar(&flagPRJSON, "json", false, "Output JSON even on a terminal")
 	prReadyCmd.Flags().BoolVar(&flagPRReadySchema, "schema", false, "Print an example input document and exit")
 	prReadyCmd.Flags().BoolVar(&flagPRReadyJSON, "json", false, "Output JSON even on a terminal")
-	prCmd.AddCommand(prCreateCmd)
+	for _, cmd := range []*cobra.Command{prCmd, prListCmd, prShowCmd} {
+		cmd.Flags().BoolVar(&flagPRListJSON, "json", false, "Output JSON even on a terminal")
+	}
+	prCmd.AddCommand(prListCmd, prShowCmd, prCreateCmd)
 	prCmd.AddCommand(prReadyCmd)
 	rootCmd.AddCommand(prCmd)
+}
+
+func newPRHandler() *prcmd.Handler {
+	deps := core.NewDeps(adapters.NewOSFS(""), adapters.NewTextOutput(os.Stderr), adapters.NewOSExec(), http.DefaultClient, adapters.SetupNoopLoading())
+	return prcmd.NewHandler(deps)
+}
+
+func runPRList(cmd *cobra.Command, _ []string) error {
+	wd, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	rows, err := newPRHandler().List(cmd.Context(), wd)
+	if err != nil {
+		return err
+	}
+	if !cli.IsTerminal() || !cli.IsStdoutTerminal() || flagPRListJSON {
+		return cli.PrintJSON(map[string]any{"prs": rows})
+	}
+	w := tabwriter.NewWriter(os.Stderr, 0, 0, 2, ' ', 0)
+	_, _ = fmt.Fprintln(w, "PR\tBRANCH\tBASE\tPIECE\tSTATUS")
+	for _, row := range rows {
+		_, _ = fmt.Fprintf(w, "#%d\t%s\t%s\t%s\t%s\n", row.Number, row.Branch, row.Base, row.Piece, row.Status)
+	}
+	return w.Flush()
+}
+
+func runPRShow(cmd *cobra.Command, args []string) error {
+	wd, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	selector := ""
+	if len(args) == 1 {
+		selector = args[0]
+	}
+	row, err := newPRHandler().Show(cmd.Context(), wd, selector)
+	if err != nil {
+		return err
+	}
+	if !cli.IsTerminal() || !cli.IsStdoutTerminal() || flagPRListJSON {
+		return cli.PrintJSON(row)
+	}
+	_, err = fmt.Fprintf(os.Stderr, "#%d %s → %s (%s)\n%s\n", row.Number, row.Branch, row.Base, row.Status, row.URL)
+	return err
 }
 
 func runPRCreate(cmd *cobra.Command, args []string) error {

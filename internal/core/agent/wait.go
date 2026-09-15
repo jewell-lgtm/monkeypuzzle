@@ -79,7 +79,7 @@ type WaitOptions struct {
 	Interval time.Duration
 	// Timeout gives up after this long (0 = wait forever).
 	Timeout time.Duration
-	// Grace covers the launch race: `mp create --agent` returns before the
+	// Grace covers the launch race: a just-started agent returns before the
 	// agent's first status report lands, so an immediate wait would see zero
 	// agents and settle vacuously. Until Grace elapses, an all-empty snapshot
 	// keeps polling; once any agent has been seen, normal settling applies.

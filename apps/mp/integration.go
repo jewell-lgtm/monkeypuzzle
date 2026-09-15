@@ -17,8 +17,8 @@ var integrationCmd = &cobra.Command{
 }
 
 var integrationInstallCmd = &cobra.Command{
-	Use:       "install <tool>",
-	Short:     "Install an agent-status integration (claude)",
+	Use:   "install <tool>",
+	Short: "Install an agent-status integration (claude)",
 	Long: `Wire an agent's own hook system to 'mp agent report' so its status shows up
 per piece. For claude, merges hooks into .claude/settings.json at the current
 repo root — run it in the main repo and commit so every piece worktree gets it.`,

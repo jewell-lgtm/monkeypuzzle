@@ -39,7 +39,7 @@ const TONE: Record<string, string> = {
       ln.cmd !== undefined ? (
         <span class="mp-term__line"><span class="mp-term__prompt">{prompt} <b>mp</b> </span><span class="mp-term__cmd">{ln.cmd}</span></span>
       ) : (
-        <span class:list={['mp-term__line', ln.tone && TONE[ln.tone]]}>{ln.text}</span>
+        <span class:list={['mp-term__line', ln.tone && TONE[ln.tone]]}>{ln.text || '\u00a0'}</span>
       )
     )
   }{cursor && <span class="mp-term__cursor"></span>}</div>

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 func sampleRows() []Row {
@@ -247,5 +248,128 @@ func TestRenderRow_SessionLabel(t *testing.T) {
 	m.SessionLabel = "cmux"
 	if m.sessionLabel() != "cmux" {
 		t.Errorf("sessionLabel() = %q, want cmux", m.sessionLabel())
+	}
+}
+
+// ctrlKey builds the KeyMsg for a control chord ("ctrl+d" / "ctrl+x"), which is
+// how Bubble Tea reports them.
+func ctrlKey(m Model, kt tea.KeyType) Model {
+	updated, _ := m.Update(tea.KeyMsg{Type: kt})
+	return updated.(Model)
+}
+
+func TestLifecycleKeys_SetActionOnPieceRow(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		key  tea.KeyType
+		want Action
+	}{
+		{"done", tea.KeyCtrlD, ActionDone},
+		{"abandon", tea.KeyCtrlX, ActionAbandon},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := New(sampleRows())
+			m.Input.SetValue("feature-x") // a query flattens the tree onto the piece
+			m.refilter()
+			row, ok := m.SelectedRow()
+			if !ok || row.Kind != RowPiece {
+				t.Fatalf("setup: selected row is %+v, want a piece row", row)
+			}
+			m = ctrlKey(m, tc.key)
+			if m.Action != tc.want {
+				t.Errorf("Action = %q, want %q", m.Action, tc.want)
+			}
+			if m.Cancelled {
+				t.Error("Cancelled = true, want the row to survive for the caller")
+			}
+			if got, _ := m.SelectedRow(); got.Piece != "feature-x" {
+				t.Errorf("SelectedRow().Piece = %q, want feature-x", got.Piece)
+			}
+		})
+	}
+}
+
+func TestLifecycleKeys_InertOnNonPieceRows(t *testing.T) {
+	// A project, a branch, and a create row have no lifecycle to end; the keys
+	// must not act on whichever piece happens to be nearby.
+	for _, query := range []string{"alpha", "stray-spike"} {
+		m := New(sampleRows())
+		m.Input.SetValue(query)
+		m.refilter()
+		if row, ok := m.SelectedRow(); !ok || row.Kind == RowPiece {
+			t.Fatalf("setup %q: selected %+v, want a non-piece row", query, row)
+		}
+		for _, kt := range []tea.KeyType{tea.KeyCtrlD, tea.KeyCtrlX} {
+			if got := ctrlKey(m, kt).Action; got != ActionSwitch {
+				t.Errorf("query %q, key %v: Action = %q, want no action", query, kt, got)
+			}
+		}
+	}
+}
+
+func TestLifecycleKeys_IgnoredWhileLoading(t *testing.T) {
+	m := NewLoading(nil)
+	if got := ctrlKey(m, tea.KeyCtrlX).Action; got != ActionSwitch {
+		t.Errorf("Action = %q while loading, want no action", got)
+	}
+}
+
+func TestEnterLeavesActionUnset(t *testing.T) {
+	m := New(sampleRows())
+	m.Input.SetValue("feature-x")
+	m.refilter()
+	if got := updateKey(m, tea.KeyEnter).Action; got != ActionSwitch {
+		t.Errorf("Action after enter = %q, want a plain switch", got)
+	}
+}
+
+func sized(m Model, w, h int) Model {
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: w, Height: h})
+	return updated.(Model)
+}
+
+func TestHelpLine_FitsTheTerminalWidth(t *testing.T) {
+	m := New(sampleRows())
+	for _, tc := range []struct {
+		width int
+		want  string
+	}{
+		{0, helpFull},   // size unknown yet
+		{120, helpFull}, // roomy
+		{80, helpShort}, // the common terminal: the full hint would wrap
+		{40, helpShort},
+	} {
+		got := sized(m, tc.width, 24).helpLine()
+		if got != tc.want {
+			t.Errorf("width %d: helpLine() = %q, want %q", tc.width, got, tc.want)
+		}
+		// Below the short form's own width nothing fits and the hint wraps;
+		// windowSize pays for that (see the next test). Above it, it must not.
+		if w := lipgloss.Width(got); tc.width >= lipgloss.Width(helpShort) && w > tc.width {
+			t.Errorf("width %d: hint is %d cells wide and wraps", tc.width, w)
+		}
+	}
+}
+
+// The scroll window is sized from the terminal height minus fixed chrome. A
+// help hint that wraps eats rows that budget already spent, pushing the last
+// row off screen.
+func TestWindowSize_AccountsForAWrappedHelpLine(t *testing.T) {
+	const height = 24
+	roomy := sized(New(sampleRows()), 120, height)
+	if got, want := roomy.windowSize(), height-dashboardChrome; got != want {
+		t.Errorf("unwrapped help: windowSize() = %d, want %d", got, want)
+	}
+
+	// Narrow enough that even the short hint needs two rows.
+	narrow := sized(New(sampleRows()), 30, height)
+	if narrow.helpLines() < 2 {
+		t.Fatalf("setup: helpLines() = %d at width 30, want a wrapped hint", narrow.helpLines())
+	}
+	if got, want := narrow.windowSize(), height-dashboardChrome-(narrow.helpLines()-1); got != want {
+		t.Errorf("wrapped help: windowSize() = %d, want %d", got, want)
+	}
+	if narrow.windowSize() >= roomy.windowSize() {
+		t.Error("a wrapped help line must cost the scroll window a row")
 	}
 }

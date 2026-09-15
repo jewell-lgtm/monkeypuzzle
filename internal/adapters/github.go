@@ -118,6 +118,18 @@ func (g *GitHub) MarkPRReady(ctx context.Context, workDir string, prNumber int) 
 	return nil
 }
 
+// MergePR squash-merges a PR. Squash matches what a local `mp merge` does, so
+// a piece lands as one commit whichever route it takes. --delete-branch=false
+// is explicit because gh honours a user's `gh config set` default otherwise,
+// and mp owns the branch's life (`mp done` / `mp abandon`), not gh.
+func (g *GitHub) MergePR(ctx context.Context, workDir string, prNumber int) error {
+	_, err := g.exec.RunWithDir(ctx, workDir, "gh", "pr", "merge", fmt.Sprintf("%d", prNumber), "--squash", "--delete-branch=false")
+	if err != nil {
+		return fmt.Errorf("failed to merge PR #%d: %w%s", prNumber, err, cliHint("gh", ghInstallHint))
+	}
+	return nil
+}
+
 // GetPRStatus gets the status of a PR by number
 func (g *GitHub) GetPRStatus(ctx context.Context, workDir string, prNumber int) (string, error) {
 	output, err := g.exec.RunWithDir(ctx, workDir, "gh", "pr", "view", fmt.Sprintf("%d", prNumber), "--json", "state", "--jq", ".state")
@@ -215,6 +227,28 @@ func (g *GitHub) ListPRs(ctx context.Context, workDir string) ([]PRInfo, error) 
 	var prs []PRInfo
 	if err := json.Unmarshal(output, &prs); err != nil {
 		return []PRInfo{}, fmt.Errorf("failed to parse PR list: %w", err)
+	}
+	return prs, nil
+}
+
+// FindOpenPRsByBranch returns the open PRs whose head is branchName, asking the
+// forge for exactly that rather than filtering a capped `pr list` locally: a
+// long-lived branch's PR can fall outside that window, and answering "no open
+// PR" from a truncated page would send a caller off to open a duplicate.
+func (g *GitHub) FindOpenPRsByBranch(ctx context.Context, workDir, branchName string) ([]PRInfo, error) {
+	output, err := g.exec.RunWithDir(ctx, workDir, "gh", "pr", "list",
+		"--state", "open",
+		"--head", branchName,
+		"--json", "number,headRefName,baseRefName,state,url,isDraft",
+		"--limit", "50",
+	)
+	if err != nil {
+		return nil, ErrGHUnavailable
+	}
+
+	var prs []PRInfo
+	if err := json.Unmarshal(output, &prs); err != nil {
+		return nil, fmt.Errorf("failed to parse PR list: %w", err)
 	}
 	return prs, nil
 }

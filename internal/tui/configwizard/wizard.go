@@ -24,6 +24,7 @@ var Choices = []Choice{
 	{Value: "tmux", Label: "tmux", Description: "Manage piece sessions with tmux"},
 	{Value: "zellij", Label: "zellij", Description: "Manage pieces as zellij tabs in your current session"},
 	{Value: "cmux", Label: "cmux", Description: "Manage pieces as cmux workspaces (macOS)"},
+	{Value: "herdr", Label: "herdr", Description: "Manage pieces as herdr workspaces (agent-aware)"},
 	{Value: "none", Label: "none", Description: "No session management — print paths for `cd $(mp switch ...)`"},
 }
 
@@ -35,7 +36,7 @@ type Model struct {
 }
 
 // New returns a wizard with an initial selection inferred from the current
-// environment ($TMUX, $ZELLIJ, $CMUX_WORKSPACE_ID).
+// environment ($TMUX, $ZELLIJ, $CMUX_WORKSPACE_ID, $HERDR_ENV).
 func New() Model {
 	return Model{selected: defaultSelection()}
 }
@@ -45,6 +46,7 @@ func defaultSelection() int {
 		"tmux":   "TMUX",
 		"zellij": "ZELLIJ",
 		"cmux":   "CMUX_WORKSPACE_ID",
+		"herdr":  "HERDR_ENV",
 	}
 	for i, c := range Choices {
 		if v, ok := env[c.Value]; ok && os.Getenv(v) != "" {

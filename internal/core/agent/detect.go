@@ -124,7 +124,7 @@ func mergeAgents(reported, detected []ListItem) []ListItem {
 	}
 	for _, d := range detected {
 		if i, ok := byPane[d.Pane]; ok {
-			if !(d.Status == piece.AgentIdle && merged[i].Status == piece.AgentDone) {
+			if d.Status != piece.AgentIdle || merged[i].Status != piece.AgentDone {
 				merged[i].Status = d.Status
 			}
 			continue

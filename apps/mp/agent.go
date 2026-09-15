@@ -123,7 +123,7 @@ func init() {
 	agentReportCmd.Flags().StringVar(&flagAgentID, "id", "", "Agent id (defaults to pid-<pid>)")
 	agentReportCmd.Flags().StringVar(&flagAgentKind, "kind", "", "Agent kind: claude, codex, ...")
 	agentReportCmd.Flags().IntVar(&flagAgentPID, "pid", 0, "Agent process id (defaults to the parent pid)")
-	agentReportCmd.Flags().StringVar(&flagAgentPane, "pane", "", "Multiplexer pane the agent runs in (defaults to $TMUX_PANE)")
+	agentReportCmd.Flags().StringVar(&flagAgentPane, "pane", "", "Multiplexer pane the agent runs in (defaults to the current pane)")
 	agentReportCmd.Flags().BoolVar(&flagAgentClaudeHook, "claude-hook", false, "Parse a Claude Code hook payload from stdin")
 	agentReportCmd.Flags().BoolVar(&flagAgentSchema, "schema", false, "Print an example input document and exit")
 	agentListCmd.Flags().BoolVar(&flagAgentListJSON, "json", false, "Output JSON instead of the table")
@@ -132,6 +132,10 @@ func init() {
 	agentFocusCmd.Flags().BoolVar(&flagAgentFocusBlocked, "blocked", false, "Focus the most urgent blocked agent instead of naming one")
 	agentFocusCmd.Flags().BoolVar(&flagAgentListAll, "all", false, "Span all registered projects (implied outside a git repo)")
 	agentFocusCmd.Flags().BoolVar(&flagAgentFocusJSON, "json", false, "Output JSON even on a terminal (direct pane focus only; see Long help)")
+
+	for _, c := range []*cobra.Command{agentReadCmd, agentSendCmd, agentFocusCmd} {
+		c.ValidArgsFunction = completePieceNames
+	}
 
 	agentCmd.AddCommand(agentReportCmd)
 	agentCmd.AddCommand(agentListCmd)
@@ -144,8 +148,10 @@ func init() {
 
 // configuredMultiplexer returns the user's configured multiplexer without the
 // TTY gating of chooseMultiplexer: pane reads and agent detection are exactly
-// what orchestrating scripts/agents do, and neither steals client focus.
-// Degrades to the no-op multiplexer on config problems.
+// what orchestrating scripts/agents do, and neither steals client focus. The
+// in-session gate stays, though — outside the multiplexer there are no panes
+// to read, so shelling out to it only produces errors. Degrades to the no-op
+// multiplexer on config problems.
 func configuredMultiplexer(exec core.Exec) core.Multiplexer {
 	userCfg, err := config.LoadUserConfig()
 	if err != nil {
@@ -155,13 +161,20 @@ func configuredMultiplexer(exec core.Exec) core.Multiplexer {
 	if err != nil {
 		return adapters.NewNoopMultiplexer()
 	}
+	if !mux.InSession() {
+		warnNotInSession(mux.Name())
+		return adapters.NewNoopMultiplexer()
+	}
 	return mux
 }
 
 // newAgentHandler builds the agent handler with pane detection wired in.
 func newAgentHandler(deps core.Deps) *agentcmd.Handler {
-	h := agentcmd.NewHandlerWithMux(deps, configuredMultiplexer(deps.Exec))
-	h.SelfPane = os.Getenv("TMUX_PANE")
+	mux := configuredMultiplexer(deps.Exec)
+	h := agentcmd.NewHandlerWithMux(deps, mux)
+	if pane, ok := mux.(core.PaneOps); ok {
+		h.SelfPane = pane.CurrentPane()
+	}
 	return h
 }
 
@@ -170,7 +183,7 @@ func paneMultiplexer(exec core.Exec) (core.PaneOps, error) {
 	mux := configuredMultiplexer(exec)
 	pane, ok := mux.(core.PaneOps)
 	if !ok {
-		return nil, fmt.Errorf("pane operations are not supported by multiplexer %q (tmux only)", mux.Name())
+		return nil, fmt.Errorf("pane operations are not supported by multiplexer %q (tmux and herdr only)", mux.Name())
 	}
 	return pane, nil
 }
@@ -440,7 +453,9 @@ func withAgentReportDefaults(cmd *cobra.Command, input agentcmd.ReportInput) age
 		input.PID = os.Getppid()
 	}
 	if input.Pane == "" {
-		input.Pane = os.Getenv("TMUX_PANE")
+		if pane, ok := configuredMultiplexer(adapters.NewOSExec()).(core.PaneOps); ok {
+			input.Pane = pane.CurrentPane()
+		}
 	}
 	return input
 }

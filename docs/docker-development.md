@@ -10,7 +10,7 @@ The Docker development environment provides:
 - **Go 1.24.11** (matching the project's toolchain)
 - **mp CLI** pre-built and available in PATH
 - **git** for version control
-- **tmux** for terminal multiplexing (required by the piece commands)
+- **tmux**, if you want per-piece multiplexer sessions (optional)
 - **gh CLI** (GitHub CLI) or **glab CLI** (GitLab CLI) for PR/MR management
 - **Essential development tools** (vim, nano, curl, wget, etc.)
 
@@ -139,7 +139,7 @@ echo '{"name":"test","pr_provider":"github"}' | mp init
 
 ### Using mp Command
 
-The piece commands (`mp create`, `mp switch`, …) require git and tmux, both available in the container:
+The piece commands (`mp create`, `mp switch`, …) need git, which the container has (tmux is there too if you want sessions):
 
 ```bash
 # Start container
@@ -152,9 +152,9 @@ docker run -it --rm \
 mp init --name myproject --pr-provider github
 
 # Create a new piece
-mp create
+mp create --name my-feature
 
-# This will create a git worktree and tmux session
+# This creates a branch and git worktree and prints its path
 ```
 
 ### Running Tests

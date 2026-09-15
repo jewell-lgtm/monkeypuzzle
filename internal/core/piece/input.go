@@ -10,12 +10,17 @@ import (
 // PieceInfo contains information about a created piece worktree.
 // It includes the piece name, worktree path, and associated tmux session name.
 type PieceInfo struct {
+	// ID is the piece's durable identifier; see PieceMetadata.ID.
+	ID string `json:"id,omitempty"`
 	// Name is the unique identifier for this piece (e.g., "piece-20250127-143022")
 	Name string `json:"name"`
 	// WorktreePath is the absolute path to the git worktree directory
 	WorktreePath string `json:"worktree_path"`
 	// SessionName is the name of the tmux session created for this piece
 	SessionName string `json:"session_name"`
+	// Host is the box a placed piece was created on; WorktreePath is then a
+	// path on that box. Empty for local pieces.
+	Host string `json:"host,omitempty"`
 }
 
 // PieceStatus contains information about the current piece status.
@@ -23,6 +28,8 @@ type PieceInfo struct {
 type PieceStatus struct {
 	// InPiece is true if the current directory is within a piece worktree
 	InPiece bool `json:"in_piece"`
+	// ID is the piece's durable identifier; see PieceMetadata.ID.
+	ID string `json:"id,omitempty"`
 	// PieceName is the name of the piece, only set when InPiece is true
 	PieceName string `json:"piece_name,omitempty"`
 	// WorktreePath is the path to the worktree, only set when InPiece is true
@@ -47,6 +54,9 @@ type PieceHierarchyStatus struct {
 
 // PieceListItem represents a piece available for switching.
 type PieceListItem struct {
+	// ID is the piece's durable identifier; see PieceMetadata.ID. Empty for a
+	// piece created before ids existed that has not been written since.
+	ID           string `json:"id,omitempty"`
 	Name         string `json:"name"`
 	WorktreePath string `json:"worktree_path"`
 	SessionName  string `json:"session_name"`
@@ -62,6 +72,13 @@ type PieceListItem struct {
 	AgentStatus string `json:"agent_status,omitempty"`
 	// AgentCounts is the per-status agent count behind the aggregate.
 	AgentCounts map[string]int `json:"agent_counts,omitempty"`
+	// Host is the box a placed piece lives on (`mp create --remote`); empty
+	// for local pieces. When set, WorktreePath is a path on that box.
+	Host string `json:"host,omitempty"`
+	// State is the placed piece's last known box-side state: "unknown" until
+	// refreshed, "pending" while its create is in flight. Empty for local
+	// pieces.
+	State string `json:"state,omitempty"`
 }
 
 // SwitchResult contains the result of a switch operation.
@@ -81,10 +98,9 @@ type NewPieceInput struct {
 	Branch           string `json:"branch,omitempty"`
 	SkipSwitch       bool   `json:"skip_switch,omitempty"`
 	OverwriteSession bool   `json:"overwrite_session,omitempty"`
-	// Agent launches an agent of this kind (claude, codex) in the new piece:
-	// typed into the piece's session when one is created, else run headless
-	// with the prompt. Validated at the CLI layer against agent.ValidKinds.
-	Agent string `json:"agent,omitempty"`
+	// Remote places the piece on this ssh box instead of a local worktree
+	// (`mp create --remote=<box>`). Handled at the CLI layer.
+	Remote string `json:"remote,omitempty"`
 }
 
 // NewPieceSchema returns an example input document for piece create input.
@@ -96,7 +112,7 @@ func NewPieceSchema() ([]byte, error) {
 		"branch":            "",
 		"skip_switch":       false,
 		"overwrite_session": false,
-		"agent":             "",
+		"remote":            "",
 	}
 	return json.MarshalIndent(schema, "", "  ")
 }
@@ -144,7 +160,7 @@ func WithNewPieceDefaults(input NewPieceInput) NewPieceInput {
 		Branch:           strings.TrimSpace(input.Branch),
 		SkipSwitch:       input.SkipSwitch,
 		OverwriteSession: input.OverwriteSession,
-		Agent:            strings.TrimSpace(input.Agent),
+		Remote:           strings.TrimSpace(input.Remote),
 	}
 }
 
@@ -347,6 +363,12 @@ type MergeInput struct {
 	// ReparentStrategy is "rebase" (default) or "merge"; only used when
 	// ReparentChildren is true.
 	ReparentStrategy string `json:"reparent_strategy,omitempty"`
+	// NoUpdateCheck merges even when the target has commits the piece lacks
+	// (conflicts then surface from git).
+	NoUpdateCheck bool `json:"no_update_check,omitempty"`
+	// Strategy overrides the configured merge strategy for this call:
+	// "local" or "forge". Empty defers to project then user config.
+	Strategy string `json:"strategy,omitempty"`
 }
 
 // MergeResult contains the result of a merge operation.
@@ -356,6 +378,13 @@ type MergeResult struct {
 	TargetBranch       string   `json:"target_branch"` // The branch merged into (parent or main)
 	Status             string   `json:"status"`        // "merged"
 	ReparentedChildren []string `json:"reparented_children,omitempty"`
+	// UpdateCheckSkipped is set when the target was ahead and the update gate
+	// was bypassed (--no-update-check or config).
+	UpdateCheckSkipped bool `json:"update_check_skipped,omitempty"`
+	// Strategy is the route the merge actually took: "local" or "forge".
+	Strategy string `json:"strategy,omitempty"`
+	// PRNumber is the PR/MR merged under the forge strategy.
+	PRNumber int `json:"pr_number,omitempty"`
 }
 
 // MergeSchema returns an example input document for piece merge input.
@@ -365,18 +394,25 @@ func MergeSchema() ([]byte, error) {
 		"force":             false,
 		"reparent_children": false,
 		"reparent_strategy": ReparentRebase,
+		"no_update_check":   false,
+		"strategy":          MergeLocal,
 	}
 	return json.MarshalIndent(schema, "", "  ")
 }
 
-// ValidateMergeInput checks the reparent strategy is recognised.
+// ValidateMergeInput checks the reparent and merge strategies are recognised.
 func ValidateMergeInput(input MergeInput) error {
 	switch input.ReparentStrategy {
 	case "", ReparentRebase, ReparentMerge:
-		return nil
 	default:
 		return fmt.Errorf("invalid reparent strategy %q (valid: %s, %s)", input.ReparentStrategy, ReparentRebase, ReparentMerge)
 	}
+	// Caught here rather than deep inside MergePiece, which resolves the
+	// strategy only after the piece has been located and its children checked.
+	if _, err := ParseMergeStrategy(input.Strategy); err != nil {
+		return err
+	}
+	return nil
 }
 
 // ParseMergeJSON parses JSON input into MergeInput.
@@ -401,6 +437,8 @@ func WithMergeDefaults(input MergeInput) MergeInput {
 		Force:            input.Force,
 		ReparentChildren: input.ReparentChildren,
 		ReparentStrategy: strategy,
+		NoUpdateCheck:    input.NoUpdateCheck,
+		Strategy:         strings.TrimSpace(input.Strategy),
 	}
 }
 
@@ -483,6 +521,8 @@ type DoneInput struct {
 	Main string `json:"main,omitempty"`
 	// MainBranch is the deprecated alias for Main.
 	MainBranch string `json:"main_branch,omitempty"`
+	// Force cleans up even when the branch is not merged (branch kept locally).
+	Force bool `json:"force,omitempty"`
 }
 
 // DoneResult contains the result of a done operation.
@@ -491,12 +531,17 @@ type DoneResult struct {
 	WorktreePath string `json:"worktree_path"`
 	MainPath     string `json:"main_path"`
 	Cleaned      bool   `json:"cleaned"`
+	// Forced is set when the merge gate was bypassed (--force or config).
+	Forced bool `json:"forced,omitempty"`
+	// ReparentedChildren lists child pieces re-homed onto this piece's parent.
+	ReparentedChildren []string `json:"reparented_children,omitempty"`
 }
 
 // DoneSchema returns an example input document for piece done input.
 func DoneSchema() ([]byte, error) {
 	schema := map[string]any{
-		"main": "main",
+		"main":  "main",
+		"force": false,
 	}
 	return json.MarshalIndent(schema, "", "  ")
 }
@@ -513,7 +558,7 @@ func ParseDoneJSON(data []byte) (DoneInput, error) {
 // WithDoneDefaults returns input with defaults applied.
 func WithDoneDefaults(input DoneInput) DoneInput {
 	mainBranch := firstNonEmpty(input.Main, input.MainBranch, "main")
-	return DoneInput{Main: mainBranch, MainBranch: mainBranch}
+	return DoneInput{Main: mainBranch, MainBranch: mainBranch, Force: input.Force}
 }
 
 // AdoptPieceInput holds input for the piece adopt command.

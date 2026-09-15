@@ -29,7 +29,7 @@ func resolveApply(applyFlag, dryRunFlag, anythingToDo bool, confirm func() (bool
 	if dryRunFlag {
 		return false, nil
 	}
-	if cli.IsTerminal() && !cli.HasStdinData() && anythingToDo {
+	if cli.IsInteractive() && !cli.HasStdinData() && anythingToDo {
 		return confirm()
 	}
 	return false, nil

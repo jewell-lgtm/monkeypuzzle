@@ -3,23 +3,27 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/config"
+	piececmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/piece"
 )
 
 // validMultiplexerValues lists the multiplexer options mp recognises.
 // "none" is the no-op (print-the-path) fallback. Maybe one day we'll support
 // wezterm / kitty / others — drop the adapter in internal/adapters, wire it in
 // NewMultiplexer, and add the name here.
-var validMultiplexerValues = []string{"tmux", "zellij", "cmux", "none"}
+var validMultiplexerValues = []string{"tmux", "zellij", "cmux", "herdr", "none"}
 
 var configCmd = &cobra.Command{
 	Use:   "config",
 	Short: "Manage user configuration",
-	Long:  `Get and set user-level monkeypuzzle configuration.`,
+	Long: `Get and set user-level monkeypuzzle configuration: multiplexer, opener,
+and workflow safety gates. Project-specific choices such as the PR/MR provider
+are configured by 'mp init'. Run 'mp config set --help' to see every key.`,
 }
 
 var configGetCmd = &cobra.Command{
@@ -35,7 +39,10 @@ var configSetCmd = &cobra.Command{
 	Long: `Set a configuration value.
 
 Available keys:
-  multiplexer  Terminal multiplexer to use (tmux, zellij, cmux, none)`,
+  multiplexer            Terminal multiplexer to use (tmux, zellij, cmux, herdr, none)
+  done_require_merged    Whether 'mp done' refuses unmerged pieces (true, false; default true)
+  merge_require_updated  Whether 'mp merge' refuses when the target is ahead (true, false; default true)
+  open_command           Command 'mp open' runs, e.g. 'code {path}' (placeholders: {path} {piece} {project} {branch})`,
 	Args: cobra.ExactArgs(2),
 	RunE: runConfigSet,
 }
@@ -45,13 +52,41 @@ func init() {
 	configCmd.AddCommand(configGetCmd)
 	configCmd.AddCommand(configSetCmd)
 
-	// Register completion for config keys
-	_ = configGetCmd.RegisterFlagCompletionFunc("", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	// Complete the key, then that key's values: `mp config set <TAB>` is how
+	// you discover what mp can be told without leaving the prompt.
+	configGetCmd.ValidArgsFunction = completeConfigKeys
+	configSetCmd.ValidArgsFunction = func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		if len(args) == 0 {
-			return []string{"multiplexer"}, cobra.ShellCompDirectiveNoFileComp
+			return completeConfigKeys(cmd, args, toComplete)
 		}
+		if len(args) > 1 {
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
+		switch args[0] {
+		case "multiplexer":
+			return validMultiplexerValues, cobra.ShellCompDirectiveNoFileComp
+		case "done_require_merged", "merge_require_updated":
+			return []string{"true", "false"}, cobra.ShellCompDirectiveNoFileComp
+		case "merge_strategy":
+			return validMergeStrategies, cobra.ShellCompDirectiveNoFileComp
+		default:
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
+	}
+}
+
+// configKeys are every key `mp config get/set` understands.
+var configKeys = []string{"multiplexer", "done_require_merged", "merge_require_updated", "merge_strategy", "open_command"}
+
+// validMergeStrategies are the user-level merge_strategy values. It is the
+// fallback for projects whose own config declares no `merge.strategy`.
+var validMergeStrategies = []string{string(piececmd.MergeLocal), string(piececmd.MergeForge)}
+
+func completeConfigKeys(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	if len(args) > 0 {
 		return nil, cobra.ShellCompDirectiveNoFileComp
-	})
+	}
+	return configKeys, cobra.ShellCompDirectiveNoFileComp
 }
 
 func runConfigGet(cmd *cobra.Command, args []string) error {
@@ -66,6 +101,17 @@ func runConfigGet(cmd *cobra.Command, args []string) error {
 	switch key {
 	case "multiplexer":
 		value = cfg.Multiplexer
+	case "done_require_merged":
+		value = strconv.FormatBool(cfg.DoneRequiresMerged())
+	case "merge_require_updated":
+		value = strconv.FormatBool(cfg.MergeRequiresUpdated())
+	case "merge_strategy":
+		value = cfg.MergeStrategy
+		if value == "" {
+			value = string(piececmd.MergeLocal)
+		}
+	case "open_command":
+		value = cfg.OpenCommand
 	default:
 		return fmt.Errorf("unknown config key: %s", key)
 	}
@@ -97,6 +143,26 @@ func runConfigSet(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("invalid multiplexer value: %s (valid: %s)", value, strings.Join(validMultiplexerValues, ", "))
 		}
 		cfg.Multiplexer = value
+	case "done_require_merged":
+		b, err := strconv.ParseBool(value)
+		if err != nil {
+			return fmt.Errorf("invalid done_require_merged value: %s (valid: true, false)", value)
+		}
+		cfg.SetDoneRequireMerged(b)
+	case "merge_require_updated":
+		b, err := strconv.ParseBool(value)
+		if err != nil {
+			return fmt.Errorf("invalid merge_require_updated value: %s (valid: true, false)", value)
+		}
+		cfg.SetMergeRequireUpdated(b)
+	case "merge_strategy":
+		s, err := piececmd.ParseMergeStrategy(value)
+		if err != nil {
+			return err
+		}
+		cfg.MergeStrategy = string(s)
+	case "open_command":
+		cfg.OpenCommand = value
 	default:
 		return fmt.Errorf("unknown config key: %s", key)
 	}

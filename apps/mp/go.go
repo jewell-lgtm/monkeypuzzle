@@ -475,24 +475,42 @@ func dashboardLoadCmd(ctx context.Context, infos []projectcmd.Info) tea.Cmd {
 // runDashboardTUI runs the interactive picker with a spinner that loads via
 // loadCmd, then dispatches the chosen row. Shared by `mp go` and `mp switch`.
 func runDashboardTUI(ctx context.Context, loadCmd tea.Cmd) error {
-	initial := dashboard.NewLoading(loadCmd)
+	sessionLabel := ""
 	if cfg, err := config.LoadUserConfig(); err == nil && cfg.Multiplexer != "" && cfg.Multiplexer != "none" {
-		initial.SessionLabel = cfg.Multiplexer
+		sessionLabel = cfg.Multiplexer
 	}
-	p := tea.NewProgram(initial)
-	m, err := p.Run()
-	if err != nil {
-		return err
+	initial := dashboard.NewLoading(loadCmd)
+	initial.SessionLabel = sessionLabel
+	// The lifecycle keys act on a row and come back to the list, so the picker
+	// runs in a loop: only a switch (or a cancel) leaves it. loadCmd recollects
+	// on every call, so the reopened picker reflects what just changed.
+	for {
+		p := tea.NewProgram(initial)
+		m, err := p.Run()
+		if err != nil {
+			return err
+		}
+		model := m.(dashboard.Model)
+		if model.Err != nil {
+			return model.Err
+		}
+		row, ok := model.SelectedRow()
+		if !ok {
+			return nil // cancelled
+		}
+		if model.Action == dashboard.ActionSwitch {
+			return dispatchPickedRow(ctx, row)
+		}
+		reopen, err := finishPickedRow(ctx, row, model.Action)
+		if err != nil {
+			return err
+		}
+		if !reopen {
+			return nil
+		}
+		initial = dashboard.NewLoading(loadCmd)
+		initial.SessionLabel = sessionLabel
 	}
-	model := m.(dashboard.Model)
-	if model.Err != nil {
-		return model.Err
-	}
-	row, ok := model.SelectedRow()
-	if !ok {
-		return nil // cancelled
-	}
-	return dispatchPickedRow(ctx, row)
 }
 
 // attachSession switches to (creating if needed) the given multiplexer session.
@@ -504,15 +522,18 @@ func runDashboardTUI(ctx context.Context, loadCmd tea.Cmd) error {
 func attachSession(ctx context.Context, sessionName, workDir string) error {
 	mux := chooseMultiplexer(adapters.NewOSExec())
 	if adapters.IsNoopMultiplexer(mux) || !mux.IsInstalled(ctx) {
-		// No session management here: print the path for `cd $(mp switch ...)`.
-		fmt.Println(workDir)
+		// No session management here: the path, for `cd "$(mp switch ...)"`.
+		surfacePath(workDir)
+		maybeOpenAfter(ctx, workDir)
 		return nil
 	}
 	if err := mux.SwitchTo(ctx, sessionName, workDir); err != nil {
-		// Fall back to printing the path.
-		fmt.Println(workDir)
+		// Fall back to the path.
+		surfacePath(workDir)
+		maybeOpenAfter(ctx, workDir)
 		return nil
 	}
 	fmt.Fprintf(os.Stderr, "Attached %s\n", sessionName)
+	maybeOpenAfter(ctx, workDir)
 	return nil
 }

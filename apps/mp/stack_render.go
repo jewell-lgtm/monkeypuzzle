@@ -55,10 +55,10 @@ func renderStackStatus(result stackcmd.StackStatusResult, p cli.Painter) string 
 		b.WriteString("\n" + p.Paint(cli.SGRYellow, cli.GlyphWarn) + " forge unreachable — PR/MR state not checked\n")
 	}
 	if len(result.Reconstructed) > 0 {
-		b.WriteString(fmt.Sprintf("\nreconstructed from forge: %s\n", strings.Join(result.Reconstructed, ", ")))
+		fmt.Fprintf(&b, "\nreconstructed from forge: %s\n", strings.Join(result.Reconstructed, ", "))
 	}
 	if len(result.Applied) > 0 {
-		b.WriteString(fmt.Sprintf("bases updated on forge: %s\n", strings.Join(result.Applied, ", ")))
+		fmt.Fprintf(&b, "bases updated on forge: %s\n", strings.Join(result.Applied, ", "))
 	}
 	return b.String()
 }
@@ -131,7 +131,7 @@ func runeLen(s string) int { return utf8.RuneCountInString(s) }
 //	    └── #7 feat: wire rate limit into CLI  [api-rate-limit-cli]
 func renderStackGraph(result stackcmd.GraphResult) string {
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("%s  (%s, %s)\n", result.Repo, result.DefaultBranch, result.Provider))
+	fmt.Fprintf(&b, "%s  (%s, %s)\n", result.Repo, result.DefaultBranch, result.Provider)
 	if len(result.Stacks) == 0 {
 		b.WriteString("no open stacked PRs\n")
 		return b.String()
@@ -152,7 +152,7 @@ func renderGraphNodes(b *strings.Builder, nodes []*stackgraph.StackNode, prefix 
 		if node.PR.Draft {
 			draft = " (draft)"
 		}
-		b.WriteString(fmt.Sprintf("%s%s#%d %s%s  [%s]\n", prefix, connector, node.PR.Number, node.PR.Title, draft, node.PR.HeadRef))
+		fmt.Fprintf(b, "%s%s#%d %s%s  [%s]\n", prefix, connector, node.PR.Number, node.PR.Title, draft, node.PR.HeadRef)
 		renderGraphNodes(b, node.Children, childPrefix)
 	}
 }

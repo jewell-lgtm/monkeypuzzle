@@ -16,6 +16,9 @@ type FS interface {
 	Stat(name string) (fs.FileInfo, error)
 	Remove(name string) error
 	Symlink(oldname, newname string) error
+	// Readlink returns a symlink's target. Stat follows links, so this is the
+	// only way to tell a link from whatever it points at.
+	Readlink(name string) (string, error)
 	ReadDir(name string) ([]fs.DirEntry, error)
 	// Rename atomically replaces newpath with oldpath (same-directory renames
 	// only, which is all callers need for atomic write-temp-then-rename).
@@ -108,7 +111,7 @@ type PaneInfo struct {
 
 // PaneOps is the optional pane-level extension of Multiplexer. Callers
 // type-assert into it and treat a failed assertion as "unsupported by this
-// multiplexer" — only tmux implements it today.
+// multiplexer" — tmux and herdr implement it.
 type PaneOps interface {
 	// SendText types text into a pane (or a session's active pane) followed by
 	// Enter, as if the user had typed it — the way to hand a prompt to an
@@ -129,6 +132,36 @@ type PaneOps interface {
 	// exist; callers check that (via Multiplexer.Exists) and fall back to a
 	// plain piece switch when it doesn't.
 	FocusPane(ctx context.Context, sessionName, pane string) error
+
+	// CurrentPane returns the pane id mp itself was invoked from, or "" when
+	// not inside a pane managed by this multiplexer. Each provider reads its
+	// own env ($TMUX_PANE, $HERDR_PANE_ID) so callers never hardcode one.
+	CurrentPane() string
+}
+
+// AgentObservation is one natively-tracked agent in a multiplexer session.
+type AgentObservation struct {
+	// Pane is the pane id the agent runs in.
+	Pane string
+	// Kind is the agent flavor as the multiplexer reports it ("claude",
+	// "codex", ...) — passed through unfiltered, so mp inherits the
+	// multiplexer's coverage rather than its own allowlist.
+	Kind string
+	// Status uses mp's vocabulary: "working", "blocked", "done", or "idle" —
+	// the piece.Agent* constants by convention (core cannot import
+	// core/piece). Adapters map their provider's states into it.
+	Status string
+	// PID is the agent's process id, 0 when the multiplexer doesn't expose it.
+	PID int
+}
+
+// AgentObserver is the optional Multiplexer extension for providers that
+// track agent state natively (herdr). Callers type-assert; when present it
+// replaces pane screen-scraping entirely — the multiplexer sees process
+// identity and state directly instead of reading them off the screen, and
+// can report "done", which scraping cannot see at all.
+type AgentObserver interface {
+	ObserveAgents(ctx context.Context, sessionName string) ([]AgentObservation, error)
 }
 
 // LoadingSignal provides pub/sub for loading state.

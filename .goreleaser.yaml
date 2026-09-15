@@ -81,7 +81,7 @@ brews:
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     directory: Formula
     homepage: "https://github.com/jewell-lgtm/monkeypuzzle"
-    description: "Stack your branches — a CLI for stacked-PR git workflows (pieces)."
+    description: "Run parallel Git work in isolated worktrees with scriptable branch stacks"
     license: MIT
     commit_author:
       name: monkeypuzzle-bot
@@ -92,3 +92,5 @@ brews:
       bin.install "mp-mcp"
     test: |
       system "#{bin}/mp", "--version"
+      output = pipe_output("#{bin}/mp-mcp", "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\"}\n")
+      assert_match "monkeypuzzle-mcp", output

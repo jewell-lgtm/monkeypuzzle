@@ -15,7 +15,42 @@ const (
 
 // UserConfig represents user-level monkeypuzzle configuration.
 type UserConfig struct {
-	Multiplexer string `json:"multiplexer,omitempty"` // "tmux", "zellij", "cmux", or "none"
+	Multiplexer string `json:"multiplexer,omitempty"` // "tmux", "zellij", "cmux", "herdr", or "none"
+	// DoneRequireMerged gates `mp done` on the piece branch being merged.
+	// Pointer so an absent key means the default (true) rather than false.
+	DoneRequireMerged *bool `json:"done_require_merged,omitempty"`
+	// MergeRequireUpdated gates `mp merge` on the target having no commits the
+	// piece lacks. Pointer so an absent key means the default (true).
+	MergeRequireUpdated *bool `json:"merge_require_updated,omitempty"`
+	// OpenCommand is the template `mp open` runs — e.g. "code {path}". Empty
+	// means no opener is configured and `mp open` only reports the path.
+	OpenCommand string `json:"open_command,omitempty"`
+	// MergeStrategy is the fallback for projects that declare none: "local"
+	// squashes into the target branch here, "forge" merges the piece's open
+	// PR/MR. Empty means "local".
+	MergeStrategy string `json:"merge_strategy,omitempty"`
+}
+
+// DoneRequiresMerged reports whether `mp done` refuses unmerged pieces
+// (default true; `mp done --force` bypasses it per call).
+func (c UserConfig) DoneRequiresMerged() bool {
+	return c.DoneRequireMerged == nil || *c.DoneRequireMerged
+}
+
+// SetDoneRequireMerged sets the done_require_merged key.
+func (c *UserConfig) SetDoneRequireMerged(v bool) {
+	c.DoneRequireMerged = &v
+}
+
+// MergeRequiresUpdated reports whether `mp merge` refuses a piece whose target
+// is ahead (default true; `mp merge --no-update-check` bypasses it per call).
+func (c UserConfig) MergeRequiresUpdated() bool {
+	return c.MergeRequireUpdated == nil || *c.MergeRequireUpdated
+}
+
+// SetMergeRequireUpdated sets the merge_require_updated key.
+func (c *UserConfig) SetMergeRequireUpdated(v bool) {
+	c.MergeRequireUpdated = &v
 }
 
 // DefaultUserConfig returns config with default values.

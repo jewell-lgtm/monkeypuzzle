@@ -35,10 +35,17 @@ func (e *testEnv) env() []string {
 func setupTestEnv(t *testing.T) *testEnv {
 	t.Helper()
 
-	// Create temp directory
+	// Create temp directory. Resolve it: on macOS the temp root is a symlink
+	// (/var -> /private/var), and git — hence every path mp prints back —
+	// reports the real one. Comparing an unresolved expectation against mp's
+	// output is a false failure, so every path a test builds from tmpDir must
+	// start from the resolved form.
 	tmpDir, err := os.MkdirTemp("", "mp-cli-test-*")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	if resolved, err := filepath.EvalSymlinks(tmpDir); err == nil {
+		tmpDir = resolved
 	}
 
 	// Build binary to temp location. Build the package that contains this test
@@ -422,16 +429,17 @@ func TestCLI_PRCreate_Schema(t *testing.T) {
 	}
 }
 
-// TestCLI_ClaudeSkill tests mp claude skill creates skill file
-func TestCLI_ClaudeSkill(t *testing.T) {
+// TestCLI_SkillCreate tests that mp skill create writes the canonical document
+// and links it where Claude Code will find it.
+func TestCLI_SkillCreate(t *testing.T) {
 	env := setupTestEnv(t)
 	defer env.cleanup()
 
-	env.initProject("test")
+	env.initGitRepo()
 
-	stdout, stderr, err := env.run("claude", "skill")
+	stdout, stderr, err := env.run("skill", "create")
 	if err != nil {
-		t.Fatalf("claude skill failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+		t.Fatalf("skill create failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
 	}
 
 	var result map[string]any
@@ -439,10 +447,133 @@ func TestCLI_ClaudeSkill(t *testing.T) {
 		t.Fatalf("invalid JSON output: %v\noutput: %s", err, stdout)
 	}
 
-	// Verify skill file was created
-	skillPath := filepath.Join(env.tmpDir, ".claude", "skills", "managing-monkeypuzzle", "SKILL.md")
-	if _, err := os.Stat(skillPath); os.IsNotExist(err) {
-		t.Error("skill file not created")
+	canonical := filepath.Join(env.tmpDir, ".agents", "skills", "managing-monkeypuzzle", "SKILL.md")
+	body, err := os.ReadFile(canonical)
+	if err != nil {
+		t.Fatalf("canonical skill not created: %v", err)
+	}
+	// Nothing used to assert the content, so an empty document would have passed.
+	if !strings.Contains(string(body), "name: managing-monkeypuzzle") {
+		t.Error("skill document is missing its frontmatter name")
+	}
+
+	link := filepath.Join(env.tmpDir, ".claude", "skills", "managing-monkeypuzzle")
+	target, err := os.Readlink(link)
+	if err != nil {
+		t.Fatalf("claude link not created: %v", err)
+	}
+	if want := filepath.Join("..", "..", ".agents", "skills", "managing-monkeypuzzle"); target != want {
+		t.Errorf("link target = %q, want %q", target, want)
+	}
+	// The link must resolve, or the skill is invisible to Claude Code.
+	if _, err := os.Stat(filepath.Join(link, "SKILL.md")); err != nil {
+		t.Errorf("skill not readable through the link: %v", err)
+	}
+}
+
+// TestCLI_SkillCreate_Idempotent tests that re-running reports no change.
+func TestCLI_SkillCreate_Idempotent(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	env.initGitRepo()
+	// Deliberately no initProject: `mp init` writes the skill itself, so the
+	// first create here would already report unchanged and the test would
+	// assert nothing.
+	stdout, stderr, err := env.run("skill", "create")
+	if err != nil {
+		t.Fatalf("first create failed: %v\nstderr: %s", err, stderr)
+	}
+	var first map[string]any
+	if err := json.Unmarshal([]byte(stdout), &first); err != nil {
+		t.Fatalf("invalid JSON output: %v\noutput: %s", err, stdout)
+	}
+	if first["status"] != "created" {
+		t.Errorf("first status = %v, want created", first["status"])
+	}
+
+	stdout, stderr, err = env.run("skill", "create")
+	if err != nil {
+		t.Fatalf("second create failed: %v\nstderr: %s", err, stderr)
+	}
+	var second map[string]any
+	if err := json.Unmarshal([]byte(stdout), &second); err != nil {
+		t.Fatalf("invalid JSON output: %v\noutput: %s", err, stdout)
+	}
+	if second["status"] != "unchanged" {
+		t.Errorf("second status = %v, want unchanged", second["status"])
+	}
+}
+
+// TestCLI_SkillCreate_OccupiedLinkPath covers the upgrade path: an older mp
+// wrote .claude/skills/<name>/ as a real directory. This only fails on a real
+// filesystem, where readlink returns EINVAL.
+func TestCLI_SkillCreate_OccupiedLinkPath(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	env.initGitRepo()
+
+	legacy := filepath.Join(env.tmpDir, ".claude", "skills", "managing-monkeypuzzle")
+	if err := os.MkdirAll(legacy, 0755); err != nil {
+		t.Fatalf("seed legacy dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(legacy, "SKILL.md"), []byte("old content\n"), 0644); err != nil {
+		t.Fatalf("seed legacy file: %v", err)
+	}
+
+	stdout, stderr, err := env.run("skill", "create")
+	if err != nil {
+		t.Fatalf("skill create must not fail when the link path is occupied: %v\nstderr: %s", err, stderr)
+	}
+	var result map[string]any
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("invalid JSON output: %v\noutput: %s", err, stdout)
+	}
+	if result["status"] != "created" {
+		t.Errorf("status = %v, want created", result["status"])
+	}
+	// The canonical document is written regardless.
+	if _, err := os.Stat(filepath.Join(env.tmpDir, ".agents", "skills", "managing-monkeypuzzle", "SKILL.md")); err != nil {
+		t.Errorf("canonical skill not written: %v", err)
+	}
+	// And the user's files are untouched.
+	body, err := os.ReadFile(filepath.Join(legacy, "SKILL.md"))
+	if err != nil || string(body) != "old content\n" {
+		t.Errorf("legacy file was modified or removed: %q, %v", body, err)
+	}
+	// The message has to be the actionable one. Readlink returns EINVAL here,
+	// which does not satisfy errors.Is(err, os.ErrInvalid) unless the FS adapter
+	// normalises it — without that the user gets a raw "invalid argument".
+	if !strings.Contains(stderr, "leaving it alone") {
+		t.Errorf("expected the actionable warning, got: %s", stderr)
+	}
+	if strings.Contains(stderr, "invalid argument") {
+		t.Errorf("raw readlink error leaked to the user: %s", stderr)
+	}
+}
+
+// TestCLI_ClaudeSkill_DeprecatedAlias tests the pre-rename spelling still works.
+func TestCLI_ClaudeSkill_DeprecatedAlias(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	env.initGitRepo()
+	env.initProject("test")
+
+	stdout, stderr, err := env.run("claude", "skill")
+	if err != nil {
+		t.Fatalf("claude skill failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "deprecated") {
+		t.Errorf("expected a deprecation notice on stderr, got: %s", stderr)
+	}
+	var result map[string]any
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("invalid JSON output: %v\noutput: %s", err, stdout)
+	}
+	if _, err := os.Stat(filepath.Join(env.tmpDir, ".agents", "skills", "managing-monkeypuzzle", "SKILL.md")); err != nil {
+		t.Errorf("alias did not write the skill: %v", err)
 	}
 }
 
@@ -458,7 +589,7 @@ func TestCLI_Init_CreatesSkill(t *testing.T) {
 	}
 
 	// Verify skill file was created
-	skillPath := filepath.Join(env.tmpDir, ".claude", "skills", "managing-monkeypuzzle", "SKILL.md")
+	skillPath := filepath.Join(env.tmpDir, ".agents", "skills", "managing-monkeypuzzle", "SKILL.md")
 	if _, err := os.Stat(skillPath); os.IsNotExist(err) {
 		t.Error("skill file not created during init")
 	}
@@ -476,7 +607,7 @@ func TestCLI_Init_SkipsSkill(t *testing.T) {
 	}
 
 	// Verify skill file was NOT created
-	skillPath := filepath.Join(env.tmpDir, ".claude", "skills", "managing-monkeypuzzle", "SKILL.md")
+	skillPath := filepath.Join(env.tmpDir, ".agents", "skills", "managing-monkeypuzzle", "SKILL.md")
 	if _, err := os.Stat(skillPath); !os.IsNotExist(err) {
 		t.Error("skill file should not be created when create_skill=false")
 	}
@@ -1460,5 +1591,380 @@ func TestCLI_AgentList_HumanTableAlwaysOnStderr(t *testing.T) {
 	}
 	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
 		t.Errorf("stdout must be pure JSON with no leading human text, got: %q (err: %v)", stdout, err)
+	}
+}
+
+// commitInWorktree adds a commit so the piece branch has work main lacks.
+func commitInWorktree(t *testing.T, worktreePath, name string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(worktreePath, name+".txt"), []byte(name), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	for _, args := range [][]string{{"add", "."}, {"commit", "-m", name}} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = worktreePath
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v failed: %v\n%s", args, err, out)
+		}
+	}
+}
+
+// TestCLI_PieceDone_Unmerged_Force: an unmerged piece is refused by default
+// (hint names --force); --force removes the worktree, keeps the branch, warns.
+func TestCLI_PieceDone_Unmerged_Force(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	env.initGitRepo()
+	env.initProject("test")
+
+	stdout, stderr, err := env.run("create", "--name", "test-force", "--skip-switch")
+	if err != nil {
+		t.Fatalf("piece create failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+	var created map[string]any
+	if err := json.Unmarshal([]byte(stdout), &created); err != nil {
+		t.Fatalf("invalid JSON from piece create: %v", err)
+	}
+	worktreePath := created["worktree_path"].(string)
+	commitInWorktree(t, worktreePath, "work")
+
+	// Default: refused, with the bypass spelled out.
+	stdout, stderr, err = env.runInDirWithStdin(worktreePath, "{}", "done")
+	if err == nil {
+		t.Fatalf("done on unmerged piece should fail\nstdout: %s\nstderr: %s", stdout, stderr)
+	}
+	for _, want := range []string{"not merged", "--force", "done_require_merged"} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("stderr should mention %q\nstderr: %s", want, stderr)
+		}
+	}
+	if _, err := os.Stat(worktreePath); err != nil {
+		t.Fatal("worktree must survive a refused done")
+	}
+
+	// --force: cleans up, keeps the branch, reports forced.
+	stdout, stderr, err = env.runInDirWithStdin(worktreePath, "{}", "done", "--force")
+	if err != nil {
+		t.Fatalf("done --force failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+	var result map[string]any
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("invalid JSON output: %v\noutput: %s", err, stdout)
+	}
+	if result["forced"] != true || result["cleaned"] != true {
+		t.Errorf("expected forced=true cleaned=true, got %v", result)
+	}
+	if _, err := os.Stat(worktreePath); !os.IsNotExist(err) {
+		t.Error("worktree should have been removed")
+	}
+	if !strings.Contains(stderr, "not merged") || !strings.Contains(stderr, "not pushed") {
+		t.Errorf("expected unmerged + unpushed warnings\nstderr: %s", stderr)
+	}
+	cmd := exec.Command("git", "branch", "--list", "test-force")
+	cmd.Dir = env.tmpDir
+	if out, _ := cmd.CombinedOutput(); !strings.Contains(string(out), "test-force") {
+		t.Errorf("branch must be kept locally, got %q", out)
+	}
+}
+
+// TestCLI_PieceDone_Unmerged_ConfigKey: done_require_merged=false lifts the
+// gate for every call, no flag needed.
+func TestCLI_PieceDone_Unmerged_ConfigKey(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	env.initGitRepo()
+	env.initProject("test")
+
+	stdout, stderr, err := env.run("config", "set", "done_require_merged", "false")
+	if err != nil {
+		t.Fatalf("config set failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+
+	stdout, stderr, err = env.run("create", "--name", "test-cfg", "--skip-switch")
+	if err != nil {
+		t.Fatalf("piece create failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+	var created map[string]any
+	if err := json.Unmarshal([]byte(stdout), &created); err != nil {
+		t.Fatalf("invalid JSON from piece create: %v", err)
+	}
+	worktreePath := created["worktree_path"].(string)
+	commitInWorktree(t, worktreePath, "work")
+
+	stdout, stderr, err = env.runInDirWithStdin(worktreePath, "{}", "done")
+	if err != nil {
+		t.Fatalf("done with done_require_merged=false failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+	var result map[string]any
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("invalid JSON output: %v\noutput: %s", err, stdout)
+	}
+	if result["forced"] != true {
+		t.Errorf("expected forced=true, got %v", result)
+	}
+	if _, err := os.Stat(worktreePath); !os.IsNotExist(err) {
+		t.Error("worktree should have been removed")
+	}
+}
+
+// TestCLI_Merge_TargetAhead_NoUpdateCheck: a piece whose target has commits it
+// lacks is refused by default (hint names --no-update-check); --no-update-check
+// squash-merges anyway, warns, and reports update_check_skipped.
+func TestCLI_Merge_TargetAhead_NoUpdateCheck(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	env.initGitRepo()
+	env.initProject("test")
+
+	stdout, stderr, err := env.run("create", "--name", "test-ahead", "--skip-switch")
+	if err != nil {
+		t.Fatalf("piece create failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+	var created map[string]any
+	if err := json.Unmarshal([]byte(stdout), &created); err != nil {
+		t.Fatalf("invalid JSON from piece create: %v", err)
+	}
+	worktreePath := created["worktree_path"].(string)
+	commitInWorktree(t, worktreePath, "piece-work")
+	// Move main ahead of the piece (a non-conflicting file).
+	commitInWorktree(t, env.tmpDir, "main-work")
+
+	// Default: refused, with the bypasses spelled out.
+	stdout, stderr, err = env.runInDirWithStdin(worktreePath, "{}", "merge")
+	if err == nil {
+		t.Fatalf("merge with target ahead should fail\nstdout: %s\nstderr: %s", stdout, stderr)
+	}
+	for _, want := range []string{"commits not in piece worktree", "mp update", "--no-update-check", "merge_require_updated"} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("stderr should mention %q\nstderr: %s", want, stderr)
+		}
+	}
+
+	// --no-update-check: merges, warns, reports the skipped gate.
+	stdout, stderr, err = env.runInDirWithStdin(worktreePath, "{}", "merge", "--no-update-check")
+	if err != nil {
+		t.Fatalf("merge --no-update-check failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+	var result map[string]any
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("invalid JSON output: %v\noutput: %s", err, stdout)
+	}
+	if result["update_check_skipped"] != true || result["status"] != "merged" {
+		t.Errorf("expected update_check_skipped=true status=merged, got %v", result)
+	}
+	if !strings.Contains(stderr, "merging anyway") {
+		t.Errorf("expected target-ahead warning\nstderr: %s", stderr)
+	}
+	if _, err := os.Stat(filepath.Join(env.tmpDir, "piece-work.txt")); err != nil {
+		t.Error("piece work should be on main after merge")
+	}
+}
+
+// TestCLI_Cleanup_ReparentsChildren: cleaning up a merged piece must re-home
+// its children onto the removed piece's parent instead of orphaning them —
+// an orphan is skipped by `mp stack sync` and shown as "(orphaned)" by `mp list`.
+func TestCLI_Cleanup_ReparentsChildren(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	env.initGitRepo()
+	env.initProject("test")
+	env.gitInDir(env.tmpDir, "add", "-A")
+	env.gitInDir(env.tmpDir, "commit", "-m", "track mp config")
+
+	// main -> a -> b -> c; merge a with --force so b stays parented on a.
+	pieceA := createPiece(t, env, "a", "main")
+	commitInWorktree(t, pieceA, "a")
+	pieceB := createPiece(t, env, "b", "a")
+	commitInWorktree(t, pieceB, "b")
+	pieceC := createPiece(t, env, "c", "b")
+	commitInWorktree(t, pieceC, "c")
+	if stdout, stderr, err := env.runInDir(pieceA, "merge", "--force"); err != nil {
+		t.Fatalf("merge failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+
+	stdout, stderr, err := env.run("cleanup", "--apply")
+	if err != nil {
+		t.Fatalf("cleanup --apply failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+	var result struct {
+		CleanedPieces []struct {
+			PieceName          string   `json:"piece_name"`
+			ReparentedChildren []string `json:"reparented_children"`
+		} `json:"cleaned_pieces"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("invalid JSON output: %v\noutput: %s", err, stdout)
+	}
+	if len(result.CleanedPieces) != 1 || result.CleanedPieces[0].PieceName != "a" || !contains(result.CleanedPieces[0].ReparentedChildren, "b") {
+		t.Errorf("expected a cleaned with b re-homed, got %+v", result.CleanedPieces)
+	}
+	if !strings.Contains(stderr, "Re-homed b onto main") {
+		t.Errorf("expected re-home notice on stderr:\n%s", stderr)
+	}
+
+	// b now hangs off main; c is untouched; nothing is orphaned.
+	stdout, _, err = env.run("list")
+	if err != nil {
+		t.Fatalf("list failed: %v", err)
+	}
+	var items []struct {
+		Name   string `json:"name"`
+		Parent string `json:"parent"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &items); err != nil {
+		t.Fatalf("invalid list JSON: %v\n%s", err, stdout)
+	}
+	parents := map[string]string{}
+	for _, it := range items {
+		parents[it.Name] = it.Parent
+	}
+	if parents["b"] != "main" || parents["c"] != "b" {
+		t.Errorf("parents after cleanup = %v, want b->main c->b", parents)
+	}
+
+	// The re-homed subtree is back in sync's walk.
+	stdout, _, err = env.run("stack", "sync", "--dry-run")
+	if err != nil {
+		t.Fatalf("stack sync --dry-run failed: %v", err)
+	}
+	var sync struct {
+		Updated []string `json:"updated"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &sync); err != nil {
+		t.Fatalf("invalid sync JSON: %v\n%s", err, stdout)
+	}
+	if !contains(sync.Updated, "b") || !contains(sync.Updated, "c") {
+		t.Errorf("stack sync should walk the re-homed subtree, got updated=%v", sync.Updated)
+	}
+}
+
+// TestCLI_Cleanup_UncommittedInitScaffold: a piece created before the
+// `mp init` scaffold (and its .gitignore) is committed must still be clean
+// in git's eyes and removable by `mp cleanup` — mp's own piece-metadata.json
+// must never block `git worktree remove`.
+func TestCLI_Cleanup_UncommittedInitScaffold(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	env.initGitRepo()
+	env.initProject("test") // deliberately not committed
+
+	pieceA := createPiece(t, env, "a", "main")
+	if status := env.gitInDir(pieceA, "status", "--porcelain"); status != "" {
+		t.Fatalf("fresh piece must be clean, git status shows:\n%s", status)
+	}
+	commitInWorktree(t, pieceA, "a")
+	if stdout, stderr, err := env.runInDir(pieceA, "merge"); err != nil {
+		t.Fatalf("merge failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+
+	stdout, stderr, err := env.run("cleanup", "--apply")
+	if err != nil {
+		t.Fatalf("cleanup --apply failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+	if strings.Contains(stderr, "Failed to cleanup") {
+		t.Errorf("cleanup refused the piece:\n%s", stderr)
+	}
+	var result struct {
+		CleanedPieces []struct {
+			PieceName string `json:"piece_name"`
+		} `json:"cleaned_pieces"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("invalid JSON output: %v\noutput: %s", err, stdout)
+	}
+	if len(result.CleanedPieces) != 1 || result.CleanedPieces[0].PieceName != "a" {
+		t.Errorf("expected a cleaned, got %+v", result.CleanedPieces)
+	}
+	if _, err := os.Stat(pieceA); !os.IsNotExist(err) {
+		t.Errorf("worktree should be removed, stat err: %v", err)
+	}
+}
+
+// TestCLI_Cleanup_ApplyDoesNotAnnounceADryRun pins a dogfooding find: every
+// invocation ran a preview pass first, so a caller who had already opted in saw
+// "[dry-run] Would cleanup: X" on the line immediately above "✓ Cleaned up: X"
+// — and paid for a second scan (a git and forge lookup per piece) to print it.
+// A pre-decided run does the work once and says only what it did.
+func TestCLI_Cleanup_ApplyDoesNotAnnounceADryRun(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		stdin string
+		args  []string
+	}{
+		{name: "apply flag", args: []string{"cleanup", "--apply"}},
+		{name: "yes flag", args: []string{"cleanup", "--yes"}},
+		{name: "apply over stdin", stdin: `{"apply":true}`, args: []string{"cleanup"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env := setupTestEnv(t)
+			defer env.cleanup()
+
+			env.initGitRepo()
+			env.initProject("test")
+			worktree := setupMergedPiece(t, env, "merged-piece")
+
+			var stdout, stderr string
+			var err error
+			if tc.stdin != "" {
+				stdout, stderr, err = env.runWithStdin(tc.stdin, tc.args...)
+			} else {
+				stdout, stderr, err = env.run(tc.args...)
+			}
+			if err != nil {
+				t.Fatalf("cleanup failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+			}
+			if strings.Contains(stderr, "[dry-run]") {
+				t.Errorf("a pre-decided cleanup announced a dry-run:\n%s", stderr)
+			}
+			if strings.Contains(stderr, "Would clean") {
+				t.Errorf("a pre-decided cleanup previewed instead of reporting:\n%s", stderr)
+			}
+			// It still has to actually clean, and still report it.
+			if !strings.Contains(stderr, "Cleaned 1 piece(s): merged-piece") {
+				t.Errorf("missing the applied summary:\n%s", stderr)
+			}
+			if _, err := os.Stat(worktree); !os.IsNotExist(err) {
+				t.Errorf("worktree should be removed, stat err: %v", err)
+			}
+		})
+	}
+}
+
+// The preview is exactly what a caller who has NOT opted in should still get.
+func TestCLI_Cleanup_PreviewStillLabelsItsDryRun(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{name: "default", args: []string{"cleanup"}},
+		{name: "explicit dry-run", args: []string{"cleanup", "--dry-run"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env := setupTestEnv(t)
+			defer env.cleanup()
+
+			env.initGitRepo()
+			env.initProject("test")
+			worktree := setupMergedPiece(t, env, "merged-piece")
+
+			stdout, stderr, err := env.run(tc.args...)
+			if err != nil {
+				t.Fatalf("cleanup failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+			}
+			if !strings.Contains(stderr, "[dry-run]") {
+				t.Errorf("a preview lost its dry-run label:\n%s", stderr)
+			}
+			if !strings.Contains(stderr, "Would clean") {
+				t.Errorf("a preview lost its summary:\n%s", stderr)
+			}
+			if _, err := os.Stat(worktree); err != nil {
+				t.Errorf("a preview removed the worktree: %v", err)
+			}
+		})
 	}
 }

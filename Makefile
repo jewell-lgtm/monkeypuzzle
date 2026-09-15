@@ -1,4 +1,4 @@
-.PHONY: build build-server install test test-tmux vet lint clean all
+.PHONY: build build-server install test test-tmux test-herdr vet lint clean all
 
 BIN_DIR := bin
 INSTALL_PATH := $(HOME)/.local/bin
@@ -29,6 +29,10 @@ test:
 # integration cases skip cleanly when a dependency is missing.
 test-tmux:
 	bash apps/tmux/test/run.sh
+
+# Same for the herdr plugin (apps/herdr).
+test-herdr:
+	bash apps/herdr/test/run.sh
 
 vet:
 	go vet ./...

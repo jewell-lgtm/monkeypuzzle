@@ -53,8 +53,10 @@ type SyncResult struct {
 	Strategy   string   `json:"strategy"`
 	Updated    []string `json:"updated"`
 	Pushed     []string `json:"pushed,omitempty"`
-	Skipped    []string `json:"skipped,omitempty"`
-	Status     string   `json:"status"` // synced | dry-run | aborted | blocked
+	// Merged lists pieces --push left alone because they are already merged.
+	Merged  []string `json:"merged,omitempty"`
+	Skipped []string `json:"skipped,omitempty"`
+	Status  string   `json:"status"` // synced | dry-run | aborted | blocked
 }
 
 // localParentBranch maps a piece's stored parent ("main" sentinel or a piece
@@ -206,12 +208,12 @@ func computeBaseFixes(items []piece.PieceListItem, prByHead map[string]pr.PRInfo
 	return fixes
 }
 
-// indexPRsByHead maps head branch -> PR, resolving reused branch names to the
+// IndexPRsByHead maps head branch -> PR, resolving reused branch names to the
 // branch's CURRENT PR: an open PR always wins over a merged/closed one, and
 // between PRs in the same state the newest (highest number) wins. Without
 // this, a branch deleted and recreated after an old PR merged resolves to the
 // stale merged PR and the whole stack reads as landed when it isn't.
-func indexPRsByHead(prs []pr.PRInfo) map[string]pr.PRInfo {
+func IndexPRsByHead(prs []pr.PRInfo) map[string]pr.PRInfo {
 	byHead := make(map[string]pr.PRInfo, len(prs))
 	for _, p := range prs {
 		cur, ok := byHead[p.HeadRefName]
