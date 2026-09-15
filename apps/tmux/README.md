@@ -67,6 +67,10 @@ plugin claims a single key in the prefix table and puts everything in a
 
 The switch picker shows `project/piece` rows (plus each project's adoptable
 branches) with a preview pane of each piece's `git status` and recent commits.
+Each row carries an aligned status badge — `◆ draft` / `◆ in review` from the
+piece's locally-stored PR metadata (no forge round-trip), `trunk` for a
+project's main row, and `branch` for adoptable branches.
+
 Whatever you type there is a name as much as a filter: `alpha/new-thing` — or
 a bare `new-thing` from inside a project — that matches no row creates that
 piece on Enter, and `ctrl-o` (`alt-enter`) does the same over a name that does
@@ -86,7 +90,6 @@ own reason and offers that one escalation rather than dropping you back to a
 shell to retype it. Abandon always keeps the branch; use `mp abandon
 --delete-branch` for the rest. On a main or branch row the keys say there is
 no piece there and do nothing.
-
 The branch jump (`m g`) is repo-aware: it scopes to the project of the current
 pane's directory and takes whatever you paste — an existing piece attaches, an
 existing local or remote branch is adopted as a piece, and a brand-new name

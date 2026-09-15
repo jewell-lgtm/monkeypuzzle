@@ -19,25 +19,47 @@ source "$DIR/helpers.sh"
 # mp switch call, <worktree> feeds the preview, and <project-path> is the repo
 # the lifecycle keys run mp in. A piece checked out on a branch that differs
 # from its name shows the branch in its label. Non-project / missing entries
-# are skipped.
+# are skipped. <display> carries an aligned status badge: "◆ draft" / "◆ in
+# review" from locally stored PR metadata, "trunk" for main rows, and "branch"
+# for adoptable branches.
 build_rows() {
 	jq -r '
 		.projects[]
 		| select(.exists and .is_project)
 		| .name as $proj
 		| .path as $path
-		| ( [ { label: "(main)", piece: "", worktree: $path, branch: "" } ]
+		| ( [ { label: "(main)", badge: "trunk", piece: "", worktree: $path, branch: "" } ]
 		    + ( (.pieces // []) | map({
 		          label: (if (.branch // "") != "" and .branch != .name then .name + "  [" + .branch + "]" else .name end),
+		          badge: (if (.pr_draft // false) then "◆ draft"
+		                  elif (.pr_number // 0) > 0 then "◆ in review"
+		                  else "" end),
 		          piece: .name, worktree: .worktree_path, branch: ""
 		        }) )
 		    + ( (.branches // []) | map({
-		          label: (.name + "  (branch)"),
+		          label: .name, badge: "branch",
 		          piece: "", worktree: $path, branch: .name
 		        }) ) )
 		| .[]
-		| [ ($proj + "/" + .label), $proj, .piece, .worktree, .branch, $path ]
+		| [ ($proj + "/" + .label), .badge, $proj, .piece, .worktree, .branch, $path ]
 		| @tsv
+	' | align_rows
+}
+
+# align_rows pads the label column to a shared width and folds the badge into
+# the display field, keeping the hidden selector fields in their positions.
+align_rows() {
+	awk -F'\t' '
+		{ rows[NR] = $0; if (length($1) > max) max = length($1) }
+		END {
+			for (i = 1; i <= NR; i++) {
+				split(rows[i], f, "\t")
+				display = f[1]
+				if (f[2] != "")
+					display = f[1] sprintf("%" (max - length(f[1]) + 2) "s", "") f[2]
+				printf "%s\t%s\t%s\t%s\t%s\t%s\n", display, f[3], f[4], f[5], f[6], f[7]
+			}
+		}
 	'
 }
 

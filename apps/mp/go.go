@@ -15,6 +15,7 @@ import (
 	"github.com/jewell-lgtm/monkeypuzzle/internal/config"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
 	agentcmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/agent"
+	piececmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/piece"
 	projectcmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/project"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core/session"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/registry"
@@ -71,6 +72,11 @@ type dashPiece struct {
 	// agents reported in the piece, for badges and blocked-first sorting.
 	AgentStatus string         `json:"agent_status,omitempty"`
 	AgentCounts map[string]int `json:"agent_counts,omitempty"`
+	// PRNumber / PRDraft mirror the piece's locally-stored PR metadata (written
+	// by `mp pr create`, flipped by `mp pr ready`), so pickers can badge pieces
+	// without a forge round-trip.
+	PRNumber int  `json:"pr_number,omitempty"`
+	PRDraft  bool `json:"pr_draft,omitempty"`
 }
 
 // dashBranch is the JSON shape for a git branch that is not yet adopted as a
@@ -151,7 +157,7 @@ func collectDashboard(ctx context.Context, infos []projectcmd.Info) ([]dashProje
 				dp.Error = err.Error()
 			} else {
 				for _, pc := range pieces {
-					dp.Pieces = append(dp.Pieces, dashPiece{
+					d := dashPiece{
 						Name:         pc.Name,
 						WorktreePath: pc.WorktreePath,
 						SessionName:  pc.SessionName,
@@ -159,7 +165,12 @@ func collectDashboard(ctx context.Context, infos []projectcmd.Info) ([]dashProje
 						Branch:       pc.Branch,
 						AgentStatus:  pc.AgentStatus,
 						AgentCounts:  pc.AgentCounts,
-					})
+					}
+					if md, err := piececmd.ReadPRMetadata(pc.WorktreePath, deps.FS); err == nil && md.PRNumber > 0 {
+						d.PRNumber = md.PRNumber
+						d.PRDraft = md.Draft
+					}
+					dp.Pieces = append(dp.Pieces, d)
 				}
 			}
 			piecePaths := make([]string, 0, len(dp.Pieces))
