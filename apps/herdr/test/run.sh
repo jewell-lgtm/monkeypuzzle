@@ -115,6 +115,26 @@ if source "$SCRIPTS/helpers.sh" 2>/dev/null; then
 		"$(split_project_query "feat/new-thing" "$rows")" $'\tfeat/new-thing'
 	assert_eq "split_project_query: a bare name names no project" \
 		"$(split_project_query "new-thing" "$rows")" $'\tnew-thing'
+
+	target_verdict() { if valid_piece_target "$1"; then echo name; else echo filter; fi; }
+	assert_eq "valid_piece_target: a plain name is a name" "$(target_verdict "new-thing")" "name"
+	assert_eq "valid_piece_target: a branch path is a name" "$(target_verdict "feat/login-v2.1")" "name"
+	assert_eq "valid_piece_target: an accented name is a name" "$(target_verdict "änderung-login")" "name"
+	assert_eq "valid_piece_target: an fzf anchor is a filter" "$(target_verdict "^new-thing")" "filter"
+	assert_eq "valid_piece_target: two terms are a filter" "$(target_verdict "alpha login")" "filter"
+	assert_eq "valid_piece_target: an exact-match quote is a filter" "$(target_verdict "'\''fix")" "filter"
+	assert_eq "valid_piece_target: a trailing slash is not a name" "$(target_verdict "alpha/")" "filter"
+	# Names git itself refuses, which the guard exists to keep away from it.
+	assert_eq "valid_piece_target: a trailing dot is not a name" "$(target_verdict "hotfix.")" "filter"
+	assert_eq "valid_piece_target: a .lock suffix is not a name" "$(target_verdict "foo.lock")" "filter"
+	assert_eq "valid_piece_target: a dot-led component is not a name" "$(target_verdict "feat/.hidden")" "filter"
+	assert_eq "valid_piece_target: a reflog span is not a name" "$(target_verdict "ref@{0}")" "filter"
+
+	assert_eq "project_path: a named project resolves to its path" \
+		"$(project_path "beta" "$rows")" "/repos/beta"
+	assert_eq "project_path: an unknown project resolves to nothing" \
+		"$(project_path "gamma" "$rows")" ""
+	assert_eq "project_path: no name resolves to nothing" "$(project_path "" "$rows")" ""
 else
 	fail "source helpers.sh" "could not source $SCRIPTS/helpers.sh"
 fi
@@ -207,20 +227,21 @@ integration_open_create() {
 		skip "open create integration" "needs jq + fzf"
 		return
 	fi
-	local tmp bin log
+	local tmp bin log err rc
 	tmp="$(mktemp -d)"
 	bin="$tmp/bin"
 	log="$tmp/mp.log"
-	mkdir -p "$bin" "$tmp/repos/alpha/src"
+	mkdir -p "$bin" "$tmp/repos/alpha/src" "$tmp/repos/beta"
 
 	# A real alpha path: project_for_cwd scopes from the cwd, and the create
 	# flow cds into the project it picks.
-	sed "s|/repos/alpha|$tmp/repos/alpha|g" >"$tmp/canned.json" < <(canned_json)
+	sed "s|/repos/|$tmp/repos/|g" >"$tmp/canned.json" < <(canned_json)
 	cat >"$bin/mp" <<EOF
 #!/usr/bin/env bash
 case "\$1" in
   go) cat "$tmp/canned.json" ;;
-  switch|create) printf '%s\n' "\$*" > "$log" ;;
+  switch) printf '%s\n' "\$*" > "$log" ;;
+  create) printf '%s :: %s\n' "\$*" "\$PWD" > "$log" ;;
   *) exit 2 ;;
 esac
 EOF
@@ -252,7 +273,35 @@ EOF
 	(cd "$tmp" && PATH="$bin:$PATH" HERDR_ENV=1 MP_PLUGIN_FILTER="" MP_PLUGIN_KEY="ctrl-o" \
 		bash "$SCRIPTS/open.sh" <<<"from-the-prompt" >/dev/null 2>&1)
 	assert_eq "open flow: the create key with no query hands off to create.sh" \
-		"$(cat "$log" 2>/dev/null)" "create --name from-the-prompt"
+		"$(cat "$log" 2>/dev/null)" "create --name from-the-prompt :: $tmp/repos/alpha"
+
+	# A query that reads as a search is refused, loudly, with nothing created.
+	rm -f "$log"
+	err="$(PATH="$bin:$PATH" HERDR_ENV=1 MP_PLUGIN_FILTER="^new-thing" \
+		bash "$SCRIPTS/open.sh" 2>&1 >/dev/null)"
+	rc=$?
+	assert_eq "open flow: a search-syntax query creates nothing" "$(cat "$log" 2>/dev/null)" ""
+	assert_eq "open flow: a search-syntax query fails visibly" "$rc" "1"
+	case "$err" in
+		*"is a filter, not a name"*) ok "open flow: says why it created nothing" ;;
+		*) fail "open flow: says why it created nothing" "$err" ;;
+	esac
+
+	# A project prefix with no name after it asks for a name instead of
+	# creating a branch called "alpha/".
+	rm -f "$log"
+	(cd "$tmp/repos/beta" && PATH="$bin:$PATH" HERDR_ENV=1 MP_PLUGIN_FILTER="alpha/" MP_PLUGIN_KEY="ctrl-o" \
+		bash "$SCRIPTS/open.sh" <<<"from-the-prompt" >/dev/null 2>&1)
+	assert_eq "open flow: a trailing slash asks for a name" \
+		"$(cat "$log" 2>/dev/null)" "create --name from-the-prompt :: $tmp/repos/alpha"
+
+	# That handoff names the project, and create.sh must honour it over both
+	# the cwd and its own picker — standing in alpha, told beta, it is beta.
+	rm -f "$log"
+	(cd "$tmp/repos/alpha" && PATH="$bin:$PATH" HERDR_ENV=1 MP_PLUGIN_FILTER="alpha" \
+		bash "$SCRIPTS/create.sh" beta <<<"from-the-prompt" >/dev/null 2>&1)
+	assert_eq "create flow: a named project wins over the cwd and the picker" \
+		"$(cat "$log" 2>/dev/null)" "create --name from-the-prompt :: $tmp/repos/beta"
 
 	rm -rf "$tmp"
 }

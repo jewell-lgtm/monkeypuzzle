@@ -90,6 +90,19 @@ project_for_cwd() {
 	done <<<"$rows"
 }
 
+# project_path prints the path of the project named in $1, given project rows
+# in $2. Empty when $1 is empty or names no registered project.
+project_path() {
+	local want="$1" rows="$2" name path
+	[[ -n "$want" ]] || return 0
+	while IFS=$'\t' read -r _ name path; do
+		if [[ "$name" == "$want" ]]; then
+			printf '%s' "$path"
+			return
+		fi
+	done <<<"$rows"
+}
+
 # fzf_pick reads TAB-delimited rows on stdin and prints the chosen row verbatim
 # (all fields, including hidden ones used to act on the selection). Extra args
 # are forwarded to fzf for display/preview tuning. When MP_PLUGIN_FILTER is set
@@ -98,7 +111,9 @@ project_for_cwd() {
 # is drivable without a TTY.
 fzf_pick() {
 	if [[ -n "${MP_PLUGIN_FILTER+x}" ]]; then
-		fzf --delimiter=$'\t' --filter="$MP_PLUGIN_FILTER" | head -n1
+		# head closes the pipe on the first row, so fzf takes SIGPIPE and
+		# pipefail would surface 141 as a picker failure.
+		fzf --delimiter=$'\t' --filter="$MP_PLUGIN_FILTER" | head -n1 || true
 	else
 		fzf --delimiter=$'\t' "$@"
 	fi
@@ -138,21 +153,40 @@ split_project_query() {
 	printf '\t%s' "$query"
 }
 
+# valid_piece_target accepts what `git check-ref-format` will take as a branch
+# name. fzf's search operators (^ $ ! ' | and spaces) are all in git's illegal
+# set, so the one pass refuses a filter typed into the picker and lets through
+# every name someone can actually have, accents included.
+valid_piece_target() {
+	case "${1:-}" in
+		"" | @ | /* | */ | *//* | .* | */.* | *..* | *. | *.lock | *.lock/*) return 1 ;;
+		*[[:space:][:cntrl:]]* | *"@{"*) return 1 ;;
+		*"^"* | *'$'* | *"!"* | *"'"* | *'"'* | *"|"* | *"~"*) return 1 ;;
+		*":"* | *"?"* | *"*"* | *"["* | *"\\"*) return 1 ;;
+	esac
+}
+
 # create_from_query turns a picker query into a piece, given project rows in
 # $2. The project comes from the query's prefix, else the cwd, else a picker;
 # the rest goes to `mp switch --create`, which attaches to a piece or adopts a
 # branch of that name rather than failing. An empty query hands off to the full
-# create flow, where a piece can also be described as a prompt.
+# create flow — carrying the named project — where a piece can also be
+# described as a prompt; a query that is not a usable name is refused rather
+# than handed to git.
 create_from_query() {
 	local query="$1" rows="$2" pair proj target selection dir
-	if [[ -z "$query" ]]; then
+	# Nothing typed, or a project prefix with no name after it: no name to
+	# create, so ask for one the long way round — carrying the project the
+	# query named, so it is not asked for twice or answered differently.
+	if [[ -z "$query" || "$query" == */ ]]; then
 		dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-		exec bash "$dir/create.sh"
+		exec bash "$dir/create.sh" "${query%/}"
 	fi
 
 	pair="$(split_project_query "$query" "$rows")"
 	proj="${pair%%$'\t'*}"
 	target="${pair#*$'\t'}"
+	valid_piece_target "$target" || die "\"$query\" is a filter, not a name git can branch on — nothing created"
 	[[ -n "$proj" ]] || proj="$(project_for_cwd "${PWD:-}" "$rows")"
 	if [[ -z "$proj" ]]; then
 		selection="$(printf '%s\n' "$rows" | fzf_pick \
