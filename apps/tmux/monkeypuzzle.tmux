@@ -39,7 +39,7 @@ tmux bind-key "$table_key" switch-client -T monkeypuzzle
 popup() {
 	tmux bind-key -T monkeypuzzle "$1" display-popup -E -w "$width" -h "$height" \
 		-d '#{pane_current_path}' \
-		"MP_PLUGIN_BIN='$mp_bin' '$CURRENT_DIR/scripts/$2'"
+		"MP_PLUGIN_BIN='$mp_bin' bash '$CURRENT_DIR/scripts/pane.sh' '$2'"
 }
 
 popup p switch.sh # pick a piece / project main session

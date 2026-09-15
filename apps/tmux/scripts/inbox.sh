@@ -86,7 +86,7 @@ main() {
 		--bind "ctrl-u:execute-silent(\"\$MP_PLUGIN_BIN\" inbox snooze {2} --clear)+reload-sync($reload)" \
 		--bind "ctrl-r:reload-sync($reload --refresh)" \
 		--preview='[ -n {6} ] && printf "note: %s\n\n" {6}; [ -n {7} ] && printf "%s\n\n" {7}; git -C {5} -c color.ui=always status -sb 2>/dev/null; echo; git -C {5} log --oneline -5 2>/dev/null' \
-		--preview-window='right,50%')" || exit 0
+		--preview-window='right,50%')" || picker_exit "$?"
 	[[ -n "$selection" ]] || exit 0
 
 	proj="$(cut -f3 <<<"$selection")"

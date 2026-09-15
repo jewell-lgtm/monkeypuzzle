@@ -426,7 +426,7 @@ integration_startup
 
 if have python3; then
 	if python3 "$SCRIPTS/../test/pane_test.py"; then
-		ok "pane: terminal error waits for dismissal and preserves exit code"
+		ok "all picker panes: terminal errors wait for dismissal and preserve exit code"
 	else
 		fail "pane: terminal error waits for dismissal" "see Python assertion above"
 	fi

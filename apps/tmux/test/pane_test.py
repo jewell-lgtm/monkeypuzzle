@@ -1,4 +1,4 @@
-"""Exercise the error pane with a real terminal, without opening herdr UI."""
+"""Exercise the error pane with a real terminal, without opening tmux UI."""
 import errno
 import os
 from pathlib import Path
@@ -9,10 +9,10 @@ import tempfile
 import time
 
 scripts = Path(__file__).resolve().parent.parent / "scripts"
-for picker in ['open', 'create', 'adopt', 'inbox']:
+for picker in ['switch.sh', 'create.sh', 'branch.sh', 'agents.sh', 'inbox.sh']:
     with tempfile.TemporaryDirectory() as tmp:
         master, slave = pty.openpty()
-        env = dict(os.environ, HERDR_ENV="1", MP_PLUGIN_BIN=f"{tmp}/missing-mp")
+        env = dict(os.environ, TMUX="test", MP_PLUGIN_BIN=f"{tmp}/missing-mp")
         proc = subprocess.Popen(
             ["bash", str(scripts / "pane.sh"), picker],
             stdin=slave, stdout=slave, stderr=slave, env=env,
@@ -30,7 +30,7 @@ for picker in ['open', 'create', 'adopt', 'inbox']:
                             raise
                         break
             assert b"Required command not found:" in output, output
-            assert b"MP_PLUGIN_BIN" in output, output
+            assert b"@monkeypuzzle-bin" in output, output
             assert b"Press Enter to close." in output, output
             assert proc.poll() is None, "error pane closed before dismissal"
             os.write(master, b"\n")
