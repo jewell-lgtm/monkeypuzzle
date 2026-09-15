@@ -290,6 +290,103 @@ func createPiece(t *testing.T, env *testEnv, name, parent string) string {
 	return res.WorktreePath
 }
 
+// TestCLI_StackAppend_CreatesBranchesInOnePieceWorktree is the defining v2
+// stack acceptance test: a stack is a branch chain inside one piece, not a
+// chain of piece worktrees.
+func TestCLI_StackAppend_CreatesBranchesInOnePieceWorktree(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	env.initGitRepo()
+	env.initProject("test")
+
+	worktree := createPiece(t, env, "billing", "main")
+	if err := os.WriteFile(filepath.Join(worktree, "schema.txt"), []byte("schema\n"), 0o644); err != nil {
+		t.Fatalf("write schema change: %v", err)
+	}
+	env.gitInDir(worktree, "add", "schema.txt")
+	env.gitInDir(worktree, "commit", "-m", "add schema")
+
+	appendBranch := func(branch string) map[string]string {
+		t.Helper()
+		stdout, stderr, err := env.runInDir(worktree, "stack", "append", branch)
+		if err != nil {
+			t.Fatalf("stack append %s failed: %v\nstdout: %s\nstderr: %s", branch, err, stdout, stderr)
+		}
+		var result map[string]string
+		if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+			t.Fatalf("invalid JSON from stack append %s: %v\noutput: %s", branch, err, stdout)
+		}
+		return result
+	}
+
+	orm := appendBranch("feat/orm-models")
+	if orm["piece"] != "billing" || orm["worktree_path"] != worktree || orm["branch"] != "feat/orm-models" || orm["base"] != "billing" {
+		t.Fatalf("unexpected first append result: %#v", orm)
+	}
+	if err := os.WriteFile(filepath.Join(worktree, "orm.txt"), []byte("orm\n"), 0o644); err != nil {
+		t.Fatalf("write orm change: %v", err)
+	}
+	env.gitInDir(worktree, "add", "orm.txt")
+	env.gitInDir(worktree, "commit", "-m", "add orm")
+
+	api := appendBranch("feat/rest-endpoints")
+	if api["piece"] != "billing" || api["worktree_path"] != worktree || api["branch"] != "feat/rest-endpoints" || api["base"] != "feat/orm-models" {
+		t.Fatalf("unexpected second append result: %#v", api)
+	}
+
+	stdout, stderr, err := env.runInDir(worktree, "stack", "append", "--prompt", "add cache layer")
+	if err != nil {
+		t.Fatalf("prompt append failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+	var prompted map[string]string
+	if err := json.Unmarshal([]byte(stdout), &prompted); err != nil || prompted["branch"] != "add-cache-layer" || prompted["base"] != "feat/rest-endpoints" {
+		t.Fatalf("unexpected prompt append: %#v err=%v", prompted, err)
+	}
+
+	if got := strings.TrimSpace(gitOut(t, worktree, "branch", "--show-current")); got != "add-cache-layer" {
+		t.Errorf("worktree is on %q, want stack tip add-cache-layer", got)
+	}
+	worktreeList := strings.Fields(gitOut(t, env.tmpDir, "worktree", "list", "--porcelain"))
+	worktreeCount := 0
+	for _, field := range worktreeList {
+		if field == "worktree" {
+			worktreeCount++
+		}
+	}
+	if worktreeCount != 2 { // main checkout plus exactly one piece checkout
+		t.Errorf("stack append created extra worktrees: got %d entries\n%s", worktreeCount, gitOut(t, env.tmpDir, "worktree", "list", "--porcelain"))
+	}
+
+	metadata, err := os.ReadFile(filepath.Join(worktree, ".monkeypuzzle", "piece-metadata.json"))
+	if err != nil {
+		t.Fatalf("read piece metadata: %v", err)
+	}
+	var stored struct {
+		Stack []struct {
+			Branch string `json:"branch"`
+			Base   string `json:"base"`
+		} `json:"stack"`
+	}
+	if err := json.Unmarshal(metadata, &stored); err != nil {
+		t.Fatalf("parse piece metadata: %v", err)
+	}
+	want := []struct{ branch, base string }{
+		{"billing", "main"},
+		{"feat/orm-models", "billing"},
+		{"feat/rest-endpoints", "feat/orm-models"},
+		{"add-cache-layer", "feat/rest-endpoints"},
+	}
+	if len(stored.Stack) != len(want) {
+		t.Fatalf("stored stack has %d entries, want %d: %s", len(stored.Stack), len(want), metadata)
+	}
+	for i := range want {
+		if stored.Stack[i].Branch != want[i].branch || stored.Stack[i].Base != want[i].base {
+			t.Errorf("stack[%d] = %s -> %s, want %s -> %s", i, stored.Stack[i].Branch, stored.Stack[i].Base, want[i].branch, want[i].base)
+		}
+	}
+}
+
 // TestCLI_StackSetParent_ReparentsPiece is the happy path for `mp stack
 // set-parent`: move piece c from parent a to parent b, verify metadata and
 // that stack status reflects the new lineage.
@@ -468,5 +565,58 @@ func TestCLI_StackUndo_DirtyWorktreeFails(t *testing.T) {
 	}
 	if !strings.Contains(stderr, "uncommitted") && !strings.Contains(stderr, "dirty") {
 		t.Errorf("error should mention dirty/uncommitted state, got: %s", stderr)
+	}
+}
+
+// TestCLI_StackSync_PushSkipsMergedPiece: `mp stack sync --push` must not push
+// a piece that is already merged. Its branch was deleted on the forge when its
+// PR merged; re-creating it resurrects a dead base and breaks the forge's
+// retarget of child PRs onto main.
+func TestCLI_StackSync_PushSkipsMergedPiece(t *testing.T) {
+	env := setupTestEnv(t)
+	defer env.cleanup()
+
+	env.initGitRepo()
+	env.initProject("test")
+	env.gitInDir(env.tmpDir, "add", "-A")
+	env.gitInDir(env.tmpDir, "commit", "-m", "track mp config")
+	bare := env.addBareOrigin()
+
+	pieceA := createPiece(t, env, "a", "main")
+	commitInWorktree(t, pieceA, "a")
+	env.gitInDir(pieceA, "push", "-u", "origin", "a")
+	pieceB := createPiece(t, env, "b", "a")
+	commitInWorktree(t, pieceB, "b")
+
+	// Merge a into main (re-homing b onto main), then delete a on the remote
+	// exactly as a forge does after merging its PR.
+	if stdout, stderr, err := env.runInDir(pieceA, "merge", "--reparent-children"); err != nil {
+		t.Fatalf("merge failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+	env.gitInDir(env.tmpDir, "push", "origin", "main")
+	env.gitInDir(env.tmpDir, "push", "origin", "--delete", "a")
+
+	stdout, stderr, err := env.run("stack", "sync", "--push", "--apply")
+	if err != nil {
+		t.Fatalf("stack sync --push failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+	var result struct {
+		Pushed []string `json:"pushed"`
+		Merged []string `json:"merged"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("invalid JSON output: %v\noutput: %s", err, stdout)
+	}
+	if contains(result.Pushed, "a") || !contains(result.Merged, "a") {
+		t.Errorf("merged piece a must be listed under merged, not pushed: pushed=%v merged=%v", result.Pushed, result.Merged)
+	}
+	if !contains(result.Pushed, "b") {
+		t.Errorf("unmerged piece b should still be pushed: pushed=%v", result.Pushed)
+	}
+	if !strings.Contains(stderr, "Skipped push for 1 merged piece(s): a") {
+		t.Errorf("summary should say the merged piece was skipped:\n%s", stderr)
+	}
+	if heads := gitOut(t, bare, "branch", "--list", "a"); strings.TrimSpace(heads) != "" {
+		t.Errorf("sync --push resurrected merged branch a on the remote: %q", heads)
 	}
 }

@@ -308,3 +308,100 @@ func TestCLI_RemoteDoctor_RegistryScan(t *testing.T) {
 		t.Errorf("no-hosts: err = %v stderr = %q", err, stderr)
 	}
 }
+
+func TestCLI_ProjectList_HiddenRows(t *testing.T) {
+	e := setupTestEnv(t)
+	defer e.cleanup()
+	probe := "mp=mp version v9.9.9\ngit=yes\ntmux=yes\ngh=no\ngh_auth=no\n"
+	shimDir, path := sshShim(t, e, probe, 0)
+
+	if err := os.MkdirAll(e.dataDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	reg := `{"version":"1","projects":[
+		{"name":"api","path":"/local/api","added_at":"2026-01-01T00:00:00Z"},
+		{"name":"api@wire","path":"/home/u/.local/share/mp/api","host":"wire","hidden":true,"linked_from":"/local/api","added_at":"2026-01-01T00:00:00Z"}]}`
+	if err := os.WriteFile(filepath.Join(e.dataDir, "projects.json"), []byte(reg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, err := runProxy(e, path, "", nil, "project", "list", "--json")
+	if err != nil {
+		t.Fatalf("project list: %v\nstderr: %s", err, stderr)
+	}
+	if strings.Contains(stdout, "api@wire") {
+		t.Errorf("hidden row listed without --all:\n%s", stdout)
+	}
+	stdout, stderr, err = runProxy(e, path, "", nil, "project", "list", "--all", "--json")
+	if err != nil {
+		t.Fatalf("project list --all: %v\nstderr: %s", err, stderr)
+	}
+	if !strings.Contains(stdout, "api@wire") || !strings.Contains(stdout, `"hidden": true`) || !strings.Contains(stdout, `"linked_from": "/local/api"`) {
+		t.Errorf("--all missing hidden row fields:\n%s", stdout)
+	}
+	if !strings.Contains(stderr, "(hidden)") {
+		t.Errorf("table stderr = %q, want (hidden) marker", stderr)
+	}
+
+	// The dashboard skips hidden rows too.
+	stdout, _, err = runProxy(e, path, "", nil, "go", "--json")
+	if err == nil && strings.Contains(stdout, "api@wire") {
+		t.Errorf("mp go --json lists hidden row:\n%s", stdout)
+	}
+
+	// doctor with no args still probes the hidden row's box.
+	stdout, _, _ = runProxy(e, path, "", nil, "remote", "doctor")
+	if !strings.Contains(stdout, `"host": "wire"`) {
+		t.Errorf("doctor skipped hidden row's host:\n%s", stdout)
+	}
+	if _, err := os.Stat(filepath.Join(shimDir, "argv")); err != nil {
+		t.Error("doctor did not ssh to hidden row's host")
+	}
+}
+
+func TestCLI_List_IncludesPlacedPieces(t *testing.T) {
+	e := setupTestEnv(t)
+	defer e.cleanup()
+	e.initGitRepo()
+	e.initProject("placed-proj")
+	if _, stderr, err := e.run("create", "--name", "local-a", "--skip-switch"); err != nil {
+		t.Fatalf("create: %v\n%s", err, stderr)
+	}
+	placements := `{"on-wire":{"box":"wire","remote_path":"/home/u/.local/share/mp/placed-proj/.monkeypuzzle/pieces/on-wire","remote_project":"/home/u/.local/share/mp/placed-proj"},"half":{"box":"wire","pending":true}}`
+	if err := os.WriteFile(filepath.Join(e.tmpDir, ".monkeypuzzle", "placements.json"), []byte(placements), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, err := e.run("list", "--flat", "--json")
+	if err != nil {
+		t.Fatalf("list: %v\n%s", err, stderr)
+	}
+	for _, want := range []string{`"name": "local-a"`, `"name": "on-wire"`, `"host": "wire"`, `"state": "unknown"`, `"state": "pending"`} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("list --json missing %s\n%s", want, stdout)
+		}
+	}
+	// A placed name is taken for local creation too.
+	if _, stderr, err := e.run("create", "--name", "on-wire", "--skip-switch"); err == nil || !strings.Contains(stderr, "already exists") {
+		t.Errorf("create over placed name: err = %v stderr = %q", err, stderr)
+	}
+	// Worktree-walking verbs must not trip over placed rows. A fake gh
+	// answers `pr list` so the forge lookup is deterministic.
+	ghDir := filepath.Join(e.tmpDir, "gh-shim")
+	if err := os.MkdirAll(ghDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ghDir, "gh"), []byte("#!/bin/sh\necho '[]'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stdout, stderr, err = runProxy(e, ghDir+string(os.PathListSeparator)+os.Getenv("PATH"), "", nil, "stack", "status", "--json")
+	if err != nil {
+		t.Errorf("stack status with placed rows: %v\n%s", err, stderr)
+	}
+	if strings.Contains(stdout, `"on-wire"`) || !strings.Contains(stdout, `"local-a"`) {
+		t.Errorf("stack status must list local pieces and skip placed rows:\n%s", stdout)
+	}
+	if _, stderr, err := e.run("flatten", "--dry-run"); err != nil {
+		t.Errorf("flatten --dry-run with placed rows: %v\n%s", err, stderr)
+	}
+}

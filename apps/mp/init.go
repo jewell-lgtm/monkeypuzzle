@@ -125,6 +125,9 @@ func runInit(cmd *cobra.Command, args []string) error {
 		if err := handler.EnsureGitignore(mpDir); err != nil {
 			return err
 		}
+		if err := handler.EnsureExclude(cmd.Context(), wd, mpDir); err != nil {
+			return err
+		}
 		fmt.Fprintf(os.Stderr, "Regenerated %s\n", filepath.Join(mpDir, ".gitignore"))
 		return nil
 	}
@@ -212,7 +215,7 @@ func getInput(workDir, mpDir string) (initcmd.Input, error) {
 			return initcmd.Input{}, err
 		}
 
-	case cli.IsTerminal():
+	case cli.IsInteractive():
 		input, err = runInteractiveMode(workDir)
 		if err != nil {
 			return initcmd.Input{}, err

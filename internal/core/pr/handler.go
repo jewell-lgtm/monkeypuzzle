@@ -2,12 +2,17 @@ package pr
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/adapters"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
+	branchcmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/branch"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core/piece"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/projectdir"
 )
@@ -17,6 +22,73 @@ type PRCreateResult struct {
 	PRNumber int    `json:"pr_number"`
 	PRURL    string `json:"pr_url"`
 	Branch   string `json:"branch"`
+}
+
+// ManagedInfo is a PR association recorded on an mp branch layer. The forge
+// remains authoritative for live state; this local record is the mp atom that
+// workflows can compose without discovering unrelated repository PRs.
+type ManagedInfo struct {
+	Number  int    `json:"number"`
+	URL     string `json:"url,omitempty"`
+	Branch  string `json:"branch"`
+	Base    string `json:"base"`
+	Piece   string `json:"piece"`
+	Status  string `json:"status,omitempty"`
+	Current bool   `json:"current,omitempty"`
+}
+
+// List returns PRs recorded against mp-managed branch layers.
+func (h *Handler) List(ctx context.Context, workDir string) ([]ManagedInfo, error) {
+	branches, err := branchcmd.NewHandler(h.deps).List(ctx, workDir)
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]ManagedInfo, 0)
+	for _, branch := range branches {
+		if branch.PRNumber != 0 {
+			rows = append(rows, ManagedInfo{Number: branch.PRNumber, URL: branch.PRURL, Branch: branch.Name, Base: branch.Base, Piece: branch.Piece, Status: branch.Status, Current: branch.Current})
+			continue
+		}
+		legacy, legacyErr := piece.ReadPRMetadata(branch.Worktree, h.deps.FS)
+		if legacyErr != nil {
+			if errors.Is(legacyErr, os.ErrNotExist) {
+				continue
+			}
+			return nil, legacyErr
+		}
+		// A legacy record predates stacks, so it names no branch. It belongs to
+		// the piece's initial layer; attaching it to every layer would report
+		// the same PR once per layer.
+		if legacy.PRNumber != 0 && (legacy.Branch == branch.Name || (legacy.Branch == "" && branch.Initial)) {
+			rows = append(rows, ManagedInfo{Number: legacy.PRNumber, URL: legacy.PRURL, Branch: branch.Name, Base: legacy.BaseBranch, Piece: branch.Piece, Status: "OPEN", Current: branch.Current})
+		}
+	}
+	return rows, nil
+}
+
+// Show resolves a recorded PR by number or branch; an empty selector defaults
+// to the current managed branch.
+func (h *Handler) Show(ctx context.Context, workDir, selector string) (ManagedInfo, error) {
+	rows, err := h.List(ctx, workDir)
+	if err != nil {
+		return ManagedInfo{}, err
+	}
+	selector = strings.TrimSpace(selector)
+	if selector == "" {
+		for _, row := range rows {
+			if row.Current {
+				return row, nil
+			}
+		}
+		return ManagedInfo{}, fmt.Errorf("the current managed branch has no recorded PR")
+	}
+	number, _ := strconv.Atoi(strings.TrimPrefix(selector, "#"))
+	for _, row := range rows {
+		if row.Branch == selector || (number != 0 && row.Number == number) {
+			return row, nil
+		}
+	}
+	return ManagedInfo{}, fmt.Errorf("no mp-managed PR matches %q", selector)
 }
 
 // Handler executes PR-related commands
@@ -76,7 +148,14 @@ func (h *Handler) CreatePR(ctx context.Context, workDir string, input Input) (*P
 		return nil, err
 	}
 
-	// Auto-detect base branch from piece metadata if not explicitly provided
+	// The active branch identifies the stack layer being shipped.
+	branch, err := h.git.CurrentBranch(ctx, workDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get current branch: %w", err)
+	}
+
+	// Auto-detect the base from the current stack entry. V1 pieces without a
+	// stack retain their parent-based behavior.
 	if input.Base == "" {
 		pieceMetadata, err := piece.ReadPieceMetadata(status.WorktreePath, h.deps.FS)
 		if err != nil {
@@ -87,19 +166,22 @@ func (h *Handler) CreatePR(ctx context.Context, workDir string, input Input) (*P
 			input.Base = "main"
 		} else {
 			input.Base = pieceMetadata.Parent
-			if pieceMetadata.Parent != "main" {
+			for _, entry := range pieceMetadata.Stack {
+				if entry.Branch == branch {
+					input.Base = entry.Base
+					break
+				}
+			}
+			if input.Base == "" {
+				input.Base = "main"
+			}
+			if input.Base != "main" {
 				h.deps.Output.Write(core.Message{
 					Type:    core.MsgInfo,
-					Content: fmt.Sprintf("Using parent piece '%s' as PR base", pieceMetadata.Parent),
+					Content: fmt.Sprintf("Using stack base '%s' for branch '%s'", input.Base, branch),
 				})
 			}
 		}
-	}
-
-	// Get current branch
-	branch, err := h.git.CurrentBranch(ctx, workDir)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get current branch: %w", err)
 	}
 
 	// Default the PR title to the piece name when not provided.
@@ -113,6 +195,7 @@ func (h *Handler) CreatePR(ctx context.Context, workDir string, input Input) (*P
 		WorktreePath: status.WorktreePath,
 		RepoRoot:     status.RepoRoot,
 		PRBaseBranch: input.Base,
+		Branch:       branch,
 	}
 
 	// before-pr-create hook (e.g. to write a description file)
@@ -153,6 +236,27 @@ func (h *Handler) CreatePR(ctx context.Context, workDir string, input Input) (*P
 
 	if err := piece.WritePRMetadata(status.WorktreePath, metadata, h.deps.FS); err != nil {
 		return nil, fmt.Errorf("failed to write PR metadata: %w", err)
+	}
+	if pieceMetadata, err := piece.ReadPieceMetadata(status.WorktreePath, h.deps.FS); err == nil {
+		recorded := false
+		for i := range pieceMetadata.Stack {
+			if pieceMetadata.Stack[i].Branch == branch {
+				pieceMetadata.Stack[i].PRNumber = prResult.Number
+				pieceMetadata.Stack[i].PRURL = prResult.URL
+				pieceMetadata.Stack[i].Status = "OPEN"
+				if err := piece.WritePieceMetadata(status.WorktreePath, *pieceMetadata, h.deps.FS); err != nil {
+					return nil, fmt.Errorf("failed to record PR in piece stack: %w", err)
+				}
+				recorded = true
+				break
+			}
+		}
+		if !recorded && len(pieceMetadata.Stack) == 0 {
+			pieceMetadata.Stack = []piece.StackEntry{{Branch: branch, Base: input.Base, PRNumber: prResult.Number, PRURL: prResult.URL, Status: "OPEN"}}
+			if err := piece.WritePieceMetadata(status.WorktreePath, *pieceMetadata, h.deps.FS); err != nil {
+				return nil, fmt.Errorf("failed to bootstrap piece stack with PR: %w", err)
+			}
+		}
 	}
 
 	result := &PRCreateResult{
@@ -221,6 +325,7 @@ func (h *Handler) MarkReady(ctx context.Context, workDir string) error {
 		PRNumber:     metadata.PRNumber,
 		PRURL:        metadata.PRURL,
 		PRBaseBranch: metadata.BaseBranch,
+		Branch:       metadata.Branch,
 	}
 
 	if err := h.hooks.RunHook(ctx, status.RepoRoot, piece.HookBeforePRReady, hookCtx); err != nil {

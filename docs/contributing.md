@@ -6,7 +6,7 @@
 
 - Go 1.24+ (use [mise](https://mise.jdx.dev/) for version management)
 - Git
-- tmux (for the piece commands)
+- tmux (optional; some integration tests skip without it)
 - gh CLI (for the GitHub PR provider) or glab CLI (for the GitLab MR provider)
 
 ### Clone and build
@@ -358,11 +358,15 @@ func runNewCmd(cmd *cobra.Command, args []string) error {
 
 ## Claude / Agent Skills
 
-The repo ships one skill under `.claude/skills/`:
+The repo ships two skills, canonically under `.agents/skills/`:
 
-- **`.claude/skills/managing-monkeypuzzle/SKILL.md` is generated** by `mp claude skill`. Re-run that command to regenerate it; do not hand-edit it, as your changes will be overwritten.
+- **`.agents/skills/managing-monkeypuzzle/SKILL.md`** — the piece/PR/stack workflow inside one repo.
+- **`.agents/skills/monkeypuzzle-inbox/SKILL.md`** — the cross-project inbox, agents, and history. Installed per-machine with `mp skill create monkeypuzzle-inbox --user`, since it works outside any project.
+- **`.claude/skills/<name>` is a symlink** to each, because Claude Code does not read `.agents/skills/`. Both symlinks are committed.
 
-When `mp`'s CLI surface changes, run `mp claude skill` to refresh it.
+Both documents are **generated** by `mp skill create <name>`. Do not hand-edit them — edit the source under `internal/core/skill/assets/`, then re-run the command.
+
+When `mp`'s CLI surface changes, edit the asset and run `mp skill create <name>` to refresh the generated copy.
 
 ---
 

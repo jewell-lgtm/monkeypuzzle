@@ -2,12 +2,29 @@
 
 Monkeypuzzle uses clean architecture with dependency injection for testability.
 
+## Global piece registry
+
+The CLI owns local worktrees and operates independently. Its explicit
+`mp tracking` commands publish stable machine/project/piece identities and
+progress snapshots to mp-server. The server's primary model is the published
+piece, owned by an authenticated developer; a piece does not need a PR or forge
+repository to exist. Developer accounts are private initially.
+
+Postgres is the durable registry. The HTTP API handles idempotent publication
+and removal; the dashboard and MCP `list_pieces` expose the developer's records
+across machines. PR monitoring is an optional secondary subsystem, disabled by
+default, and cannot prevent registry startup. See [the registry
+contract](server-tracking.md) for identity, privacy and prototype limits.
+
 ## Directory Structure
 
 ```
 monkeypuzzle/
 ├── apps/mp/              # CLI wiring (Cobra commands)
 │   ├── root.go          # Root command
+│   ├── atoms.go         # Noun aliases and safe bare-command defaults
+│   ├── branch.go        # Branch atom CLI
+│   ├── worktree.go      # Worktree list/show/delete + management TUI
 │   ├── init.go          # mp init command
 │   └── piece.go         # piece commands (create, status, list, merge, …)
 ├── internal/
@@ -17,23 +34,48 @@ monkeypuzzle/
 │   │   │   ├── input.go     # Input struct, validation, schema
 │   │   │   ├── handler.go   # Business logic
 │   │   │   └── handler_test.go
+│   │   ├── branch/      # Projection of mp-managed stack branch layers
+│   │   ├── worktree/    # Piece-storage projection + lifecycle delegation
 │   │   └── piece/       # Piece command logic
 │   │       ├── input.go
 │   │       ├── handler.go
 │   │       ├── handler_test.go
-│   │       └── hooks.go     # Hook runner for piece operations
+│   │       ├── hooks.go     # Hook runner for piece operations
+│   │       └── placements.go # Controller-side links to pieces placed on boxes
 │   ├── adapters/        # Interface implementations
 │   │   ├── filesystem.go   # OSFS, MemoryFS
 │   │   ├── output.go       # TextOutput, JSONOutput, BufferOutput
 │   │   ├── exec.go         # OSExec, MockExec
 │   │   ├── git.go          # Git operations
-│   │   └── tmux.go         # Tmux operations
+│   │   └── tmux.go … herdr.go  # Multiplexer adapters (tmux, zellij, cmux, herdr)
 │   └── tui/             # Bubble Tea UI
 │       └── init/        # Interactive init wizard
 └── pkg/styles/          # TUI styling
 ```
 
+## Project state on disk
+
+Everything mp keeps for a repo lives under its monkeypuzzle directory
+(`.monkeypuzzle/` by default; relocatable via `mp config`, see
+`internal/projectdir`):
+
+| Path | What |
+| --- | --- |
+| `monkeypuzzle.json` | project config (name, PR provider, multiplexer, …) |
+| `pieces/<name>/` | one git worktree per local piece — **every** directory here is treated as a worktree |
+| `hooks/` | lifecycle hook scripts |
+| `placements.json` | links to pieces placed on a box with `mp create --remote` — `{ "<piece>": {box, remote_path, remote_project, pending, cached} }`; read by `ListPieces` so placed pieces appear alongside local ones (with `host`/`state`), never as worktrees |
+| `logs/` | hook and headless-agent logs |
+
 ## Core Concepts
+
+The user-facing domain model is specified in
+[Atoms and workflows](atoms.md). Core packages own atom invariants; CLI
+workflows compose handlers and adapters. In particular, the `branch` package
+projects mp-managed stack layers, `piece` owns worktrees and lifecycle metadata,
+`stack` owns base→head topology, `worktree` reports piece storage and delegates
+managed culling to `piece`, and `inbox` owns only cross-project ordering
+annotations. Raw Git and terminal-session resources stay behind adapters.
 
 ### Ports (Interfaces)
 
@@ -160,15 +202,35 @@ git.CurrentBranch(workDir)
 git.Merge(workDir, branch)
 ```
 
-**Tmux** - Uses Exec internally:
+**Multiplexer** - Uses Exec internally. `adapters.NewMultiplexer(provider,
+exec)` builds the adapter for the configured provider (`tmux`, `zellij`,
+`cmux`, `herdr`, or the no-op `none`), each implementing `core.Multiplexer`
+— `SwitchTo` (create-or-focus), `Kill`, `Exists`, `InSession`, `IsInstalled`,
+`Name`:
 
 ```go
-tmux := adapters.NewTmux(deps.Exec)
-tmux.NewSession(sessionName, workDir)
-tmux.KillSession(sessionName)
+mux, _ := adapters.NewMultiplexer("herdr", deps.Exec)
+mux.SwitchTo(ctx, sessionName, workDir)
+mux.Kill(ctx, sessionName)
 ```
 
-**HookRunner** - Executes shell scripts with environment variables:
+Two optional extensions are discovered by type assertion, and callers treat
+a failed assertion as "unsupported by this provider":
+
+- `core.PaneOps` (tmux, herdr) — pane-level send/read/list/focus plus
+  `CurrentPane`; powers `mp agent read`/`send`, pane-precise `focus`, and
+  zero-install detection.
+- `core.AgentObserver` (herdr) — the provider's own agent tracking; when
+  present it replaces screen-scraping in `mp agent list` entirely.
+
+**HookRunner** - Executes shell scripts with environment variables. It
+strips inherited `MP_*` from the hook env, so the box-side identity of a
+placed piece (`MP_PLACEMENT_HOST`, `MP_REMOTE`) is re-added to every hook:
+from the env the controller's ssh proxy exported (read once in
+`NewHookRunner`), else from the worktree's `piece-metadata.json`
+(`placement_host`, written by the box-side create). The
+one controller-side hook, `on-box-connect.sh`, runs through the same runner
+with the local repo as root:
 
 ```go
 hooks := piece.NewHookRunner(deps)
@@ -239,6 +301,39 @@ User Input (flags/JSON/TUI)
          ↓
     Adapter implementations execute
 ```
+
+## History log
+
+`internal/core/history` keeps an append-only JSONL audit trail of every
+transition mp performs, global across repositories:
+`$MP_HISTORY_FILE`, else `${XDG_STATE_HOME:-~/.local/state}/monkeypuzzle/history.jsonl`.
+
+- **Format**: one JSON object per line (`ts`, `event`, `project`, `piece`,
+  `branch`, `parent`, `host`, `actor`, `data`); see `mp history` in
+  [commands](./commands.md#mp-history) for the event list.
+- **Append-only**: opened `O_APPEND`, one `write(2)` per event, so concurrent
+  mp processes never interleave a line. Nothing rewrites or truncates it.
+- **Never fails a verb**: `history.Record` downgrades every error to a
+  warning. The hook runner records completed-transition hooks (`on-piece-create`,
+  `after-*`, `agent-*`) before it even looks for a script, so events fire with
+  no hooks configured; transitions without a hook (`done`, `abandon`,
+  `cleanup`, `switch`, `stack sync`) record explicitly in their handlers.
+- **Tests**: packages that emit use `historytest.Main` as their `TestMain`
+  so test runs never touch the real log.
+
+## Inbox state
+
+`internal/core/inbox` keeps the user's global piece order in
+`$MP_CONFIG_DIR/inbox.json` (default `~/.config/monkeypuzzle/inbox.json`,
+beside the user config): `order` (ranked `project/piece` keys), `notes`,
+`snoozed`, and a droppable per-key `cache` of the last forge lookup. Every
+read-modify-write goes through `inbox.Update`, which takes an advisory
+`flock` on `inbox.json.lock` (via the FS's `core.FileLocker`) and writes
+atomically by rename, so concurrent mp processes never lose an edit. Rows
+are assembled from the same sources every other verb uses — `registry` for
+projects, `piece.ListPieces` for worktrees/agents, `stack.IndexPRsByHead`
+for PRs — and urgency is derived on each read, never persisted. `List`
+prunes keys whose piece is gone and saves only when something changed.
 
 ## Testing Strategy
 

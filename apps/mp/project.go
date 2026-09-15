@@ -20,6 +20,7 @@ var (
 	flagProjectAddSchema bool
 	flagProjectRmSchema  bool
 	flagProjectListJSON  bool
+	flagProjectListAll   bool
 )
 
 var projectCmd = &cobra.Command{
@@ -75,7 +76,10 @@ var projectListCmd = &cobra.Command{
 (current branch, number of pieces).
 
 By default a human-readable table is printed; use --json for machine output.
-When stdout is not a terminal, JSON is printed automatically.`,
+When stdout is not a terminal, JSON is printed automatically.
+
+Hidden rows — the box-side clones 'mp create --remote' keeps for placed
+pieces — are skipped unless --all is given.`,
 	Args: cobra.NoArgs,
 	RunE: runProjectList,
 }
@@ -87,6 +91,7 @@ func init() {
 	projectRemoveCmd.Flags().BoolVar(&flagProjectRmSchema, "schema", false, "Print an example input document and exit")
 
 	projectListCmd.Flags().BoolVar(&flagProjectListJSON, "json", false, "Output JSON instead of a table")
+	projectListCmd.Flags().BoolVar(&flagProjectListAll, "all", false, "Include hidden rows (box-side clones of placed pieces)")
 
 	projectCmd.AddCommand(projectAddCmd)
 	projectCmd.AddCommand(projectRemoveCmd)
@@ -242,7 +247,13 @@ func resolveProjectRemoveTarget(args []string) (string, error) {
 // --- list ---
 
 func runProjectList(cmd *cobra.Command, args []string) error {
-	projects, err := projectcmd.List()
+	var projects []projectcmd.Info
+	var err error
+	if flagProjectListAll {
+		projects, err = projectcmd.ListAll()
+	} else {
+		projects, err = projectcmd.List()
+	}
 	if err != nil {
 		return err
 	}
@@ -266,6 +277,8 @@ func runProjectList(cmd *cobra.Command, args []string) error {
 				branch = "(missing)"
 			case !p.IsProject:
 				branch = "(no .monkeypuzzle)"
+			case p.Hidden:
+				branch = "(hidden)"
 			case p.Host != "":
 				branch = "(remote)"
 			case branch == "":

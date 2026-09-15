@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -17,7 +18,6 @@ import (
 	"github.com/jewell-lgtm/monkeypuzzle/internal/adapters"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/config"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
-	agentcmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/agent"
 	piececmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/piece"
 	projectcmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/project"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/projectdir"
@@ -41,26 +41,35 @@ var pieceCreateCmd = &cobra.Command{
 	Use:     "create",
 	Aliases: []string{"new"},
 	Short:   "Create a new puzzle piece",
-	Long: `Create a new puzzle piece by initializing a git worktree and opening a multiplexer session.
-The worktree will be created in a repo-scoped directory within the platform-appropriate data directory (e.g., ~/Library/Application Support/monkeypuzzle/pieces/{repo-hash}/ on macOS, ~/.local/share/monkeypuzzle/pieces/{repo-hash}/ on Linux).`,
+	Long: `Create a new puzzle piece: a git worktree on its own branch, plus a multiplexer
+session when you run mp interactively inside one. Otherwise the worktree path is
+the hand-off — printed on stdout for a human, in the JSON for an agent.
+
+The worktree goes inside the repo, at <repo>/.monkeypuzzle/pieces/<name> (or
+under the directory chosen with ` + "`mp init --dir`" + `), which mp init gitignores.`,
 	Args: cobra.NoArgs,
 	RunE: runPieceCreate,
 }
 
 var pieceUpdateCmd = &cobra.Command{
 	Use:   "update",
-	Short: "Update piece with latest from main branch",
-	Long:  `Merges the main branch into the current piece's history. Must be run from within a piece worktree.`,
-	Args:  cobra.NoArgs,
-	RunE:  runPieceUpdate,
+	Short: "Merge main into the current piece (usually use sync)",
+	Long: `Merge the main branch directly into the current piece. Must be run from a
+piece worktree. Usually use 'mp sync' instead: it follows piece lineage and
+merges the current piece's parent, which is main for a root piece.`,
+	Args: cobra.NoArgs,
+	RunE: runPieceUpdate,
 }
 
 var pieceMergeCmd = &cobra.Command{
 	Use:   "merge",
-	Short: "Merge piece back into main branch",
-	Long:  `Merges the piece branch back into main. Fails if main has commits not in the piece worktree. Must be run from within a piece worktree.`,
-	Args:  cobra.NoArgs,
-	RunE:  runPieceMerge,
+	Short: "Merge the current piece into its parent",
+	Long: `Merge the piece branch into its parent (another piece, or main for a root
+piece). Must be run from within a piece worktree. By default refuses when the
+parent has commits not in the piece worktree; --no-update-check
+(or 'mp config set merge_require_updated false') merges anyway.`,
+	Args: cobra.NoArgs,
+	RunE: runPieceMerge,
 }
 
 var pieceCleanupCmd = &cobra.Command{
@@ -96,8 +105,9 @@ var pieceDoneCmd = &cobra.Command{
 	Short: "Cleanup a piece after merge",
 	Long: `Remove a piece worktree and multiplexer session after the branch has been merged.
 Defaults to the piece you're standing in; name a piece positionally or with
---piece to finish one from anywhere in the repo. Verifies the piece is merged
-before cleanup. Use 'mp abandon' for unmerged pieces.`,
+--piece to finish one from anywhere in the repo. By default refuses an unmerged
+piece; --force (or 'mp config set done_require_merged false') cleans up anyway,
+keeping the branch. Use 'mp abandon' to also drop the branch.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runPieceDone,
 }
@@ -135,7 +145,12 @@ var flagPieceCleanupJSON bool
 var flagAbandonName string
 var flagAbandonPiece string
 var flagDonePiece string
+var flagDoneForce bool
+var flagMergeNoUpdateCheck bool
+var flagMergeForge bool
+var flagMergeLocal bool
 var flagStatusPiece string
+var flagStatusEnsureID bool
 var flagDeleteBranch bool
 var flagOverwriteSession bool
 var flagPieceCreateSchema bool
@@ -151,7 +166,7 @@ var flagPieceAdoptName string
 var flagPieceAdoptParent string
 var flagPieceAdoptSchema bool
 var flagPiecePrompt string
-var flagPieceAgent string
+var flagPieceRemote string
 var flagPieceListFlat bool
 var flagPieceListAll bool
 var flagPieceCreateJSON bool
@@ -171,13 +186,15 @@ func init() {
 	pieceCreateCmd.Flags().BoolVar(&flagOverwriteSession, "overwrite-session", false, "Replace existing main repo multiplexer session")
 	pieceCreateCmd.Flags().BoolVar(&flagPieceCreateSchema, "schema", false, "Print an example input document and exit")
 	pieceCreateCmd.Flags().BoolVar(&flagPieceCreateJSON, "json", false, "Output JSON even on a terminal")
-	pieceCreateCmd.Flags().StringVar(&flagPieceAgent, "agent", "", "Launch an agent in the new piece: claude or codex (typed into the session, or run headless with --prompt)")
-	pieceUpdateCmd.Flags().StringVar(&flagMainBranch, "main", "main", "Main branch name to merge (default: main)")
+	pieceCreateCmd.Flags().BoolVar(&flagOpenAfter, "open", false, "Also open the new worktree with your configured opener (see 'mp open')")
+	pieceCreateCmd.Flags().StringVar(&flagOpenWith, "with", "", "Opener command for --open (overrides $MP_OPEN and open_command)")
+	pieceCreateCmd.Flags().StringVar(&flagPieceRemote, "remote", "", "Place the piece on this ssh box (worktree, hooks, PRs live there; see docs/remote-development.md)")
+	pieceUpdateCmd.Flags().StringVar(&flagMainBranch, "main", "main", "Main branch name to merge")
 	pieceUpdateCmd.Flags().StringVar(&flagMainBranchLegacy, "main-branch", "", "Deprecated alias for --main")
 	_ = pieceUpdateCmd.Flags().MarkDeprecated("main-branch", "use --main")
 	pieceUpdateCmd.Flags().BoolVar(&flagPieceUpdateSchema, "schema", false, "Print an example input document and exit")
 	pieceUpdateCmd.Flags().BoolVar(&flagPieceUpdateJSON, "json", false, "Output JSON even on a terminal")
-	pieceMergeCmd.Flags().StringVar(&flagMainBranch, "main", "main", "Main branch name to merge into (default: main)")
+	pieceMergeCmd.Flags().StringVar(&flagMainBranch, "main", "main", "Trunk branch to use when the piece's parent is main")
 	pieceMergeCmd.Flags().StringVar(&flagMainBranchLegacy, "main-branch", "", "Deprecated alias for --main")
 	_ = pieceMergeCmd.Flags().MarkDeprecated("main-branch", "use --main")
 	pieceMergeCmd.Flags().BoolVar(&flagPieceMergeSchema, "schema", false, "Print an example input document and exit")
@@ -185,7 +202,11 @@ func init() {
 	pieceMergeCmd.Flags().BoolVar(&flagPieceMergeReparent, "reparent-children", false, "Merge a piece that has child pieces: re-home them onto the merge target")
 	pieceMergeCmd.Flags().StringVar(&flagPieceMergeReparentStrategy, "reparent-strategy", "", "How to re-home children: 'rebase' (default, rewrites history) or 'merge' (no force-push)")
 	pieceMergeCmd.Flags().BoolVar(&flagPieceMergeJSON, "json", false, "Output JSON even on a terminal")
-	pieceCleanupCmd.Flags().StringVar(&flagMainBranch, "main", "main", "Main branch name to check for merged status (default: main)")
+	pieceMergeCmd.Flags().BoolVar(&flagMergeNoUpdateCheck, "no-update-check", false, "Merge even if the target has commits not in the piece (conflicts surface from git)")
+	pieceMergeCmd.Flags().BoolVar(&flagMergeForge, "forge", false, "Merge the piece's open PR/MR on the forge instead of locally")
+	pieceMergeCmd.Flags().BoolVar(&flagMergeLocal, "local", false, "Squash-merge into the target branch here, whatever the configured strategy")
+	pieceMergeCmd.MarkFlagsMutuallyExclusive("forge", "local")
+	pieceCleanupCmd.Flags().StringVar(&flagMainBranch, "main", "main", "Main branch name to check for merged status")
 	pieceCleanupCmd.Flags().StringVar(&flagMainBranchLegacy, "main-branch", "", "Deprecated alias for --main")
 	_ = pieceCleanupCmd.Flags().MarkDeprecated("main-branch", "use --main")
 	pieceCleanupCmd.Flags().BoolVar(&flagPieceCleanupApply, "apply", false, "Apply the cleanup (default is a dry-run preview)")
@@ -202,20 +223,22 @@ func init() {
 	pieceAbandonCmd.Flags().BoolVar(&flagPieceAbandonJSON, "json", false, "Output JSON even on a terminal")
 	pieceDoneCmd.Flags().StringVar(&flagDonePiece, "piece", "", "Piece to finish (default: the piece you're in)")
 	pieceDoneCmd.Flags().StringVar(&flagMainBranch, "main", "main", "Main branch to check merge status against")
+	pieceDoneCmd.Flags().BoolVar(&flagDoneForce, "force", false, "Clean up even if the piece is not merged (branch kept locally)")
 	pieceDoneCmd.Flags().StringVar(&flagMainBranchLegacy, "main-branch", "", "Deprecated alias for --main")
 	_ = pieceDoneCmd.Flags().MarkDeprecated("main-branch", "use --main")
 	pieceDoneCmd.Flags().BoolVar(&flagPieceDoneSchema, "schema", false, "Print an example input document and exit")
 	pieceDoneCmd.Flags().BoolVar(&flagPieceDoneJSON, "json", false, "Output JSON even on a terminal")
 	pieceAdoptCmd.Flags().StringVarP(&flagPieceAdoptBranch, "branch", "b", "", "Branch to adopt; local name or remote ref like origin/foo (defaults to current branch when on main)")
 	pieceAdoptCmd.Flags().StringVar(&flagPieceAdoptName, "name", "", "Override piece name (defaults to branch name)")
-	pieceAdoptCmd.Flags().StringVarP(&flagPieceAdoptParent, "parent", "p", "main", "Parent piece name (default: main)")
+	pieceAdoptCmd.Flags().StringVarP(&flagPieceAdoptParent, "parent", "p", "main", "Parent piece name")
 	pieceAdoptCmd.Flags().BoolVar(&flagPieceAdoptSchema, "schema", false, "Print an example input document and exit")
 	pieceAdoptCmd.Flags().BoolVar(&flagPieceAdoptJSON, "json", false, "Output JSON even on a terminal")
 	pieceStatusCmd.Flags().StringVar(&flagStatusPiece, "piece", "", "Piece to inspect (default: the piece you're in)")
-	pieceStatusCmd.Flags().StringVar(&flagMainBranch, "main", "main", "Main branch name (default: main)")
+	pieceStatusCmd.Flags().StringVar(&flagMainBranch, "main", "main", "Main branch name")
 	pieceStatusCmd.Flags().StringVar(&flagMainBranchLegacy, "main-branch", "", "Deprecated alias for --main")
 	_ = pieceStatusCmd.Flags().MarkDeprecated("main-branch", "use --main")
 	pieceStatusCmd.Flags().BoolVar(&flagPieceStatusJSON, "json", false, "Output JSON even on a terminal")
+	pieceStatusCmd.Flags().BoolVar(&flagStatusEnsureID, "ensure-id", false, "Mint and persist the piece's durable id if it does not have one yet")
 	pieceListCmd.Flags().BoolVar(&flagPieceListFlat, "flat", false, "Display pieces in a flat list instead of tree view")
 	pieceListCmd.Flags().BoolVar(&flagPieceListAll, "all", false, "List pieces across all registered projects")
 	pieceListCmd.Flags().BoolVar(&flagPieceListJSON, "json", false, "Output JSON even on a terminal")
@@ -238,6 +261,16 @@ func init() {
 	_ = pieceMergeCmd.RegisterFlagCompletionFunc("main-branch", completeGitBranches)
 	_ = pieceCleanupCmd.RegisterFlagCompletionFunc("main", completeGitBranches)
 	_ = pieceCleanupCmd.RegisterFlagCompletionFunc("main-branch", completeGitBranches)
+	_ = pieceDoneCmd.RegisterFlagCompletionFunc("piece", completePieceNames)
+	_ = pieceStatusCmd.RegisterFlagCompletionFunc("piece", completePieceNames)
+	_ = pieceCreateCmd.RegisterFlagCompletionFunc("parent", completePieceNames)
+	_ = pieceAdoptCmd.RegisterFlagCompletionFunc("parent", completePieceNames)
+
+	// Piece-name completion on every piece positional: without an fzf picker,
+	// tab completion is the picker.
+	for _, c := range []*cobra.Command{pieceStatusCmd, pieceDoneCmd, pieceAbandonCmd, waitCmd} {
+		c.ValidArgsFunction = completePieceNames
+	}
 }
 
 // newPieceHandler creates a piece handler, choosing the multiplexer from the
@@ -252,11 +285,12 @@ func newPieceHandler(deps core.Deps) *piececmd.Handler {
 //
 //   - stdin is a TTY (cli.IsTerminal). Agents and scripts drive mp through its
 //     stateless API (flags / stdin JSON, output captured), which is never a TTY.
-//     MP_TMUX_PLUGIN=1 substitutes for the TTY check: the companion tmux plugin
-//     (apps/tmux) drives mp through the stateless API (no controlling TTY) but
-//     still wants mp to perform the switch-client/session-create. Only the
+//     MP_MUX_PLUGIN=1 substitutes for the TTY check: a companion plugin
+//     (apps/tmux, apps/herdr) drives mp through the stateless API (no
+//     controlling TTY) but still wants mp to perform the switch/create. Only a
 //     plugin sets it, per invocation -- an agent never does. The opt-in is
-//     tmux-specific and never enables other providers.
+//     honored only for providers with such a plugin (pluginCapableProviders);
+//     MP_TMUX_PLUGIN=1 is the legacy tmux-only spelling, kept working.
 //   - the configured multiplexer reports InSession() -- e.g. $TMUX set for tmux
 //     -- so switching can move the user's existing client. The env var alone is
 //     NOT trusted: it is inherited by child processes, so an agent spawned from
@@ -268,7 +302,7 @@ func newPieceHandler(deps core.Deps) *piececmd.Handler {
 // cd into. Config problems also degrade to no-op with a warning so piece
 // commands keep working with a broken user config.
 func chooseMultiplexer(exec core.Exec) core.Multiplexer {
-	pluginDriven := os.Getenv("MP_TMUX_PLUGIN") == "1"
+	pluginDriven := os.Getenv("MP_MUX_PLUGIN") == "1" || os.Getenv("MP_TMUX_PLUGIN") == "1"
 	if !cli.IsTerminal() && !pluginDriven {
 		return adapters.NewNoopMultiplexer()
 	}
@@ -286,16 +320,58 @@ func chooseMultiplexer(exec core.Exec) core.Multiplexer {
 	}
 
 	if !mux.InSession() {
+		warnNotInSession(mux.Name())
 		return adapters.NewNoopMultiplexer()
 	}
 
-	// The plugin opt-in stood in for the TTY check; it is only valid for tmux.
-	if !cli.IsTerminal() && mux.Name() != "tmux" {
+	// The plugin opt-in stood in for the TTY check; it is only valid for the
+	// providers that ship a companion plugin.
+	if !cli.IsTerminal() && !pluginCapableProviders[mux.Name()] {
 		return adapters.NewNoopMultiplexer()
 	}
 
 	return mux
 }
+
+// warnNotInSession tells a human, once per run, why no session is coming: the
+// configured multiplexer is not the one this terminal is inside. Silent for
+// agents (no terminal) — they get the path either way.
+var warnNotInSessionOnce sync.Once
+
+func warnNotInSession(name string) {
+	if name == "none" || !cli.IsInteractive() {
+		return
+	}
+	warnNotInSessionOnce.Do(func() {
+		fmt.Fprintf(os.Stderr, "note: multiplexer is %s but this terminal is not inside it; printing worktree paths instead (mp config set multiplexer none to make that the default)\n", name)
+	})
+}
+
+// handOffSwitch turns a SwitchPiece result into the caller's hand-off: nothing
+// when a session was attached, else the worktree path — on stdout for a human
+// (`cd "$(mp create …)"`), only noted for the shell wrapper when the JSON
+// already printed carries it.
+func handOffSwitch(res piececmd.SwitchResult, err error) func(path string, jsonMode bool) {
+	return func(path string, jsonMode bool) {
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to switch to piece: %v\n", err)
+			return
+		}
+		if res.Method != "path" {
+			return
+		}
+		if jsonMode {
+			noteCwd(path)
+			return
+		}
+		surfacePath(path)
+	}
+}
+
+// pluginCapableProviders are the multiplexers whose companion plugin may set
+// MP_MUX_PLUGIN=1 (or the legacy MP_TMUX_PLUGIN=1) in place of the TTY check
+// in chooseMultiplexer.
+var pluginCapableProviders = map[string]bool{"tmux": true, "herdr": true}
 
 func completePieceNames(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	deps := core.NewDeps(
@@ -456,10 +532,15 @@ func runPieceStatus(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	wd, err := resolvePieceWorkDir(ctx, selector)
+	fs := adapters.NewOSFS("")
+	loc, err := locatePiece(ctx, fs, selector)
 	if err != nil {
 		return err
 	}
+	if loc.placed() {
+		return proxyPlaced(loc, fs, selector, false)
+	}
+	wd := loc.workDir
 
 	deps := core.NewDeps(
 		adapters.NewOSFS(""),
@@ -483,9 +564,22 @@ func runPieceStatus(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Opt-in, because minting an id writes metadata: that dirties the worktree,
+	// which is enough to make `mp cleanup` refuse the piece.
+	if flagStatusEnsureID && status.InPiece && status.ID == "" {
+		id, err := piececmd.EnsurePieceID(status.WorktreePath, adapters.NewOSFS(""))
+		if err != nil {
+			return err
+		}
+		status.ID = id
+	}
+
 	// Output to stderr for human-readable text
 	if status.InPiece {
-		fmt.Fprintf(os.Stderr, "Current piece: %s\n\n", status.PieceName)
+		fmt.Fprintf(os.Stderr, "Current piece: %s\n", status.PieceName)
+		// The worktree path is the one fact a plain terminal can't infer, and
+		// what `cd` needs when no multiplexer session holds the piece.
+		fmt.Fprintf(os.Stderr, "Worktree: %s\n\n", status.WorktreePath)
 
 		// Display parent
 		if status.Parent != "" && status.Parent != "main" {
@@ -572,6 +666,11 @@ func runPieceCreate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// A placed piece is created on its box, not here.
+	if input.Remote != "" {
+		return runPieceCreateRemote(ctx, deps, handler, input)
+	}
+
 	opts := piececmd.CreatePieceOptions{
 		OverwriteSession: input.OverwriteSession,
 	}
@@ -584,7 +683,8 @@ func runPieceCreate(cmd *cobra.Command, args []string) error {
 
 	// On a terminal the handler's success line tells the story; the JSON
 	// payload is for pipes and agents (or --json).
-	if !cli.IsTerminal() || !cli.IsStdoutTerminal() || flagPieceCreateJSON {
+	jsonMode := !cli.IsInteractive() || flagPieceCreateJSON
+	if jsonMode {
 		jsonData, err := json.MarshalIndent(info, "", "  ")
 		if err != nil {
 			return fmt.Errorf("failed to marshal info: %w", err)
@@ -594,69 +694,11 @@ func runPieceCreate(cmd *cobra.Command, args []string) error {
 
 	// Switch to the new piece (unless skip_switch is set)
 	if !input.SkipSwitch {
-		_, err := handler.SwitchPiece(ctx, info.Name)
-		if err != nil {
-			// Non-fatal: log warning but don't fail
-			fmt.Fprintf(os.Stderr, "Warning: failed to switch to piece: %v\n", err)
-		}
+		handOffSwitch(handler.SwitchPiece(ctx, info.Name))(info.WorktreePath, jsonMode)
 	}
+	maybeOpenAfter(ctx, info.WorktreePath)
 
-	if input.Agent != "" {
-		if err := launchAgentInPiece(ctx, deps, info, input); err != nil {
-			// Non-fatal: the piece exists and is usable without the agent.
-			fmt.Fprintf(os.Stderr, "Warning: failed to launch agent: %v\n", err)
-		}
-	} else {
-		cli.Hint("mp pr create --draft")
-	}
-
-	return nil
-}
-
-// launchAgentInPiece starts the requested agent in a fresh piece. With a live
-// multiplexer session the launch line is typed into it (interactive TUI);
-// otherwise the agent runs headless in the worktree — which needs a prompt —
-// detached, logging under the repo's monkeypuzzle logs dir. The agent's own
-// integration hooks (mp integration install) take it from there: status
-// reports need no help from this path.
-func launchAgentInPiece(ctx context.Context, deps core.Deps, info piececmd.PieceInfo, input piececmd.NewPieceInput) error {
-	spec, err := agentcmd.BuildLaunch(input.Agent, input.Prompt)
-	if err != nil {
-		return err
-	}
-
-	mux := chooseMultiplexer(deps.Exec)
-	if pane, ok := mux.(core.PaneOps); ok && mux.Exists(ctx, info.SessionName) {
-		if err := pane.SendText(ctx, info.SessionName, spec.Line); err != nil {
-			return err
-		}
-		fmt.Fprintf(os.Stderr, "Launched %s in session %s\n", spec.Kind, info.SessionName)
-		return nil
-	}
-
-	if len(spec.Argv) == 0 {
-		return fmt.Errorf("headless %s launch needs --prompt (no multiplexer session to type into)", spec.Kind)
-	}
-	repoRoot, err := projectdir.MainRepoRoot(info.WorktreePath)
-	if err != nil {
-		repoRoot = info.WorktreePath
-	}
-	logPath := filepath.Join(projectdir.LogsDir(repoRoot), "agent-"+spec.Kind+"-"+info.Name+".log")
-	// Strip tmux identity from the headless agent's env: inherited TMUX_PANE
-	// would be the *user's* pane, and the agent's report hooks would record it
-	// — after which `mp agent send` / the plugin's focus would target the
-	// user's own shell instead of the agent.
-	env := make([]string, 0, len(os.Environ()))
-	for _, e := range os.Environ() {
-		if strings.HasPrefix(e, "TMUX=") || strings.HasPrefix(e, "TMUX_PANE=") {
-			continue
-		}
-		env = append(env, e)
-	}
-	if err := deps.Exec.StartDetached(info.WorktreePath, env, logPath, spec.Argv[0], spec.Argv[1:]...); err != nil {
-		return err
-	}
-	fmt.Fprintf(os.Stderr, "Launched %s headless in %s; output: %s\n", spec.Kind, info.WorktreePath, logPath)
+	cli.Hint("mp pr create --draft")
 	return nil
 }
 
@@ -681,7 +723,7 @@ func getPieceCreateInput(deps core.Deps, workDir string) (piececmd.NewPieceInput
 		if err != nil {
 			return piececmd.NewPieceInput{}, err
 		}
-	} else if cli.IsTerminal() {
+	} else if cli.IsInteractive() {
 		// Mode 3: Interactive TUI
 		input, err = runPieceCreateTUI(deps, workDir)
 		if err != nil {
@@ -701,8 +743,8 @@ func getPieceCreateInput(deps core.Deps, workDir string) (piececmd.NewPieceInput
 	if flagOverwriteSession {
 		input.OverwriteSession = true
 	}
-	if flagPieceAgent != "" {
-		input.Agent = flagPieceAgent
+	if flagPieceRemote != "" {
+		input.Remote = flagPieceRemote
 	}
 
 	// Apply defaults and validate inside input layer
@@ -710,13 +752,6 @@ func getPieceCreateInput(deps core.Deps, workDir string) (piececmd.NewPieceInput
 	if err := piececmd.ValidateNewPieceInput(input); err != nil {
 		return piececmd.NewPieceInput{}, err
 	}
-	// Fail on an unknown agent kind before the piece is created.
-	if input.Agent != "" {
-		if _, err := agentcmd.BuildLaunch(input.Agent, input.Prompt); err != nil {
-			return piececmd.NewPieceInput{}, err
-		}
-	}
-
 	return input, nil
 }
 
@@ -832,6 +867,10 @@ func runPieceMerge(cmd *cobra.Command, args []string) error {
 		adapters.SetupCLILoading(os.Stderr),
 	)
 	handler := newPieceHandler(deps)
+	if userCfg, err := config.LoadUserConfig(); err == nil {
+		handler.SetMergeRequireUpdated(userCfg.MergeRequiresUpdated())
+		handler.SetMergeStrategyDefault(userCfg.MergeStrategy)
+	}
 
 	// Get input
 	input, err := getMergeInput(cmd)
@@ -843,7 +882,7 @@ func runPieceMerge(cmd *cobra.Command, args []string) error {
 	// handle them, ask (interactively) how to re-home them.
 	if !input.Force && !input.ReparentChildren {
 		if hs, hsErr := handler.GetPieceHierarchyStatus(ctx, wd, input.MainBranch); hsErr == nil && len(hs.Children) > 0 {
-			if cli.IsTerminal() {
+			if cli.IsInteractive() {
 				choice, ok, cerr := chooser.Run(
 					fmt.Sprintf("Piece %q has child pieces", hs.PieceName),
 					[]string{"Children: " + strings.Join(hs.Children, ", "), "Merging it re-homes them onto the merge target."},
@@ -906,6 +945,15 @@ func getMergeInput(cmd *cobra.Command) (piececmd.MergeInput, error) {
 		input.ReparentChildren = true
 		input.ReparentStrategy = flagPieceMergeReparentStrategy
 	}
+	if flagMergeForge {
+		input.Strategy = string(piececmd.MergeForge)
+	}
+	if flagMergeLocal {
+		input.Strategy = string(piececmd.MergeLocal)
+	}
+	if flagMergeNoUpdateCheck {
+		input.NoUpdateCheck = true
+	}
 
 	input = piececmd.WithMergeDefaults(input)
 	if err := piececmd.ValidateMergeInput(input); err != nil {
@@ -958,17 +1006,27 @@ func runPieceCleanup(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("not in a git repository")
 	}
 
-	// Cleanup is dry-run by default. Always preview first, then decide whether to
-	// apply: --apply (or --force) opts in, --dry-run stays a preview, an
-	// interactive terminal is asked to confirm, and any other (non-interactive)
-	// caller previews.
-	output, err := cleanupPass(ctx, handler, repoRoot, input.MainBranch, true)
-	if err != nil {
-		return err
+	// Cleanup is dry-run by default: preview, then decide whether to apply.
+	// --apply (or --yes) opts in, --dry-run stays a preview, an interactive
+	// terminal is asked to confirm, and any other (non-interactive) caller
+	// previews.
+	//
+	// A caller who has already opted in needs no preview. Running one anyway
+	// scanned every piece a second time — each one a git and forge lookup — and
+	// announced "[dry-run] Would cleanup X" on the line above cleaning X.
+	preDecided := input.Apply || flagPieceCleanupYes
+	var output cleanupOutput
+	if !preDecided {
+		if output, err = cleanupPass(ctx, handler, repoRoot, input.MainBranch, true); err != nil {
+			return err
+		}
+		if output.Links, err = checkLinks(repoRoot, deps.FS, true); err != nil {
+			return err
+		}
 	}
 
-	anythingToDo := len(output.CleanedPieces) > 0 || len(output.RemovedProjects) > 0
-	apply, err := resolveApply(input.Apply || flagPieceCleanupYes, input.DryRun, anythingToDo, func() (bool, error) {
+	anythingToDo := len(output.CleanedPieces) > 0 || len(output.RemovedProjects) > 0 || droppableLinks(output.Links) > 0
+	apply, err := resolveApply(preDecided, input.DryRun, anythingToDo, func() (bool, error) {
 		return confirmApply("Clean up merged pieces?", cleanupSummary(output))
 	})
 	if err != nil {
@@ -979,11 +1037,20 @@ func runPieceCleanup(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
+		if output.Links, err = checkLinks(repoRoot, deps.FS, false); err != nil {
+			return err
+		}
 	}
 
 	// Human summary always goes to stderr (like every other command's), so
-	// stdout stays JSON-only.
+	// stdout stays JSON-only — except the main repo root when the sweep took
+	// the directory the caller stood in.
 	fmt.Fprintln(os.Stderr, cleanupHumanSummary(output, apply))
+	if apply {
+		for _, p := range output.CleanedPieces {
+			surfaceRoot(wd, p.WorktreePath, repoRoot, flagPieceCleanupJSON)
+		}
+	}
 	if !apply {
 		cli.Hint("mp cleanup --apply")
 	}
@@ -992,7 +1059,8 @@ func runPieceCleanup(cmd *cobra.Command, args []string) error {
 
 // cleanupHumanSummary is the one-line terminal wrap-up for `mp cleanup`.
 func cleanupHumanSummary(output cleanupOutput, applied bool) string {
-	if len(output.CleanedPieces) == 0 && len(output.RemovedProjects) == 0 {
+	links := droppableLinks(output.Links)
+	if len(output.CleanedPieces) == 0 && len(output.RemovedProjects) == 0 && links == 0 {
 		return "Nothing to clean."
 	}
 	names := make([]string, 0, len(output.CleanedPieces))
@@ -1006,6 +1074,9 @@ func cleanupHumanSummary(output cleanupOutput, applied bool) string {
 	s := fmt.Sprintf("%s %d piece(s): %s", verb, len(names), strings.Join(names, ", "))
 	if n := len(output.RemovedProjects); n > 0 {
 		s += fmt.Sprintf("; pruned %d stale project(s)", n)
+	}
+	if links > 0 {
+		s += fmt.Sprintf("; dropped/healed %d stale/pending placement(s)", links)
 	}
 	return s
 }
@@ -1058,6 +1129,9 @@ func cleanupSummary(out cleanupOutput) string {
 	if len(out.RemovedProjects) > 0 {
 		parts = append(parts, fmt.Sprintf("prune %d deleted project(s)", len(out.RemovedProjects)))
 	}
+	if n := droppableLinks(out.Links); n > 0 {
+		parts = append(parts, fmt.Sprintf("drop or heal %d stale/pending placement(s)", n))
+	}
 	return "Would " + strings.Join(parts, "; ")
 }
 
@@ -1065,6 +1139,9 @@ func cleanupSummary(out cleanupOutput) string {
 type cleanupOutput struct {
 	CleanedPieces   []piececmd.CleanupResult `json:"cleaned_pieces"`
 	RemovedProjects []registry.Project       `json:"removed_projects"`
+	// Links are this project's placements on boxes, each checked against its
+	// box; stale and pending ones are dropped on apply.
+	Links []linkCheck `json:"links,omitempty"`
 }
 
 func getCleanupInput(cmd *cobra.Command) (piececmd.CleanupInput, error) {
@@ -1127,6 +1204,15 @@ func runPieceAbandon(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	if selector != "" {
+		loc, err := locatePiece(ctx, deps.FS, selector)
+		if err != nil {
+			return err
+		}
+		if loc.placed() {
+			return proxyPlaced(loc, deps.FS, selector, true)
+		}
+	}
 	input, err := getAbandonInput(ctx, handler, selector)
 	if err != nil {
 		return err
@@ -1137,11 +1223,17 @@ func runPieceAbandon(cmd *cobra.Command, args []string) error {
 		DeleteBranch: input.DeleteBranch,
 	}
 
+	// Before, not after: abandoning the piece you stand in deletes that
+	// directory, and os.Getwd then fails outright on Linux, silently skipping
+	// the hand-off that leaves the shell somewhere that still exists.
+	cwd, _ := os.Getwd()
+
 	result, err := handler.AbandonPiece(ctx, input.Name, opts)
 	if err != nil {
 		return err
 	}
 
+	surfaceRoot(cwd, result.WorktreePath, result.MainPath, flagPieceAbandonJSON)
 	return emitResult(result, flagPieceAbandonJSON)
 }
 
@@ -1157,14 +1249,23 @@ func runPieceDone(cmd *cobra.Command, args []string) error {
 	}
 
 	ctx := cmd.Context()
+	// The caller's own directory, captured before anything is removed. It is
+	// not loc.workDir, which is the piece being finished — that would report a
+	// hand-off even when the caller stood somewhere else entirely.
+	callerCwd, _ := os.Getwd()
 	selector, err := pieceSelector(args, selectorFlag{"--piece", flagDonePiece})
 	if err != nil {
 		return err
 	}
-	wd, err := resolvePieceWorkDir(ctx, selector)
+	fs := adapters.NewOSFS("")
+	loc, err := locatePiece(ctx, fs, selector)
 	if err != nil {
 		return err
 	}
+	if loc.placed() {
+		return proxyPlaced(loc, fs, selector, true)
+	}
+	wd := loc.workDir
 
 	deps := core.NewDeps(
 		adapters.NewOSFS(""),
@@ -1175,6 +1276,9 @@ func runPieceDone(cmd *cobra.Command, args []string) error {
 	)
 
 	handler := newPieceHandler(deps)
+	if userCfg, err := config.LoadUserConfig(); err == nil {
+		handler.SetDoneRequireMerged(userCfg.DoneRequiresMerged())
+	}
 
 	// Get input
 	input, err := getDoneInput(cmd)
@@ -1187,6 +1291,7 @@ func runPieceDone(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	surfaceRoot(callerCwd, result.WorktreePath, result.MainPath, flagPieceDoneJSON)
 	cli.Hint("mp create, or mp go to pick up other work")
 	return emitResult(result, flagPieceDoneJSON)
 }
@@ -1210,6 +1315,9 @@ func getDoneInput(cmd *cobra.Command) (piececmd.DoneInput, error) {
 	if v, ok := mainBranchFromFlags(cmd); ok {
 		input.Main = v
 		input.MainBranch = v
+	}
+	if flagDoneForce {
+		input.Force = true
 	}
 
 	return piececmd.WithDoneDefaults(input), nil
@@ -1254,7 +1362,8 @@ func runPieceAdopt(cmd *cobra.Command, args []string) error {
 
 	// On a terminal the handler's success line tells the story; the JSON
 	// payload is for pipes and agents (or --json).
-	if !cli.IsTerminal() || !cli.IsStdoutTerminal() || flagPieceAdoptJSON {
+	jsonMode := !cli.IsInteractive() || flagPieceAdoptJSON
+	if jsonMode {
 		jsonData, err := json.MarshalIndent(info, "", "  ")
 		if err != nil {
 			return fmt.Errorf("failed to marshal result: %w", err)
@@ -1262,14 +1371,9 @@ func runPieceAdopt(cmd *cobra.Command, args []string) error {
 		fmt.Println(string(jsonData))
 	}
 
-	// Switch to the adopted piece. In an interactive session this creates and
-	// attaches the piece's multiplexer session; for agents/automation the multiplexer is
-	// the no-op (see chooseMultiplexer), so this does nothing and the caller reads
-	// the worktree path from the JSON above.
-	if _, err := handler.SwitchPiece(ctx, info.Name); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to switch to piece: %v\n", err)
-	}
-
+	// Switch to the adopted piece: the multiplexer session when mp manages
+	// one, else the worktree path (stdout for a human, JSON above for agents).
+	handOffSwitch(handler.SwitchPiece(ctx, info.Name))(info.WorktreePath, jsonMode)
 	return nil
 }
 
@@ -1384,6 +1488,11 @@ func runPieceList(cmd *cobra.Command, args []string) error {
 	// command's summary line, so `mp list | jq` sees only JSON on stdout
 	// (gated the same way as everywhere else) and never a tree it can't parse.
 	renderTree(piececmd.BuildPieceTree(pieces))
+	if len(pieces) > 0 {
+		// One line beats a path on every row: it turns any name above into a
+		// directory you can cd to.
+		fmt.Fprintf(os.Stderr, "\nWorktrees: %s/<piece>\n", filepath.Dir(pieces[0].WorktreePath))
+	}
 	return emitResult(pieces, flagPieceListJSON)
 }
 

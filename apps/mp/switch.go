@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/adapters"
+	"github.com/jewell-lgtm/monkeypuzzle/internal/config"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
 	piececmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/piece"
 	projectcmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/project"
@@ -68,6 +69,9 @@ func init() {
 	switchCmd.Flags().BoolVar(&flagSwitchCreate, "create", false, "Create a new piece when the target matches nothing")
 	switchCmd.Flags().BoolVar(&flagSwitchAll, "all", false, "Interactive picker across all registered projects")
 	switchCmd.Flags().BoolVar(&flagSwitchAllSchema, "schema", false, "Print an example input document and exit")
+	switchCmd.Flags().BoolVar(&flagOpenAfter, "open", false, "Also open the worktree with your configured opener (see 'mp open')")
+	switchCmd.Flags().StringVar(&flagOpenWith, "with", "", "Opener command for --open (overrides $MP_OPEN and open_command)")
+	switchCmd.ValidArgsFunction = completePieceNames
 	rootCmd.AddCommand(switchCmd)
 }
 
@@ -91,8 +95,8 @@ func runSwitchAll(cmd *cobra.Command, args []string) error {
 	}
 
 	if !haveInput {
-		if !cli.IsTerminal() {
-			return fmt.Errorf("no input; pass a target, --piece/--branch, stdin JSON, or run with a terminal")
+		if !cli.IsInteractive() {
+			return fmt.Errorf("no input; pass a target, --piece/--branch, stdin JSON, or run with a terminal (stdin and stdout)")
 		}
 		return runSwitchInteractive(ctx, flagSwitchAll)
 	}
@@ -208,7 +212,7 @@ func runSwitchTarget(ctx context.Context, proj registry.Project, target string, 
 		return attachSession(ctx, info.SessionName, info.WorktreePath)
 	case piececmd.TargetNew:
 		if !create {
-			if cli.IsTerminal() && !cli.HasStdinData() {
+			if cli.IsInteractive() && !cli.HasStdinData() {
 				ok, err := confirmCreateTarget(res.Branch, res.PieceName)
 				if err != nil {
 					return err
@@ -401,4 +405,110 @@ func getSwitchAllInput(args []string) (switchAllInput, bool, error) {
 	default:
 		return switchAllInput{}, false, nil
 	}
+}
+
+// finishAction describes one lifecycle action the picker offers on a piece row:
+// its prompt wording and the options the chooser presents. The picker is the
+// only place these run without the user naming a piece, so the confirmation —
+// and the escalation when mp's own gate refuses — lives here; `mp done` and
+// `mp abandon` themselves stay unprompted.
+type finishAction struct {
+	title    string
+	run      string // label for the plain action
+	runDesc  string
+	force    string // label for the pre-emptive force option
+	forceCue string // what to offer after the plain action is refused
+}
+
+func finishActionFor(action dashboard.Action) (finishAction, bool) {
+	switch action {
+	case dashboard.ActionDone:
+		return finishAction{
+			title:    "Finish",
+			run:      "Finish it",
+			runDesc:  "run the piece-done lifecycle and reclaim its worktree",
+			force:    "Finish it anyway",
+			forceCue: "Clean up regardless (keeps the branch)",
+		}, true
+	case dashboard.ActionAbandon:
+		return finishAction{
+			title:    "Abandon",
+			run:      "Abandon it",
+			runDesc:  "remove the worktree; the branch is kept",
+			force:    "Force-abandon it",
+			forceCue: "Discard the uncommitted changes (keeps the branch)",
+		}, true
+	}
+	return finishAction{}, false
+}
+
+// finishPickedRow confirms and runs a lifecycle action on the piece row the
+// picker was left on. It reports whether the picker should reopen: it should
+// not once the caller's own worktree is gone, since there is nowhere left to
+// return to.
+func finishPickedRow(ctx context.Context, row dashboard.Row, action dashboard.Action) (reopen bool, err error) {
+	spec, ok := finishActionFor(action)
+	if !ok {
+		return true, fmt.Errorf("unknown picker action: %q", action)
+	}
+	label := row.Project + "/" + row.Piece
+	choice, ok, err := chooser.Run(
+		fmt.Sprintf("%s %s?", spec.title, label),
+		[]string{row.WorktreePath},
+		[]chooser.Option{
+			{Label: spec.run, Desc: spec.runDesc, Value: "run"},
+			{Label: spec.force, Desc: spec.forceCue, Value: "force"},
+			{Label: "Cancel", Desc: "leave the piece alone", Value: ""},
+		},
+	)
+	if err != nil || !ok || choice == "" {
+		return true, err
+	}
+
+	// The caller's directory, captured before the worktree it may live in is
+	// removed: os.Getwd fails outright afterwards on Linux.
+	callerCwd, _ := os.Getwd()
+	runErr := runFinish(ctx, row, action, choice == "force")
+	if runErr != nil && choice != "force" {
+		// The gate refused. Show why, then offer the one escalation that gets
+		// past it rather than making the user leave the picker to retry.
+		fmt.Fprintf(os.Stderr, "%s %v\n", cli.GlyphFail, runErr)
+		forced, ok, cerr := chooser.Run(
+			fmt.Sprintf("%s %s anyway?", spec.title, label),
+			[]string{spec.forceCue},
+			[]chooser.Option{
+				{Label: spec.force, Desc: spec.forceCue, Value: "force"},
+				{Label: "Cancel", Desc: "leave the piece alone", Value: ""},
+			},
+		)
+		if cerr != nil || !ok || forced != "force" {
+			return true, cerr
+		}
+		runErr = runFinish(ctx, row, action, true)
+	}
+	if runErr != nil {
+		return true, runErr
+	}
+	// Standing inside the piece that just went: hand the shell somewhere that
+	// still exists instead of reopening a picker in a deleted directory.
+	if piececmd.IsPathInside(callerCwd, row.WorktreePath) {
+		surfaceRoot(callerCwd, row.WorktreePath, row.ProjectPath, false)
+		return false, nil
+	}
+	return true, nil
+}
+
+func runFinish(ctx context.Context, row dashboard.Row, action dashboard.Action, force bool) error {
+	deps := core.NewDeps(adapters.NewOSFS(""), adapters.NewTextOutput(os.Stderr), adapters.NewOSExec(), http.DefaultClient, adapters.SetupCLILoading(os.Stderr))
+	handler := newPieceHandler(deps)
+	if action == dashboard.ActionAbandon {
+		_, err := handler.AbandonPiece(ctx, row.Piece, piececmd.AbandonOptions{Force: force, RepoRoot: row.ProjectPath})
+		return err
+	}
+	if userCfg, err := config.LoadUserConfig(); err == nil {
+		handler.SetDoneRequireMerged(userCfg.DoneRequiresMerged())
+	}
+	input := piececmd.WithDoneDefaults(piececmd.DoneInput{Force: force})
+	_, err := handler.DonePiece(ctx, row.WorktreePath, input)
+	return err
 }

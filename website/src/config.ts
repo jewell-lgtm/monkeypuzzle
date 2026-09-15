@@ -5,7 +5,7 @@
 // (The old SERVER_URL/LOGIN_URL pair pointed "Get started" at a login page
 // that dead-ended at "coming soon" — removed on purpose.)
 export const GITHUB_URL = 'https://github.com/jewell-lgtm/monkeypuzzle';
-export const DOCS_URL = `${GITHUB_URL}#readme`;
+export const DOCS_URL = '/docs/';
 
 // Cloudflare Turnstile SITE key (public by design — safe to commit; the
 // SECRET key lives only in the k8s Secret `monkeypuzzle-website-turnstile`).

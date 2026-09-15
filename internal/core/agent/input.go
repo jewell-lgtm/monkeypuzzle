@@ -10,7 +10,8 @@ import (
 )
 
 // ReportInput holds input for `mp agent report`. ID/Kind/PID/Pane default at
-// the CLI edge (ppid, $TMUX_PANE) so hooks can call it with just --status.
+// the CLI edge (ppid, the configured multiplexer's current pane) so hooks
+// can call it with just --status.
 type ReportInput struct {
 	ID     string `json:"id,omitempty"`
 	Kind   string `json:"kind,omitempty"`
@@ -71,19 +72,19 @@ type ReportResult struct {
 // ListItem is one agent in `mp agent list` output.
 type ListItem struct {
 	// Project is set in cross-project listings (`mp agent list --all`).
-	Project     string    `json:"project,omitempty"`
-	Piece       string    `json:"piece"`
-	SessionName string    `json:"session_name"`
-	ID          string    `json:"id"`
-	Kind        string    `json:"kind,omitempty"`
-	Status      string    `json:"status"`
+	Project     string `json:"project,omitempty"`
+	Piece       string `json:"piece"`
+	SessionName string `json:"session_name"`
+	ID          string `json:"id"`
+	Kind        string `json:"kind,omitempty"`
+	Status      string `json:"status"`
 	// Icon is the single-glyph rendering of Status (🔴/⚡/✅/💤) — the same
 	// mapping Summary uses, so every consumer (this JSON, the tmux plugin)
 	// renders identical icons from one source instead of a second lookup table.
-	Icon string `json:"icon,omitempty"`
-	PID         int       `json:"pid,omitempty"`
-	Pane        string    `json:"pane,omitempty"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	Icon      string    `json:"icon,omitempty"`
+	PID       int       `json:"pid,omitempty"`
+	Pane      string    `json:"pane,omitempty"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // claudeHookPayload is the subset of Claude Code's hook stdin JSON we use.

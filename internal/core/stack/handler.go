@@ -7,9 +7,11 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/adapters"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
+	"github.com/jewell-lgtm/monkeypuzzle/internal/core/history"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core/piece"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core/pr"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/projectdir"
@@ -85,6 +87,8 @@ func (h *Handler) Status(ctx context.Context, workDir string, in StatusInput) (S
 	if err != nil {
 		return StackStatusResult{}, err
 	}
+	// Placed pieces have no local worktree or metadata to reconcile.
+	items = piece.LocalPieces(items)
 
 	result := StackStatusResult{MainBranch: in.MainBranch}
 
@@ -104,7 +108,7 @@ func (h *Handler) Status(ctx context.Context, workDir string, in StatusInput) (S
 	result.GitHubChecked = forgeAvailable
 	result.ForgeChecked = forgeAvailable
 
-	prByHead := indexPRsByHead(prs)
+	prByHead := IndexPRsByHead(prs)
 
 	// Reconstruct local lineage from PR/MR bases (machine-#2 rebuild). Metadata-only.
 	if in.fromRemote() && forgeAvailable {
@@ -124,6 +128,7 @@ func (h *Handler) Status(ctx context.Context, workDir string, in StatusInput) (S
 			if items, err = h.pieces.ListPieces(ctx, mainRepoRoot); err != nil {
 				return StackStatusResult{}, err
 			}
+			items = piece.LocalPieces(items)
 		}
 	}
 
@@ -243,7 +248,11 @@ func (h *Handler) Sync(ctx context.Context, workDir string, in SyncInput) (SyncR
 		return result, err
 	}
 
+	if len(result.Merged) > 0 {
+		h.emit(core.MsgInfo, fmt.Sprintf("Skipped push for %d merged piece(s): %s (run 'mp cleanup' to remove them)", len(result.Merged), strings.Join(result.Merged, ", ")))
+	}
 	h.emit(core.MsgSuccess, fmt.Sprintf("Stack synced (%s): %d piece(s) updated", in.Strategy, len(result.Updated)))
+	history.Record(h.deps.Output, history.Event{Event: "stack.synced", Project: piece.ProjectName(mainRepoRoot, h.deps.FS), Data: map[string]any{"strategy": in.Strategy, "pieces": result.Updated, "pushed": result.Pushed}})
 	return result, nil
 }
 
@@ -363,11 +372,7 @@ func (h *Handler) syncMerge(ctx context.Context, piecesDir string, roots []strin
 			}
 			result.Updated = append(result.Updated, n.name)
 			if in.Push {
-				if err := h.git.Push(ctx, wt); err != nil {
-					h.emit(core.MsgWarning, fmt.Sprintf("Push failed for %q: %v", n.name, err))
-				} else {
-					result.Pushed = append(result.Pushed, n.name)
-				}
+				h.pushSynced(ctx, piecesDir, n.name, in.MainBranch, false, &result)
 			}
 		} else {
 			result.Skipped = append(result.Skipped, n.name)
@@ -384,6 +389,36 @@ func (h *Handler) syncMerge(ctx context.Context, piecesDir string, roots []strin
 	}
 
 	return result, nil
+}
+
+// pushSynced pushes one just-synced piece branch, force-with-lease when the
+// sync rewrote it. A piece already merged (same detection cleanup uses: recorded
+// marker, is-piece-done hook, PR state, ancestry) is never pushed: its branch was
+// deleted on the forge when its PR merged, and re-creating it resurrects a dead
+// base and breaks the forge's retarget of child PRs onto main.
+func (h *Handler) pushSynced(ctx context.Context, piecesDir, name, mainBranch string, force bool, result *SyncResult) {
+	wt := filepath.Join(piecesDir, name)
+	status, err := h.pieces.IsBranchMerged(ctx, wt, name, mainBranch)
+	if err != nil {
+		h.emit(core.MsgWarning, fmt.Sprintf("Push skipped for %q: failed to check merge status: %v", name, err))
+		return
+	}
+	if status.IsMerged {
+		h.emit(core.MsgInfo, fmt.Sprintf("Not pushing %q: already merged (via %s)", name, status.Method))
+		result.Merged = append(result.Merged, name)
+		return
+	}
+	if force {
+		h.emit(core.MsgWarning, forcePushMsg(name))
+		err = h.git.PushForceWithLease(ctx, wt)
+	} else {
+		err = h.git.Push(ctx, wt)
+	}
+	if err != nil {
+		h.emit(core.MsgWarning, fmt.Sprintf("Push failed for %q: %v", name, err))
+		return
+	}
+	result.Pushed = append(result.Pushed, name)
 }
 
 // mergePieceWithStash stashes any uncommitted changes, merges parentBranch into the
@@ -471,13 +506,7 @@ func (h *Handler) syncRebase(ctx context.Context, mainRepoRoot, piecesDir string
 		result.Updated = append(result.Updated, migrated...)
 		if in.Push {
 			for _, p := range migrated {
-				wt := filepath.Join(piecesDir, p)
-				h.emit(core.MsgWarning, forcePushMsg(p))
-				if err := h.git.PushForceWithLease(ctx, wt); err != nil {
-					h.emit(core.MsgWarning, fmt.Sprintf("Force-push failed for %q: %v", p, err))
-				} else {
-					result.Pushed = append(result.Pushed, p)
-				}
+				h.pushSynced(ctx, piecesDir, p, in.MainBranch, true, &result)
 			}
 		}
 	}
@@ -612,33 +641,141 @@ func inScope(scope map[string]bool, name string) bool {
 
 // ---- Append / Prepend ------------------------------------------------------
 
-// Append creates a new piece as a child of the current piece (a new branch on top).
-func (h *Handler) Append(ctx context.Context, workDir string, in AppendInput) (piece.PieceInfo, error) {
+// Append creates a new branch on top of the current piece's stack and checks it
+// out in that piece's existing worktree.
+func (h *Handler) Append(ctx context.Context, workDir string, in AppendInput) (AppendResult, error) {
 	if err := ValidateAppendInput(in); err != nil {
-		return piece.PieceInfo{}, err
+		return AppendResult{}, err
 	}
 	st, err := h.pieces.Status(ctx, workDir)
 	if err != nil {
-		return piece.PieceInfo{}, err
+		return AppendResult{}, err
 	}
 	if !st.InPiece {
-		return piece.PieceInfo{}, fmt.Errorf("'mp stack append' must run from inside a piece worktree; use 'mp create' to start a new root piece")
+		return AppendResult{}, fmt.Errorf("'mp stack append' must run from inside a piece worktree; use 'mp create' to start a new root piece")
 	}
 	mainRepoRoot, _, err := h.resolveRepo(ctx, workDir)
 	if err != nil {
-		return piece.PieceInfo{}, err
+		return AppendResult{}, err
+	}
+	branch := strings.TrimSpace(in.Name)
+	if branch == "" {
+		// SanitizePieceName falls back to the literal "piece", so a prompt with
+		// nothing nameable in it would silently produce that branch.
+		if !hasNameableRune(in.Prompt) {
+			return AppendResult{}, fmt.Errorf("stack branch name is required; --prompt %q contains no letters or digits to name a branch after", in.Prompt)
+		}
+		branch = piece.SanitizePieceName(in.Prompt)
+	}
+	if h.git.LocalBranchExists(ctx, mainRepoRoot, branch) {
+		return AppendResult{}, fmt.Errorf("branch %q already exists", branch)
 	}
 
-	input := piece.WithNewPieceDefaults(piece.NewPieceInput{
-		Name:       in.Name,
-		Prompt:     in.Prompt,
-		Parent:     st.PieceName,
-		SkipSwitch: true,
-	})
-	if err := piece.ValidateNewPieceInput(input); err != nil {
-		return piece.PieceInfo{}, err
+	metadata, err := piece.ReadPieceMetadata(st.WorktreePath, h.deps.FS)
+	if err != nil {
+		return AppendResult{}, err
 	}
-	return h.pieces.CreatePieceWithInput(ctx, input, piece.CreatePieceOptions{Parent: st.PieceName, RepoRoot: mainRepoRoot})
+	currentBranch, err := h.git.CurrentBranch(ctx, st.WorktreePath)
+	if err != nil {
+		return AppendResult{}, err
+	}
+	if len(metadata.Stack) == 0 {
+		base := metadata.Parent
+		if base == "" {
+			base = "main"
+		}
+		metadata.Stack = []piece.StackEntry{{Branch: currentBranch, Base: base}}
+	}
+	tip := metadata.Stack[len(metadata.Stack)-1].Branch
+	if currentBranch != tip {
+		return AppendResult{}, fmt.Errorf("piece %q is checked out on %q, but its stack tip is %q", st.PieceName, currentBranch, tip)
+	}
+
+	if err := h.git.CreateAndCheckoutBranch(ctx, st.WorktreePath, branch); err != nil {
+		return AppendResult{}, err
+	}
+	metadata.Stack = append(metadata.Stack, piece.StackEntry{Branch: branch, Base: tip})
+	if err := piece.WritePieceMetadata(st.WorktreePath, *metadata, h.deps.FS); err != nil {
+		// Keep Git and metadata aligned when persisting the new topology fails.
+		_ = h.git.Checkout(ctx, st.WorktreePath, tip)
+		_ = h.git.BranchDelete(ctx, mainRepoRoot, branch, true)
+		return AppendResult{}, fmt.Errorf("failed to record stack branch %q: %w", branch, err)
+	}
+
+	h.emit(core.MsgSuccess, fmt.Sprintf("Appended branch %q to piece %q in %s", branch, st.PieceName, st.WorktreePath))
+	history.Record(h.deps.Output, history.Event{Event: "stack.appended", Project: piece.ProjectName(mainRepoRoot, h.deps.FS), Piece: st.PieceName, Data: map[string]any{"branch": branch, "base": tip}})
+	return AppendResult{Piece: st.PieceName, WorktreePath: st.WorktreePath, Branch: branch, Base: tip}, nil
+}
+
+// Remove deletes the current managed stack tip and checks out its recorded
+// base. The initial branch belongs to the piece lifecycle and is never removed
+// through the branch atom.
+func (h *Handler) Remove(ctx context.Context, workDir string, in RemoveInput) (RemoveResult, error) {
+	st, err := h.pieces.Status(ctx, workDir)
+	if err != nil {
+		return RemoveResult{}, err
+	}
+	if !st.InPiece {
+		return RemoveResult{}, fmt.Errorf("'mp branch delete' must run from inside a piece worktree")
+	}
+	if clean, err := h.git.IsClean(ctx, st.WorktreePath); err != nil {
+		return RemoveResult{}, err
+	} else if !clean {
+		return RemoveResult{}, fmt.Errorf("piece %q has uncommitted changes; commit or stash them before removing a branch layer", st.PieceName)
+	}
+	metadata, err := piece.ReadPieceMetadata(st.WorktreePath, h.deps.FS)
+	if err != nil {
+		return RemoveResult{}, err
+	}
+	current, err := h.git.CurrentBranch(ctx, st.WorktreePath)
+	if err != nil {
+		return RemoveResult{}, err
+	}
+	name := strings.TrimSpace(in.Name)
+	if name == "" {
+		name = current
+	}
+	if len(metadata.Stack) <= 1 {
+		if len(metadata.Stack) == 1 && name != metadata.Stack[0].Branch {
+			return RemoveResult{}, fmt.Errorf("branch %q is not managed by piece %q; adopt it as a piece first", name, st.PieceName)
+		}
+		return RemoveResult{}, fmt.Errorf("branch %q is the initial branch of piece %q; use 'mp piece done' or 'mp piece abandon'", current, st.PieceName)
+	}
+	tip := metadata.Stack[len(metadata.Stack)-1]
+	if name != tip.Branch {
+		return RemoveResult{}, fmt.Errorf("branch %q is not the managed stack tip %q; only the tip can be removed", name, tip.Branch)
+	}
+	if current != tip.Branch {
+		return RemoveResult{}, fmt.Errorf("piece %q is checked out on %q, but its managed stack tip is %q", st.PieceName, current, tip.Branch)
+	}
+	if tip.PRNumber != 0 && !in.Force {
+		return RemoveResult{}, fmt.Errorf("branch %q has recorded PR #%d; pass --force to remove the branch layer anyway", tip.Branch, tip.PRNumber)
+	}
+
+	previous := append([]piece.StackEntry(nil), metadata.Stack...)
+	metadata.Stack = metadata.Stack[:len(metadata.Stack)-1]
+	if err := piece.WritePieceMetadata(st.WorktreePath, *metadata, h.deps.FS); err != nil {
+		return RemoveResult{}, fmt.Errorf("failed to update stack metadata: %w", err)
+	}
+	restore := func() { metadata.Stack = previous; _ = piece.WritePieceMetadata(st.WorktreePath, *metadata, h.deps.FS) }
+	if err := h.git.Checkout(ctx, st.WorktreePath, tip.Base); err != nil {
+		restore()
+		return RemoveResult{}, err
+	}
+	mainRepoRoot, _, err := h.resolveRepo(ctx, workDir)
+	if err != nil {
+		_ = h.git.Checkout(ctx, st.WorktreePath, tip.Branch)
+		restore()
+		return RemoveResult{}, err
+	}
+	if err := h.git.BranchDelete(ctx, mainRepoRoot, tip.Branch, in.Force); err != nil {
+		_ = h.git.Checkout(ctx, st.WorktreePath, tip.Branch)
+		restore()
+		return RemoveResult{}, err
+	}
+	h.emit(core.MsgSuccess, fmt.Sprintf("Removed branch %q from piece %q; now on %q", tip.Branch, st.PieceName, tip.Base))
+	history.Record(h.deps.Output, history.Event{Event: "stack.removed", Project: piece.ProjectName(mainRepoRoot, h.deps.FS), Piece: st.PieceName, Data: map[string]any{"branch": tip.Branch, "base": tip.Base}})
+	return RemoveResult{Piece: st.PieceName, WorktreePath: st.WorktreePath, Branch: tip.Branch, Base: tip.Base, BranchDeleted: true}, nil
 }
 
 // Prepend inserts a new piece between the current piece and its parent. The new
@@ -830,4 +967,15 @@ func forcePushMsg(piece string) string {
 
 func rebaseStillConflictedMsg(path string) string {
 	return fmt.Sprintf("Rebase still has unresolved conflicts in %s. Resolve them (the conflicted files), 'git add' them, then run 'mp stack continue' again. Or 'git rebase --abort' to back out.", path)
+}
+
+// hasNameableRune reports whether s has anything SanitizePieceName could build
+// a branch name from.
+func hasNameableRune(s string) bool {
+	for _, r := range s {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			return true
+		}
+	}
+	return false
 }

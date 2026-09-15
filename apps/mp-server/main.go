@@ -1,10 +1,10 @@
-// Command mp-server is the Monkey Puzzle web + MCP server. It runs in two modes:
+// Command mp-server is the global piece registry, with private developer accounts.
+// It runs in two modes:
 //
-//	mp-server serve    # HTTP: HTML UI (humans) + MCP endpoint (agents)
-//	mp-server worker   # Temporal worker syncing GitHub -> Postgres
+//	mp-server serve    # registry HTTP API, dashboard and MCP
+//	mp-server worker   # optional PR monitoring, PR_SYNC_ENABLED=true
 //
-// Both read configuration from the environment (see config.go). docker-compose
-// brings up Postgres + a Temporal dev server + both modes.
+// The registry needs Postgres and authentication. Temporal is optional.
 package main
 
 import (
@@ -15,16 +15,16 @@ import (
 )
 
 func main() {
-	root := &cobra.Command{Use: "mp-server", Short: "Monkey Puzzle web + MCP server"}
+	root := &cobra.Command{Use: "mp-server", Short: "Global piece registry for Monkeypuzzle"}
 	root.AddCommand(
 		&cobra.Command{
 			Use:   "serve",
-			Short: "Run the HTTP server (HTML UI + MCP endpoint)",
+			Short: "Run the piece registry (HTTP API, dashboard and MCP)",
 			RunE:  func(*cobra.Command, []string) error { return runServe() },
 		},
 		&cobra.Command{
 			Use:   "worker",
-			Short: "Run the Temporal sync worker",
+			Short: "Run the optional PR-monitoring worker",
 			RunE:  func(*cobra.Command, []string) error { return runWorker() },
 		},
 	)

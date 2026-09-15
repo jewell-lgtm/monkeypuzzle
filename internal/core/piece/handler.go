@@ -11,6 +11,8 @@ import (
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/adapters"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core"
+	"github.com/jewell-lgtm/monkeypuzzle/internal/core/history"
+	initcmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/init"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/core/session"
 	"github.com/jewell-lgtm/monkeypuzzle/internal/projectdir"
 )
@@ -22,10 +24,18 @@ const (
 
 // Handler executes piece-related commands
 type Handler struct {
-	deps  core.Deps
-	git   *adapters.Git
-	mux   core.Multiplexer
-	hooks *HookRunner
+	deps core.Deps
+	git  *adapters.Git
+	// mergeStrategyDefault is the user-level merge strategy fallback.
+	mergeStrategyDefault string
+	mux                  core.Multiplexer
+	hooks                *HookRunner
+	// doneRequireMerged mirrors the user config key done_require_merged:
+	// when false, DonePiece cleans up unmerged pieces without --force.
+	doneRequireMerged bool
+	// mergeRequireUpdated mirrors the user config key merge_require_updated:
+	// when false, MergePiece proceeds even if the target is ahead.
+	mergeRequireUpdated bool
 }
 
 // NewHandler creates a new piece handler with dependencies.
@@ -37,11 +47,23 @@ func NewHandler(deps core.Deps) *Handler {
 // NewHandlerWithMultiplexer creates a new piece handler with a specific multiplexer.
 func NewHandlerWithMultiplexer(deps core.Deps, mux core.Multiplexer) *Handler {
 	return &Handler{
-		deps:  deps,
-		git:   adapters.NewGit(deps.Exec),
-		mux:   mux,
-		hooks: NewHookRunner(deps),
+		deps:                deps,
+		git:                 adapters.NewGit(deps.Exec),
+		mux:                 mux,
+		hooks:               NewHookRunner(deps),
+		doneRequireMerged:   true,
+		mergeRequireUpdated: true,
 	}
+}
+
+// SetDoneRequireMerged applies the done_require_merged user config key.
+func (h *Handler) SetDoneRequireMerged(v bool) {
+	h.doneRequireMerged = v
+}
+
+// SetMergeRequireUpdated applies the merge_require_updated user config key.
+func (h *Handler) SetMergeRequireUpdated(v bool) {
+	h.mergeRequireUpdated = v
 }
 
 // CreatePieceOptions configures piece creation behavior
@@ -114,6 +136,7 @@ func (h *Handler) CreatePiece(ctx context.Context, pieceName string, opts Create
 	if err != nil {
 		return PieceInfo{}, fmt.Errorf("failed to get pieces directory: %w", err)
 	}
+	h.ensureStateExcluded(ctx, repoRoot)
 
 	// Use provided name or generate one
 	if pieceName == "" {
@@ -125,11 +148,12 @@ func (h *Handler) CreatePiece(ctx context.Context, pieceName string, opts Create
 	} else {
 		// Sanitize the provided name (convert spaces to hyphens, lowercase, etc.)
 		pieceName = SanitizePieceName(pieceName)
-		// Validate that the sanitized name doesn't already exist
-		piecePath := filepath.Join(piecesDir, pieceName)
-		_, err := h.deps.FS.Stat(piecePath)
-		if err == nil {
-			return PieceInfo{}, fmt.Errorf("piece name %q already exists at %s", pieceName, piecePath)
+		// Validate that the sanitized name doesn't already exist (as a
+		// worktree here or as a placement on a box)
+		if taken, err := h.PieceExists(repoRoot, pieceName); err != nil {
+			return PieceInfo{}, err
+		} else if taken {
+			return PieceInfo{}, fmt.Errorf("%w: %q in %s", ErrPieceExists, pieceName, repoRoot)
 		}
 	}
 
@@ -186,8 +210,11 @@ func (h *Handler) CreatePiece(ctx context.Context, pieceName string, opts Create
 
 	// Write piece metadata (parent-child relationship)
 	pieceMetadata := PieceMetadata{
+		ID:                NewPieceID(),
 		Parent:            parent,
 		CreatedFromBranch: currentBranch,
+		PlacementHost:     h.hooks.placementHost,
+		Stack:             []StackEntry{{Branch: newBranch, Base: parent}},
 	}
 	if err := WritePieceMetadata(worktreePath, pieceMetadata, h.deps.FS); err != nil {
 		// Non-fatal: log warning but continue
@@ -199,6 +226,7 @@ func (h *Handler) CreatePiece(ctx context.Context, pieceName string, opts Create
 
 	sessionName := h.pieceSessionName(repoRoot, pieceName)
 	info := PieceInfo{
+		ID:           pieceMetadata.ID,
 		Name:         pieceName,
 		WorktreePath: worktreePath,
 		SessionName:  sessionName,
@@ -209,7 +237,14 @@ func (h *Handler) CreatePiece(ctx context.Context, pieceName string, opts Create
 		PieceName:    pieceName,
 		WorktreePath: worktreePath,
 		RepoRoot:     repoRoot,
-		SessionName:  sessionName,
+		Branch:       newBranch,
+		Parent:       parent,
+	}
+	// MP_SESSION_NAME only when mp actually manages a session: a hook that
+	// targets it (tmux send-keys …) would otherwise fail silently for a user
+	// with no multiplexer.
+	if !adapters.IsNoopMultiplexer(h.mux) {
+		hookCtx.SessionName = sessionName
 	}
 	if err := h.hooks.RunHookDetached(repoRoot, HookOnPieceCreate, hookCtx); err != nil {
 		// The hook runs fire-and-forget so its setup work (dependency installs,
@@ -259,6 +294,8 @@ func (h *Handler) AdoptPiece(ctx context.Context, input AdoptPieceInput) (PieceI
 			}
 		}
 	}
+
+	h.ensureStateExcluded(ctx, repoRoot)
 
 	// Detect if we're inside a worktree — affects defaulting and clean check.
 	// When the caller provides RepoRoot we treat it as a main repo (not a
@@ -315,10 +352,11 @@ func (h *Handler) AdoptPiece(ctx context.Context, input AdoptPieceInput) (PieceI
 		return PieceInfo{}, fmt.Errorf("failed to get pieces directory: %w", err)
 	}
 
-	// Check if piece name already exists
-	piecePath := filepath.Join(piecesDir, pieceName)
-	if _, err := h.deps.FS.Stat(piecePath); err == nil {
-		return PieceInfo{}, fmt.Errorf("piece name %q already exists at %s", pieceName, piecePath)
+	// Check if piece name already exists (worktree here or placement on a box)
+	if taken, err := h.PieceExists(repoRoot, pieceName); err != nil {
+		return PieceInfo{}, err
+	} else if taken {
+		return PieceInfo{}, fmt.Errorf("%w: %q in %s", ErrPieceExists, pieceName, repoRoot)
 	}
 
 	// Create pieces directory if it doesn't exist
@@ -378,7 +416,7 @@ func (h *Handler) AdoptPiece(ctx context.Context, input AdoptPieceInput) (PieceI
 			if err := h.git.WorktreePrune(ctx, repoRoot); err != nil {
 				return PieceInfo{}, fmt.Errorf("branch %q was checked out in a worktree whose directory is gone, and pruning the stale record failed: %w", branchToAdopt, err)
 			}
-		case isPathInside(holder.Path, piecesDir):
+		case IsPathInside(holder.Path, piecesDir):
 			return PieceInfo{}, fmt.Errorf("branch %q is already a piece (checked out at %s); use `mp switch` instead", branchToAdopt, holder.Path)
 		case mainHolds:
 			stashed, err := h.git.StashPush(ctx, repoRoot)
@@ -423,8 +461,10 @@ func (h *Handler) AdoptPiece(ctx context.Context, input AdoptPieceInput) (PieceI
 
 	// Write piece metadata
 	pieceMetadata := PieceMetadata{
+		ID:                NewPieceID(),
 		Parent:            parent,
 		CreatedFromBranch: branchToAdopt,
+		PlacementHost:     h.hooks.placementHost,
 	}
 	if err := WritePieceMetadata(worktreePath, pieceMetadata, h.deps.FS); err != nil {
 		h.deps.Output.Write(core.Message{
@@ -435,6 +475,7 @@ func (h *Handler) AdoptPiece(ctx context.Context, input AdoptPieceInput) (PieceI
 
 	sessionName := h.pieceSessionName(repoRoot, pieceName)
 	info := PieceInfo{
+		ID:           pieceMetadata.ID,
 		Name:         pieceName,
 		WorktreePath: worktreePath,
 		SessionName:  sessionName,
@@ -446,6 +487,8 @@ func (h *Handler) AdoptPiece(ctx context.Context, input AdoptPieceInput) (PieceI
 		WorktreePath: worktreePath,
 		RepoRoot:     repoRoot,
 		SessionName:  sessionName,
+		Branch:       branchToAdopt,
+		Parent:       parent,
 	}
 	if err := h.hooks.RunHookDetached(repoRoot, HookOnPieceCreate, hookCtx); err != nil {
 		// Fire-and-forget; only a failure to start lands here. Non-fatal: keep
@@ -461,6 +504,7 @@ func (h *Handler) AdoptPiece(ctx context.Context, input AdoptPieceInput) (PieceI
 		Content: fmt.Sprintf("Adopted branch %s as piece: %s at %s", branchToAdopt, pieceName, worktreePath),
 		Data:    info,
 	})
+	h.record(repoRoot, "piece.adopted", pieceName, branchToAdopt, nil)
 
 	return info, nil
 }
@@ -561,8 +605,16 @@ func (h *Handler) Status(ctx context.Context, workDir string) (PieceStatus, erro
 		repoRoot = ""
 	}
 
+	// Read-only: minting an id here would dirty the worktree, which is enough
+	// to make `mp cleanup` refuse the piece. Use EnsurePieceID explicitly.
+	pieceID := ""
+	if metadata, err := ReadPieceMetadata(worktreePath, h.deps.FS); err == nil {
+		pieceID = metadata.ID
+	}
+
 	return PieceStatus{
 		InPiece:      true,
+		ID:           pieceID,
 		PieceName:    pieceName,
 		WorktreePath: worktreePath,
 		RepoRoot:     repoRoot,
@@ -713,7 +765,7 @@ func (h *Handler) UpdatePiece(ctx context.Context, workDir, mainBranch string) (
 	}
 
 	// Get current branch to verify we're on a branch
-	_, err = h.git.CurrentBranch(ctx, workDir)
+	branch, err := h.git.CurrentBranch(ctx, workDir)
 	if err != nil {
 		return UpdateResult{}, fmt.Errorf("failed to get current branch: %w", err)
 	}
@@ -724,6 +776,7 @@ func (h *Handler) UpdatePiece(ctx context.Context, workDir, mainBranch string) (
 		WorktreePath: status.WorktreePath,
 		RepoRoot:     status.RepoRoot,
 		MainBranch:   mainBranch,
+		Branch:       branch,
 	}
 
 	// Run before-piece-update hook
@@ -771,7 +824,8 @@ func (h *Handler) SyncPiece(ctx context.Context, workDir string, input SyncInput
 		return SyncResult{}, ErrNotInPiece
 	}
 
-	if _, err := h.git.CurrentBranch(ctx, workDir); err != nil {
+	branch, err := h.git.CurrentBranch(ctx, workDir)
+	if err != nil {
 		return SyncResult{}, fmt.Errorf("failed to get current branch: %w", err)
 	}
 
@@ -804,6 +858,8 @@ func (h *Handler) SyncPiece(ctx context.Context, workDir string, input SyncInput
 		WorktreePath: status.WorktreePath,
 		RepoRoot:     status.RepoRoot,
 		MainBranch:   hookMainBranch,
+		Branch:       branch,
+		Parent:       parent,
 	}
 
 	if err := h.hooks.RunHook(ctx, status.RepoRoot, HookBeforePieceUpdate, hookCtx); err != nil {
@@ -897,7 +953,9 @@ func splitSyncRemoteRef(from string) (remote, ref string) {
 // MergePiece squash-merges the piece branch into its target branch.
 // For root pieces (parent=main), merges into main.
 // For child pieces, merges into the parent piece's branch.
-// Blocks if piece has unmerged children unless Force is set.
+// Blocks if piece has unmerged children unless Force is set. By default it
+// refuses when the target has commits the piece lacks; input.NoUpdateCheck or
+// merge_require_updated=false lets it through.
 func (h *Handler) MergePiece(ctx context.Context, workDir string, input MergeInput) (MergeResult, error) {
 	// Check if we're in a piece worktree
 	status, err := h.Status(ctx, workDir)
@@ -963,11 +1021,8 @@ func (h *Handler) MergePiece(ctx context.Context, workDir string, input MergeInp
 		WorktreePath: status.WorktreePath,
 		RepoRoot:     mainRepoRoot,
 		MainBranch:   targetBranch,
-	}
-
-	// Run before-piece-merge hook
-	if err := h.hooks.RunHook(ctx, mainRepoRoot, HookBeforePieceMerge, hookCtx); err != nil {
-		return MergeResult{}, fmt.Errorf("before-piece-merge hook failed: %w", err)
+		Branch:       pieceBranch,
+		Parent:       pieceMetadata.Parent,
 	}
 
 	// Check if target branch has commits not in the piece branch
@@ -976,32 +1031,69 @@ func (h *Handler) MergePiece(ctx context.Context, workDir string, input MergeInp
 		return MergeResult{}, fmt.Errorf("failed to check if target is ahead: %w", err)
 	}
 
-	if isAhead {
-		return MergeResult{}, fmt.Errorf("cannot merge: %s has commits not in piece worktree. Run 'mp update' first", targetBranch)
+	if isAhead && !input.NoUpdateCheck && h.mergeRequireUpdated {
+		return MergeResult{}, fmt.Errorf("%w: %s has commits not in piece worktree; run 'mp update', pass --no-update-check (stdin {\"no_update_check\":true}), or set 'mp config set merge_require_updated false'", ErrTargetAhead, targetBranch)
 	}
 
-	// Get commit messages from piece branch for the squash commit message
-	commitMsgs, err := h.git.GetCommitMessages(ctx, mainRepoRoot, targetBranch, pieceBranch)
+	mergeStrategy, err := ResolveMergeStrategy(mainRepoRoot, h.deps.FS, input.Strategy, h.mergeStrategyDefault)
 	if err != nil {
-		return MergeResult{}, fmt.Errorf("failed to get commit messages: %w", err)
+		return MergeResult{}, err
 	}
 
-	// Build squash commit message
-	commitMsg := h.buildSquashCommitMessage(status.PieceName, commitMsgs)
-
-	// Switch to target branch
-	if err := h.git.Checkout(ctx, mainRepoRoot, targetBranch); err != nil {
-		return MergeResult{}, fmt.Errorf("failed to checkout %s: %w", targetBranch, err)
+	// Everything that can refuse the merge runs before the hook. A
+	// before-piece-merge.sh has real side effects — a version bump, a changelog
+	// entry, a CI trigger — and firing it for a merge mp then declines would
+	// leave those behind with no after-piece-merge.sh to answer them.
+	var forgePlan OpenPR
+	if mergeStrategy == MergeForge {
+		forgePlan, err = h.planForgeMerge(ctx, mainRepoRoot, status.WorktreePath, pieceBranch, targetBranch)
+		if err != nil {
+			return MergeResult{}, err
+		}
 	}
 
-	// Squash merge the piece branch into target
-	if err := h.git.MergeSquash(ctx, mainRepoRoot, pieceBranch); err != nil {
-		return MergeResult{}, fmt.Errorf("failed to squash merge piece branch into %s: %w", targetBranch, err)
+	if isAhead {
+		h.deps.Output.Write(core.Message{
+			Type:    core.MsgWarning,
+			Content: fmt.Sprintf("%s has commits not in %s; merging anyway (conflicts will surface from git)", targetBranch, pieceBranch),
+		})
 	}
 
-	// Commit the squashed changes
-	if err := h.git.Commit(ctx, mainRepoRoot, commitMsg); err != nil {
-		return MergeResult{}, fmt.Errorf("failed to commit squashed changes: %w", err)
+	// Run before-piece-merge hook
+	if err := h.hooks.RunHook(ctx, mainRepoRoot, HookBeforePieceMerge, hookCtx); err != nil {
+		return MergeResult{}, fmt.Errorf("before-piece-merge hook failed: %w", err)
+	}
+
+	var prNumber int
+	if mergeStrategy == MergeForge {
+		prNumber = forgePlan.Number
+		if err := h.executeForgeMerge(ctx, mainRepoRoot, targetBranch, forgePlan); err != nil {
+			return MergeResult{}, err
+		}
+	} else {
+		// Get commit messages from piece branch for the squash commit message
+		commitMsgs, err := h.git.GetCommitMessages(ctx, mainRepoRoot, targetBranch, pieceBranch)
+		if err != nil {
+			return MergeResult{}, fmt.Errorf("failed to get commit messages: %w", err)
+		}
+
+		// Build squash commit message
+		commitMsg := h.buildSquashCommitMessage(status.PieceName, commitMsgs)
+
+		// Switch to target branch
+		if err := h.git.Checkout(ctx, mainRepoRoot, targetBranch); err != nil {
+			return MergeResult{}, fmt.Errorf("failed to checkout %s: %w", targetBranch, err)
+		}
+
+		// Squash merge the piece branch into target
+		if err := h.git.MergeSquash(ctx, mainRepoRoot, pieceBranch); err != nil {
+			return MergeResult{}, fmt.Errorf("failed to squash merge piece branch into %s: %w", targetBranch, err)
+		}
+
+		// Commit the squashed changes
+		if err := h.git.Commit(ctx, mainRepoRoot, commitMsg); err != nil {
+			return MergeResult{}, fmt.Errorf("failed to commit squashed changes: %w", err)
+		}
 	}
 
 	// Record the durable merged marker now that the squash + commit succeeded.
@@ -1070,34 +1162,182 @@ func (h *Handler) MergePiece(ctx context.Context, workDir string, input MergeInp
 		TargetBranch:       targetBranch,
 		Status:             "merged",
 		ReparentedChildren: reparented,
+		UpdateCheckSkipped: isAhead,
+		Strategy:           string(mergeStrategy),
+		PRNumber:           prNumber,
 	}
 
+	summary := fmt.Sprintf("Squash merged %s into %s", pieceBranch, targetBranch)
+	if mergeStrategy == MergeForge {
+		summary = fmt.Sprintf("Merged PR #%d (%s into %s) on the forge", prNumber, pieceBranch, targetBranch)
+	}
 	h.deps.Output.Write(core.Message{
 		Type:    core.MsgSuccess,
-		Content: fmt.Sprintf("Squash merged %s into %s", pieceBranch, targetBranch),
+		Content: summary,
 		Data:    result,
 	})
 
 	return result, nil
 }
 
-// buildSquashCommitMessage creates a commit message for squash merge
-func (h *Handler) buildSquashCommitMessage(pieceName string, commitMsgs []string) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "feat: %s\n", pieceName)
+// SetMergeStrategyDefault records the user-level merge strategy, consulted when
+// the project declares none. The CLI reads user config and passes it in.
+func (h *Handler) SetMergeStrategyDefault(v string) { h.mergeStrategyDefault = v }
 
+// planForgeMerge resolves the PR/MR the forge strategy would land and runs
+// every check that can refuse it. It changes nothing, so a caller can run it
+// before any side effect — notably the before-piece-merge hook.
+func (h *Handler) planForgeMerge(ctx context.Context, mainRepoRoot, worktreePath, pieceBranch, targetBranch string) (OpenPR, error) {
+	mc := h.getMergeChecker(mainRepoRoot)
+	if mc == nil {
+		return OpenPR{}, ErrNoForgeProvider
+	}
+
+	open, err := mc.FindOpenByBranch(ctx, mainRepoRoot, pieceBranch)
+	if err != nil {
+		return OpenPR{}, fmt.Errorf("failed to look up an open PR for %s: %w", pieceBranch, err)
+	}
+	if open.Number == 0 {
+		return OpenPR{}, fmt.Errorf("%w: %s; run 'mp pr create' first, or 'mp merge --local'", ErrNoOpenPR, pieceBranch)
+	}
+
+	// The forge merges a PR into the base it was opened against, which is not
+	// necessarily the branch mp was asked to merge into. Merging anyway would
+	// land the work somewhere else while reporting this target, so refuse and
+	// name both branches.
+	if open.Base != targetBranch {
+		return OpenPR{}, fmt.Errorf("%w: PR #%d for %s targets %s, not %s; re-point it with 'mp stack set-parent', or 'mp merge --local'",
+			ErrPRBaseMismatch, open.Number, pieceBranch, open.Base, targetBranch)
+	}
+
+	// A draft is not up for merging. gh/glab would refuse with a raw forge
+	// error; say which command flips it instead.
+	if open.IsDraft {
+		return OpenPR{}, fmt.Errorf("%w: PR #%d for %s is a draft; run 'mp pr ready' first", ErrPRIsDraft, open.Number, pieceBranch)
+	}
+
+	// Commits that exist only here are not in the PR, so merging it would land
+	// less than the piece contains. Refuse rather than push on the user's
+	// behalf: `mp merge` is not the command that publishes work.
+	ahead, _, err := h.git.CommitsAheadBehind(ctx, worktreePath, "origin/"+pieceBranch, pieceBranch)
+	if err != nil {
+		// Usually origin/<branch> is missing locally: a single-branch clone, a
+		// pruned tracking ref, or a PR head on another remote. The guard did
+		// not run, so say so rather than merging as though it had passed.
+		return OpenPR{}, fmt.Errorf("cannot confirm PR #%d contains every commit on %s (could not compare against origin/%s: %w); fetch the branch, or 'mp merge --local'",
+			open.Number, pieceBranch, pieceBranch, err)
+	}
+	if ahead > 0 {
+		return OpenPR{}, fmt.Errorf("%s has %d commit(s) not pushed, so PR #%d does not contain them; push first, or 'mp merge --local'", pieceBranch, ahead, open.Number)
+	}
+
+	return open, nil
+}
+
+// executeForgeMerge merges the planned PR/MR and brings the local target branch
+// up to the result.
+//
+// After the merge call succeeds, a failure to sync the local trunk is a warning:
+// the piece really is merged, and erroring here would leave callers believing it
+// was not.
+func (h *Handler) executeForgeMerge(ctx context.Context, mainRepoRoot, targetBranch string, open OpenPR) error {
+	mc := h.getMergeChecker(mainRepoRoot)
+	if mc == nil {
+		return ErrNoForgeProvider
+	}
+	if err := mc.Merge(ctx, mainRepoRoot, open.Number); err != nil {
+		return err
+	}
+
+	// Past this point the merge has happened. Warn, never fail.
+	if err := h.syncTargetToRemote(ctx, mainRepoRoot, targetBranch); err != nil {
+		h.deps.Output.Write(core.Message{
+			Type:    core.MsgWarning,
+			Content: fmt.Sprintf("Merged PR #%d, but could not fast-forward local %s: %v", open.Number, targetBranch, err),
+		})
+	}
+	return nil
+}
+
+// syncTargetToRemote fast-forwards the local target branch onto what the forge
+// just produced, so `mp done` and the next `mp create` start from the merged
+// trunk rather than a stale one.
+//
+// The target is not always checked out in the main repo: merging a stacked
+// piece targets its parent's branch, which lives in the parent's own worktree.
+// Fast-forwarding there is the whole point — the parent is what has to receive
+// the merged child — so the sync runs wherever the branch actually is.
+func (h *Handler) syncTargetToRemote(ctx context.Context, mainRepoRoot, targetBranch string) error {
+	if err := h.git.Fetch(ctx, mainRepoRoot, "origin", targetBranch); err != nil {
+		return err
+	}
+
+	holder, err := h.worktreeForBranch(ctx, mainRepoRoot, targetBranch)
+	if err != nil {
+		return err
+	}
+	if holder == "" {
+		// Nothing has it checked out: take it in the main repo as before.
+		if err := h.git.Checkout(ctx, mainRepoRoot, targetBranch); err != nil {
+			return err
+		}
+		holder = mainRepoRoot
+	}
+	return h.git.MergeFFOnly(ctx, holder, "origin/"+targetBranch)
+}
+
+// worktreeForBranch returns the worktree with branch checked out, or "" when no
+// worktree holds it.
+func (h *Handler) worktreeForBranch(ctx context.Context, mainRepoRoot, branch string) (string, error) {
+	worktrees, err := h.git.Worktrees(ctx, mainRepoRoot)
+	if err != nil {
+		return "", err
+	}
+	for _, wt := range worktrees {
+		if wt.Branch == branch && !wt.Prunable {
+			return wt.Path, nil
+		}
+	}
+	return "", nil
+}
+
+// buildSquashCommitMessage composes the commit message for a squash merge.
+//
+// One commit keeps its message verbatim. It is what the author wrote about
+// exactly this change, and inventing a subject over it lost the body and
+// asserted a conventional-commit type the change need not have — a fix landed
+// as "feat: <piece>" with the real subject demoted to a bullet.
+//
+// Several commits have no single authored subject, so the piece name stands in.
+// It carries no type prefix: mp cannot know whether the result is a feat or a
+// fix, and guessing wrong is what made the old format misleading. Every message
+// is kept whole underneath.
+func (h *Handler) buildSquashCommitMessage(pieceName string, commitMsgs []string) string {
+	if len(commitMsgs) == 1 {
+		return strings.TrimSpace(commitMsgs[0]) + "\n"
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s\n", pieceName)
 	if len(commitMsgs) > 0 {
 		b.WriteString("\nSquashed commits:\n")
 		for _, msg := range commitMsgs {
-			fmt.Fprintf(&b, "- %s\n", msg)
+			fmt.Fprintf(&b, "\n%s\n", strings.TrimSpace(msg))
 		}
 	}
-
 	return b.String()
 }
 
 // getPiecesDir returns the directory for storing pieces scoped to the given repo.
 // Honors any relocation of the monkeypuzzle directory.
+// ensureStateExcluded keeps mp's piece-state paths in git's info/exclude so the
+// worktree about to be created never shows them as untracked, even when its
+// base commit predates the committed .gitignore (see init.EnsureExclude).
+// Best-effort: init owns the authoritative, warning call.
+func (h *Handler) ensureStateExcluded(ctx context.Context, repoRoot string) {
+	_ = initcmd.NewHandler(h.deps).EnsureExclude(ctx, repoRoot, projectdir.RelDir(repoRoot))
+}
+
 func getPiecesDir(repoRoot string) (string, error) {
 	return projectdir.PiecesDir(repoRoot)
 }
@@ -1311,6 +1551,8 @@ func (h *Handler) checkCommitMerged(ctx context.Context, repoRoot, branchName, m
 type CleanupResult struct {
 	PieceName    string `json:"piece_name"`
 	WorktreePath string `json:"worktree_path"`
+	// ReparentedChildren lists child pieces re-homed onto this piece's parent.
+	ReparentedChildren []string `json:"reparented_children,omitempty"`
 }
 
 // CleanupOptions configures the cleanup behavior
@@ -1383,9 +1625,21 @@ func (h *Handler) CleanupMergedPieces(ctx context.Context, repoRoot string, opts
 				Type:    core.MsgInfo,
 				Content: fmt.Sprintf("[dry-run] Would cleanup: %s (merged via %s)", pieceName, mergeStatus.Method),
 			})
+			result.ReparentedChildren, _ = h.ReparentChildrenOf(piecesDir, pieceName, true)
 			results = append(results, result)
 			continue
 		}
+
+		// Re-home children before the worktree (and its metadata) disappears.
+		reparented, err := h.ReparentChildrenOf(piecesDir, pieceName, false)
+		if err != nil {
+			h.deps.Output.Write(core.Message{
+				Type:    core.MsgWarning,
+				Content: fmt.Sprintf("Skipping %s: %v", pieceName, err),
+			})
+			continue
+		}
+		result.ReparentedChildren = reparented
 
 		// Cleanup the piece
 		if err := h.removePiece(ctx, repoRoot, pieceName, worktreePath); err != nil {
@@ -1400,11 +1654,53 @@ func (h *Handler) CleanupMergedPieces(ctx context.Context, repoRoot string, opts
 			Type:    core.MsgSuccess,
 			Content: fmt.Sprintf("Cleaned up: %s", pieceName),
 		})
+		h.record(repoRoot, "piece.cleaned", pieceName, branchName, map[string]any{"merged_via": mergeStatus.Method})
 
 		results = append(results, result)
 	}
 
 	return results, nil
+}
+
+// ReparentChildrenOf re-homes every direct child of pieceName onto pieceName's
+// own parent (metadata only; branches are untouched) so removing a piece never
+// orphans its subtree — an orphan is invisible to `mp stack sync` and shown as
+// "(orphaned)" by `mp list`. Returns the re-homed child names. With dryRun it
+// only reports what would change.
+func (h *Handler) ReparentChildrenOf(piecesDir, pieceName string, dryRun bool) ([]string, error) {
+	children, err := GetPieceChildren(pieceName, piecesDir, h.deps.FS)
+	if err != nil {
+		return nil, err
+	}
+	if len(children) == 0 {
+		return nil, nil
+	}
+	meta, err := ReadPieceMetadata(filepath.Join(piecesDir, pieceName), h.deps.FS)
+	if err != nil {
+		return nil, err
+	}
+	newParent := meta.Parent
+	if newParent == "" {
+		newParent = "main"
+	}
+	sort.Strings(children)
+	for _, child := range children {
+		if dryRun {
+			h.deps.Output.Write(core.Message{Type: core.MsgInfo, Content: fmt.Sprintf("[dry-run] Would re-home %s onto %s", child, newParent)})
+			continue
+		}
+		childPath := filepath.Join(piecesDir, child)
+		cm, err := ReadPieceMetadata(childPath, h.deps.FS)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read metadata for child %q: %w", child, err)
+		}
+		cm.Parent = newParent
+		if err := WritePieceMetadata(childPath, *cm, h.deps.FS); err != nil {
+			return nil, fmt.Errorf("failed to re-home child %q onto %s: %w", child, newParent, err)
+		}
+		h.deps.Output.Write(core.Message{Type: core.MsgInfo, Content: fmt.Sprintf("Re-homed %s onto %s (run 'mp stack sync' to restack it)", child, newParent)})
+	}
+	return children, nil
 }
 
 // removePiece removes a piece worktree and associated session.
@@ -1441,7 +1737,7 @@ func (h *Handler) shouldSwitchClientToMain(worktreePath string) bool {
 	if err != nil {
 		return false
 	}
-	return isPathInside(wd, worktreePath)
+	return IsPathInside(wd, worktreePath)
 }
 
 func (h *Handler) switchClientToMain(ctx context.Context, mainRepoRoot string) {
@@ -1454,8 +1750,8 @@ func (h *Handler) switchClientToMain(ctx context.Context, mainRepoRoot string) {
 	}
 }
 
-// isPathInside reports whether child is the same as or nested under parent.
-func isPathInside(child, parent string) bool {
+// IsPathInside reports whether child is the same as or nested under parent.
+func IsPathInside(child, parent string) bool {
 	absChild, err := filepath.Abs(child)
 	if err != nil {
 		return false
@@ -1478,6 +1774,10 @@ func isPathInside(child, parent string) bool {
 type AbandonOptions struct {
 	Force        bool // Force removal even with uncommitted changes
 	DeleteBranch bool // Also delete the git branch
+	// RepoRoot names the project to look the piece up in. Empty means the
+	// project the caller is standing in; a cross-project caller (the picker)
+	// sets it so the name resolves against the right repo.
+	RepoRoot string
 }
 
 // AbandonResult contains information about the abandoned piece
@@ -1487,6 +1787,8 @@ type AbandonResult struct {
 	BranchName    string `json:"branch_name,omitempty"`
 	BranchDeleted bool   `json:"branch_deleted,omitempty"`
 	MainPath      string `json:"main_path,omitempty"`
+	// ReparentedChildren lists child pieces re-homed onto this piece's parent.
+	ReparentedChildren []string `json:"reparented_children,omitempty"`
 }
 
 // AbandonPiece removes a piece worktree, tmux session, and optionally the branch.
@@ -1496,9 +1798,9 @@ func (h *Handler) AbandonPiece(ctx context.Context, pieceName string, opts Aband
 
 	// Detect repo root from current working directory first
 	// Use GetMainRepoRoot to handle running from within a worktree
-	repoRoot := ""
+	repoRoot := opts.RepoRoot
 	wd, err := os.Getwd()
-	if err == nil {
+	if repoRoot == "" && err == nil {
 		// Try GetMainRepoRoot first (handles worktrees)
 		detectedRoot, err := h.git.GetMainRepoRoot(ctx, wd)
 		if err != nil {
@@ -1524,6 +1826,9 @@ func (h *Handler) AbandonPiece(ctx context.Context, pieceName string, opts Aband
 			target = &pieces[i]
 			break
 		}
+	}
+	if target != nil && target.IsPlaced() {
+		return result, fmt.Errorf("%w: %q is on %s", ErrPiecePlaced, pieceName, target.Host)
 	}
 	if target == nil {
 		var names []string
@@ -1557,6 +1862,15 @@ func (h *Handler) AbandonPiece(ctx context.Context, pieceName string, opts Aband
 	repoRoot = detectedRepoRoot
 
 	shouldSwitchToMain := h.shouldSwitchClientToMain(target.WorktreePath)
+
+	// Re-home children before the worktree (and its metadata) disappears.
+	piecesDir, err := getPiecesDir(repoRoot)
+	if err != nil {
+		return result, fmt.Errorf("failed to get pieces directory: %w", err)
+	}
+	if result.ReparentedChildren, err = h.ReparentChildrenOf(piecesDir, pieceName, false); err != nil {
+		return result, err
+	}
 
 	// Do the destructive git work (remove worktree, delete branch) BEFORE
 	// killing the session. When `mp abandon` runs from inside the piece's own
@@ -1610,6 +1924,7 @@ func (h *Handler) AbandonPiece(ctx context.Context, pieceName string, opts Aband
 		Content: fmt.Sprintf("Abandoned piece: %s", pieceName),
 		Data:    result,
 	})
+	h.record(repoRoot, "piece.abandoned", pieceName, branchName, map[string]any{"branch_deleted": result.BranchDeleted})
 
 	// Kill the session last. All destructive work is now done and persisted, so
 	// even if this tears down the very session we're running in, the abandon has
@@ -1691,6 +2006,9 @@ func (h *Handler) FlattenPieces(ctx context.Context, repoRoot string, opts Flatt
 
 	for i := range pieces {
 		p := pieces[i]
+		if p.IsPlaced() {
+			continue // lives on a box; nothing local to remove
+		}
 		item := FlattenItem{PieceName: p.Name, WorktreePath: p.WorktreePath}
 
 		// Capture the branch name before the worktree goes away.
@@ -1763,7 +2081,9 @@ func (h *Handler) FlattenPieces(ctx context.Context, repoRoot string, opts Flatt
 }
 
 // DonePiece cleans up the current piece after it has been merged.
-// Must be run from within a piece worktree. Verifies the piece is merged before cleanup.
+// Must be run from within a piece worktree. By default it refuses an unmerged
+// piece; input.Force or done_require_merged=false lets it through (the branch
+// is never deleted).
 func (h *Handler) DonePiece(ctx context.Context, workDir string, input DoneInput) (DoneResult, error) {
 	// Check if we're in a piece worktree
 	status, err := h.Status(ctx, workDir)
@@ -1793,14 +2113,28 @@ func (h *Handler) DonePiece(ctx context.Context, workDir string, input DoneInput
 		return DoneResult{}, fmt.Errorf("failed to check merge status: %w", err)
 	}
 
-	if !mergeStatus.IsMerged {
-		return DoneResult{}, fmt.Errorf("piece is not merged; use 'mp abandon' to remove unmerged pieces")
+	if !mergeStatus.IsMerged && !input.Force && h.doneRequireMerged {
+		return DoneResult{}, fmt.Errorf("%w; pass --force (stdin {\"force\":true}), set 'mp config set done_require_merged false', or use 'mp abandon'", ErrNotMerged)
 	}
 
 	result := DoneResult{
 		PieceName:    status.PieceName,
 		WorktreePath: status.WorktreePath,
 		MainPath:     mainRepoRoot,
+		Forced:       !mergeStatus.IsMerged,
+	}
+
+	if result.Forced {
+		h.warnUnmergedDone(ctx, status.WorktreePath, branchName, input.MainBranch)
+	}
+
+	// Re-home children before the worktree (and its metadata) disappears.
+	piecesDir, err := getPiecesDir(mainRepoRoot)
+	if err != nil {
+		return result, fmt.Errorf("failed to get pieces directory: %w", err)
+	}
+	if result.ReparentedChildren, err = h.ReparentChildrenOf(piecesDir, status.PieceName, false); err != nil {
+		return result, err
 	}
 
 	// If we're running inside the worktree being removed, switch the active
@@ -1821,10 +2155,40 @@ func (h *Handler) DonePiece(ctx context.Context, workDir string, input DoneInput
 		Content: fmt.Sprintf("Done with piece: %s", status.PieceName),
 		Data:    result,
 	})
+	h.record(mainRepoRoot, "piece.done", status.PieceName, branchName, map[string]any{"merged_via": mergeStatus.Method})
 
 	_ = h.mux.Kill(ctx, h.pieceSessionName(mainRepoRoot, status.PieceName))
 
 	return result, nil
+}
+
+// warnUnmergedDone reports that an unmerged piece is being cleaned up: the
+// branch stays local, and any commits its upstream lacks are called out so
+// nothing is lost silently.
+func (h *Handler) warnUnmergedDone(ctx context.Context, worktreePath, branchName, mainBranch string) {
+	h.deps.Output.Write(core.Message{
+		Type:    core.MsgWarning,
+		Content: fmt.Sprintf("Piece is not merged; removing worktree anyway (branch %s kept locally)", branchName),
+	})
+	n, hasUpstream, err := h.git.CommitsNotOnUpstream(ctx, worktreePath, branchName, mainBranch)
+	if err != nil {
+		h.deps.Output.Write(core.Message{
+			Type:    core.MsgWarning,
+			Content: fmt.Sprintf("Failed to count unpushed commits on %s: %v", branchName, err),
+		})
+		return
+	}
+	if n == 0 {
+		return
+	}
+	suffix := ""
+	if !hasUpstream {
+		suffix = " (no upstream)"
+	}
+	h.deps.Output.Write(core.Message{
+		Type:    core.MsgWarning,
+		Content: fmt.Sprintf("%d commits on %s not pushed%s", n, branchName, suffix),
+	})
 }
 
 // ensureSubtreeClean errors if any worktree in the subtree rooted at the given
@@ -1969,10 +2333,21 @@ func (h *Handler) trunkRemote(ctx context.Context, repoRoot string) string {
 }
 
 func (h *Handler) projectName(repoRoot string) string {
-	if cfg, err := ReadConfig(repoRoot, h.deps.FS); err == nil && strings.TrimSpace(cfg.Project.Name) != "" {
+	return ProjectName(repoRoot, h.deps.FS)
+}
+
+// ProjectName is the project's configured name (project.name in
+// monkeypuzzle.json), falling back to the repo directory's base name.
+func ProjectName(repoRoot string, fs core.FS) string {
+	if cfg, err := ReadConfig(repoRoot, fs); err == nil && strings.TrimSpace(cfg.Project.Name) != "" {
 		return cfg.Project.Name
 	}
 	return filepath.Base(repoRoot)
+}
+
+// record appends a history event for a transition that has no hook of its own.
+func (h *Handler) record(repoRoot, event, pieceName, branch string, data map[string]any) {
+	history.Record(h.deps.Output, history.Event{Event: event, Project: h.projectName(repoRoot), Piece: pieceName, Branch: branch, Data: data})
 }
 
 // pieceSessionName returns the tmux session name for a piece in a repo.
@@ -2019,7 +2394,12 @@ func (h *Handler) ListPieces(ctx context.Context, repoRoot string) ([]PieceListI
 	entries, err := h.deps.FS.ReadDir(piecesDir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return []PieceListItem{}, nil
+			// No local worktrees yet, but pieces may still be placed on boxes.
+			placed := h.placedItems(repoRoot)
+			if placed == nil {
+				return []PieceListItem{}, nil
+			}
+			return placed, nil
 		}
 		return nil, fmt.Errorf("failed to read pieces directory: %w", err)
 	}
@@ -2030,12 +2410,15 @@ func (h *Handler) ListPieces(ctx context.Context, repoRoot string) ([]PieceListI
 	if worktrees, err := h.git.Worktrees(ctx, repoRoot); err == nil {
 		for _, wt := range worktrees {
 			if wt.Branch != "" {
-				branchByPath[filepath.Clean(wt.Path)] = wt.Branch
+				branchByPath[canonicalWorktreePath(wt.Path)] = wt.Branch
 			}
 		}
 	}
 
-	var pieces []PieceListItem
+	// Non-nil even when nothing matches: this slice is marshalled straight to
+	// stdout, and a nil one encodes as `null`, which every JSON consumer has
+	// to special-case before it can iterate.
+	pieces := make([]PieceListItem, 0, len(entries))
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
@@ -2058,10 +2441,12 @@ func (h *Handler) ListPieces(ctx context.Context, repoRoot string) ([]PieceListI
 		// Read piece metadata for parent + agent info
 		parent := "main"
 		agentStatus := ""
-		branch := branchByPath[filepath.Clean(worktreePath)]
+		pieceID := ""
+		branch := branchByPath[canonicalWorktreePath(worktreePath)]
 		var agentCounts map[string]int
 		if metadata, err := ReadPieceMetadata(worktreePath, h.deps.FS); err == nil {
 			parent = metadata.Parent
+			pieceID = metadata.ID
 			live := LiveAgents(metadata.Agents)
 			agentStatus = AggregateAgents(live)
 			agentCounts = CountAgents(live)
@@ -2073,6 +2458,7 @@ func (h *Handler) ListPieces(ctx context.Context, repoRoot string) ([]PieceListI
 		}
 
 		pieces = append(pieces, PieceListItem{
+			ID:           pieceID,
 			Name:         name,
 			WorktreePath: worktreePath,
 			SessionName:  sessionName,
@@ -2085,12 +2471,27 @@ func (h *Handler) ListPieces(ctx context.Context, repoRoot string) ([]PieceListI
 		})
 	}
 
+	// Placed pieces (on a box) join the same list; they are never local
+	// worktrees and are skipped by anything that walks piecesDir.
+	pieces = append(pieces, h.placedItems(repoRoot)...)
+
 	// Sort by modification time (newest first)
 	sort.Slice(pieces, func(i, j int) bool {
 		return pieces[i].ModTime.After(pieces[j].ModTime)
 	})
 
 	return pieces, nil
+}
+
+// canonicalWorktreePath makes filesystem paths comparable with paths emitted
+// by Git. This matters on macOS, where temporary paths commonly enter through
+// /var while `git worktree list` reports the same directory through /private/var.
+func canonicalWorktreePath(path string) string {
+	path = filepath.Clean(path)
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		return filepath.Clean(resolved)
+	}
+	return path
 }
 
 // TreeNode represents a node in the piece tree
@@ -2192,7 +2593,12 @@ func (h *Handler) SwitchPiece(ctx context.Context, name string) (SwitchResult, e
 		return SwitchResult{}, fmt.Errorf("piece %q not found. Available: %s", name, strings.Join(names, ", "))
 	}
 
+	if target.IsPlaced() {
+		return SwitchResult{}, fmt.Errorf("%w: %q is on %s at %s (ssh %s, then cd there; with tmux on the box: `ssh -t %s tmux new -A -s %s -c %s`)", ErrPiecePlaced, name, target.Host, target.WorktreePath, target.Host, target.Host, target.SessionName, target.WorktreePath)
+	}
+
 	result := SwitchResult{Piece: *target}
+	h.record(mainRepoRoot, "piece.switched", target.Name, target.Branch, nil)
 
 	// No session management: callers surface the path from the result JSON.
 	if adapters.IsNoopMultiplexer(h.mux) {
@@ -2233,6 +2639,7 @@ func (h *Handler) switchToMain(ctx context.Context, mainRepoRoot, name string) (
 			HasSession:   h.mux.Exists(ctx, sessionName),
 		},
 	}
+	h.record(mainRepoRoot, "piece.switched", name, name, nil)
 
 	// No session management: callers surface the path from the result JSON.
 	if adapters.IsNoopMultiplexer(h.mux) {

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
@@ -30,7 +31,7 @@ func ensureUserConfig(cmd *cobra.Command) error {
 	// Errors from here on are not usage errors — don't print cobra's banner.
 	cmd.SilenceUsage = true
 
-	if !cli.IsTerminal() {
+	if !cli.IsInteractive() {
 		return notConfiguredError()
 	}
 
@@ -56,13 +57,15 @@ func ensureUserConfig(cmd *cobra.Command) error {
 }
 
 func notConfiguredError() error {
-	return fmt.Errorf("monkeypuzzle is not configured yet. Run `mp config set multiplexer <tmux|none>` to set it up, " +
-		"or run any `mp` command in an interactive terminal to use the setup wizard")
+	return fmt.Errorf("monkeypuzzle is not configured yet. Run `mp config set multiplexer <%s>` to set it up, "+
+		"or run any `mp` command in an interactive terminal to use the setup wizard",
+		strings.Join(validMultiplexerValues, "|"))
 }
 
 // commandSkipsConfigCheck returns true for commands that must work without a
 // populated user config: the config command itself, help/completion plumbing,
-// and any invocation that's just emitting an example input document.
+// shell-init and doctor, and any invocation that's just emitting an example
+// input document.
 func commandSkipsConfigCheck(cmd *cobra.Command) bool {
 	if cmd == nil {
 		return true
@@ -71,8 +74,16 @@ func commandSkipsConfigCheck(cmd *cobra.Command) bool {
 	case "help", "completion", "__complete", "__completeNoDesc":
 		return true
 	}
+	// shell-init is eval'd from a shell rc file, where a missing config would
+	// break every new shell; doctor's job is to report the missing config.
+	switch cmd.CommandPath() {
+	case "mp shell-init", "mp doctor":
+		return true
+	}
+	// skill only writes a documentation file, so it works before the first-run
+	// wizard — teaching an agent about mp is a reasonable first move.
 	for c := cmd; c != nil; c = c.Parent() {
-		if c.Name() == "config" {
+		if c.Name() == "config" || c.Name() == "skill" {
 			return true
 		}
 	}

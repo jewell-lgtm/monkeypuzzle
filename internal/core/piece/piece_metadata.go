@@ -1,6 +1,7 @@
 package piece
 
 import (
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -32,10 +33,21 @@ type AgentRecord struct {
 	Status string `json:"status"`
 	// PID is the agent process, used for lazy liveness reaping. 0 = unknown.
 	PID int `json:"pid,omitempty"`
-	// Pane is the multiplexer pane the agent runs in (tmux $TMUX_PANE),
+	// Pane is the multiplexer pane the agent runs in ($TMUX_PANE, $HERDR_PANE_ID),
 	// letting UIs jump focus straight to the agent.
 	Pane      string    `json:"pane,omitempty"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// StackEntry is one branch/PR layer in a piece's linear stack. The first
+// entry is the piece's initial branch; each later entry names the branch
+// immediately below it in Base.
+type StackEntry struct {
+	Branch   string `json:"branch"`
+	Base     string `json:"base"`
+	PRNumber int    `json:"pr_number,omitempty"`
+	PRURL    string `json:"pr_url,omitempty"`
+	Status   string `json:"status,omitempty"`
 }
 
 // AggregateAgents collapses a piece's agents to one status by severity:
@@ -81,6 +93,11 @@ func LiveAgents(agents map[string]AgentRecord) map[string]AgentRecord {
 
 // PieceMetadata stores parent-child relationship metadata for a piece
 type PieceMetadata struct {
+	// ID identifies this piece for as long as it exists. A piece's name,
+	// branch, and worktree path can all change; this cannot, so it is the only
+	// thing an external system should record to refer back to a piece. mp
+	// assigns it and never interprets it.
+	ID string `json:"id,omitempty"`
 	// Parent is the parent piece name or "main" for root pieces
 	Parent string `json:"parent"`
 	// CreatedFromBranch is the git branch the piece was created from
@@ -95,9 +112,17 @@ type PieceMetadata struct {
 	// heuristics (branch --merged, git cherry) cannot detect it. Recording at
 	// merge time sidesteps that entirely.
 	Merged bool `json:"merged,omitempty"`
+	// Stack is the ordered branch chain managed inside this one worktree.
+	// It is omitted in v1 metadata and bootstrapped lazily by stack commands.
+	Stack []StackEntry `json:"stack,omitempty"`
 	// Agents tracks agent processes running in this piece's worktree, keyed by
 	// agent id. Maintained by `mp agent report`; reaped lazily on write.
 	Agents map[string]AgentRecord `json:"agents,omitempty"`
+	// PlacementHost is the box name the controller placed this piece under
+	// (`mp create --remote=<box>`), written by the box-side create from the
+	// MP_PLACEMENT_HOST the proxy exported. Hooks in this worktree read it
+	// back, so the placement env no longer depends on how mp was invoked.
+	PlacementHost string `json:"placement_host,omitempty"`
 }
 
 // MarkPieceMerged sets the durable merged marker on a piece's metadata so that
@@ -115,8 +140,19 @@ func MarkPieceMerged(worktreePath string, fs core.FS) error {
 	return WritePieceMetadata(worktreePath, *metadata, fs)
 }
 
+// NewPieceID mints a piece identifier. rand.Text() is the same source the
+// tracking identity uses; 12 of its base32 characters is ~1e18 values, far more
+// than enough to keep one developer's pieces distinct, and short enough to sit
+// in a tag or a note in whatever system refers back to the piece.
+func NewPieceID() string {
+	return rand.Text()[:12]
+}
+
 // DefaultPieceMetadata returns metadata with default values (parent=main)
 func DefaultPieceMetadata() PieceMetadata {
+	// No ID here: ReadPieceMetadata hands this back for a worktree with no
+	// metadata file, so minting one would make every read report a different
+	// id. Ids are minted at create/adopt and backfilled on write.
 	return PieceMetadata{
 		Parent:            "main",
 		CreatedFromBranch: "",
@@ -158,6 +194,12 @@ func WritePieceMetadata(worktreePath string, metadata PieceMetadata, fs core.FS)
 	}
 	if err := fs.MkdirAll(mpDir, DefaultDirPerm); err != nil {
 		return fmt.Errorf("failed to create monkeypuzzle directory: %w", err)
+	}
+
+	// Backfill: a piece created before ids existed earns one at its next
+	// metadata write, and keeps it from then on.
+	if metadata.ID == "" {
+		metadata.ID = NewPieceID()
 	}
 
 	data, err := json.MarshalIndent(metadata, "", "  ")
@@ -240,4 +282,28 @@ func HasChildren(pieceName string, piecesDir string, fs core.FS) (bool, error) {
 		return false, err
 	}
 	return len(children) > 0, nil
+}
+
+// EnsurePieceID returns a piece's durable id, assigning and persisting one if
+// the piece predates ids. Listing pieces never writes, so this is how a caller
+// that actually needs the id materialises it.
+func EnsurePieceID(worktreePath string, fs core.FS) (string, error) {
+	unlock, err := LockPieceMetadata(worktreePath, fs)
+	if err != nil {
+		return "", err
+	}
+	defer unlock()
+
+	metadata, err := ReadPieceMetadata(worktreePath, fs)
+	if err != nil {
+		return "", err
+	}
+	if metadata.ID != "" {
+		return metadata.ID, nil
+	}
+	metadata.ID = NewPieceID()
+	if err := WritePieceMetadata(worktreePath, *metadata, fs); err != nil {
+		return "", err
+	}
+	return metadata.ID, nil
 }

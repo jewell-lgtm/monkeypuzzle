@@ -276,8 +276,11 @@ func (g *Git) BranchDelete(ctx context.Context, repoRoot, branchName string, for
 	if force {
 		flag = "-D"
 	}
-	_, err := g.exec.RunWithDir(ctx, repoRoot, "git", "branch", flag, branchName)
+	out, err := g.exec.RunWithDir(ctx, repoRoot, "git", "branch", flag, branchName)
 	if err != nil {
+		if detail := strings.TrimSpace(string(out)); detail != "" {
+			return fmt.Errorf("failed to delete branch %s: %s", branchName, detail)
+		}
 		return fmt.Errorf("failed to delete branch %s: %w", branchName, err)
 	}
 	return nil
@@ -297,6 +300,21 @@ func (g *Git) RevParseGitDir(ctx context.Context, workDir string) (string, error
 	}
 	gitDir, _ = filepath.Abs(gitDir)
 	return gitDir, nil
+}
+
+// CommonDir returns the absolute git common directory for workDir: the main
+// repository's .git, shared by every linked worktree (where info/exclude lives).
+func (g *Git) CommonDir(ctx context.Context, workDir string) (string, error) {
+	output, err := g.exec.RunWithDir(ctx, workDir, "git", "rev-parse", "--git-common-dir")
+	if err != nil {
+		return "", fmt.Errorf("failed to get git common dir: %w", err)
+	}
+	dir := strings.TrimSpace(string(output))
+	if !filepath.IsAbs(dir) {
+		dir = filepath.Join(workDir, dir)
+	}
+	dir, _ = filepath.Abs(dir)
+	return dir, nil
 }
 
 // IsWorktree checks if the git directory indicates a worktree
@@ -409,6 +427,23 @@ func (g *Git) CommitsAheadBehind(ctx context.Context, workDir, mainBranch, branc
 	return ahead, behind, nil
 }
 
+// CommitsNotOnUpstream counts commits on branchName that its upstream does not
+// have. Without an upstream it counts commits not on mainBranch instead and
+// reports hasUpstream=false.
+func (g *Git) CommitsNotOnUpstream(ctx context.Context, workDir, branchName, mainBranch string) (count int, hasUpstream bool, err error) {
+	output, upErr := g.exec.RunWithDir(ctx, workDir, "git", "rev-list", "--count", branchName+"@{upstream}.."+branchName)
+	if upErr == nil {
+		count, err = strconv.Atoi(strings.TrimSpace(string(output)))
+		return count, true, err
+	}
+	output, err = g.exec.RunWithDir(ctx, workDir, "git", "rev-list", "--count", mainBranch+".."+branchName)
+	if err != nil {
+		return 0, false, fmt.Errorf("failed to count commits on %s: %w", branchName, err)
+	}
+	count, err = strconv.Atoi(strings.TrimSpace(string(output)))
+	return count, false, err
+}
+
 // GetMainRepoRoot gets the main repository root from a worktree.
 // For worktrees, this finds the main repo by examining the gitdir structure.
 // For regular repositories, it returns the same as RepoRoot.
@@ -438,6 +473,17 @@ func (g *Git) Checkout(ctx context.Context, workDir, branch string) error {
 	_, err := g.exec.RunWithDir(ctx, workDir, "git", "checkout", branch)
 	if err != nil {
 		return fmt.Errorf("failed to checkout branch %s in %s: %w", branch, workDir, err)
+	}
+	return nil
+}
+
+// CreateAndCheckoutBranch creates a branch at the current HEAD and checks it
+// out in the same worktree. This is the fundamental operation for an
+// intra-piece stack: advancing the stack must not allocate another worktree.
+func (g *Git) CreateAndCheckoutBranch(ctx context.Context, workDir, branch string) error {
+	_, err := g.exec.RunWithDir(ctx, workDir, "git", "checkout", "-b", branch)
+	if err != nil {
+		return fmt.Errorf("failed to create branch %s in %s: %w", branch, workDir, err)
 	}
 	return nil
 }
@@ -484,18 +530,23 @@ func (g *Git) Commit(ctx context.Context, workDir, message string) error {
 	return nil
 }
 
-// GetCommitMessages returns commit messages from branch that are not in base
+// GetCommitMessages returns the full message — subject and body — of each
+// commit in branch that is not in base, newest first.
+//
+// It used to ask for %s, so every body was dropped before any caller could see
+// it; the squash merge then committed a subject line where the author had
+// written paragraphs. Bodies span lines, so the records are NUL-delimited
+// rather than newline-delimited.
 func (g *Git) GetCommitMessages(ctx context.Context, workDir, base, branch string) ([]string, error) {
-	output, err := g.exec.RunWithDir(ctx, workDir, "git", "log", "--format=%s", base+".."+branch)
+	output, err := g.exec.RunWithDir(ctx, workDir, "git", "log", "--format=%B%x00", base+".."+branch)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get commit messages: %w", err)
 	}
 
-	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
 	var messages []string
-	for _, line := range lines {
-		if line != "" {
-			messages = append(messages, line)
+	for _, record := range strings.Split(string(output), "\x00") {
+		if msg := strings.TrimSpace(record); msg != "" {
+			messages = append(messages, msg)
 		}
 	}
 	return messages, nil

@@ -124,6 +124,11 @@ func runFlatten(cmd *cobra.Command, args []string) error {
 	if !apply {
 		fmt.Fprintln(os.Stderr, "Dry run: nothing removed. Pass --apply to flatten.")
 	}
+	if cwd, err := os.Getwd(); err == nil {
+		for _, item := range result.Removed {
+			surfaceRoot(cwd, item.WorktreePath, result.MainPath, true)
+		}
+	}
 	return cli.PrintJSON(result)
 }
 

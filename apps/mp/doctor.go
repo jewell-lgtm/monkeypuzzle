@@ -25,8 +25,8 @@ var remoteDoctorCmd = &cobra.Command{
 	Use:   "doctor [host]",
 	Short: "Check that a remote host is ready for mp over ssh",
 	Long: `Probe an ssh host and report everything the remote workflow needs: key-based
-(BatchMode) ssh access, an mp binary and its version vs this one, git, tmux,
-and gh with working auth. Run it once after installing mp on a new host, and
+(BatchMode) ssh access, an mp binary and its version vs this one, git, the
+multiplexers (tmux, herdr), and gh with working auth. Run it once after installing mp on a new host, and
 first whenever a proxied command misbehaves.
 
 The host argument is an ssh destination (alias or user@host). With no
@@ -53,32 +53,46 @@ type doctorReport struct {
 	VersionMatch bool   `json:"version_match"`
 	Git          bool   `json:"git"`
 	Tmux         bool   `json:"tmux"`
+	Herdr        bool   `json:"herdr"`
 	Gh           bool   `json:"gh"`
 	GhAuth       bool   `json:"gh_auth"`
+	// Dir/Init are set when a path was probed: is it an mp project there?
+	Dir  string `json:"dir,omitempty"`
+	Init bool   `json:"init,omitempty"`
+	// PendingLinks are "project/piece" placements on this box whose create
+	// never finished (`mp cleanup` in that project drops them).
+	PendingLinks []string `json:"pending_links,omitempty"`
 }
 
 // doctorProbe is the single shell script run on the host; one key=value line
 // per check keeps it one ssh round-trip. It probes the same binary the proxy
-// would run (MP_REMOTE_BIN honored) under the same PATH.
-func doctorProbe() string {
-	return `export PATH="$HOME/.local/bin:$PATH"
+// would run (MP_REMOTE_BIN honored) under the same PATH. With a dir it also
+// reports whether that path is an mp project (init=yes|no).
+func doctorProbe(dir string) string {
+	script := `export PATH="$HOME/.local/bin:$PATH"
 echo "mp=$(` + cli.ShQuote(remoteBin()) + ` --version 2>/dev/null || echo missing)"
 echo "git=$(command -v git >/dev/null && echo yes || echo no)"
 echo "tmux=$(command -v tmux >/dev/null && echo yes || echo no)"
+echo "herdr=$(command -v herdr >/dev/null && echo yes || echo no)"
 echo "gh=$(command -v gh >/dev/null && echo yes || echo no)"
 echo "gh_auth=$(gh auth status >/dev/null 2>&1 && echo yes || echo no)"`
+	if dir != "" {
+		script += `
+echo "init=$(test -f ` + cli.ShQuote(dir+"/.monkeypuzzle/monkeypuzzle.json") + ` && echo yes || echo no)"`
+	}
+	return script
 }
 
 func runRemoteDoctor(cmd *cobra.Command, args []string) error {
+	reg, err := registry.Load()
+	if err != nil {
+		return err
+	}
 	var hosts []string
 	switch {
 	case len(args) == 1:
 		hosts = []string{args[0]}
 	default:
-		reg, err := registry.Load()
-		if err != nil {
-			return err
-		}
 		seen := map[string]bool{}
 		for _, p := range reg.Projects {
 			if p.Host != "" && !seen[p.Host] {
@@ -94,7 +108,8 @@ func runRemoteDoctor(cmd *cobra.Command, args []string) error {
 	reports := make([]doctorReport, 0, len(hosts))
 	ok := true
 	for _, h := range hosts {
-		r := probeHost(h)
+		r := probeHost(h, "")
+		r.PendingLinks = pendingLinks(reg, h)
 		reports = append(reports, r)
 		ok = ok && r.Reachable && r.MPVersion != "missing" && r.Git
 		printDoctorHuman(r)
@@ -108,15 +123,17 @@ func runRemoteDoctor(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func probeHost(host string) doctorReport {
-	r := doctorReport{Host: host, LocalVersion: resolveVersion()}
+// probeHost runs the doctor probe on host; dir, when set, is a box-side path
+// whose mp-project status is reported as Init.
+func probeHost(host, dir string) doctorReport {
+	r := doctorReport{Host: host, LocalVersion: resolveVersion(), Dir: dir}
 	// The registry file is user-writable; a poisoned host must not reach ssh.
 	if err := cli.ValidSSHDest(host); err != nil {
 		r.SSHError = err.Error()
 		return r
 	}
 	// sh -c so the POSIX probe survives fish/csh login shells.
-	out, err := exec.Command("ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "--", host, "sh -c "+cli.ShQuote(doctorProbe())).Output()
+	out, err := exec.Command("ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "--", host, "sh -c "+cli.ShQuote(doctorProbe(dir))).Output()
 	if err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
@@ -140,10 +157,14 @@ func probeHost(host string) doctorReport {
 			r.Git = v == "yes"
 		case "tmux":
 			r.Tmux = v == "yes"
+		case "herdr":
+			r.Herdr = v == "yes"
 		case "gh":
 			r.Gh = v == "yes"
 		case "gh_auth":
 			r.GhAuth = v == "yes"
+		case "init":
+			r.Init = v == "yes"
 		}
 	}
 	r.VersionMatch = r.MPVersion == r.LocalVersion
@@ -171,9 +192,15 @@ func printDoctorHuman(r doctorReport) {
 	} else {
 		fmt.Fprintf(os.Stderr, "  %s mp %s = local\n", cli.GlyphOK, r.MPVersion)
 	}
-	fmt.Fprintf(os.Stderr, "  %s git  %s tmux  %s gh", tick(r.Git), tick(r.Tmux), tick(r.Gh))
+	fmt.Fprintf(os.Stderr, "  %s git  %s tmux  %s herdr  %s gh", tick(r.Git), tick(r.Tmux), tick(r.Herdr), tick(r.Gh))
 	if r.Gh {
 		fmt.Fprintf(os.Stderr, " (auth: %s)", tick(r.GhAuth))
 	}
 	fmt.Fprintln(os.Stderr)
+	if r.Dir != "" {
+		fmt.Fprintf(os.Stderr, "  %s %s is an mp project\n", tick(r.Init), r.Dir)
+	}
+	if len(r.PendingLinks) > 0 {
+		fmt.Fprintf(os.Stderr, "  %s pending placements: %s (run `mp cleanup` in the project)\n", cli.GlyphWarn, strings.Join(r.PendingLinks, ", "))
+	}
 }

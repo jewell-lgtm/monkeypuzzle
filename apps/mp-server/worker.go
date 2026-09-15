@@ -22,6 +22,9 @@ func runWorker() error {
 	if err != nil {
 		return err
 	}
+	if !cfg.PRSyncEnabled {
+		return fmt.Errorf("PR monitoring is opt-in: set PR_SYNC_ENABLED=true to run the worker")
+	}
 	ctx := context.Background()
 
 	st, err := store.NewPgxStore(ctx, cfg.DatabaseURL)

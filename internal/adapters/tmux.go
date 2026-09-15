@@ -147,6 +147,11 @@ func (t *TmuxMultiplexer) FocusPane(ctx context.Context, sessionName, pane strin
 	return nil
 }
 
+// CurrentPane returns the tmux pane mp itself runs in, "" outside tmux.
+func (t *TmuxMultiplexer) CurrentPane() string {
+	return os.Getenv("TMUX_PANE")
+}
+
 // IsInstalled returns true if tmux is available.
 func (t *TmuxMultiplexer) IsInstalled(ctx context.Context) bool {
 	_, err := t.exec.Run(ctx, "which", "tmux")

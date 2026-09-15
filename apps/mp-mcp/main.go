@@ -217,6 +217,87 @@ func (s *Server) handleToolsList(req *Request) *Response {
 				},
 			},
 		},
+		{
+			Name:        "mp_inbox",
+			Description: "The global cross-repo inbox: every piece across all registered projects as one list, ordered by your manual rank then urgency (blocked > review > working > idle > merged). Returns {\"rows\":[…]}",
+			InputSchema: JSONSchema{
+				Type: "object",
+				Properties: map[string]Property{
+					"sort":    {Type: "string", Description: "\"rank\" (your order, urgency breaks ties; default) or \"urgency\""},
+					"refresh": {Type: "boolean", Description: "Re-fetch PR state instead of the 2-minute cache"},
+					"cwd":     {Type: "string", Description: "Working directory (an init'd repo here is included even if unregistered)"},
+				},
+			},
+		},
+		{
+			Name:        "mp_inbox_move",
+			Description: "Re-rank a piece in the inbox; give exactly one placement. Returns {\"key\",\"rank\",\"from_rank\"}",
+			InputSchema: JSONSchema{
+				Type: "object",
+				Properties: map[string]Property{
+					"piece":  {Type: "string", Description: "Piece selector: project/piece, or a bare piece name (this project's first, else must be unique)"},
+					"top":    {Type: "boolean", Description: "Rank 1"},
+					"bottom": {Type: "boolean", Description: "Last rank"},
+					"up":     {Type: "integer", Description: "N ranks higher"},
+					"down":   {Type: "integer", Description: "N ranks lower"},
+					"before": {Type: "string", Description: "Place directly above this piece selector"},
+					"after":  {Type: "string", Description: "Place directly below this piece selector"},
+					"cwd":    {Type: "string", Description: "Working directory (scopes bare selectors)"},
+				},
+				Required: []string{"piece"},
+			},
+		},
+		{
+			Name:        "mp_inbox_note",
+			Description: "Set a piece's inbox note; empty note or clear removes it. Returns {\"key\",\"note\"}",
+			InputSchema: JSONSchema{
+				Type: "object",
+				Properties: map[string]Property{
+					"piece": {Type: "string", Description: "Piece selector: project/piece, or a bare piece name"},
+					"note":  {Type: "string", Description: "Note text"},
+					"clear": {Type: "boolean", Description: "Remove the note"},
+					"cwd":   {Type: "string", Description: "Working directory (scopes bare selectors)"},
+				},
+				Required: []string{"piece"},
+			},
+		},
+		{
+			Name:        "mp_inbox_snooze",
+			Description: "Park a piece at the bottom of the inbox (next/prev skip it) until a time; give one of for, until, clear. Returns {\"key\",\"snoozed_until\"}",
+			InputSchema: JSONSchema{
+				Type: "object",
+				Properties: map[string]Property{
+					"piece": {Type: "string", Description: "Piece selector: project/piece, or a bare piece name"},
+					"for":   {Type: "string", Description: "Duration, e.g. 90m, 2h, 2d"},
+					"until": {Type: "string", Description: "RFC3339 time"},
+					"clear": {Type: "boolean", Description: "Un-snooze"},
+					"cwd":   {Type: "string", Description: "Working directory (scopes bare selectors)"},
+				},
+				Required: []string{"piece"},
+			},
+		},
+		{
+			Name:        "mp_inbox_next",
+			Description: "Resolve the inbox row after the piece cwd stands in (wrapping, snoozed rows skipped; outside a piece: rank 1) and return its switch result. No multiplexer switch happens for a non-TTY caller, same as mp go",
+			InputSchema: JSONSchema{
+				Type: "object",
+				Properties: map[string]Property{
+					"sort": {Type: "string", Description: "Order to step through: \"rank\" (default) or \"urgency\""},
+					"cwd":  {Type: "string", Description: "Working directory (the piece you stand in)"},
+				},
+			},
+		},
+		{
+			Name:        "mp_inbox_prev",
+			Description: "Resolve the inbox row before the piece cwd stands in (wrapping, snoozed rows skipped; outside a piece: the last row) and return its switch result. No multiplexer switch happens for a non-TTY caller, same as mp go",
+			InputSchema: JSONSchema{
+				Type: "object",
+				Properties: map[string]Property{
+					"sort": {Type: "string", Description: "Order to step through: \"rank\" (default) or \"urgency\""},
+					"cwd":  {Type: "string", Description: "Working directory (the piece you stand in)"},
+				},
+			},
+		},
 	}
 	return successResponse(req.ID, ToolsListResult{Tools: tools})
 }
@@ -314,11 +395,62 @@ func (s *Server) executeTool(name string, args map[string]string) (string, bool)
 			cmdArgs = append(cmdArgs, strings.Fields(v)...)
 		}
 
+	case "mp_inbox":
+		cmdArgs = []string{"inbox", "--json"}
+		if v := args["sort"]; v != "" {
+			cmdArgs = append(cmdArgs, "--sort", v)
+		}
+		if args["refresh"] == "true" {
+			cmdArgs = append(cmdArgs, "--refresh")
+		}
+
+	case "mp_inbox_move":
+		cmdArgs = []string{"inbox", "move", "--json"}
+		stdin = inboxStdin(args, []string{"before", "after"}, []string{"top", "bottom"}, []string{"up", "down"})
+
+	case "mp_inbox_note":
+		cmdArgs = []string{"inbox", "note", "--json"}
+		stdin = inboxStdin(args, []string{"note"}, []string{"clear"}, nil)
+
+	case "mp_inbox_snooze":
+		cmdArgs = []string{"inbox", "snooze", "--json"}
+		stdin = inboxStdin(args, []string{"for", "until"}, []string{"clear"}, nil)
+
+	case "mp_inbox_next", "mp_inbox_prev":
+		cmdArgs = []string{"inbox", strings.TrimPrefix(name, "mp_inbox_"), "--json"}
+		if v := args["sort"]; v != "" {
+			cmdArgs = append(cmdArgs, "--sort", v)
+		}
+
 	default:
 		return fmt.Sprintf("Unknown tool: %s", name), true
 	}
 
 	return s.runMp(cwd, cmdArgs, stdin)
+}
+
+// inboxStdin builds the stdin JSON an `mp inbox` verb reads (its --schema
+// shape): the piece selector plus whichever of the named string, bool and
+// int fields the caller set. Types are restored from the stringified args.
+func inboxStdin(args map[string]string, strs, bools, ints []string) string {
+	in := map[string]any{"piece": args["piece"]}
+	for _, k := range strs {
+		if v := args[k]; v != "" {
+			in[k] = v
+		}
+	}
+	for _, k := range bools {
+		if args[k] == "true" {
+			in[k] = true
+		}
+	}
+	for _, k := range ints {
+		if n, err := strconv.Atoi(args[k]); err == nil && n != 0 {
+			in[k] = n
+		}
+	}
+	data, _ := json.Marshal(in)
+	return string(data)
 }
 
 func (s *Server) runMp(cwd string, args []string, stdin string) (string, bool) {

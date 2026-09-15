@@ -41,6 +41,18 @@ pnpm smoke   # build first; serves dist/ and checks every route
 (The old nav/CTA links to the mp-server login were removed on purpose — no
 dead ends until the hosted dashboard launches.)
 
+## Docs section (`/docs`)
+
+The repo's `docs/*.md` are published at `/docs/<name>/`, rendered through an
+Astro content collection (`src/content.config.ts`, pages in
+`src/pages/docs/`). The markdown is **vendored** into `src/content/docs/` by
+`pnpm sync-docs` (`scripts/sync-docs.mjs`) because the Docker build context
+is `website/` alone and cannot see `../docs`. The sync lifts each doc's H1
+into frontmatter and rewrites links — sibling docs become site routes,
+anything outside `docs/` becomes a GitHub link — so nothing dead-ends. Edit
+the source docs, run `pnpm sync-docs`, commit both; the
+`src/lib/docs-sync.test.ts` freshness test fails on drift.
+
 ## Design system
 
 Everything visual derives from the design system, vendored here so the site is

@@ -10,12 +10,13 @@ import "context"
 
 // Identity is the result of a successful login: the identity provider's stable
 // subject (used as the local user's external id, shared with the agent's MCP
-// token), the forge it belongs to ("github"/"gitlab"), and the access token used
-// to call that forge's API.
+// token), profile details, and an optional token for forge API access.
 type Identity struct {
 	ProviderUserID string
 	Provider       string
 	Token          string
+	DisplayName    string
+	AvatarURL      string
 }
 
 // Provider is the human login surface: produce an authorization URL, then

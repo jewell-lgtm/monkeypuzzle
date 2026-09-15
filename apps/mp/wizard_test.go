@@ -16,9 +16,14 @@ func TestCommandSkipsConfigCheck(t *testing.T) {
 	pieceCreate.Flags().Bool("schema", false, "")
 	completion := &cobra.Command{Use: "completion"}
 	helpCmd := &cobra.Command{Use: "help"}
+	shellInit := &cobra.Command{Use: "shell-init"}
+	doctor := &cobra.Command{Use: "doctor"}
+	remote := &cobra.Command{Use: "remote"}
+	remoteDoctor := &cobra.Command{Use: "doctor"}
 
 	configParent.AddCommand(configSet)
-	root.AddCommand(configParent, pieceCreate, completion, helpCmd)
+	remote.AddCommand(remoteDoctor)
+	root.AddCommand(configParent, pieceCreate, completion, helpCmd, shellInit, doctor, remote)
 
 	cases := []struct {
 		name string
@@ -31,6 +36,11 @@ func TestCommandSkipsConfigCheck(t *testing.T) {
 		{"config subcommand", configSet, nil, true},
 		{"completion", completion, nil, true},
 		{"help", helpCmd, nil, true},
+		// shell-init runs from a shell rc file and doctor reports the missing
+		// config; neither may be blocked by it.
+		{"shell-init", shellInit, nil, true},
+		{"doctor", doctor, nil, true},
+		{"remote doctor", remoteDoctor, nil, false},
 		{"piece create without schema", pieceCreate, nil, false},
 		{"piece create with --schema", pieceCreate, []string{"--schema"}, true},
 	}

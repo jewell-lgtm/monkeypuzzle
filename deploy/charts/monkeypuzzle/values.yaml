@@ -84,7 +84,11 @@ server:
   tolerations: []
   affinity: {}
 
-# The Temporal sync worker (`mp-server worker`).
+# Optional secondary PR monitoring. The private piece registry needs only Postgres.
+prSync:
+  enabled: false
+
+# The Temporal sync worker (`mp-server worker`), created only with prSync.enabled.
 worker:
   replicas: 1
   resources:
@@ -141,7 +145,7 @@ externalDatabase:
 # are idempotent re-syncs. Disable and set externalTemporal.hostPort for a
 # production-grade, durable Temporal (e.g. Temporal Cloud or a temporal release).
 temporal:
-  enabled: true
+  enabled: false
   # Pin to a specific tag for reproducibility (avoid :latest). This is the
   # temporal CLI image (bundles the dev server); it versions separately from
   # the Temporal server it ships (1.7.2 -> server 1.31).

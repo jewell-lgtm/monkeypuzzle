@@ -1,0 +1,93 @@
+/* ════════════════════════════════════════════════════════════════
+   Monkeypuzzle marketing site — /docs section.
+   Sidebar + prose layout for the vendored repo docs. Visual styling
+   is all design tokens; the markdown body gets a readable prose
+   treatment (the docs are heavy on tables and code blocks).
+   ════════════════════════════════════════════════════════════════ */
+
+/* ---- Landing (/docs/) ---- */
+.docs-index { padding: 64px 0 80px; }
+.docs-index h1 { font-size: var(--mp-text-3xl); margin: 8px 0 12px; }
+.docs-index__lead { color: var(--mp-text-muted); max-width: 60ch; margin: 0 0 32px; }
+.docs-index__lead a { color: var(--mp-primary); }
+.docs-index__grid {
+  display: grid; gap: 16px;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+}
+.docs-index__link { display: block; }
+.docs-index__title { font-family: var(--mp-font-mono); font-size: var(--mp-text-md); }
+
+/* ---- Doc page: sidebar + article ---- */
+.docs {
+  display: grid; grid-template-columns: 220px minmax(0, 1fr);
+  gap: 48px; padding: 48px 28px 80px; align-items: start;
+}
+@media (max-width: 800px) {
+  .docs { grid-template-columns: 1fr; gap: 24px; }
+}
+
+.docs__sidebar { position: sticky; top: 24px; }
+@media (max-width: 800px) { .docs__sidebar { position: static; } }
+.docs__sidebar-label {
+  font-family: var(--mp-font-mono); font-size: var(--mp-text-xs);
+  text-transform: uppercase; letter-spacing: 0.12em;
+  color: var(--mp-text-subtle); margin-bottom: 12px;
+}
+.docs__sidebar ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.docs__sidebar a {
+  display: block; padding: 6px 10px; border-radius: var(--mp-radius-sm);
+  font-size: var(--mp-text-sm); color: var(--mp-text-muted);
+}
+.docs__sidebar a:hover { color: var(--mp-text); background: var(--mp-surface); }
+.docs__sidebar a[aria-current='page'] {
+  color: var(--mp-primary); background: var(--mp-surface);
+}
+
+/* ---- Article prose ---- */
+.docs__article { max-width: 76ch; min-width: 0; }
+.docs__article h1 {
+  font-size: var(--mp-text-3xl); margin: 0 0 20px;
+  padding-bottom: 16px; border-bottom: 1px solid var(--mp-border);
+}
+.docs__article h2 { font-size: var(--mp-text-xl); margin: 40px 0 12px; }
+.docs__article h3 { font-size: var(--mp-text-lg); margin: 28px 0 10px; }
+.docs__article h4 { font-size: var(--mp-text-md); margin: 20px 0 8px; }
+.docs__article p, .docs__article li { line-height: 1.65; color: var(--mp-text-muted); }
+.docs__article strong { color: var(--mp-text); }
+.docs__article a { color: var(--mp-primary); }
+.docs__article a:hover { text-decoration: underline; }
+.docs__article hr { border: 0; border-top: 1px solid var(--mp-border); margin: 32px 0; }
+.docs__article blockquote {
+  margin: 16px 0; padding: 4px 16px;
+  border-left: 3px solid var(--mp-border); color: var(--mp-text-subtle);
+}
+
+/* Inline code + fenced blocks (shiki emits pre.astro-code) */
+.docs__article code {
+  font-family: var(--mp-font-mono); font-size: 0.9em;
+  background: var(--mp-surface); border: 1px solid var(--mp-border);
+  border-radius: var(--mp-radius-sm); padding: 1px 5px;
+}
+.docs__article pre {
+  padding: 14px 16px; border-radius: var(--mp-radius-md);
+  border: 1px solid var(--mp-border); overflow-x: auto;
+  font-size: var(--mp-text-sm); line-height: 1.55;
+}
+.docs__article pre code { background: none; border: 0; padding: 0; font-size: inherit; }
+
+/* Tables — the command reference is mostly tables; scroll, don't overflow */
+.docs__article table {
+  display: block; overflow-x: auto;
+  border-collapse: collapse; margin: 16px 0;
+  font-size: var(--mp-text-sm);
+}
+.docs__article th, .docs__article td {
+  border: 1px solid var(--mp-border); padding: 8px 12px;
+  text-align: left; vertical-align: top;
+}
+.docs__article th {
+  background: var(--mp-surface); color: var(--mp-text);
+  font-family: var(--mp-font-mono); font-weight: 600;
+}
+.docs__article td { color: var(--mp-text-muted); }
+.docs__article td code, .docs__article th code { white-space: nowrap; }

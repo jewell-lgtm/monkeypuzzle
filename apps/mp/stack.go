@@ -18,9 +18,9 @@ import (
 
 var stackCmd = &cobra.Command{
 	Use:   "stack",
-	Short: "Manage stacks of pieces (git-town-style)",
-	Long: `Whole-stack operations over pieces: sync a stack against main and itself,
-inspect the tree against the forge's PR/MR list, and append/prepend pieces.
+	Short: "Manage branch stacks inside pieces",
+	Long: `Manage the linear branch/PR stack inside a piece worktree, inspect it
+against the forge's PR/MR list, and sync existing legacy piece stacks.
 
 Anything risky aborts cleanly and prints plain-English next steps (e.g. which
 PR/MR base to change on the forge). 'sync' is dry-run by default and asks to
@@ -49,7 +49,7 @@ preview unless --apply (or "apply": true) is given.`,
 
 var stackAppendCmd = &cobra.Command{
 	Use:   "append [name]",
-	Short: "Create a new piece as a child of the current piece",
+	Short: "Create a branch on top of the current piece's stack",
 	Args:  cobra.MaximumNArgs(1),
 	RunE:  runStackAppend,
 }
@@ -156,7 +156,7 @@ func init() {
 
 	stackSyncCmd.Flags().StringVar(&flagStackMain, "main", "main", "Main branch name")
 	stackSyncCmd.Flags().StringVar(&flagStackSyncFrom, "from", "", "Upstream ref to sync main from, e.g. origin/main (prompts when omitted on a terminal; defaults to origin/<main>)")
-	stackSyncCmd.Flags().StringVar(&flagStackStrategy, "strategy", "merge", "Sync strategy: merge (default) or rebase")
+	stackSyncCmd.Flags().StringVar(&flagStackStrategy, "strategy", "merge", "Sync strategy: merge or rebase")
 	stackSyncCmd.Flags().BoolVar(&flagStackPush, "push", false, "Push each branch after syncing")
 	stackSyncCmd.Flags().BoolVar(&flagStackStackScope, "stack", false, "Limit to the current piece's stack (run from a piece worktree)")
 	stackSyncCmd.Flags().BoolVar(&flagStackSyncApply, "apply", false, "Apply the sync (default is a dry-run preview)")
@@ -166,7 +166,7 @@ func init() {
 	stackSyncCmd.Flags().BoolVar(&flagStackSyncJSON, "json", false, "Output JSON even on a terminal")
 
 	stackAppendCmd.Flags().StringVar(&flagStackName, "name", "", "Piece name")
-	stackAppendCmd.Flags().StringVar(&flagStackPrompt, "prompt", "", "Piece prompt (recorded in piece metadata; used to name the piece)")
+	stackAppendCmd.Flags().StringVar(&flagStackPrompt, "prompt", "", "Prompt used to derive the branch name")
 	stackAppendCmd.Flags().BoolVar(&flagStackAppendSchema, "schema", false, "Print an example input document and exit")
 	stackAppendCmd.Flags().BoolVar(&flagStackAppendJSON, "json", false, "Output JSON even on a terminal")
 
@@ -183,7 +183,7 @@ func init() {
 
 	stackGraphCmd.Flags().StringVar(&flagStackGraphRepo, "repo", "", "Repository as owner/name (required)")
 	stackGraphCmd.Flags().StringVar(&flagStackGraphBranch, "default-branch", "", "Trunk branch (auto-detected from the forge if omitted)")
-	stackGraphCmd.Flags().StringVar(&flagStackGraphProvider, "provider", "github", "Forge provider: github (default) or gitlab")
+	stackGraphCmd.Flags().StringVar(&flagStackGraphProvider, "provider", "github", "Forge provider: github or gitlab")
 	stackGraphCmd.Flags().IntVar(&flagStackGraphLimit, "limit", 200, "Max PRs to fetch")
 	stackGraphCmd.Flags().BoolVar(&flagStackGraphSchema, "schema", false, "Print an example input document and exit")
 	stackGraphCmd.Flags().BoolVar(&flagStackGraphJSON, "json", false, "Output JSON even on a terminal")
@@ -322,7 +322,7 @@ func runStackSync(cmd *cobra.Command, args []string) error {
 	// explicit --dry-run (a read-only preview, where the source only affects a
 	// cosmetic line); non-interactive callers fall through and the handler
 	// defaults to origin/<main>.
-	if input.From == "" && !input.DryRun && cli.IsTerminal() && !cli.HasStdinData() {
+	if input.From == "" && !input.DryRun && cli.IsInteractive() && !cli.HasStdinData() {
 		mainName := input.MainBranch
 		if mainName == "" {
 			mainName = "main"
