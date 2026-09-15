@@ -103,6 +103,22 @@ project_path() {
 	done <<<"$rows"
 }
 
+# seam_nth translates the caller's --with-nth into the matching --nth, so the
+# non-interactive seam below scores the same columns the picker matches on.
+# Without it a query could match a hidden field — a worktree or project path —
+# that nobody typing into the real picker can see.
+seam_nth() {
+	local arg
+	for arg in "$@"; do
+		case "$arg" in
+			--with-nth=*)
+				printf '%s' "--nth=${arg#--with-nth=}"
+				return
+				;;
+		esac
+	done
+}
+
 # fzf_pick reads TAB-delimited rows on stdin and prints the chosen row verbatim
 # (all fields, including hidden ones used to act on the selection). Extra args
 # are forwarded to fzf for display/preview tuning. When MP_PLUGIN_FILTER is set
@@ -110,10 +126,13 @@ project_path() {
 # interactive UI and selects the best fuzzy match for that query, so the flow
 # is drivable without a TTY.
 fzf_pick() {
+	local nth
 	if [[ -n "${MP_PLUGIN_FILTER+x}" ]]; then
+		nth="$(seam_nth "$@")"
 		# head closes the pipe on the first row, so fzf takes SIGPIPE and
 		# pipefail would surface 141 as a picker failure.
-		fzf --delimiter=$'\t' --filter="$MP_PLUGIN_FILTER" | head -n1 || true
+		# shellcheck disable=SC2086 # one flag or nothing; never word-split
+		fzf --delimiter=$'\t' $nth --filter="$MP_PLUGIN_FILTER" | head -n1 || true
 	else
 		fzf --delimiter=$'\t' "$@"
 	fi
@@ -126,9 +145,12 @@ fzf_pick() {
 # matches no row exits 1 with an empty row — the same create path, not a
 # failure — while cancellation still exits 130.
 fzf_pick_or_create() {
+	local nth
 	if [[ -n "${MP_PLUGIN_FILTER+x}" ]]; then
+		nth="$(seam_nth "$@")"
 		printf '%s\n%s\n' "$MP_PLUGIN_FILTER" "${MP_PLUGIN_KEY:-}"
-		fzf --delimiter=$'\t' --filter="$MP_PLUGIN_FILTER" | head -n1 || true
+		# shellcheck disable=SC2086 # one flag or nothing; never word-split
+		fzf --delimiter=$'\t' $nth --filter="$MP_PLUGIN_FILTER" | head -n1 || true
 		return 0
 	fi
 	fzf --delimiter=$'\t' --print-query --expect=ctrl-o,alt-enter "$@"

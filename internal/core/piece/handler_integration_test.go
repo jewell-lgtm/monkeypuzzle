@@ -2471,3 +2471,75 @@ func TestIntegration_MergePiece_DefaultsToLocal(t *testing.T) {
 		t.Errorf("a default merge touched the forge: %v", forge.merged)
 	}
 }
+
+// The cross-project picker names a piece in a repo the process is not standing
+// in. Without an explicit RepoRoot the lookup resolves against the caller's own
+// directory, which is a different project's piece list entirely.
+func TestIntegration_AbandonPiece_RepoRootResolvesAnotherProject(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	tmpDataHome, err := os.MkdirTemp("", "mp-data-*")
+	if err != nil {
+		t.Fatalf("failed to create temp data dir: %v", err)
+	}
+	t.Cleanup(func() {
+		os.RemoveAll(tmpDataHome)
+		paths.ResetDataDir()
+	})
+	paths.SetDataDir(tmpDataHome)
+
+	target, err := os.MkdirTemp("", "mp-abandon-target-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(target)
+	setupGitRepo(t, target)
+	setupMonkeypuzzleConfig(t, target)
+
+	// A second repo, standing in for wherever the picker was opened from.
+	elsewhere, err := os.MkdirTemp("", "mp-abandon-elsewhere-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(elsewhere)
+	setupGitRepo(t, elsewhere)
+	setupMonkeypuzzleConfig(t, elsewhere)
+
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get working directory: %v", err)
+	}
+	defer func() { _ = os.Chdir(oldWd) }()
+
+	deps := core.Deps{FS: adapters.NewOSFS(""), Output: adapters.NewBufferOutput(), Exec: adapters.NewOSExec()}
+	handler := piece.NewHandlerWithMultiplexer(deps, newRecordingMux(false))
+
+	if err := os.Chdir(target); err != nil {
+		t.Fatalf("failed to change directory: %v", err)
+	}
+	info, err := handler.CreatePiece(context.Background(), "over-there", piece.CreatePieceOptions{})
+	if err != nil {
+		t.Fatalf("CreatePiece failed: %v", err)
+	}
+
+	// Stand in the other project entirely, as the picker's caller does.
+	if err := os.Chdir(elsewhere); err != nil {
+		t.Fatalf("failed to change directory: %v", err)
+	}
+	if _, err := handler.AbandonPiece(context.Background(), "over-there", piece.AbandonOptions{}); err == nil {
+		t.Fatal("AbandonPiece without RepoRoot found a piece of another project; want a not-found error")
+	}
+
+	result, err := handler.AbandonPiece(context.Background(), "over-there", piece.AbandonOptions{RepoRoot: target})
+	if err != nil {
+		t.Fatalf("AbandonPiece with RepoRoot failed: %v", err)
+	}
+	if result.PieceName != "over-there" {
+		t.Errorf("PieceName = %q, want over-there", result.PieceName)
+	}
+	if _, err := os.Stat(info.WorktreePath); !os.IsNotExist(err) {
+		t.Errorf("worktree %s still exists after abandon (stat err: %v)", info.WorktreePath, err)
+	}
+}

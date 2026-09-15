@@ -23,7 +23,7 @@ And with `mp config set multiplexer herdr`, `mp agent list` / `mp wait` /
 
 | Action (`monkeypuzzle.<id>`) | What it does                                                   |
 | ---------------------------- | -------------------------------------------------------------- |
-| `open`                       | Popup picker over every piece and project main mp knows about — including pieces with a worktree but **no live workspace yet**, which herdr's switcher can't show — with a git status/log preview. Hands off to `mp switch`. Typing a name no row matches (or `ctrl-o` over one that does) creates that piece instead. |
+| `open`                       | Popup picker over every piece and project main mp knows about — including pieces with a worktree but **no live workspace yet**, which herdr's switcher can't show — with a git status/log preview. Hands off to `mp switch`. Typing a name no row matches (or `ctrl-o` over one that does) creates that piece instead; `ctrl-d` finishes the highlighted piece and `ctrl-x` abandons it. |
 | `create`                     | Popup: pick a project, name the piece (or leave blank and describe it as a prompt) → `mp create`. `ctrl-o` in the `open` picker with nothing typed lands here. |
 | `adopt`                      | Popup picker over adoptable local/remote branches → `mp switch --branch` adopts one as a piece. |
 | `blocked`                    | No popup: `mp agent focus --blocked --all` jumps straight to the most urgent blocked agent across every registered project. |
@@ -39,6 +39,16 @@ branch is adopted rather than failing. A query that is a filter and not a name
 — fzf's `^` `$` `!` `'` operators, two terms, anything `git check-ref-format`
 refuses — is turned down instead of handed to git, and a bare `alpha/` asks
 for the name through the create picker, in alpha.
+
+It is also how you end one, so culling merged and dead work needs no separate
+trip: `ctrl-d` finishes the highlighted piece (`mp done`) and `ctrl-x`
+abandons it (`mp abandon`), then the list reloads. Each asks first —
+`[y/N/f=force]`, where `f` goes straight past mp's gate — and when the plain
+run is refused (the piece isn't merged, the worktree is dirty) it shows mp's
+own reason and offers that one escalation rather than dropping you back to a
+shell to retype it. Abandon always keeps the branch; use `mp abandon
+--delete-branch` for the rest. On a project main row the keys say there is no
+piece there and do nothing.
 
 The scripts drive mp through its stateless API and export `MP_MUX_PLUGIN=1`,
 which tells mp to perform the herdr workspace focus/create itself (see

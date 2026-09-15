@@ -55,7 +55,7 @@ plugin claims a single key in the prefix table and puts everything in a
 
 | Chord (after prefix) | Action                                                        |
 | -------------------- | ------------------------------------------------------------- |
-| `m p`                | Switch: pick a piece, branch, or main session — or create one  |
+| `m p`                | Switch: pick a piece, branch, or main session — or create, finish, or abandon one |
 | `m g`                | Go to a branch: paste a name — switch, adopt, or create it    |
 | `m c`                | Create: pick a project, name the piece, create + switch       |
 | `m a`                | Agents: pick a live agent (blocked first), focus its pane     |
@@ -76,6 +76,16 @@ with nothing typed — or a bare `alpha/`, which keeps alpha — drops into the
 full create flow (`m c`). A query that is a filter and not a name (fzf's `^`
 `$` `!` `'` operators, two terms, anything `git check-ref-format` refuses) is
 turned down instead of handed to git.
+
+The same picker also ends a piece, so culling merged and dead work needs no
+separate trip: `ctrl-d` finishes the highlighted piece (`mp done`) and
+`ctrl-x` abandons it (`mp abandon`), then the list reloads. Each asks first —
+`[y/N/f=force]`, where `f` goes straight past mp's gate — and when the plain
+run is refused (the piece isn't merged, the worktree is dirty) it shows mp's
+own reason and offers that one escalation rather than dropping you back to a
+shell to retype it. Abandon always keeps the branch; use `mp abandon
+--delete-branch` for the rest. On a main or branch row the keys say there is
+no piece there and do nothing.
 
 The branch jump (`m g`) is repo-aware: it scopes to the project of the current
 pane's directory and takes whatever you paste — an existing piece attaches, an

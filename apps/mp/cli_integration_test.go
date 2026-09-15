@@ -1884,3 +1884,87 @@ func TestCLI_Cleanup_UncommittedInitScaffold(t *testing.T) {
 		t.Errorf("worktree should be removed, stat err: %v", err)
 	}
 }
+
+// TestCLI_Cleanup_ApplyDoesNotAnnounceADryRun pins a dogfooding find: every
+// invocation ran a preview pass first, so a caller who had already opted in saw
+// "[dry-run] Would cleanup: X" on the line immediately above "✓ Cleaned up: X"
+// — and paid for a second scan (a git and forge lookup per piece) to print it.
+// A pre-decided run does the work once and says only what it did.
+func TestCLI_Cleanup_ApplyDoesNotAnnounceADryRun(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		stdin string
+		args  []string
+	}{
+		{name: "apply flag", args: []string{"cleanup", "--apply"}},
+		{name: "yes flag", args: []string{"cleanup", "--yes"}},
+		{name: "apply over stdin", stdin: `{"apply":true}`, args: []string{"cleanup"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env := setupTestEnv(t)
+			defer env.cleanup()
+
+			env.initGitRepo()
+			env.initProject("test")
+			worktree := setupMergedPiece(t, env, "merged-piece")
+
+			var stdout, stderr string
+			var err error
+			if tc.stdin != "" {
+				stdout, stderr, err = env.runWithStdin(tc.stdin, tc.args...)
+			} else {
+				stdout, stderr, err = env.run(tc.args...)
+			}
+			if err != nil {
+				t.Fatalf("cleanup failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+			}
+			if strings.Contains(stderr, "[dry-run]") {
+				t.Errorf("a pre-decided cleanup announced a dry-run:\n%s", stderr)
+			}
+			if strings.Contains(stderr, "Would clean") {
+				t.Errorf("a pre-decided cleanup previewed instead of reporting:\n%s", stderr)
+			}
+			// It still has to actually clean, and still report it.
+			if !strings.Contains(stderr, "Cleaned 1 piece(s): merged-piece") {
+				t.Errorf("missing the applied summary:\n%s", stderr)
+			}
+			if _, err := os.Stat(worktree); !os.IsNotExist(err) {
+				t.Errorf("worktree should be removed, stat err: %v", err)
+			}
+		})
+	}
+}
+
+// The preview is exactly what a caller who has NOT opted in should still get.
+func TestCLI_Cleanup_PreviewStillLabelsItsDryRun(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{name: "default", args: []string{"cleanup"}},
+		{name: "explicit dry-run", args: []string{"cleanup", "--dry-run"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env := setupTestEnv(t)
+			defer env.cleanup()
+
+			env.initGitRepo()
+			env.initProject("test")
+			worktree := setupMergedPiece(t, env, "merged-piece")
+
+			stdout, stderr, err := env.run(tc.args...)
+			if err != nil {
+				t.Fatalf("cleanup failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+			}
+			if !strings.Contains(stderr, "[dry-run]") {
+				t.Errorf("a preview lost its dry-run label:\n%s", stderr)
+			}
+			if !strings.Contains(stderr, "Would clean") {
+				t.Errorf("a preview lost its summary:\n%s", stderr)
+			}
+			if _, err := os.Stat(worktree); err != nil {
+				t.Errorf("a preview removed the worktree: %v", err)
+			}
+		})
+	}
+}

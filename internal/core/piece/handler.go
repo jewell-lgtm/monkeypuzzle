@@ -1688,6 +1688,10 @@ func IsPathInside(child, parent string) bool {
 type AbandonOptions struct {
 	Force        bool // Force removal even with uncommitted changes
 	DeleteBranch bool // Also delete the git branch
+	// RepoRoot names the project to look the piece up in. Empty means the
+	// project the caller is standing in; a cross-project caller (the picker)
+	// sets it so the name resolves against the right repo.
+	RepoRoot string
 }
 
 // AbandonResult contains information about the abandoned piece
@@ -1708,9 +1712,9 @@ func (h *Handler) AbandonPiece(ctx context.Context, pieceName string, opts Aband
 
 	// Detect repo root from current working directory first
 	// Use GetMainRepoRoot to handle running from within a worktree
-	repoRoot := ""
+	repoRoot := opts.RepoRoot
 	wd, err := os.Getwd()
-	if err == nil {
+	if repoRoot == "" && err == nil {
 		// Try GetMainRepoRoot first (handles worktrees)
 		detectedRoot, err := h.git.GetMainRepoRoot(ctx, wd)
 		if err != nil {

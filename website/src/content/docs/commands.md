@@ -1361,6 +1361,13 @@ mp project remove --target /path/to/repo
 
 A **repo switcher**: jump to any registered project's worktree from anywhere. With a terminal it opens an interactive fuzzy picker where each repo starts **collapsed** (one row per repo). Press `→` to expand a repo and reveal its pieces and branches; `←` collapses it again. Pressing `Enter` on a collapsed repo jumps straight to its **main worktree**. Typing filters across everything (collapsed or not), and the list scrolls (`↑/↓`, `PgUp/PgDn`), sizing its window to the terminal height. A single registered repo starts expanded.
 
+On a piece row the picker also ends the piece's life: `^D` finishes it
+(`mp done`) and `^X` abandons it (`mp abandon`). Both confirm first, and the
+confirmation offers the `--force` escalation — finish an unmerged piece,
+discard an abandoned one's uncommitted changes — so a refusal does not send
+you back to the shell. The picker reopens on the updated list afterwards; the
+keys are inert on project, branch, and create rows, which have no lifecycle.
+
 With `--json` (or no TTY) it prints the **full per-project detail** (`pieces`, `branches`) so automation can build its own pickers.
 
 Bare `mp` opens a fuzzy picker **scoped to the current project** (repo-local) — it shows the pieces and branches of the project you're standing in. When run **outside** a monkeypuzzle project, bare `mp` prints context-aware guidance to stderr and then falls through to the cross-project picker (when you have registered projects to jump to):
