@@ -164,12 +164,97 @@ terminal state survives reattach.
 
 ### herdr
 
-With `mp config set multiplexer herdr`, pieces open as herdr workspaces
-labeled `mp/<project>/<piece>`, and mp reads herdr's own agent tracking
-instead of reading the screen. The [herdr plugin](../apps/herdr/README.md)
-adds pickers for what herdr can't show natively: pieces with no live
-workspace, adoptable branches, and the inbox. Its piece picker creates too —
-a typed name that matches no row becomes a new piece.
+[herdr](https://herdr.dev) is a multiplexer built for coding agents: it groups
+terminals into *workspaces*, recognizes which agent occupies which pane, and
+keeps the lot in a sidebar. mp gives each piece one workspace, which is herdr's
+own model — one workspace per repo, task or investigation — so nothing is
+translated between them.
+
+New to both? The whole setup is four lines:
+
+```bash
+brew install herdr                 # or see herdr.dev for other platforms
+mp config set multiplexer herdr    # once per machine
+herdr plugin install jewell-lgtm/monkeypuzzle/apps/herdr
+herdr                              # launch or attach to the session
+```
+
+The plugin's pickers need [`fzf`](https://github.com/junegunn/fzf) 0.71+ and
+[`jq`](https://jqlang.github.io/jq/).
+
+From inside herdr, `mp create` and `mp switch` open — or focus, if it already
+exists — a workspace labeled `mp/<project>/<piece>` rooted at that piece's
+worktree; the repo's own main worktree is `mp/<project>`. `mp done`,
+`mp abandon` and `mp cleanup` close it again. What lives *inside* a workspace
+is yours: mp creates no tabs, no panes and no agents.
+
+Workspaces belong to the herdr server, not to your terminal. Detaching,
+closing the window, or attaching from another machine leaves every pane
+running where it is.
+
+#### herdr 101
+
+The prefix is `Ctrl+b` unless you change `[keys] prefix` in
+`~/.config/herdr/config.toml`.
+
+| Keys | Description |
+| --- | --- |
+| `herdr` | launch or attach to the persistent session |
+| `Ctrl+b ?` | help — every binding, including your own |
+| `Ctrl+b w` | workspace picker |
+| `Ctrl+b Shift+n` | new workspace |
+| `Ctrl+b c` | new tab |
+| `Ctrl+b v` / `Ctrl+b -` | split the pane vertically / horizontally |
+| `Ctrl+b h` `j` `k` `l` | focus the pane left / down / up / right |
+| `Ctrl+b z` | zoom the focused pane |
+| `Ctrl+b b` | toggle the sidebar |
+| `Ctrl+b q` | detach; the session keeps running |
+
+#### What the plugin adds
+
+herdr covers natively what the tmux plugin needed pickers and status-line
+hacks for — workspace switching, per-pane agent state, ambient status in the
+sidebar. So the [herdr plugin](../apps/herdr/README.md) only adds the verbs
+where mp holds data herdr doesn't:
+
+| Action | Description |
+| --- | --- |
+| `monkeypuzzle.open` | picker over every piece and project main mp knows about, **including pieces that have a worktree but no live workspace** — which herdr's own switcher cannot show; a typed name that matches no row creates that piece |
+| `monkeypuzzle.create` | pick a project, then name the piece or describe it as a prompt |
+| `monkeypuzzle.adopt` | adopt an existing local or remote branch as a piece |
+| `monkeypuzzle.inbox` | the ranked [inbox](workflow.md#the-inbox), with rank, snooze and refresh in the picker |
+| `monkeypuzzle.next` / `.prev` | step to the piece after or before the one you're standing in |
+| `monkeypuzzle.blocked` | jump straight to the most urgent blocked agent, across every project |
+
+Bind them yourself — the plugin ships no default keys:
+
+```toml
+[[keys.command]]
+key = "prefix+m"
+type = "plugin_action"
+command = "monkeypuzzle.open"
+description = "monkeypuzzle: open piece"
+
+[[keys.command]]
+key = "prefix+i"
+type = "plugin_action"
+command = "monkeypuzzle.inbox"
+description = "monkeypuzzle: inbox"
+
+[[keys.command]]
+key = "prefix+u"
+type = "plugin_action"
+command = "monkeypuzzle.blocked"
+description = "monkeypuzzle: jump to blocked agent"
+```
+
+#### Agent state
+
+With `multiplexer = herdr`, `mp agent list`, `mp agent summary`, `mp wait` and
+`mp agent focus --blocked` read herdr's per-pane agent tracking — including
+`done`, and agents beyond claude and codex — instead of inferring state from
+the screen. `mp integration install claude` remains the exact path, because it
+reports from the agent's own hooks rather than from what's on screen.
 
 ### zellij and cmux
 

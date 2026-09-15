@@ -11,6 +11,7 @@ id = "monkeypuzzle"
 name = "Monkeypuzzle"
 version = "0.1.0"
 min_herdr_version = "0.9.0"
+# The scripts are bash and need fzf and jq; Windows is not supported.
 platforms = ["linux", "macos"]
 description = "Worktree-per-piece git flow: open, create, and adopt pieces; the inbox; jump to the blocked agent"
 

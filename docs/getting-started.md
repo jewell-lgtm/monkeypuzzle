@@ -7,7 +7,10 @@
 - **Go 1.24+**, only if you build from source
 
 A multiplexer (tmux, zellij, cmux, herdr) is optional; see
-[Integrations](integrations.md#multiplexers).
+[Integrations](integrations.md#multiplexers). If you want each piece to get
+its own workspace with agent status tracked per pane, start with
+[herdr](integrations.md#herdr) — it needs no setup beyond
+`mp config set multiplexer herdr`.
 
 ## Installation
 
@@ -120,5 +123,5 @@ Without the shell wrapper, `cd "$(mp switch my-feature)"` does the same as
 
 - [Workflow guide](workflow.md): [stacking](workflow.md#stacking) pieces, gates, hook recipes
 - [Commands reference](commands.md): every flag and JSON shape
-- [Integrations](integrations.md): editors, tmux and other multiplexers, coding agents
+- [Integrations](integrations.md): editors, [herdr](integrations.md#herdr), tmux and other multiplexers, coding agents
 - [Remote development](remote-development.md): drive a project on another machine, or place single pieces on a box with `mp create --remote`

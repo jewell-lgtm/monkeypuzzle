@@ -2217,3 +2217,37 @@ func TestHandler_ReparentChildrenOf(t *testing.T) {
 		t.Errorf("dry-run rewrote d.parent to %q", meta.Parent)
 	}
 }
+
+// An empty pieces directory is not the same as a missing one: the missing case
+// already returned an empty slice, but a repo whose last piece had been
+// abandoned kept the directory and returned nil, so `mp list` printed a bare
+// `null` on stdout.
+func TestHandler_ListPieces_EmptyDirEncodesAsArray(t *testing.T) {
+	fs := adapters.NewMemoryFS()
+	handler := piece.NewHandler(core.Deps{FS: fs, Output: adapters.NewBufferOutput(), Exec: adapters.NewMockExec()})
+	paths.SetDataDir("/test-data/monkeypuzzle")
+	t.Cleanup(paths.ResetDataDir)
+
+	repo := "/test-repo"
+	if err := fs.MkdirAll(filepath.Join(repo, ".monkeypuzzle", "pieces"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	pieces, err := handler.ListPieces(context.Background(), repo)
+	if err != nil {
+		t.Fatalf("ListPieces: %v", err)
+	}
+	if pieces == nil {
+		t.Error("ListPieces returned a nil slice; JSON consumers get null instead of []")
+	}
+	if len(pieces) != 0 {
+		t.Errorf("got %d pieces, want 0: %+v", len(pieces), pieces)
+	}
+	encoded, err := json.Marshal(pieces)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(encoded) != "[]" {
+		t.Errorf("json.Marshal = %s, want []", encoded)
+	}
+}
