@@ -867,6 +867,59 @@ configured but unreachable, `mp sync` warns and falls back to the local parent.
 
 Merge piece back to main branch.
 
+### Where the merge happens
+
+`mp merge` lands a piece one of two ways:
+
+| Strategy | What it does |
+| -------- | ------------ |
+| `local` (default) | Squash-merges the piece branch into the target branch in the main checkout. Nothing touches the forge. |
+| `forge` | Squash-merges the piece's **open PR/MR** through the forge CLI, then fast-forwards the local target branch onto the result. |
+
+The strategy is resolved most-specific-first: the per-call flag, then the
+project's `merge.strategy`, then the user-level `merge_strategy`, then `local`.
+
+```jsonc
+// .monkeypuzzle/monkeypuzzle.json — the project's answer, shared by everyone
+// who checks it out
+{
+  "version": "1",
+  "project": { "name": "alpha" },
+  "pr": { "provider": "github" },
+  "merge": { "strategy": "forge" }
+}
+```
+
+```bash
+mp config set merge_strategy forge   # your fallback for projects that declare none
+mp merge --forge                     # this call only
+mp merge --local                     # this call only, whatever the config says
+```
+
+Under `forge`, `mp merge` refuses rather than land the work by a route the
+project did not ask for. Every one of these is checked **before** the
+`before-piece-merge` hook runs, so a refused merge leaves no half-done side
+effects behind:
+
+| Refusal | Why | Way forward |
+| ------- | --- | ----------- |
+| No open PR/MR for the branch | Merging on the forge is a claim that the work went through a review surface; mp will not quietly merge it locally instead | [`mp pr create`](#mp-pr-create), or `--local` |
+| The open PR targets a different base | The forge merges a PR into its own base, not the branch you named, so mp would be reporting a merge that did not happen | [`mp stack set-parent`](#mp-stack) to re-point it, or `--local` |
+| The PR is still a draft | Flipping a draft to ready is a deliberate step, never something merge does for you | [`mp pr ready`](#mp-pr-ready) |
+| The branch has commits that were never pushed | The PR does not contain them, so merging it would land less than the piece holds | push first, or `--local` |
+| `origin/<branch>` cannot be compared against | The "is everything in the PR?" check could not run, and mp will not merge as though it had passed | fetch the branch, or `--local` |
+
+The result carries `"strategy"` and, for a forge merge, the `"pr_number"` it
+merged. Both strategies record the same durable merged marker, so
+[`mp done`](#mp-done) and [`mp cleanup`](#mp-cleanup) behave identically after
+either. The forge merge leaves the source branch alone — mp owns the branch's
+life through `mp done` / `mp abandon`.
+
+After the forge merges, mp fast-forwards the local target onto the result in
+whichever worktree holds it — the main checkout for `main`, or the parent
+piece's own worktree when a stacked piece merges into its parent, so the parent
+actually receives the child's work.
+
 By default `mp merge` refuses when the target branch has commits the piece lacks (run [`mp update`](#mp-update) to pull them in). The gate is a policy, not a rule — bypass it any of three ways; the merge then proceeds with a warning and any conflicts surface from git:
 
 | Bypass       | Spelling                                       | Scope     |
@@ -894,6 +947,8 @@ echo '{"no_update_check":true}' | mp merge
 | `--force`              | Merge even if the piece has child pieces (children are **not** re-homed) | `false` |
 | `--reparent-children`  | Merge a piece with children, re-homing them onto the merge target        | `false` |
 | `--reparent-strategy`  | How to re-home children: `rebase` (rewrites history) or `merge` (no force-push) | `rebase` |
+| `--forge`              | Merge the piece's open PR/MR on the forge for this call                  | config  |
+| `--local`              | Squash-merge into the target branch here for this call                   | config  |
 | `--no-update-check`    | Merge even if the target has commits not in the piece (conflicts surface from git) | `false` |
 
 ### Requirements
@@ -1422,6 +1477,7 @@ mp config set multiplexer none   # tmux, zellij, cmux, herdr, or none
 mp config set open_command 'code {path}'  # what `mp open` runs
 mp config set done_require_merged false   # let `mp done` clean up unmerged pieces
 mp config set merge_require_updated false # let `mp merge` proceed when the target is ahead
+mp config set merge_strategy forge        # merge PRs on the forge where a project doesn't say otherwise
 ```
 
 ### Keys
@@ -1432,6 +1488,7 @@ mp config set merge_require_updated false # let `mp merge` proceed when the targ
 | `open_command`        | Command template [`mp open`](#mp-open) runs | e.g. `code {path}`; placeholders `{path}` `{piece}` `{project}` `{branch}`; unset by default |
 | `done_require_merged` | Whether [`mp done`](#mp-done) refuses unmerged pieces (`--force` bypasses per call) | `true` (default), `false` |
 | `merge_require_updated` | Whether [`mp merge`](#mp-merge) refuses when the target is ahead (`--no-update-check` bypasses per call) | `true` (default), `false` |
+| `merge_strategy` | Fallback for [`mp merge`](#mp-merge) in projects whose config declares no `merge.strategy` | `local` (default), `forge` |
 
 ---
 

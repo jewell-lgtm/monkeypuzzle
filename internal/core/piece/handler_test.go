@@ -960,6 +960,11 @@ func TestHandler_MergePiece_BeforeHookFails(t *testing.T) {
 	mockExec.AddResponse("git", []string{"rev-parse", "--show-toplevel"}, []byte(worktreePath+"\n"), nil)
 	mockExec.AddResponse("git", []string{"rev-parse", "--abbrev-ref", "HEAD"}, []byte("piece-1\n"), nil)
 
+	// The read-only safety checks now run ahead of the hook, so they need
+	// answers for the hook to be reached at all.
+	mockExec.AddResponse("git", []string{"merge-base", "main", "piece-1"}, []byte("abc123\n"), nil)
+	mockExec.AddResponse("git", []string{"rev-list", "--count", "abc123..main"}, []byte("0\n"), nil)
+
 	// Create before-piece-merge hook that fails
 	hookPath := "repo/.monkeypuzzle/hooks/before-piece-merge.sh"
 	_ = fs.MkdirAll("repo/.monkeypuzzle/hooks", 0755)
@@ -979,7 +984,7 @@ func TestHandler_MergePiece_BeforeHookFails(t *testing.T) {
 		t.Errorf("expected error about hook failure, got: %v", err)
 	}
 
-	// Verify checkout was NOT called (hook should abort before safety checks)
+	// Verify checkout was NOT called: the hook aborts before anything is written.
 	if mockExec.WasCalled("git", "checkout", "main") {
 		t.Error("git checkout should not be called when before hook fails")
 	}

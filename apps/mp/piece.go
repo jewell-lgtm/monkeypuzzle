@@ -147,6 +147,8 @@ var flagAbandonPiece string
 var flagDonePiece string
 var flagDoneForce bool
 var flagMergeNoUpdateCheck bool
+var flagMergeForge bool
+var flagMergeLocal bool
 var flagStatusPiece string
 var flagStatusEnsureID bool
 var flagDeleteBranch bool
@@ -201,6 +203,9 @@ func init() {
 	pieceMergeCmd.Flags().StringVar(&flagPieceMergeReparentStrategy, "reparent-strategy", "", "How to re-home children: 'rebase' (default, rewrites history) or 'merge' (no force-push)")
 	pieceMergeCmd.Flags().BoolVar(&flagPieceMergeJSON, "json", false, "Output JSON even on a terminal")
 	pieceMergeCmd.Flags().BoolVar(&flagMergeNoUpdateCheck, "no-update-check", false, "Merge even if the target has commits not in the piece (conflicts surface from git)")
+	pieceMergeCmd.Flags().BoolVar(&flagMergeForge, "forge", false, "Merge the piece's open PR/MR on the forge instead of locally")
+	pieceMergeCmd.Flags().BoolVar(&flagMergeLocal, "local", false, "Squash-merge into the target branch here, whatever the configured strategy")
+	pieceMergeCmd.MarkFlagsMutuallyExclusive("forge", "local")
 	pieceCleanupCmd.Flags().StringVar(&flagMainBranch, "main", "main", "Main branch name to check for merged status")
 	pieceCleanupCmd.Flags().StringVar(&flagMainBranchLegacy, "main-branch", "", "Deprecated alias for --main")
 	_ = pieceCleanupCmd.Flags().MarkDeprecated("main-branch", "use --main")
@@ -864,6 +869,7 @@ func runPieceMerge(cmd *cobra.Command, args []string) error {
 	handler := newPieceHandler(deps)
 	if userCfg, err := config.LoadUserConfig(); err == nil {
 		handler.SetMergeRequireUpdated(userCfg.MergeRequiresUpdated())
+		handler.SetMergeStrategyDefault(userCfg.MergeStrategy)
 	}
 
 	// Get input
@@ -939,6 +945,12 @@ func getMergeInput(cmd *cobra.Command) (piececmd.MergeInput, error) {
 		input.ReparentChildren = true
 		input.ReparentStrategy = flagPieceMergeReparentStrategy
 	}
+	if flagMergeForge {
+		input.Strategy = string(piececmd.MergeForge)
+	}
+	if flagMergeLocal {
+		input.Strategy = string(piececmd.MergeLocal)
+	}
 	if flagMergeNoUpdateCheck {
 		input.NoUpdateCheck = true
 	}
@@ -994,20 +1006,27 @@ func runPieceCleanup(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("not in a git repository")
 	}
 
-	// Cleanup is dry-run by default. Always preview first, then decide whether to
-	// apply: --apply (or --force) opts in, --dry-run stays a preview, an
-	// interactive terminal is asked to confirm, and any other (non-interactive)
-	// caller previews.
-	output, err := cleanupPass(ctx, handler, repoRoot, input.MainBranch, true)
-	if err != nil {
-		return err
-	}
-	if output.Links, err = checkLinks(repoRoot, deps.FS, true); err != nil {
-		return err
+	// Cleanup is dry-run by default: preview, then decide whether to apply.
+	// --apply (or --yes) opts in, --dry-run stays a preview, an interactive
+	// terminal is asked to confirm, and any other (non-interactive) caller
+	// previews.
+	//
+	// A caller who has already opted in needs no preview. Running one anyway
+	// scanned every piece a second time — each one a git and forge lookup — and
+	// announced "[dry-run] Would cleanup X" on the line above cleaning X.
+	preDecided := input.Apply || flagPieceCleanupYes
+	var output cleanupOutput
+	if !preDecided {
+		if output, err = cleanupPass(ctx, handler, repoRoot, input.MainBranch, true); err != nil {
+			return err
+		}
+		if output.Links, err = checkLinks(repoRoot, deps.FS, true); err != nil {
+			return err
+		}
 	}
 
 	anythingToDo := len(output.CleanedPieces) > 0 || len(output.RemovedProjects) > 0 || droppableLinks(output.Links) > 0
-	apply, err := resolveApply(input.Apply || flagPieceCleanupYes, input.DryRun, anythingToDo, func() (bool, error) {
+	apply, err := resolveApply(preDecided, input.DryRun, anythingToDo, func() (bool, error) {
 		return confirmApply("Clean up merged pieces?", cleanupSummary(output))
 	})
 	if err != nil {

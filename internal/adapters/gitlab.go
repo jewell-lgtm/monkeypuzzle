@@ -105,6 +105,17 @@ func (g *GitLab) MarkPRReady(ctx context.Context, workDir string, mrNumber int) 
 	return nil
 }
 
+// MergePR squash-merges an MR. --yes skips glab's interactive confirmation,
+// which has no answer in a non-tty; the source branch is left alone because mp
+// owns the branch's life (`mp done` / `mp abandon`).
+func (g *GitLab) MergePR(ctx context.Context, workDir string, mrNumber int) error {
+	_, err := g.exec.RunWithDir(ctx, workDir, "glab", "mr", "merge", fmt.Sprintf("%d", mrNumber), "--squash", "--yes", "--remove-source-branch=false")
+	if err != nil {
+		return fmt.Errorf("failed to merge MR !%d: %w%s", mrNumber, err, cliHint("glab", glabInstallHint))
+	}
+	return nil
+}
+
 // GetPRStatus returns the MR state ("opened", "closed", "merged", "locked").
 func (g *GitLab) GetPRStatus(ctx context.Context, workDir string, mrNumber int) (string, error) {
 	output, err := g.exec.RunWithDir(ctx, workDir, "glab", "mr", "view", fmt.Sprintf("%d", mrNumber), "-F", "json")
@@ -211,6 +222,46 @@ func (g *GitLab) ListPRs(ctx context.Context, workDir string) ([]PRInfo, error) 
 	}
 	if err := json.Unmarshal(output, &rows); err != nil {
 		return []PRInfo{}, fmt.Errorf("failed to parse MR list: %w", err)
+	}
+
+	prs := make([]PRInfo, 0, len(rows))
+	for _, r := range rows {
+		prs = append(prs, PRInfo{
+			Number:      r.IID,
+			HeadRefName: r.SourceBranch,
+			BaseRefName: r.TargetBranch,
+			State:       glabStateToCanonical(r.State),
+			URL:         r.WebURL,
+			IsDraft:     r.Draft,
+		})
+	}
+	return prs, nil
+}
+
+// FindOpenMRsByBranch returns the open MRs whose source branch is branchName,
+// asking the forge for exactly that rather than filtering a capped `mr list`
+// locally: a long-lived branch's MR can fall outside that window, and answering
+// "no open MR" from a truncated page would send a caller off to open a duplicate.
+func (g *GitLab) FindOpenMRsByBranch(ctx context.Context, workDir, branchName string) ([]PRInfo, error) {
+	output, err := g.exec.RunWithDir(ctx, workDir, "glab", "mr", "list",
+		"--source-branch", branchName,
+		"--per-page", "50",
+		"-F", "json",
+	)
+	if err != nil {
+		return nil, ErrGlabUnavailable
+	}
+
+	var rows []struct {
+		IID          int    `json:"iid"`
+		SourceBranch string `json:"source_branch"`
+		TargetBranch string `json:"target_branch"`
+		State        string `json:"state"`
+		WebURL       string `json:"web_url"`
+		Draft        bool   `json:"draft"`
+	}
+	if err := json.Unmarshal(output, &rows); err != nil {
+		return nil, fmt.Errorf("failed to parse MR list: %w", err)
 	}
 
 	prs := make([]PRInfo, 0, len(rows))

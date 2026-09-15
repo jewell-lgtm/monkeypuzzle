@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/config"
+	piececmd "github.com/jewell-lgtm/monkeypuzzle/internal/core/piece"
 )
 
 // validMultiplexerValues lists the multiplexer options mp recognises.
@@ -66,6 +67,8 @@ func init() {
 			return validMultiplexerValues, cobra.ShellCompDirectiveNoFileComp
 		case "done_require_merged", "merge_require_updated":
 			return []string{"true", "false"}, cobra.ShellCompDirectiveNoFileComp
+		case "merge_strategy":
+			return validMergeStrategies, cobra.ShellCompDirectiveNoFileComp
 		default:
 			return nil, cobra.ShellCompDirectiveNoFileComp
 		}
@@ -73,7 +76,11 @@ func init() {
 }
 
 // configKeys are every key `mp config get/set` understands.
-var configKeys = []string{"multiplexer", "done_require_merged", "merge_require_updated", "open_command"}
+var configKeys = []string{"multiplexer", "done_require_merged", "merge_require_updated", "merge_strategy", "open_command"}
+
+// validMergeStrategies are the user-level merge_strategy values. It is the
+// fallback for projects whose own config declares no `merge.strategy`.
+var validMergeStrategies = []string{string(piececmd.MergeLocal), string(piececmd.MergeForge)}
 
 func completeConfigKeys(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	if len(args) > 0 {
@@ -98,6 +105,11 @@ func runConfigGet(cmd *cobra.Command, args []string) error {
 		value = strconv.FormatBool(cfg.DoneRequiresMerged())
 	case "merge_require_updated":
 		value = strconv.FormatBool(cfg.MergeRequiresUpdated())
+	case "merge_strategy":
+		value = cfg.MergeStrategy
+		if value == "" {
+			value = string(piececmd.MergeLocal)
+		}
 	case "open_command":
 		value = cfg.OpenCommand
 	default:
@@ -143,6 +155,12 @@ func runConfigSet(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("invalid merge_require_updated value: %s (valid: true, false)", value)
 		}
 		cfg.SetMergeRequireUpdated(b)
+	case "merge_strategy":
+		s, err := piececmd.ParseMergeStrategy(value)
+		if err != nil {
+			return err
+		}
+		cfg.MergeStrategy = string(s)
 	case "open_command":
 		cfg.OpenCommand = value
 	default:

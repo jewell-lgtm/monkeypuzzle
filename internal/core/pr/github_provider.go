@@ -3,8 +3,10 @@ package pr
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/adapters"
+	"github.com/jewell-lgtm/monkeypuzzle/internal/core/piece"
 )
 
 // toPRInfos converts adapter PRInfo rows (which already carry canonical State)
@@ -80,4 +82,22 @@ func (p *GitHubProvider) ListPRs(ctx context.Context, workDir string) ([]PRInfo,
 
 func (p *GitHubProvider) SetPRBase(ctx context.Context, workDir string, number int, base string) error {
 	return p.gh.SetPRBase(ctx, workDir, number, base)
+}
+
+func (p *GitHubProvider) FindOpenByBranch(ctx context.Context, workDir, branchName string) (piece.OpenPR, error) {
+	rows, err := p.gh.FindOpenPRsByBranch(ctx, workDir, branchName)
+	if err != nil {
+		return piece.OpenPR{}, err
+	}
+	for _, r := range rows {
+		if r.HeadRefName != branchName || !strings.EqualFold(r.State, "OPEN") {
+			continue
+		}
+		return piece.OpenPR{Number: r.Number, Base: r.BaseRefName, IsDraft: r.IsDraft}, nil
+	}
+	return piece.OpenPR{}, nil
+}
+
+func (p *GitHubProvider) Merge(ctx context.Context, workDir string, number int) error {
+	return p.gh.MergePR(ctx, workDir, number)
 }
