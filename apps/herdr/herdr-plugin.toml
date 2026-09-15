@@ -11,11 +11,9 @@ id = "monkeypuzzle"
 name = "Monkeypuzzle"
 version = "0.1.0"
 min_herdr_version = "0.9.0"
-platforms = ["linux", "macos"]
-description = "Worktree-per-piece git flow: open, create, and adopt pieces; the inbox; jump to the blocked agent"
-
 # The scripts are bash and need fzf and jq; Windows is not supported.
 platforms = ["linux", "macos"]
+description = "Worktree-per-piece git flow: open, create, and adopt pieces; the inbox; jump to the blocked agent"
 
 # Picker actions open their popup pane; blocked / next / prev are direct
 # commands riding mp's own resolution (`mp agent focus --blocked --all`,
