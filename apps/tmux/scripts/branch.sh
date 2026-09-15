@@ -23,7 +23,7 @@ main() {
 	if [[ -z "$proj" ]]; then
 		selection="$(printf '%s\n' "$rows" | fzf_pick \
 			--with-nth=1 \
-			--prompt='project> ')" || exit 0
+			--prompt='project> ')" || picker_exit "$?"
 		[[ -n "$selection" ]] || exit 0
 		proj="$(cut -f2 <<<"$selection")"
 	fi

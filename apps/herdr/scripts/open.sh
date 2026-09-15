@@ -45,7 +45,7 @@ main() {
 		--with-nth=1 \
 		--prompt='piece> ' \
 		--preview='git -C {4} -c color.ui=always status -sb 2>/dev/null; echo; git -C {4} log --oneline -5 2>/dev/null' \
-		--preview-window='right,50%')" || exit 0
+		--preview-window='right,50%')" || picker_exit "$?"
 	[[ -n "$selection" ]] || exit 0
 
 	proj="$(cut -f2 <<<"$selection")"

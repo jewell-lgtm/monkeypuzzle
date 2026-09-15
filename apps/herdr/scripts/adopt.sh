@@ -34,7 +34,7 @@ main() {
 		--with-nth=1 \
 		--prompt='branch> ' \
 		--preview='git -C {4} -c color.ui=always log --oneline -8 {3} 2>/dev/null' \
-		--preview-window='right,50%')" || exit 0
+		--preview-window='right,50%')" || picker_exit "$?"
 	[[ -n "$selection" ]] || exit 0
 
 	proj="$(cut -f2 <<<"$selection")"

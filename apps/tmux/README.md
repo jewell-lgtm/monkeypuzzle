@@ -140,3 +140,15 @@ make test-tmux          # run the plugin test suite (bash + jq + fzf)
 The scripts are structured so their `build_*` row-builders can be sourced and
 tested in isolation; the switch flow has a `MP_PLUGIN_FILTER` seam that drives
 the picker non-interactively for the integration test. See `test/run.sh`.
+
+## Command lookup and startup errors
+
+The plugin keeps tmux's existing `PATH` order, then adds `~/.local/bin`,
+`/opt/homebrew/bin`, and `/usr/local/bin`. For another install location,
+add it to tmux's environment, or set `@monkeypuzzle-bin` in `~/.tmux.conf`
+to the absolute path of `mp` and reload the plugin.
+
+All five picker popups keep failures visible until you press Enter.
+Missing-command errors name the command and show the searched `PATH`.
+Cancelling a picker still closes it immediately. Direct actions report
+missing commands through tmux's status message.

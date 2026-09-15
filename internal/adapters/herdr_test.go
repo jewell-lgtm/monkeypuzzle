@@ -6,34 +6,34 @@ import (
 	"testing"
 )
 
-// herdrListJSON builds a `herdr workspace list --json` payload.
+// herdrListJSON builds a `herdr workspace list` payload.
 func herdrListJSON(entries ...string) []byte {
-	out := `{"workspaces":[`
+	out := `{"id":"cli:workspace:list","result":{"type":"workspace_list","workspaces":[`
 	for i, e := range entries {
 		if i > 0 {
 			out += ","
 		}
 		out += e
 	}
-	return []byte(out + `]}`)
+	return []byte(out + `]}}`)
 }
 
-// herdrPanesJSON builds a `herdr pane list <ws> --json` payload.
+// herdrPanesJSON builds a `herdr pane list <ws>` payload.
 func herdrPanesJSON(entries ...string) []byte {
-	out := `{"panes":[`
+	out := `{"id":"cli:pane:list","result":{"type":"pane_list","panes":[`
 	for i, e := range entries {
 		if i > 0 {
 			out += ","
 		}
 		out += e
 	}
-	return []byte(out + `]}`)
+	return []byte(out + `]}}`)
 }
 
 func TestHerdrMultiplexer_SwitchTo_FocusesExisting(t *testing.T) {
 	exec := NewMockExec()
-	exec.AddResponse("herdr", []string{"workspace", "list", "--json"},
-		herdrListJSON(`{"id":"w2","label":"mp/proj/piece"}`), nil)
+	exec.AddResponse("herdr", []string{"workspace", "list"},
+		herdrListJSON(`{"workspace_id":"w2","label":"mp/proj/piece"}`), nil)
 	exec.AddResponse("herdr", []string{"workspace", "focus", "w2"}, nil, nil)
 
 	mux := NewHerdrMultiplexer(exec)
@@ -50,7 +50,7 @@ func TestHerdrMultiplexer_SwitchTo_FocusesExisting(t *testing.T) {
 
 func TestHerdrMultiplexer_SwitchTo_CreatePath(t *testing.T) {
 	exec := NewMockExec()
-	exec.AddResponse("herdr", []string{"workspace", "list", "--json"}, herdrListJSON(), nil)
+	exec.AddResponse("herdr", []string{"workspace", "list"}, herdrListJSON(), nil)
 	exec.AddResponse("herdr", []string{"workspace", "create", "--cwd", "/work/dir", "--label", "mp/proj/piece"}, nil, nil)
 
 	mux := NewHerdrMultiplexer(exec)
@@ -69,8 +69,8 @@ func TestHerdrMultiplexer_SwitchTo_CreatePath(t *testing.T) {
 // "mp/dearest-mobileapp".
 func TestHerdrMultiplexer_SwitchTo_ExactLabelMatch(t *testing.T) {
 	exec := NewMockExec()
-	exec.AddResponse("herdr", []string{"workspace", "list", "--json"},
-		herdrListJSON(`{"id":"w1","label":"mp/dearest-mobileapp"}`), nil)
+	exec.AddResponse("herdr", []string{"workspace", "list"},
+		herdrListJSON(`{"workspace_id":"w1","label":"mp/dearest-mobileapp"}`), nil)
 	exec.AddResponse("herdr", []string{"workspace", "create", "--cwd", "/work/dir", "--label", "mp/dearest"}, nil, nil)
 
 	mux := NewHerdrMultiplexer(exec)
@@ -85,8 +85,8 @@ func TestHerdrMultiplexer_SwitchTo_ExactLabelMatch(t *testing.T) {
 
 func TestHerdrMultiplexer_Kill(t *testing.T) {
 	exec := NewMockExec()
-	exec.AddResponse("herdr", []string{"workspace", "list", "--json"},
-		herdrListJSON(`{"id":"w2","label":"mp/proj/piece"}`), nil)
+	exec.AddResponse("herdr", []string{"workspace", "list"},
+		herdrListJSON(`{"workspace_id":"w2","label":"mp/proj/piece"}`), nil)
 	exec.AddResponse("herdr", []string{"workspace", "close", "w2"}, nil, nil)
 
 	mux := NewHerdrMultiplexer(exec)
@@ -101,7 +101,7 @@ func TestHerdrMultiplexer_Kill(t *testing.T) {
 // Killing a workspace that doesn't exist is a no-op, not an error.
 func TestHerdrMultiplexer_Kill_MissingWorkspaceIsNoop(t *testing.T) {
 	exec := NewMockExec()
-	exec.AddResponse("herdr", []string{"workspace", "list", "--json"}, herdrListJSON(), nil)
+	exec.AddResponse("herdr", []string{"workspace", "list"}, herdrListJSON(), nil)
 
 	mux := NewHerdrMultiplexer(exec)
 	if err := mux.Kill(context.Background(), "mp/proj/piece"); err != nil {
@@ -119,15 +119,17 @@ func TestHerdrMultiplexer_Exists(t *testing.T) {
 		err  error
 		want bool
 	}{
-		{"exists", herdrListJSON(`{"id":"w1","label":"mp/proj/piece"}`), nil, true},
-		{"missing", herdrListJSON(`{"id":"w1","label":"other"}`), nil, false},
+		{"exists", herdrListJSON(`{"workspace_id":"w1","label":"mp/proj/piece"}`), nil, true},
+		{"missing", herdrListJSON(`{"workspace_id":"w1","label":"other"}`), nil, false},
 		{"list fails", nil, MockError("no socket"), false},
 		{"garbage json", []byte("not json"), nil, false},
+		{"missing result", []byte(`{"workspaces":[]}`), nil, false},
+		{"null result", []byte(`{"result":null}`), nil, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			exec := NewMockExec()
-			exec.AddResponse("herdr", []string{"workspace", "list", "--json"}, tt.json, tt.err)
+			exec.AddResponse("herdr", []string{"workspace", "list"}, tt.json, tt.err)
 
 			mux := NewHerdrMultiplexer(exec)
 			if got := mux.Exists(context.Background(), "mp/proj/piece"); got != tt.want {
@@ -167,39 +169,37 @@ func TestHerdrMultiplexer_IsInstalled(t *testing.T) {
 
 func TestHerdrMultiplexer_SendText_ResolvesFocusedPane(t *testing.T) {
 	exec := NewMockExec()
-	exec.AddResponse("herdr", []string{"workspace", "list", "--json"},
-		herdrListJSON(`{"id":"w2","label":"mp/proj/piece"}`), nil)
-	exec.AddResponse("herdr", []string{"pane", "list", "w2", "--json"},
+	exec.AddResponse("herdr", []string{"workspace", "list"},
+		herdrListJSON(`{"workspace_id":"w2","label":"mp/proj/piece"}`), nil)
+	exec.AddResponse("herdr", []string{"pane", "list", "--workspace", "w2"},
 		herdrPanesJSON(
-			`{"id":"w2:p1","command":"zsh","pid":100,"focused":false}`,
-			`{"id":"w2:p2","command":"claude","pid":200,"focused":true}`,
+			`{"pane_id":"w2:p1","agent":"zsh","focused":false}`,
+			`{"pane_id":"w2:p2","agent":"claude","focused":true}`,
 		), nil)
-	exec.AddResponse("herdr", []string{"pane", "send-text", "w2:p2", "--", "hello world"}, nil, nil)
-	exec.AddResponse("herdr", []string{"pane", "send-keys", "w2:p2", "enter"}, nil, nil)
+	exec.AddResponse("herdr", []string{"pane", "run", "w2:p2", "hello world"}, nil, nil)
 
 	mux := NewHerdrMultiplexer(exec)
 	if err := mux.SendText(context.Background(), "mp/proj/piece", "hello world"); err != nil {
 		t.Errorf("SendText() error = %v", err)
 	}
-	if !exec.WasCalled("herdr", "pane", "send-text", "w2:p2", "--", "hello world") {
-		t.Errorf("expected send-text to the focused pane, calls: %+v", exec.GetCalls())
+	if !exec.WasCalled("herdr", "pane", "run", "w2:p2", "hello world") {
+		t.Errorf("expected pane run to the focused pane, calls: %+v", exec.GetCalls())
 	}
-	if !exec.WasCalled("herdr", "pane", "send-keys", "w2:p2", "enter") {
-		t.Errorf("expected a separate Enter, calls: %+v", exec.GetCalls())
+	if exec.WasCalled("herdr", "pane", "send-keys", "w2:p2", "enter") {
+		t.Errorf("must submit atomically, calls: %+v", exec.GetCalls())
 	}
 }
 
 // A pane-id target ("w1:p1") bypasses workspace resolution entirely.
 func TestHerdrMultiplexer_SendText_PaneIDPassesThrough(t *testing.T) {
 	exec := NewMockExec()
-	exec.AddResponse("herdr", []string{"pane", "send-text", "w1:p3", "--", "hi"}, nil, nil)
-	exec.AddResponse("herdr", []string{"pane", "send-keys", "w1:p3", "enter"}, nil, nil)
+	exec.AddResponse("herdr", []string{"pane", "run", "w1:p3", "hi"}, nil, nil)
 
 	mux := NewHerdrMultiplexer(exec)
 	if err := mux.SendText(context.Background(), "w1:p3", "hi"); err != nil {
 		t.Errorf("SendText() error = %v", err)
 	}
-	if exec.WasCalled("herdr", "workspace", "list", "--json") {
+	if exec.WasCalled("herdr", "workspace", "list") {
 		t.Error("pane-id target must not trigger a workspace lookup")
 	}
 }
@@ -220,28 +220,28 @@ func TestHerdrMultiplexer_CapturePane(t *testing.T) {
 
 func TestHerdrMultiplexer_ListPanes(t *testing.T) {
 	exec := NewMockExec()
-	exec.AddResponse("herdr", []string{"workspace", "list", "--json"},
-		herdrListJSON(`{"id":"w2","label":"mp/proj/piece"}`), nil)
-	exec.AddResponse("herdr", []string{"pane", "list", "w2", "--json"},
-		herdrPanesJSON(`{"id":"w2:p1","command":"claude","pid":4242,"focused":true}`), nil)
+	exec.AddResponse("herdr", []string{"workspace", "list"},
+		herdrListJSON(`{"workspace_id":"w2","label":"mp/proj/piece"}`), nil)
+	exec.AddResponse("herdr", []string{"pane", "list", "--workspace", "w2"},
+		herdrPanesJSON(`{"pane_id":"w2:p1","agent":"claude","focused":true}`), nil)
 
 	mux := NewHerdrMultiplexer(exec)
 	panes, err := mux.ListPanes(context.Background(), "mp/proj/piece")
 	if err != nil {
 		t.Fatalf("ListPanes() error = %v", err)
 	}
-	if len(panes) != 1 || panes[0].ID != "w2:p1" || panes[0].Command != "claude" || panes[0].PID != 4242 {
+	if len(panes) != 1 || panes[0].ID != "w2:p1" || panes[0].Command != "claude" || panes[0].PID != 0 {
 		t.Errorf("ListPanes() = %+v", panes)
 	}
 }
 
 func TestHerdrMultiplexer_FocusPane(t *testing.T) {
 	exec := NewMockExec()
-	exec.AddResponse("herdr", []string{"workspace", "list", "--json"},
-		herdrListJSON(`{"id":"w2","label":"mp/proj/piece"}`), nil)
+	exec.AddResponse("herdr", []string{"workspace", "list"},
+		herdrListJSON(`{"workspace_id":"w2","label":"mp/proj/piece"}`), nil)
 	exec.AddResponse("herdr", []string{"workspace", "focus", "w2"}, nil, nil)
 	// Pane focus failing (pane closed) must not fail the call.
-	exec.AddResponse("herdr", []string{"pane", "focus", "w2:p9"}, nil, MockError("pane not found"))
+	exec.AddResponse("herdr", []string{"agent", "focus", "w2:p9"}, nil, MockError("pane not found"))
 
 	mux := NewHerdrMultiplexer(exec)
 	if err := mux.FocusPane(context.Background(), "mp/proj/piece", "w2:p9"); err != nil {
@@ -249,5 +249,19 @@ func TestHerdrMultiplexer_FocusPane(t *testing.T) {
 	}
 	if !exec.WasCalled("herdr", "workspace", "focus", "w2") {
 		t.Errorf("expected workspace focus, calls: %+v", exec.GetCalls())
+	}
+}
+
+func TestHerdrMultiplexer_RejectsMissingResult(t *testing.T) {
+	for _, payload := range []string{`{"workspaces":[]}`, `{"result":null}`, `{"error":{"message":"unavailable"}}`} {
+		exec := NewMockExec()
+		exec.AddResponse("herdr", []string{"workspace", "list"}, []byte(payload), nil)
+		mux := NewHerdrMultiplexer(exec)
+		if err := mux.SwitchTo(context.Background(), "mp/proj/piece", "/tmp"); err == nil || !strings.Contains(err.Error(), "no result") {
+			t.Errorf("payload %s: got %v", payload, err)
+		}
+		if len(exec.GetCalls()) != 1 {
+			t.Fatal("invalid response must not trigger workspace creation")
+		}
 	}
 }
