@@ -2323,7 +2323,7 @@ func TestIntegration_AdoptPiece_LockedWorktree(t *testing.T) {
 
 // fakeForge stands in for the PR provider behind the forge merge strategy.
 type fakeForge struct {
-	openByBranch map[string]int
+	openByBranch map[string]piece.OpenPR
 	merged       []int
 	mergeErr     error
 }
@@ -2332,7 +2332,7 @@ func (f *fakeForge) FindMergedByBranch(context.Context, string, string) (bool, i
 	return false, 0, nil
 }
 func (f *fakeForge) IsMerged(context.Context, string, int) (bool, error) { return false, nil }
-func (f *fakeForge) FindOpenByBranch(_ context.Context, _, branch string) (int, error) {
+func (f *fakeForge) FindOpenByBranch(_ context.Context, _, branch string) (piece.OpenPR, error) {
 	return f.openByBranch[branch], nil
 }
 func (f *fakeForge) Merge(_ context.Context, _ string, number int) error {
@@ -2350,8 +2350,18 @@ func useFakeForge(t *testing.T, f *fakeForge) {
 	t.Cleanup(func() { piece.SetMergeCheckerFactory(previous) })
 }
 
-// forgeRepo builds a project with one piece holding a commit, ready to merge.
+// forgeRepo builds a project with one piece holding a pushed commit, ready to
+// merge. The project has a real bare origin: the forge strategy compares the
+// piece against origin/<branch> to check the PR contains every commit, so a
+// repo with no remote would exercise a different path than any real one.
 func forgeRepo(t *testing.T, name string) (repoRoot string, handler *piece.Handler, info piece.PieceInfo) {
+	t.Helper()
+	return forgeRepoPushed(t, name, true)
+}
+
+// forgeRepoPushed is forgeRepo with control over whether the piece's commit
+// reaches origin.
+func forgeRepoPushed(t *testing.T, name string, push bool) (repoRoot string, handler *piece.Handler, info piece.PieceInfo) {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
@@ -2375,6 +2385,11 @@ func forgeRepo(t *testing.T, name string) (repoRoot string, handler *piece.Handl
 	setupGitRepo(t, repoRoot)
 	setupMonkeypuzzleConfig(t, repoRoot)
 
+	originPath := filepath.Join(t.TempDir(), "origin.git")
+	runGit(t, repoRoot, "init", "--bare", originPath)
+	runGit(t, repoRoot, "remote", "add", "origin", originPath)
+	runGit(t, repoRoot, "push", "-u", "origin", "main")
+
 	oldWd, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("getwd: %v", err)
@@ -2395,7 +2410,16 @@ func forgeRepo(t *testing.T, name string) (repoRoot string, handler *piece.Handl
 	if err := os.WriteFile(filepath.Join(info.WorktreePath, "work.txt"), []byte("work"), 0644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	for _, args := range [][]string{{"add", "-A"}, {"commit", "-m", "work"}} {
+	steps := [][]string{{"add", "-A"}, {"commit", "-m", "work"}}
+	if push {
+		steps = append(steps, []string{"push", "-u", "origin", name})
+	} else {
+		// The branch still needs a tracking ref for the guard to resolve; push
+		// it empty (at main) so origin/<name> exists without the commit.
+		runGit(t, info.WorktreePath, "push", "origin", "main:refs/heads/"+name)
+		steps = append(steps, []string{"fetch", "origin"})
+	}
+	for _, args := range steps {
 		cmd := exec.Command("git", args...)
 		cmd.Dir = info.WorktreePath
 		if out, err := cmd.CombinedOutput(); err != nil {
@@ -2410,7 +2434,7 @@ func forgeRepo(t *testing.T, name string) (repoRoot string, handler *piece.Handl
 // route than the project asked for.
 func TestIntegration_MergePiece_ForgeRefusesWithoutAnOpenPR(t *testing.T) {
 	_, handler, info := forgeRepo(t, "no-pr")
-	forge := &fakeForge{openByBranch: map[string]int{}}
+	forge := &fakeForge{openByBranch: map[string]piece.OpenPR{}}
 	useFakeForge(t, forge)
 
 	_, err := handler.MergePiece(context.Background(), info.WorktreePath, piece.WithMergeDefaults(
@@ -2430,7 +2454,7 @@ func TestIntegration_MergePiece_ForgeRefusesWithoutAnOpenPR(t *testing.T) {
 
 func TestIntegration_MergePiece_ForgeMergesTheOpenPR(t *testing.T) {
 	_, handler, info := forgeRepo(t, "has-pr")
-	forge := &fakeForge{openByBranch: map[string]int{"has-pr": 42}}
+	forge := &fakeForge{openByBranch: map[string]piece.OpenPR{"has-pr": {Number: 42, Base: "main"}}}
 	useFakeForge(t, forge)
 
 	res, err := handler.MergePiece(context.Background(), info.WorktreePath, piece.WithMergeDefaults(
@@ -2457,7 +2481,7 @@ func TestIntegration_MergePiece_ForgeMergesTheOpenPR(t *testing.T) {
 // never opts in.
 func TestIntegration_MergePiece_DefaultsToLocal(t *testing.T) {
 	_, handler, info := forgeRepo(t, "plain")
-	forge := &fakeForge{openByBranch: map[string]int{"plain": 9}}
+	forge := &fakeForge{openByBranch: map[string]piece.OpenPR{"plain": {Number: 9, Base: "main"}}}
 	useFakeForge(t, forge)
 
 	res, err := handler.MergePiece(context.Background(), info.WorktreePath, piece.WithMergeDefaults(piece.MergeInput{}))
@@ -2541,5 +2565,102 @@ func TestIntegration_AbandonPiece_RepoRootResolvesAnotherProject(t *testing.T) {
 	}
 	if _, err := os.Stat(info.WorktreePath); !os.IsNotExist(err) {
 		t.Errorf("worktree %s still exists after abandon (stat err: %v)", info.WorktreePath, err)
+	}
+}
+
+// A PR opened against one branch does not license merging into another. The
+// forge would land it on its own base, so merging while reporting the asked-for
+// target would claim the work went somewhere it did not.
+func TestIntegration_MergePiece_ForgeRefusesAPRTargetingAnotherBase(t *testing.T) {
+	repoRoot, handler, info := forgeRepo(t, "wrong-base")
+	runGit(t, repoRoot, "branch", "release")
+	forge := &fakeForge{openByBranch: map[string]piece.OpenPR{"wrong-base": {Number: 7, Base: "main"}}}
+	useFakeForge(t, forge)
+
+	_, err := handler.MergePiece(context.Background(), info.WorktreePath, piece.WithMergeDefaults(
+		piece.MergeInput{Strategy: string(piece.MergeForge), Main: "release"},
+	))
+	if !errors.Is(err, piece.ErrPRBaseMismatch) {
+		t.Fatalf("MergePiece error = %v, want ErrPRBaseMismatch", err)
+	}
+	if !strings.Contains(err.Error(), "main") || !strings.Contains(err.Error(), "release") {
+		t.Errorf("error should name both branches, got: %v", err)
+	}
+	if len(forge.merged) != 0 {
+		t.Errorf("merged %v on the forge despite the base mismatch", forge.merged)
+	}
+	if merged, _ := handler.IsBranchMerged(context.Background(), info.WorktreePath, "wrong-base", "release"); merged.IsMerged {
+		t.Error("piece reports merged after a refused forge merge")
+	}
+}
+
+// A draft is not up for merging. mp names the command that flips it rather than
+// letting the forge CLI fail with its own wording.
+func TestIntegration_MergePiece_ForgeRefusesADraft(t *testing.T) {
+	_, handler, info := forgeRepo(t, "still-draft")
+	forge := &fakeForge{openByBranch: map[string]piece.OpenPR{"still-draft": {Number: 8, Base: "main", IsDraft: true}}}
+	useFakeForge(t, forge)
+
+	_, err := handler.MergePiece(context.Background(), info.WorktreePath, piece.WithMergeDefaults(
+		piece.MergeInput{Strategy: string(piece.MergeForge)},
+	))
+	if !errors.Is(err, piece.ErrPRIsDraft) {
+		t.Fatalf("MergePiece error = %v, want ErrPRIsDraft", err)
+	}
+	if !strings.Contains(err.Error(), "mp pr ready") {
+		t.Errorf("error should point at 'mp pr ready', got: %v", err)
+	}
+	if len(forge.merged) != 0 {
+		t.Errorf("merged %v on the forge despite the draft", forge.merged)
+	}
+}
+
+// Commits that never reached origin are not in the PR, so merging it would land
+// less than the piece holds.
+func TestIntegration_MergePiece_ForgeRefusesUnpushedCommits(t *testing.T) {
+	_, handler, info := forgeRepoPushed(t, "unpushed", false)
+	forge := &fakeForge{openByBranch: map[string]piece.OpenPR{"unpushed": {Number: 11, Base: "main"}}}
+	useFakeForge(t, forge)
+
+	_, err := handler.MergePiece(context.Background(), info.WorktreePath, piece.WithMergeDefaults(
+		piece.MergeInput{Strategy: string(piece.MergeForge)},
+	))
+	if err == nil {
+		t.Fatal("expected MergePiece to refuse a piece with unpushed commits")
+	}
+	if !strings.Contains(err.Error(), "not pushed") {
+		t.Errorf("error should name the unpushed commits, got: %v", err)
+	}
+	if len(forge.merged) != 0 {
+		t.Errorf("merged %v on the forge despite unpushed commits", forge.merged)
+	}
+}
+
+// A before-piece-merge hook has real side effects — a version bump, a changelog
+// entry, a CI trigger. Firing it for a merge mp then refuses would leave those
+// behind with no after-piece-merge hook to answer them.
+func TestIntegration_MergePiece_ForgeRefusalDoesNotFireTheBeforeHook(t *testing.T) {
+	repoRoot, handler, info := forgeRepo(t, "no-pr-hook")
+	forge := &fakeForge{openByBranch: map[string]piece.OpenPR{}}
+	useFakeForge(t, forge)
+
+	hooksDir := filepath.Join(repoRoot, ".monkeypuzzle", "hooks")
+	if err := os.MkdirAll(hooksDir, 0755); err != nil {
+		t.Fatalf("mkdir hooks: %v", err)
+	}
+	marker := filepath.Join(t.TempDir(), "hook-ran")
+	hook := fmt.Sprintf("#!/bin/sh\ntouch %q\n", marker)
+	if err := os.WriteFile(filepath.Join(hooksDir, "before-piece-merge.sh"), []byte(hook), 0755); err != nil {
+		t.Fatalf("write hook: %v", err)
+	}
+
+	if _, err := handler.MergePiece(context.Background(), info.WorktreePath, piece.WithMergeDefaults(
+		piece.MergeInput{Strategy: string(piece.MergeForge)},
+	)); !errors.Is(err, piece.ErrNoOpenPR) {
+		t.Fatalf("MergePiece error = %v, want ErrNoOpenPR", err)
+	}
+
+	if _, err := os.Stat(marker); err == nil {
+		t.Error("before-piece-merge hook ran for a merge that was refused")
 	}
 }

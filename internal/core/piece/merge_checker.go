@@ -14,11 +14,21 @@ import (
 type MergeChecker interface {
 	FindMergedByBranch(ctx context.Context, workDir, branchName string) (bool, int, error)
 	IsMerged(ctx context.Context, workDir string, number int) (bool, error)
-	// FindOpenByBranch returns the number of the open PR/MR for branchName, or
-	// 0 when it has none. The forge merge strategy needs something to merge.
-	FindOpenByBranch(ctx context.Context, workDir, branchName string) (int, error)
+	// FindOpenByBranch returns the open PR/MR for branchName, or a zero Number
+	// when it has none. The forge merge strategy needs something to merge, and
+	// needs it to target the branch it claims to be merging into.
+	FindOpenByBranch(ctx context.Context, workDir, branchName string) (OpenPR, error)
 	// Merge squash-merges the PR/MR on the forge.
 	Merge(ctx context.Context, workDir string, number int) error
+}
+
+// OpenPR is the open PR/MR the forge merge strategy would land. Number is 0
+// when the branch has none open. Base is the branch the forge would merge it
+// into, which mp checks against the branch it was asked to merge into.
+type OpenPR struct {
+	Number  int
+	Base    string
+	IsDraft bool
 }
 
 // MergeCheckerFactory builds a MergeChecker for a given repo, reading the project

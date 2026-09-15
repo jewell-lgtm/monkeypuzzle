@@ -3,7 +3,8 @@ package pr
 import (
 	"context"
 	"errors"
-	"strings"
+
+	"github.com/jewell-lgtm/monkeypuzzle/internal/core/piece"
 )
 
 // ErrProviderUnavailable indicates the underlying forge CLI is missing or
@@ -65,9 +66,10 @@ type Provider interface {
 	// callers can degrade to local lineage.
 	ListPRs(ctx context.Context, workDir string) ([]PRInfo, error)
 
-	// FindOpenByBranch returns the number of the open PR/MR whose source branch
-	// is branchName, or 0 when the branch has none open.
-	FindOpenByBranch(ctx context.Context, workDir, branchName string) (int, error)
+	// FindOpenByBranch returns the open PR/MR whose source branch is branchName,
+	// or a zero Number when the branch has none open. Providers ask the forge
+	// for that branch specifically rather than filtering a capped listing.
+	FindOpenByBranch(ctx context.Context, workDir, branchName string) (piece.OpenPR, error)
 
 	// Merge squash-merges the PR/MR, matching what a local `mp merge` does so a
 	// piece lands as one commit whichever route it takes. It leaves the source
@@ -76,19 +78,4 @@ type Provider interface {
 
 	// SetPRBase re-points the base/target branch of an open PR/MR.
 	SetPRBase(ctx context.Context, workDir string, number int, base string) error
-}
-
-// findOpenByBranch is the shared FindOpenByBranch implementation: every forge
-// answers it from its own PR listing, so the filter lives here once.
-func findOpenByBranch(ctx context.Context, p Provider, workDir, branchName string) (int, error) {
-	prs, err := p.ListPRs(ctx, workDir)
-	if err != nil {
-		return 0, err
-	}
-	for _, info := range prs {
-		if info.HeadRefName == branchName && strings.EqualFold(info.State, "OPEN") {
-			return info.Number, nil
-		}
-	}
-	return 0, nil
 }

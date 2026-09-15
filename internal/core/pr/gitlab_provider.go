@@ -3,8 +3,10 @@ package pr
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"github.com/jewell-lgtm/monkeypuzzle/internal/adapters"
+	"github.com/jewell-lgtm/monkeypuzzle/internal/core/piece"
 )
 
 // GitLabProvider implements Provider by delegating to adapters.GitLab (which shells out to glab).
@@ -65,8 +67,18 @@ func (p *GitLabProvider) SetPRBase(ctx context.Context, workDir string, number i
 	return p.gl.SetPRBase(ctx, workDir, number, base)
 }
 
-func (p *GitLabProvider) FindOpenByBranch(ctx context.Context, workDir, branchName string) (int, error) {
-	return findOpenByBranch(ctx, p, workDir, branchName)
+func (p *GitLabProvider) FindOpenByBranch(ctx context.Context, workDir, branchName string) (piece.OpenPR, error) {
+	rows, err := p.gl.FindOpenMRsByBranch(ctx, workDir, branchName)
+	if err != nil {
+		return piece.OpenPR{}, err
+	}
+	for _, r := range rows {
+		if r.HeadRefName != branchName || !strings.EqualFold(r.State, "OPEN") {
+			continue
+		}
+		return piece.OpenPR{Number: r.Number, Base: r.BaseRefName, IsDraft: r.IsDraft}, nil
+	}
+	return piece.OpenPR{}, nil
 }
 
 func (p *GitLabProvider) Merge(ctx context.Context, workDir string, number int) error {

@@ -395,18 +395,24 @@ func MergeSchema() ([]byte, error) {
 		"reparent_children": false,
 		"reparent_strategy": ReparentRebase,
 		"no_update_check":   false,
+		"strategy":          MergeLocal,
 	}
 	return json.MarshalIndent(schema, "", "  ")
 }
 
-// ValidateMergeInput checks the reparent strategy is recognised.
+// ValidateMergeInput checks the reparent and merge strategies are recognised.
 func ValidateMergeInput(input MergeInput) error {
 	switch input.ReparentStrategy {
 	case "", ReparentRebase, ReparentMerge:
-		return nil
 	default:
 		return fmt.Errorf("invalid reparent strategy %q (valid: %s, %s)", input.ReparentStrategy, ReparentRebase, ReparentMerge)
 	}
+	// Caught here rather than deep inside MergePiece, which resolves the
+	// strategy only after the piece has been located and its children checked.
+	if _, err := ParseMergeStrategy(input.Strategy); err != nil {
+		return err
+	}
+	return nil
 }
 
 // ParseMergeJSON parses JSON input into MergeInput.

@@ -899,17 +899,29 @@ mp merge --forge                     # this call only
 mp merge --local                     # this call only, whatever the config says
 ```
 
-Under `forge`, `mp merge` **refuses when the branch has no open PR/MR** — merging
-on the forge is a claim that the work went through a review surface, so mp will
-not quietly merge it locally instead. Run [`mp pr create`](#mp-pr-create) first,
-or pass `--local`. It also refuses when the branch has commits that were never
-pushed, since the PR would not contain them; push first, or merge locally.
+Under `forge`, `mp merge` refuses rather than land the work by a route the
+project did not ask for. Every one of these is checked **before** the
+`before-piece-merge` hook runs, so a refused merge leaves no half-done side
+effects behind:
+
+| Refusal | Why | Way forward |
+| ------- | --- | ----------- |
+| No open PR/MR for the branch | Merging on the forge is a claim that the work went through a review surface; mp will not quietly merge it locally instead | [`mp pr create`](#mp-pr-create), or `--local` |
+| The open PR targets a different base | The forge merges a PR into its own base, not the branch you named, so mp would be reporting a merge that did not happen | [`mp stack set-parent`](#mp-stack) to re-point it, or `--local` |
+| The PR is still a draft | Flipping a draft to ready is a deliberate step, never something merge does for you | [`mp pr ready`](#mp-pr-ready) |
+| The branch has commits that were never pushed | The PR does not contain them, so merging it would land less than the piece holds | push first, or `--local` |
+| `origin/<branch>` cannot be compared against | The "is everything in the PR?" check could not run, and mp will not merge as though it had passed | fetch the branch, or `--local` |
 
 The result carries `"strategy"` and, for a forge merge, the `"pr_number"` it
 merged. Both strategies record the same durable merged marker, so
 [`mp done`](#mp-done) and [`mp cleanup`](#mp-cleanup) behave identically after
 either. The forge merge leaves the source branch alone — mp owns the branch's
 life through `mp done` / `mp abandon`.
+
+After the forge merges, mp fast-forwards the local target onto the result in
+whichever worktree holds it — the main checkout for `main`, or the parent
+piece's own worktree when a stacked piece merges into its parent, so the parent
+actually receives the child's work.
 
 By default `mp merge` refuses when the target branch has commits the piece lacks (run [`mp update`](#mp-update) to pull them in). The gate is a policy, not a rule — bypass it any of three ways; the merge then proceeds with a warning and any conflicts surface from git:
 

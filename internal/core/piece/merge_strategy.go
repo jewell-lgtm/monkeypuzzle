@@ -30,6 +30,15 @@ var ErrNoOpenPR = errors.New("no open PR for this branch")
 // could be resolved for the project.
 var ErrNoForgeProvider = errors.New("no PR provider configured for the forge merge strategy")
 
+// ErrPRBaseMismatch means the branch's open PR/MR targets a different base than
+// the branch mp was asked to merge into. The forge would land the work against
+// the PR's own base, so mp refuses rather than report a merge into the target.
+var ErrPRBaseMismatch = errors.New("open PR targets a different base branch")
+
+// ErrPRIsDraft means the branch's open PR/MR is still a draft. Flipping it to
+// ready is a deliberate step (`mp pr ready`), never something merge does.
+var ErrPRIsDraft = errors.New("open PR is still a draft")
+
 // ParseMergeStrategy validates a configured or flag-supplied strategy name.
 // An empty string means "unset" and resolves to the next layer down.
 func ParseMergeStrategy(v string) (MergeStrategy, error) {
@@ -58,7 +67,7 @@ func ResolveMergeStrategy(repoRoot string, fs core.FS, override, userDefault str
 	if mainRoot, err := projectdir.MainRepoRoot(repoRoot); err == nil {
 		configRoot = mainRoot
 	}
-	if cfg, err := ReadConfig(configRoot, fs); err == nil {
+	if cfg, err := ReadConfig(configRoot, fs); err == nil && cfg.Merge != nil {
 		s, err := ParseMergeStrategy(cfg.Merge.Strategy)
 		if err != nil {
 			return "", fmt.Errorf("project config: %w", err)

@@ -27,7 +27,7 @@ type Config struct {
 	Version string        `json:"version"`
 	Project ProjectConfig `json:"project"`
 	PR      PRConfig      `json:"pr"`
-	Merge   MergeConfig   `json:"merge,omitempty"`
+	Merge   *MergeConfig  `json:"merge,omitempty"`
 }
 
 // MergeConfig is how this project lands pieces. Strategy is "local" (squash

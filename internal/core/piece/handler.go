@@ -1025,11 +1025,6 @@ func (h *Handler) MergePiece(ctx context.Context, workDir string, input MergeInp
 		Parent:       pieceMetadata.Parent,
 	}
 
-	// Run before-piece-merge hook
-	if err := h.hooks.RunHook(ctx, mainRepoRoot, HookBeforePieceMerge, hookCtx); err != nil {
-		return MergeResult{}, fmt.Errorf("before-piece-merge hook failed: %w", err)
-	}
-
 	// Check if target branch has commits not in the piece branch
 	isAhead, err := h.git.IsMainAhead(ctx, mainRepoRoot, targetBranch, pieceBranch)
 	if err != nil {
@@ -1039,6 +1034,24 @@ func (h *Handler) MergePiece(ctx context.Context, workDir string, input MergeInp
 	if isAhead && !input.NoUpdateCheck && h.mergeRequireUpdated {
 		return MergeResult{}, fmt.Errorf("%w: %s has commits not in piece worktree; run 'mp update', pass --no-update-check (stdin {\"no_update_check\":true}), or set 'mp config set merge_require_updated false'", ErrTargetAhead, targetBranch)
 	}
+
+	mergeStrategy, err := ResolveMergeStrategy(mainRepoRoot, h.deps.FS, input.Strategy, h.mergeStrategyDefault)
+	if err != nil {
+		return MergeResult{}, err
+	}
+
+	// Everything that can refuse the merge runs before the hook. A
+	// before-piece-merge.sh has real side effects — a version bump, a changelog
+	// entry, a CI trigger — and firing it for a merge mp then declines would
+	// leave those behind with no after-piece-merge.sh to answer them.
+	var forgePlan OpenPR
+	if mergeStrategy == MergeForge {
+		forgePlan, err = h.planForgeMerge(ctx, mainRepoRoot, status.WorktreePath, pieceBranch, targetBranch)
+		if err != nil {
+			return MergeResult{}, err
+		}
+	}
+
 	if isAhead {
 		h.deps.Output.Write(core.Message{
 			Type:    core.MsgWarning,
@@ -1046,15 +1059,15 @@ func (h *Handler) MergePiece(ctx context.Context, workDir string, input MergeInp
 		})
 	}
 
-	mergeStrategy, err := ResolveMergeStrategy(mainRepoRoot, h.deps.FS, input.Strategy, h.mergeStrategyDefault)
-	if err != nil {
-		return MergeResult{}, err
+	// Run before-piece-merge hook
+	if err := h.hooks.RunHook(ctx, mainRepoRoot, HookBeforePieceMerge, hookCtx); err != nil {
+		return MergeResult{}, fmt.Errorf("before-piece-merge hook failed: %w", err)
 	}
 
 	var prNumber int
 	if mergeStrategy == MergeForge {
-		prNumber, err = h.mergeOnForge(ctx, mainRepoRoot, status.WorktreePath, pieceBranch, targetBranch)
-		if err != nil {
+		prNumber = forgePlan.Number
+		if err := h.executeForgeMerge(ctx, mainRepoRoot, targetBranch, forgePlan); err != nil {
 			return MergeResult{}, err
 		}
 	} else {
@@ -1171,60 +1184,121 @@ func (h *Handler) MergePiece(ctx context.Context, workDir string, input MergeInp
 // the project declares none. The CLI reads user config and passes it in.
 func (h *Handler) SetMergeStrategyDefault(v string) { h.mergeStrategyDefault = v }
 
-// mergeOnForge merges the piece's open PR/MR and brings the local target branch
-// up to the result. It returns the PR number it merged.
-//
-// Ordering matters: everything that can refuse happens before the merge call,
-// because the merge is the one step that cannot be undone. After it succeeds,
-// a failure to sync the local trunk is a warning — the piece really is merged,
-// and erroring here would leave callers believing it was not.
-func (h *Handler) mergeOnForge(ctx context.Context, mainRepoRoot, worktreePath, pieceBranch, targetBranch string) (int, error) {
+// planForgeMerge resolves the PR/MR the forge strategy would land and runs
+// every check that can refuse it. It changes nothing, so a caller can run it
+// before any side effect — notably the before-piece-merge hook.
+func (h *Handler) planForgeMerge(ctx context.Context, mainRepoRoot, worktreePath, pieceBranch, targetBranch string) (OpenPR, error) {
 	mc := h.getMergeChecker(mainRepoRoot)
 	if mc == nil {
-		return 0, ErrNoForgeProvider
+		return OpenPR{}, ErrNoForgeProvider
 	}
 
-	number, err := mc.FindOpenByBranch(ctx, mainRepoRoot, pieceBranch)
+	open, err := mc.FindOpenByBranch(ctx, mainRepoRoot, pieceBranch)
 	if err != nil {
-		return 0, fmt.Errorf("failed to look up an open PR for %s: %w", pieceBranch, err)
+		return OpenPR{}, fmt.Errorf("failed to look up an open PR for %s: %w", pieceBranch, err)
 	}
-	if number == 0 {
-		return 0, fmt.Errorf("%w: %s; run 'mp pr create' first, or 'mp merge --local'", ErrNoOpenPR, pieceBranch)
+	if open.Number == 0 {
+		return OpenPR{}, fmt.Errorf("%w: %s; run 'mp pr create' first, or 'mp merge --local'", ErrNoOpenPR, pieceBranch)
+	}
+
+	// The forge merges a PR into the base it was opened against, which is not
+	// necessarily the branch mp was asked to merge into. Merging anyway would
+	// land the work somewhere else while reporting this target, so refuse and
+	// name both branches.
+	if open.Base != targetBranch {
+		return OpenPR{}, fmt.Errorf("%w: PR #%d for %s targets %s, not %s; re-point it with 'mp stack set-parent', or 'mp merge --local'",
+			ErrPRBaseMismatch, open.Number, pieceBranch, open.Base, targetBranch)
+	}
+
+	// A draft is not up for merging. gh/glab would refuse with a raw forge
+	// error; say which command flips it instead.
+	if open.IsDraft {
+		return OpenPR{}, fmt.Errorf("%w: PR #%d for %s is a draft; run 'mp pr ready' first", ErrPRIsDraft, open.Number, pieceBranch)
 	}
 
 	// Commits that exist only here are not in the PR, so merging it would land
 	// less than the piece contains. Refuse rather than push on the user's
 	// behalf: `mp merge` is not the command that publishes work.
 	ahead, _, err := h.git.CommitsAheadBehind(ctx, worktreePath, "origin/"+pieceBranch, pieceBranch)
-	if err == nil && ahead > 0 {
-		return number, fmt.Errorf("%s has %d commit(s) not pushed, so PR #%d does not contain them; push first, or 'mp merge --local'", pieceBranch, ahead, number)
+	if err != nil {
+		// Usually origin/<branch> is missing locally: a single-branch clone, a
+		// pruned tracking ref, or a PR head on another remote. The guard did
+		// not run, so say so rather than merging as though it had passed.
+		return OpenPR{}, fmt.Errorf("cannot confirm PR #%d contains every commit on %s (could not compare against origin/%s: %w); fetch the branch, or 'mp merge --local'",
+			open.Number, pieceBranch, pieceBranch, err)
+	}
+	if ahead > 0 {
+		return OpenPR{}, fmt.Errorf("%s has %d commit(s) not pushed, so PR #%d does not contain them; push first, or 'mp merge --local'", pieceBranch, ahead, open.Number)
 	}
 
-	if err := mc.Merge(ctx, mainRepoRoot, number); err != nil {
-		return number, err
+	return open, nil
+}
+
+// executeForgeMerge merges the planned PR/MR and brings the local target branch
+// up to the result.
+//
+// After the merge call succeeds, a failure to sync the local trunk is a warning:
+// the piece really is merged, and erroring here would leave callers believing it
+// was not.
+func (h *Handler) executeForgeMerge(ctx context.Context, mainRepoRoot, targetBranch string, open OpenPR) error {
+	mc := h.getMergeChecker(mainRepoRoot)
+	if mc == nil {
+		return ErrNoForgeProvider
+	}
+	if err := mc.Merge(ctx, mainRepoRoot, open.Number); err != nil {
+		return err
 	}
 
 	// Past this point the merge has happened. Warn, never fail.
 	if err := h.syncTargetToRemote(ctx, mainRepoRoot, targetBranch); err != nil {
 		h.deps.Output.Write(core.Message{
 			Type:    core.MsgWarning,
-			Content: fmt.Sprintf("Merged PR #%d, but could not fast-forward local %s: %v", number, targetBranch, err),
+			Content: fmt.Sprintf("Merged PR #%d, but could not fast-forward local %s: %v", open.Number, targetBranch, err),
 		})
 	}
-	return number, nil
+	return nil
 }
 
 // syncTargetToRemote fast-forwards the local target branch onto what the forge
 // just produced, so `mp done` and the next `mp create` start from the merged
 // trunk rather than a stale one.
+//
+// The target is not always checked out in the main repo: merging a stacked
+// piece targets its parent's branch, which lives in the parent's own worktree.
+// Fast-forwarding there is the whole point — the parent is what has to receive
+// the merged child — so the sync runs wherever the branch actually is.
 func (h *Handler) syncTargetToRemote(ctx context.Context, mainRepoRoot, targetBranch string) error {
 	if err := h.git.Fetch(ctx, mainRepoRoot, "origin", targetBranch); err != nil {
 		return err
 	}
-	if err := h.git.Checkout(ctx, mainRepoRoot, targetBranch); err != nil {
+
+	holder, err := h.worktreeForBranch(ctx, mainRepoRoot, targetBranch)
+	if err != nil {
 		return err
 	}
-	return h.git.MergeFFOnly(ctx, mainRepoRoot, "origin/"+targetBranch)
+	if holder == "" {
+		// Nothing has it checked out: take it in the main repo as before.
+		if err := h.git.Checkout(ctx, mainRepoRoot, targetBranch); err != nil {
+			return err
+		}
+		holder = mainRepoRoot
+	}
+	return h.git.MergeFFOnly(ctx, holder, "origin/"+targetBranch)
+}
+
+// worktreeForBranch returns the worktree with branch checked out, or "" when no
+// worktree holds it.
+func (h *Handler) worktreeForBranch(ctx context.Context, mainRepoRoot, branch string) (string, error) {
+	worktrees, err := h.git.Worktrees(ctx, mainRepoRoot)
+	if err != nil {
+		return "", err
+	}
+	for _, wt := range worktrees {
+		if wt.Branch == branch && !wt.Prunable {
+			return wt.Path, nil
+		}
+	}
+	return "", nil
 }
 
 // buildSquashCommitMessage creates a commit message for squash merge
