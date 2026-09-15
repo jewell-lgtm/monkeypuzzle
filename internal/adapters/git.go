@@ -508,18 +508,23 @@ func (g *Git) Commit(ctx context.Context, workDir, message string) error {
 	return nil
 }
 
-// GetCommitMessages returns commit messages from branch that are not in base
+// GetCommitMessages returns the full message — subject and body — of each
+// commit in branch that is not in base, newest first.
+//
+// It used to ask for %s, so every body was dropped before any caller could see
+// it; the squash merge then committed a subject line where the author had
+// written paragraphs. Bodies span lines, so the records are NUL-delimited
+// rather than newline-delimited.
 func (g *Git) GetCommitMessages(ctx context.Context, workDir, base, branch string) ([]string, error) {
-	output, err := g.exec.RunWithDir(ctx, workDir, "git", "log", "--format=%s", base+".."+branch)
+	output, err := g.exec.RunWithDir(ctx, workDir, "git", "log", "--format=%B%x00", base+".."+branch)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get commit messages: %w", err)
 	}
 
-	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
 	var messages []string
-	for _, line := range lines {
-		if line != "" {
-			messages = append(messages, line)
+	for _, record := range strings.Split(string(output), "\x00") {
+		if msg := strings.TrimSpace(record); msg != "" {
+			messages = append(messages, msg)
 		}
 	}
 	return messages, nil

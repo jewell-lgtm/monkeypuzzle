@@ -1301,18 +1301,30 @@ func (h *Handler) worktreeForBranch(ctx context.Context, mainRepoRoot, branch st
 	return "", nil
 }
 
-// buildSquashCommitMessage creates a commit message for squash merge
+// buildSquashCommitMessage composes the commit message for a squash merge.
+//
+// One commit keeps its message verbatim. It is what the author wrote about
+// exactly this change, and inventing a subject over it lost the body and
+// asserted a conventional-commit type the change need not have — a fix landed
+// as "feat: <piece>" with the real subject demoted to a bullet.
+//
+// Several commits have no single authored subject, so the piece name stands in.
+// It carries no type prefix: mp cannot know whether the result is a feat or a
+// fix, and guessing wrong is what made the old format misleading. Every message
+// is kept whole underneath.
 func (h *Handler) buildSquashCommitMessage(pieceName string, commitMsgs []string) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "feat: %s\n", pieceName)
+	if len(commitMsgs) == 1 {
+		return strings.TrimSpace(commitMsgs[0]) + "\n"
+	}
 
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s\n", pieceName)
 	if len(commitMsgs) > 0 {
 		b.WriteString("\nSquashed commits:\n")
 		for _, msg := range commitMsgs {
-			fmt.Fprintf(&b, "- %s\n", msg)
+			fmt.Fprintf(&b, "\n%s\n", strings.TrimSpace(msg))
 		}
 	}
-
 	return b.String()
 }
 

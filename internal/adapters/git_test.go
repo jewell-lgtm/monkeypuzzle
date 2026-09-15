@@ -313,13 +313,23 @@ func TestGit_GetCommitMessages(t *testing.T) {
 	}{
 		{
 			name:       "multiple commits",
-			mockOutput: []byte("feat: add feature\nfix: bug fix\nchore: cleanup\n"),
+			mockOutput: []byte("feat: add feature\n\x00fix: bug fix\n\x00chore: cleanup\n\x00"),
 			want:       []string{"feat: add feature", "fix: bug fix", "chore: cleanup"},
 		},
 		{
 			name:       "single commit",
-			mockOutput: []byte("feat: add feature\n"),
+			mockOutput: []byte("feat: add feature\n\x00"),
 			want:       []string{"feat: add feature"},
+		},
+		{
+			// The whole point of the NUL delimiter: a body spans lines, and
+			// splitting on newlines would shred one commit into several.
+			name:       "bodies survive intact",
+			mockOutput: []byte("feat: add feature\n\nWhy this matters.\n\nCo-Authored-By: Someone <s@e>\n\x00fix: bug fix\n\nOne line of why.\n\x00"),
+			want: []string{
+				"feat: add feature\n\nWhy this matters.\n\nCo-Authored-By: Someone <s@e>",
+				"fix: bug fix\n\nOne line of why.",
+			},
 		},
 		{
 			name:       "empty",
@@ -331,7 +341,7 @@ func TestGit_GetCommitMessages(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			exec := NewMockExec()
-			exec.AddResponse("git", []string{"log", "--format=%s", "main..feature"}, tt.mockOutput, nil)
+			exec.AddResponse("git", []string{"log", "--format=%B%x00", "main..feature"}, tt.mockOutput, nil)
 
 			git := NewGit(exec)
 			got, err := git.GetCommitMessages(context.Background(), "/repo", "main", "feature")

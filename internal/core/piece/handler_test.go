@@ -609,11 +609,11 @@ func TestHandler_MergePiece_Success(t *testing.T) {
 	mockExec.AddResponse("git", []string{"merge-base", "main", "piece-1"}, []byte("abc123\n"), nil)
 	mockExec.AddResponse("git", []string{"rev-list", "--count", "abc123..main"}, []byte("0\n"), nil) // main is not ahead
 	// GetCommitMessages for squash commit message
-	mockExec.AddResponse("git", []string{"log", "--format=%s", "main..piece-1"}, []byte("feat: add feature\nfix: bug fix\n"), nil)
+	mockExec.AddResponse("git", []string{"log", "--format=%B%x00", "main..piece-1"}, []byte("feat: add feature\n\x00fix: bug fix\n\x00"), nil)
 	// Checkout, squash merge, and commit
 	mockExec.AddResponse("git", []string{"checkout", "main"}, nil, nil)
 	mockExec.AddResponse("git", []string{"merge", "--squash", "piece-1"}, nil, nil)
-	commitMsg := "feat: piece-1\n\nSquashed commits:\n- feat: add feature\n- fix: bug fix\n"
+	commitMsg := "piece-1\n\nSquashed commits:\n\nfeat: add feature\n\nfix: bug fix\n"
 	mockExec.AddResponse("git", []string{"commit", "-m", commitMsg}, nil, nil)
 
 	_, err := handler.MergePiece(context.Background(), "/pieces/piece-1", piece.MergeInput{MainBranch: "main"})
@@ -654,10 +654,10 @@ func mergeAheadTestEnv(t *testing.T) (*piece.Handler, *adapters.BufferOutput, *a
 	mockExec.AddResponse("git", []string{"merge-base", "main", "piece-1"}, []byte("abc123\n"), nil)
 	mockExec.AddResponse("git", []string{"rev-list", "--count", "abc123..main"}, []byte("2\n"), nil)
 	// Squash-merge path (only reached when the gate is bypassed).
-	mockExec.AddResponse("git", []string{"log", "--format=%s", "main..piece-1"}, []byte("feat: add feature\n"), nil)
+	mockExec.AddResponse("git", []string{"log", "--format=%B%x00", "main..piece-1"}, []byte("feat: add feature\n\x00"), nil)
 	mockExec.AddResponse("git", []string{"checkout", "main"}, nil, nil)
 	mockExec.AddResponse("git", []string{"merge", "--squash", "piece-1"}, nil, nil)
-	mockExec.AddResponse("git", []string{"commit", "-m", "feat: piece-1\n\nSquashed commits:\n- feat: add feature\n"}, nil, nil)
+	mockExec.AddResponse("git", []string{"commit", "-m", "feat: add feature\n"}, nil, nil)
 
 	return handler, out, mockExec
 }
@@ -770,13 +770,13 @@ func TestHandler_MergePiece_IntoParentPiece(t *testing.T) {
 	mockExec.AddResponse("git", []string{"merge-base", "parent-piece", "child-piece"}, []byte("abc123\n"), nil)
 	mockExec.AddResponse("git", []string{"rev-list", "--count", "abc123..parent-piece"}, []byte("0\n"), nil)
 	// GetCommitMessages
-	mockExec.AddResponse("git", []string{"log", "--format=%s", "parent-piece..child-piece"}, []byte("feat: child feature\n"), nil)
+	mockExec.AddResponse("git", []string{"log", "--format=%B%x00", "parent-piece..child-piece"}, []byte("feat: child feature\n\x00"), nil)
 	// Checkout parent-piece (not main)
 	mockExec.AddResponse("git", []string{"checkout", "parent-piece"}, nil, nil)
 	// Squash merge
 	mockExec.AddResponse("git", []string{"merge", "--squash", "child-piece"}, nil, nil)
 	// Commit
-	commitMsg := "feat: child-piece\n\nSquashed commits:\n- feat: child feature\n"
+	commitMsg := "feat: child feature\n"
 	mockExec.AddResponse("git", []string{"commit", "-m", commitMsg}, nil, nil)
 
 	result, err := handler.MergePiece(context.Background(), worktreePath, piece.MergeInput{MainBranch: "main"})
@@ -884,10 +884,10 @@ func TestHandler_MergePiece_ForceOverridesChildren(t *testing.T) {
 	mockExec.AddResponse("git", []string{"rev-parse", "--abbrev-ref", "HEAD"}, []byte("parent-piece\n"), nil)
 	mockExec.AddResponse("git", []string{"merge-base", "main", "parent-piece"}, []byte("abc123\n"), nil)
 	mockExec.AddResponse("git", []string{"rev-list", "--count", "abc123..main"}, []byte("0\n"), nil)
-	mockExec.AddResponse("git", []string{"log", "--format=%s", "main..parent-piece"}, []byte("feat: parent feature\n"), nil)
+	mockExec.AddResponse("git", []string{"log", "--format=%B%x00", "main..parent-piece"}, []byte("feat: parent feature\n\x00"), nil)
 	mockExec.AddResponse("git", []string{"checkout", "main"}, nil, nil)
 	mockExec.AddResponse("git", []string{"merge", "--squash", "parent-piece"}, nil, nil)
-	commitMsg := "feat: parent-piece\n\nSquashed commits:\n- feat: parent feature\n"
+	commitMsg := "feat: parent feature\n"
 	mockExec.AddResponse("git", []string{"commit", "-m", commitMsg}, nil, nil)
 
 	// Merge with Force=true
