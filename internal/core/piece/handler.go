@@ -2244,7 +2244,10 @@ func (h *Handler) ListPieces(ctx context.Context, repoRoot string) ([]PieceListI
 		}
 	}
 
-	var pieces []PieceListItem
+	// Non-nil even when nothing matches: this slice is marshalled straight to
+	// stdout, and a nil one encodes as `null`, which every JSON consumer has
+	// to special-case before it can iterate.
+	pieces := make([]PieceListItem, 0, len(entries))
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
