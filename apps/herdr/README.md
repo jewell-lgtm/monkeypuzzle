@@ -41,6 +41,19 @@ which tells mp to perform the herdr workspace focus/create itself (see
 - `herdr` (the plugin runs inside it)
 - [`fzf`](https://github.com/junegunn/fzf) ≥ 0.71 and [`jq`](https://stedolan.github.io/jq/) — the pickers
 
+### Command lookup and startup errors
+
+The plugin keeps herdr's existing `PATH` order, then adds `~/.local/bin`,
+`/opt/homebrew/bin`, and `/usr/local/bin`. This also works when herdr starts
+from a desktop app with only system directories in its environment.
+For another install location, add it to the environment used to launch
+herdr, or set `MP_PLUGIN_BIN` to the absolute path of `mp` there.
+
+Missing-command errors name the command and show the searched `PATH`.
+Failed picker panes keep their error visible until you press Enter;
+cancelling a picker still closes it immediately. Direct actions report
+errors in `herdr plugin log list`.
+
 ## Install
 
 ```bash

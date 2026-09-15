@@ -11,6 +11,8 @@ source "$DIR/helpers.sh"
 
 main() {
 	set -uo pipefail
+	setup_path
+	require_cmd "$(mp_bin)"
 	# $HERDR_PLUGIN_CONTEXT_JSON carries the invoking workspace; mp resolves
 	# everything itself, so only a sane cwd matters ($1 for manual runs).
 	cd "${1:-.}" 2>/dev/null || true

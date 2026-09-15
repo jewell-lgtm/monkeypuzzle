@@ -12,6 +12,8 @@ source "$DIR/helpers.sh"
 
 main() {
 	set -uo pipefail
+	setup_path
+	require_cmd "$(mp_bin)"
 	local dir="${1:-}"
 	[[ "$dir" == next || "$dir" == prev ]] || die "usage: step.sh next|prev [cwd]"
 	# $2 is the invoking cwd (manual runs): mp resolves "the piece you stand
