@@ -64,7 +64,7 @@ mp create [--name <name> | --prompt <text>]
         ▼  after-pr-ready.sh                 (same env)
         │
         ▼  before-piece-merge.sh             (env: MP_MAIN_BRANCH)
-   mp merge — merge piece into main (or merge the PR on the forge)
+   mp merge — squash into main, or merge the PR on the forge (merge_strategy)
         ▼  after-piece-merge.sh              (same env)
         │
         ▼  is-piece-done.sh (optional)       — exit 0 = merged (for squash-merge detection)

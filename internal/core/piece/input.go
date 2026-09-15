@@ -366,6 +366,9 @@ type MergeInput struct {
 	// NoUpdateCheck merges even when the target has commits the piece lacks
 	// (conflicts then surface from git).
 	NoUpdateCheck bool `json:"no_update_check,omitempty"`
+	// Strategy overrides the configured merge strategy for this call:
+	// "local" or "forge". Empty defers to project then user config.
+	Strategy string `json:"strategy,omitempty"`
 }
 
 // MergeResult contains the result of a merge operation.
@@ -378,6 +381,10 @@ type MergeResult struct {
 	// UpdateCheckSkipped is set when the target was ahead and the update gate
 	// was bypassed (--no-update-check or config).
 	UpdateCheckSkipped bool `json:"update_check_skipped,omitempty"`
+	// Strategy is the route the merge actually took: "local" or "forge".
+	Strategy string `json:"strategy,omitempty"`
+	// PRNumber is the PR/MR merged under the forge strategy.
+	PRNumber int `json:"pr_number,omitempty"`
 }
 
 // MergeSchema returns an example input document for piece merge input.
@@ -425,6 +432,7 @@ func WithMergeDefaults(input MergeInput) MergeInput {
 		ReparentChildren: input.ReparentChildren,
 		ReparentStrategy: strategy,
 		NoUpdateCheck:    input.NoUpdateCheck,
+		Strategy:         strings.TrimSpace(input.Strategy),
 	}
 }
 

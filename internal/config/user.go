@@ -25,6 +25,10 @@ type UserConfig struct {
 	// OpenCommand is the template `mp open` runs — e.g. "code {path}". Empty
 	// means no opener is configured and `mp open` only reports the path.
 	OpenCommand string `json:"open_command,omitempty"`
+	// MergeStrategy is the fallback for projects that declare none: "local"
+	// squashes into the target branch here, "forge" merges the piece's open
+	// PR/MR. Empty means "local".
+	MergeStrategy string `json:"merge_strategy,omitempty"`
 }
 
 // DoneRequiresMerged reports whether `mp done` refuses unmerged pieces

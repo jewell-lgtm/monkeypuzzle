@@ -118,6 +118,18 @@ func (g *GitHub) MarkPRReady(ctx context.Context, workDir string, prNumber int) 
 	return nil
 }
 
+// MergePR squash-merges a PR. Squash matches what a local `mp merge` does, so
+// a piece lands as one commit whichever route it takes. --delete-branch=false
+// is explicit because gh honours a user's `gh config set` default otherwise,
+// and mp owns the branch's life (`mp done` / `mp abandon`), not gh.
+func (g *GitHub) MergePR(ctx context.Context, workDir string, prNumber int) error {
+	_, err := g.exec.RunWithDir(ctx, workDir, "gh", "pr", "merge", fmt.Sprintf("%d", prNumber), "--squash", "--delete-branch=false")
+	if err != nil {
+		return fmt.Errorf("failed to merge PR #%d: %w%s", prNumber, err, cliHint("gh", ghInstallHint))
+	}
+	return nil
+}
+
 // GetPRStatus gets the status of a PR by number
 func (g *GitHub) GetPRStatus(ctx context.Context, workDir string, prNumber int) (string, error) {
 	output, err := g.exec.RunWithDir(ctx, workDir, "gh", "pr", "view", fmt.Sprintf("%d", prNumber), "--json", "state", "--jq", ".state")

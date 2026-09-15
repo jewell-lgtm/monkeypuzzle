@@ -93,7 +93,8 @@ mp create --name my-feature   # branch + worktree off main; your shell moves int
 
 mp pr create --draft          # push the branch, open a draft PR/MR
 mp pr ready                   # flip it to ready for review
-mp merge                      # merge into main (or merge the PR on the forge)
+mp merge                      # squash into main — or merge the PR on the forge
+                              #   (mp config set merge_strategy forge)
 mp done                       # remove the worktree now it's merged
 ```
 

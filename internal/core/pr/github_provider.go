@@ -81,3 +81,11 @@ func (p *GitHubProvider) ListPRs(ctx context.Context, workDir string) ([]PRInfo,
 func (p *GitHubProvider) SetPRBase(ctx context.Context, workDir string, number int, base string) error {
 	return p.gh.SetPRBase(ctx, workDir, number, base)
 }
+
+func (p *GitHubProvider) FindOpenByBranch(ctx context.Context, workDir, branchName string) (int, error) {
+	return findOpenByBranch(ctx, p, workDir, branchName)
+}
+
+func (p *GitHubProvider) Merge(ctx context.Context, workDir string, number int) error {
+	return p.gh.MergePR(ctx, workDir, number)
+}

@@ -27,6 +27,14 @@ type Config struct {
 	Version string        `json:"version"`
 	Project ProjectConfig `json:"project"`
 	PR      PRConfig      `json:"pr"`
+	Merge   MergeConfig   `json:"merge,omitempty"`
+}
+
+// MergeConfig is how this project lands pieces. Strategy is "local" (squash
+// into the target branch in the main checkout) or "forge" (merge the piece's
+// open PR/MR). Empty defers to the user-level default, then to "local".
+type MergeConfig struct {
+	Strategy string `json:"strategy,omitempty"`
 }
 
 type ProjectConfig struct {

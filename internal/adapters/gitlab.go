@@ -106,6 +106,17 @@ func (g *GitLab) MarkPRReady(ctx context.Context, workDir string, mrNumber int) 
 }
 
 // GetPRStatus returns the MR state ("opened", "closed", "merged", "locked").
+// MergePR squash-merges an MR. --yes skips glab's interactive confirmation,
+// which has no answer in a non-tty; the source branch is left alone because mp
+// owns the branch's life (`mp done` / `mp abandon`).
+func (g *GitLab) MergePR(ctx context.Context, workDir string, mrNumber int) error {
+	_, err := g.exec.RunWithDir(ctx, workDir, "glab", "mr", "merge", fmt.Sprintf("%d", mrNumber), "--squash", "--yes", "--remove-source-branch=false")
+	if err != nil {
+		return fmt.Errorf("failed to merge MR !%d: %w%s", mrNumber, err, cliHint("glab", glabInstallHint))
+	}
+	return nil
+}
+
 func (g *GitLab) GetPRStatus(ctx context.Context, workDir string, mrNumber int) (string, error) {
 	output, err := g.exec.RunWithDir(ctx, workDir, "glab", "mr", "view", fmt.Sprintf("%d", mrNumber), "-F", "json")
 	if err != nil {

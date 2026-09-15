@@ -14,6 +14,11 @@ import (
 type MergeChecker interface {
 	FindMergedByBranch(ctx context.Context, workDir, branchName string) (bool, int, error)
 	IsMerged(ctx context.Context, workDir string, number int) (bool, error)
+	// FindOpenByBranch returns the number of the open PR/MR for branchName, or
+	// 0 when it has none. The forge merge strategy needs something to merge.
+	FindOpenByBranch(ctx context.Context, workDir, branchName string) (int, error)
+	// Merge squash-merges the PR/MR on the forge.
+	Merge(ctx context.Context, workDir string, number int) error
 }
 
 // MergeCheckerFactory builds a MergeChecker for a given repo, reading the project
@@ -25,9 +30,13 @@ var mergeCheckerFactory MergeCheckerFactory
 
 // SetMergeCheckerFactory registers a factory that produces MergeChecker instances.
 // Called from the pr package's init() to wire the registry-driven provider in
-// without a circular import.
-func SetMergeCheckerFactory(f MergeCheckerFactory) {
+// without a circular import. It returns the factory it replaced, so a caller
+// that swaps in a stand-in can put the real one back rather than leaving the
+// process with none.
+func SetMergeCheckerFactory(f MergeCheckerFactory) MergeCheckerFactory {
+	previous := mergeCheckerFactory
 	mergeCheckerFactory = f
+	return previous
 }
 
 // getMergeChecker returns a checker for the given repo, or nil if none is configured.

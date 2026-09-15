@@ -24,10 +24,12 @@ const (
 
 // Handler executes piece-related commands
 type Handler struct {
-	deps  core.Deps
-	git   *adapters.Git
-	mux   core.Multiplexer
-	hooks *HookRunner
+	deps core.Deps
+	git  *adapters.Git
+	// mergeStrategyDefault is the user-level merge strategy fallback.
+	mergeStrategyDefault string
+	mux                  core.Multiplexer
+	hooks                *HookRunner
 	// doneRequireMerged mirrors the user config key done_require_merged:
 	// when false, DonePiece cleans up unmerged pieces without --force.
 	doneRequireMerged bool
@@ -1044,28 +1046,41 @@ func (h *Handler) MergePiece(ctx context.Context, workDir string, input MergeInp
 		})
 	}
 
-	// Get commit messages from piece branch for the squash commit message
-	commitMsgs, err := h.git.GetCommitMessages(ctx, mainRepoRoot, targetBranch, pieceBranch)
+	mergeStrategy, err := ResolveMergeStrategy(mainRepoRoot, h.deps.FS, input.Strategy, h.mergeStrategyDefault)
 	if err != nil {
-		return MergeResult{}, fmt.Errorf("failed to get commit messages: %w", err)
+		return MergeResult{}, err
 	}
 
-	// Build squash commit message
-	commitMsg := h.buildSquashCommitMessage(status.PieceName, commitMsgs)
+	var prNumber int
+	if mergeStrategy == MergeForge {
+		prNumber, err = h.mergeOnForge(ctx, mainRepoRoot, status.WorktreePath, pieceBranch, targetBranch)
+		if err != nil {
+			return MergeResult{}, err
+		}
+	} else {
+		// Get commit messages from piece branch for the squash commit message
+		commitMsgs, err := h.git.GetCommitMessages(ctx, mainRepoRoot, targetBranch, pieceBranch)
+		if err != nil {
+			return MergeResult{}, fmt.Errorf("failed to get commit messages: %w", err)
+		}
 
-	// Switch to target branch
-	if err := h.git.Checkout(ctx, mainRepoRoot, targetBranch); err != nil {
-		return MergeResult{}, fmt.Errorf("failed to checkout %s: %w", targetBranch, err)
-	}
+		// Build squash commit message
+		commitMsg := h.buildSquashCommitMessage(status.PieceName, commitMsgs)
 
-	// Squash merge the piece branch into target
-	if err := h.git.MergeSquash(ctx, mainRepoRoot, pieceBranch); err != nil {
-		return MergeResult{}, fmt.Errorf("failed to squash merge piece branch into %s: %w", targetBranch, err)
-	}
+		// Switch to target branch
+		if err := h.git.Checkout(ctx, mainRepoRoot, targetBranch); err != nil {
+			return MergeResult{}, fmt.Errorf("failed to checkout %s: %w", targetBranch, err)
+		}
 
-	// Commit the squashed changes
-	if err := h.git.Commit(ctx, mainRepoRoot, commitMsg); err != nil {
-		return MergeResult{}, fmt.Errorf("failed to commit squashed changes: %w", err)
+		// Squash merge the piece branch into target
+		if err := h.git.MergeSquash(ctx, mainRepoRoot, pieceBranch); err != nil {
+			return MergeResult{}, fmt.Errorf("failed to squash merge piece branch into %s: %w", targetBranch, err)
+		}
+
+		// Commit the squashed changes
+		if err := h.git.Commit(ctx, mainRepoRoot, commitMsg); err != nil {
+			return MergeResult{}, fmt.Errorf("failed to commit squashed changes: %w", err)
+		}
 	}
 
 	// Record the durable merged marker now that the squash + commit succeeded.
@@ -1135,15 +1150,81 @@ func (h *Handler) MergePiece(ctx context.Context, workDir string, input MergeInp
 		Status:             "merged",
 		ReparentedChildren: reparented,
 		UpdateCheckSkipped: isAhead,
+		Strategy:           string(mergeStrategy),
+		PRNumber:           prNumber,
 	}
 
+	summary := fmt.Sprintf("Squash merged %s into %s", pieceBranch, targetBranch)
+	if mergeStrategy == MergeForge {
+		summary = fmt.Sprintf("Merged PR #%d (%s into %s) on the forge", prNumber, pieceBranch, targetBranch)
+	}
 	h.deps.Output.Write(core.Message{
 		Type:    core.MsgSuccess,
-		Content: fmt.Sprintf("Squash merged %s into %s", pieceBranch, targetBranch),
+		Content: summary,
 		Data:    result,
 	})
 
 	return result, nil
+}
+
+// SetMergeStrategyDefault records the user-level merge strategy, consulted when
+// the project declares none. The CLI reads user config and passes it in.
+func (h *Handler) SetMergeStrategyDefault(v string) { h.mergeStrategyDefault = v }
+
+// mergeOnForge merges the piece's open PR/MR and brings the local target branch
+// up to the result. It returns the PR number it merged.
+//
+// Ordering matters: everything that can refuse happens before the merge call,
+// because the merge is the one step that cannot be undone. After it succeeds,
+// a failure to sync the local trunk is a warning — the piece really is merged,
+// and erroring here would leave callers believing it was not.
+func (h *Handler) mergeOnForge(ctx context.Context, mainRepoRoot, worktreePath, pieceBranch, targetBranch string) (int, error) {
+	mc := h.getMergeChecker(mainRepoRoot)
+	if mc == nil {
+		return 0, ErrNoForgeProvider
+	}
+
+	number, err := mc.FindOpenByBranch(ctx, mainRepoRoot, pieceBranch)
+	if err != nil {
+		return 0, fmt.Errorf("failed to look up an open PR for %s: %w", pieceBranch, err)
+	}
+	if number == 0 {
+		return 0, fmt.Errorf("%w: %s; run 'mp pr create' first, or 'mp merge --local'", ErrNoOpenPR, pieceBranch)
+	}
+
+	// Commits that exist only here are not in the PR, so merging it would land
+	// less than the piece contains. Refuse rather than push on the user's
+	// behalf: `mp merge` is not the command that publishes work.
+	ahead, _, err := h.git.CommitsAheadBehind(ctx, worktreePath, "origin/"+pieceBranch, pieceBranch)
+	if err == nil && ahead > 0 {
+		return number, fmt.Errorf("%s has %d commit(s) not pushed, so PR #%d does not contain them; push first, or 'mp merge --local'", pieceBranch, ahead, number)
+	}
+
+	if err := mc.Merge(ctx, mainRepoRoot, number); err != nil {
+		return number, err
+	}
+
+	// Past this point the merge has happened. Warn, never fail.
+	if err := h.syncTargetToRemote(ctx, mainRepoRoot, targetBranch); err != nil {
+		h.deps.Output.Write(core.Message{
+			Type:    core.MsgWarning,
+			Content: fmt.Sprintf("Merged PR #%d, but could not fast-forward local %s: %v", number, targetBranch, err),
+		})
+	}
+	return number, nil
+}
+
+// syncTargetToRemote fast-forwards the local target branch onto what the forge
+// just produced, so `mp done` and the next `mp create` start from the merged
+// trunk rather than a stale one.
+func (h *Handler) syncTargetToRemote(ctx context.Context, mainRepoRoot, targetBranch string) error {
+	if err := h.git.Fetch(ctx, mainRepoRoot, "origin", targetBranch); err != nil {
+		return err
+	}
+	if err := h.git.Checkout(ctx, mainRepoRoot, targetBranch); err != nil {
+		return err
+	}
+	return h.git.MergeFFOnly(ctx, mainRepoRoot, "origin/"+targetBranch)
 }
 
 // buildSquashCommitMessage creates a commit message for squash merge

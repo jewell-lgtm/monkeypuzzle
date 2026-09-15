@@ -147,6 +147,8 @@ var flagAbandonPiece string
 var flagDonePiece string
 var flagDoneForce bool
 var flagMergeNoUpdateCheck bool
+var flagMergeForge bool
+var flagMergeLocal bool
 var flagStatusPiece string
 var flagStatusEnsureID bool
 var flagDeleteBranch bool
@@ -201,6 +203,9 @@ func init() {
 	pieceMergeCmd.Flags().StringVar(&flagPieceMergeReparentStrategy, "reparent-strategy", "", "How to re-home children: 'rebase' (default, rewrites history) or 'merge' (no force-push)")
 	pieceMergeCmd.Flags().BoolVar(&flagPieceMergeJSON, "json", false, "Output JSON even on a terminal")
 	pieceMergeCmd.Flags().BoolVar(&flagMergeNoUpdateCheck, "no-update-check", false, "Merge even if the target has commits not in the piece (conflicts surface from git)")
+	pieceMergeCmd.Flags().BoolVar(&flagMergeForge, "forge", false, "Merge the piece's open PR/MR on the forge instead of locally")
+	pieceMergeCmd.Flags().BoolVar(&flagMergeLocal, "local", false, "Squash-merge into the target branch here, whatever the configured strategy")
+	pieceMergeCmd.MarkFlagsMutuallyExclusive("forge", "local")
 	pieceCleanupCmd.Flags().StringVar(&flagMainBranch, "main", "main", "Main branch name to check for merged status")
 	pieceCleanupCmd.Flags().StringVar(&flagMainBranchLegacy, "main-branch", "", "Deprecated alias for --main")
 	_ = pieceCleanupCmd.Flags().MarkDeprecated("main-branch", "use --main")
@@ -864,6 +869,7 @@ func runPieceMerge(cmd *cobra.Command, args []string) error {
 	handler := newPieceHandler(deps)
 	if userCfg, err := config.LoadUserConfig(); err == nil {
 		handler.SetMergeRequireUpdated(userCfg.MergeRequiresUpdated())
+		handler.SetMergeStrategyDefault(userCfg.MergeStrategy)
 	}
 
 	// Get input
@@ -938,6 +944,12 @@ func getMergeInput(cmd *cobra.Command) (piececmd.MergeInput, error) {
 	if flagPieceMergeReparentStrategy != "" {
 		input.ReparentChildren = true
 		input.ReparentStrategy = flagPieceMergeReparentStrategy
+	}
+	if flagMergeForge {
+		input.Strategy = string(piececmd.MergeForge)
+	}
+	if flagMergeLocal {
+		input.Strategy = string(piececmd.MergeLocal)
 	}
 	if flagMergeNoUpdateCheck {
 		input.NoUpdateCheck = true

@@ -5,6 +5,7 @@ package piece_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -2317,5 +2318,156 @@ func TestIntegration_AdoptPiece_LockedWorktree(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "worktree unlock") {
 		t.Errorf("expected unlock hint in error, got: %v", err)
+	}
+}
+
+// fakeForge stands in for the PR provider behind the forge merge strategy.
+type fakeForge struct {
+	openByBranch map[string]int
+	merged       []int
+	mergeErr     error
+}
+
+func (f *fakeForge) FindMergedByBranch(context.Context, string, string) (bool, int, error) {
+	return false, 0, nil
+}
+func (f *fakeForge) IsMerged(context.Context, string, int) (bool, error) { return false, nil }
+func (f *fakeForge) FindOpenByBranch(_ context.Context, _, branch string) (int, error) {
+	return f.openByBranch[branch], nil
+}
+func (f *fakeForge) Merge(_ context.Context, _ string, number int) error {
+	if f.mergeErr != nil {
+		return f.mergeErr
+	}
+	f.merged = append(f.merged, number)
+	return nil
+}
+
+// useFakeForge swaps the provider factory for the duration of one test.
+func useFakeForge(t *testing.T, f *fakeForge) {
+	t.Helper()
+	previous := piece.SetMergeCheckerFactory(func(string, core.Deps) piece.MergeChecker { return f })
+	t.Cleanup(func() { piece.SetMergeCheckerFactory(previous) })
+}
+
+// forgeRepo builds a project with one piece holding a commit, ready to merge.
+func forgeRepo(t *testing.T, name string) (repoRoot string, handler *piece.Handler, info piece.PieceInfo) {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	tmpDataHome, err := os.MkdirTemp("", "mp-data-*")
+	if err != nil {
+		t.Fatalf("temp data dir: %v", err)
+	}
+	t.Cleanup(func() {
+		os.RemoveAll(tmpDataHome)
+		paths.ResetDataDir()
+	})
+	paths.SetDataDir(tmpDataHome)
+
+	repoRoot, err = os.MkdirTemp("", "mp-forge-*")
+	if err != nil {
+		t.Fatalf("temp dir: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(repoRoot) })
+	setupGitRepo(t, repoRoot)
+	setupMonkeypuzzleConfig(t, repoRoot)
+
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldWd) })
+	if err := os.Chdir(repoRoot); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+
+	deps := core.Deps{FS: adapters.NewOSFS(""), Output: adapters.NewBufferOutput(), Exec: adapters.NewOSExec()}
+	handler = piece.NewHandlerWithMultiplexer(deps, newRecordingMux(false))
+
+	info, err = handler.CreatePiece(context.Background(), name, piece.CreatePieceOptions{})
+	if err != nil {
+		t.Fatalf("CreatePiece: %v", err)
+	}
+	// One commit, so the piece has something to land.
+	if err := os.WriteFile(filepath.Join(info.WorktreePath, "work.txt"), []byte("work"), 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	for _, args := range [][]string{{"add", "-A"}, {"commit", "-m", "work"}} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = info.WorktreePath
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	return repoRoot, handler, info
+}
+
+// The forge strategy has nothing to merge without a PR. It must say so rather
+// than fall back to a local merge, which would land the work by a different
+// route than the project asked for.
+func TestIntegration_MergePiece_ForgeRefusesWithoutAnOpenPR(t *testing.T) {
+	_, handler, info := forgeRepo(t, "no-pr")
+	forge := &fakeForge{openByBranch: map[string]int{}}
+	useFakeForge(t, forge)
+
+	_, err := handler.MergePiece(context.Background(), info.WorktreePath, piece.WithMergeDefaults(
+		piece.MergeInput{Strategy: string(piece.MergeForge)},
+	))
+	if !errors.Is(err, piece.ErrNoOpenPR) {
+		t.Fatalf("MergePiece error = %v, want ErrNoOpenPR", err)
+	}
+	if len(forge.merged) != 0 {
+		t.Errorf("merged %v on the forge despite refusing", forge.merged)
+	}
+	// The local branch must be untouched: no silent local merge.
+	if merged, _ := handler.IsBranchMerged(context.Background(), info.WorktreePath, "no-pr", "main"); merged.IsMerged {
+		t.Error("piece reports merged after a refused forge merge")
+	}
+}
+
+func TestIntegration_MergePiece_ForgeMergesTheOpenPR(t *testing.T) {
+	_, handler, info := forgeRepo(t, "has-pr")
+	forge := &fakeForge{openByBranch: map[string]int{"has-pr": 42}}
+	useFakeForge(t, forge)
+
+	res, err := handler.MergePiece(context.Background(), info.WorktreePath, piece.WithMergeDefaults(
+		piece.MergeInput{Strategy: string(piece.MergeForge)},
+	))
+	if err != nil {
+		t.Fatalf("MergePiece: %v", err)
+	}
+	if len(forge.merged) != 1 || forge.merged[0] != 42 {
+		t.Errorf("merged = %v, want [42]", forge.merged)
+	}
+	if res.Strategy != string(piece.MergeForge) || res.PRNumber != 42 {
+		t.Errorf("result strategy/PR = %q/%d, want forge/42", res.Strategy, res.PRNumber)
+	}
+	// The merged marker is what `mp done` consults, so a forge merge must
+	// record it exactly as a local one does.
+	merged, _ := handler.IsBranchMerged(context.Background(), info.WorktreePath, "has-pr", "main")
+	if !merged.IsMerged {
+		t.Error("forge merge did not record the merged marker; mp done would refuse the piece")
+	}
+}
+
+// The default is still a local merge, so nothing changes for a project that
+// never opts in.
+func TestIntegration_MergePiece_DefaultsToLocal(t *testing.T) {
+	_, handler, info := forgeRepo(t, "plain")
+	forge := &fakeForge{openByBranch: map[string]int{"plain": 9}}
+	useFakeForge(t, forge)
+
+	res, err := handler.MergePiece(context.Background(), info.WorktreePath, piece.WithMergeDefaults(piece.MergeInput{}))
+	if err != nil {
+		t.Fatalf("MergePiece: %v", err)
+	}
+	if res.Strategy != string(piece.MergeLocal) {
+		t.Errorf("strategy = %q, want local", res.Strategy)
+	}
+	if len(forge.merged) != 0 {
+		t.Errorf("a default merge touched the forge: %v", forge.merged)
 	}
 }

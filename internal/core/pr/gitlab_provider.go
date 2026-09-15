@@ -64,3 +64,11 @@ func (p *GitLabProvider) ListPRs(ctx context.Context, workDir string) ([]PRInfo,
 func (p *GitLabProvider) SetPRBase(ctx context.Context, workDir string, number int, base string) error {
 	return p.gl.SetPRBase(ctx, workDir, number, base)
 }
+
+func (p *GitLabProvider) FindOpenByBranch(ctx context.Context, workDir, branchName string) (int, error) {
+	return findOpenByBranch(ctx, p, workDir, branchName)
+}
+
+func (p *GitLabProvider) Merge(ctx context.Context, workDir string, number int) error {
+	return p.gl.MergePR(ctx, workDir, number)
+}
