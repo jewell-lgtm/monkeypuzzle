@@ -76,13 +76,13 @@ JSON
 if source "$SCRIPTS/switch.sh" 2>/dev/null; then
 	got="$(canned_json | build_rows)"
 	want="$(printf '%s\n' \
-		$'alpha/(main)\talpha\t\t/repos/alpha\t' \
-		$'alpha/fix-login\talpha\tfix-login\t/wt/alpha/fix-login\t' \
-		$'alpha/dark-mode  [feat/dark-mode]\talpha\tdark-mode\t/wt/alpha/dark-mode\t' \
-		$'alpha/spike-idea  (branch)\talpha\t\t/repos/alpha\tspike-idea' \
-		$'alpha/origin/review-fixes  (branch)\talpha\t\t/repos/alpha\torigin/review-fixes' \
-		$'beta/(main)\tbeta\t\t/repos/beta\t')"
-	assert_eq "switch build_rows: main + piece + branch rows, non-project skipped" "$got" "$want"
+		$'alpha/(main)\talpha\t\t/repos/alpha\t\t/repos/alpha' \
+		$'alpha/fix-login\talpha\tfix-login\t/wt/alpha/fix-login\t\t/repos/alpha' \
+		$'alpha/dark-mode  [feat/dark-mode]\talpha\tdark-mode\t/wt/alpha/dark-mode\t\t/repos/alpha' \
+		$'alpha/spike-idea  (branch)\talpha\t\t/repos/alpha\tspike-idea\t/repos/alpha' \
+		$'alpha/origin/review-fixes  (branch)\talpha\t\t/repos/alpha\torigin/review-fixes\t/repos/alpha' \
+		$'beta/(main)\tbeta\t\t/repos/beta\t\t/repos/beta')"
+	assert_eq "switch build_rows: main + piece + branch rows carrying the project path, non-project skipped" "$got" "$want"
 else
 	fail "source switch.sh" "could not source $SCRIPTS/switch.sh"
 fi
@@ -335,6 +335,136 @@ EOF
 	rm -rf "$tmp"
 }
 integration_switch_create
+
+# ---- Integration: done / abandon from the picker ---------------------------
+# finish.sh is the whole confirmation: the prompt, the mp call in the right
+# repo, and the one escalation offered after mp's own gate refuses.
+integration_finish() {
+	local tmp bin log answers rc
+	tmp="$(mktemp -d)"
+	bin="$tmp/bin"
+	log="$tmp/mp.log"
+	mkdir -p "$bin" "$tmp/repos/alpha"
+
+	# Stub mp: append each done/abandon call with the directory it ran in. It
+	# fails until $tmp/allow exists, standing in for the merged/dirty gate.
+	cat >"$bin/mp" <<EOF
+#!/usr/bin/env bash
+case "\$1" in
+  done|abandon)
+    printf '%s :: %s\n' "\$*" "\$PWD" >> "$log"
+    if [ -e "$tmp/allow" ] || [ "\$4" = "--force" ]; then exit 0; fi
+    echo "piece is not merged into main" >&2
+    exit 1 ;;
+  *) exit 2 ;;
+esac
+EOF
+	chmod +x "$bin/mp"
+
+	run_finish_sh() { # <answers> <args...>
+		answers="$1"
+		shift
+		printf '%s\n' "$answers" | PATH="$bin:$PATH" bash "$SCRIPTS/finish.sh" "$@" >/dev/null 2>&1
+	}
+
+	# Declining the prompt runs nothing at all.
+	run_finish_sh "n" abandon alpha fix-login "$tmp/repos/alpha"
+	assert_eq "finish: a declined prompt runs no mp command" "$(cat "$log" 2>/dev/null)" ""
+
+	# Confirming runs the verb against the piece, in that project's repo.
+	: >"$tmp/allow"
+	run_finish_sh "y" abandon alpha fix-login "$tmp/repos/alpha"
+	assert_eq "finish: y abandons the piece in its own project" \
+		"$(cat "$log" 2>/dev/null)" "abandon --piece fix-login :: $tmp/repos/alpha"
+
+	rm -f "$log"
+	run_finish_sh "y" done alpha fix-login "$tmp/repos/alpha"
+	assert_eq "finish: y finishes the piece with mp done" \
+		"$(cat "$log" 2>/dev/null)" "done --piece fix-login :: $tmp/repos/alpha"
+
+	# f forces in one keystroke, without waiting to be refused first.
+	rm -f "$log"
+	run_finish_sh "f" abandon alpha fix-login "$tmp/repos/alpha"
+	assert_eq "finish: f forces without a second prompt" \
+		"$(cat "$log" 2>/dev/null)" "abandon --piece fix-login --force :: $tmp/repos/alpha"
+
+	# Refused: mp's gate says no, and the follow-up prompt escalates once.
+	rm -f "$log" "$tmp/allow"
+	run_finish_sh "$(printf 'y\ny')" done alpha fix-login "$tmp/repos/alpha"
+	assert_eq "finish: a refused run offers force, and forcing retries it" \
+		"$(cat "$log" 2>/dev/null)" \
+		"$(printf 'done --piece fix-login :: %s\ndone --piece fix-login --force :: %s' "$tmp/repos/alpha" "$tmp/repos/alpha")"
+
+	# Declining that escalation leaves the piece alone.
+	rm -f "$log"
+	run_finish_sh "$(printf 'y\nn')" done alpha fix-login "$tmp/repos/alpha"
+	assert_eq "finish: declining the escalation stops at the refusal" \
+		"$(cat "$log" 2>/dev/null)" "done --piece fix-login :: $tmp/repos/alpha"
+
+	# A row with no piece (a project main, or a branch) has no lifecycle.
+	rm -f "$log"
+	out="$(printf 'y\n' | PATH="$bin:$PATH" bash "$SCRIPTS/finish.sh" abandon alpha "" "$tmp/repos/alpha" 2>&1)"
+	assert_eq "finish: a non-piece row runs nothing" "$(cat "$log" 2>/dev/null)" ""
+	case "$out" in
+		*"not a piece"*) ok "finish: a non-piece row says why" ;;
+		*) fail "finish: a non-piece row says why" "$out" ;;
+	esac
+
+	# An unknown action is a wiring bug, not something to guess at.
+	printf 'y\n' | PATH="$bin:$PATH" bash "$SCRIPTS/finish.sh" merge alpha fix-login "$tmp/repos/alpha" >/dev/null 2>&1
+	rc=$?
+	assert_eq "finish: an unknown action fails loudly" "$rc" "1"
+	assert_eq "finish: an unknown action runs nothing" "$(cat "$log" 2>/dev/null)" ""
+
+	rm -rf "$tmp"
+}
+integration_finish
+
+# ---- Integration: the picker's lifecycle keys reach finish.sh --------------
+integration_switch_finish_keys() {
+	if ! have jq || ! have fzf; then
+		skip "switch lifecycle keys" "needs jq + fzf"
+		return
+	fi
+	local tmp bin log
+	tmp="$(mktemp -d)"
+	bin="$tmp/bin"
+	log="$tmp/mp.log"
+	mkdir -p "$bin"
+
+	sed "s|/repos/|$tmp/repos/|g" >"$tmp/canned.json" < <(canned_json)
+	mkdir -p "$tmp/repos/alpha"
+	cat >"$bin/mp" <<EOF
+#!/usr/bin/env bash
+case "\$1" in
+  go) cat "$tmp/canned.json" ;;
+  done|abandon) printf '%s :: %s\n' "\$*" "\$PWD" > "$log" ;;
+  *) exit 2 ;;
+esac
+EOF
+	chmod +x "$bin/mp"
+
+	# The selected row carries the piece and the project path the verb needs.
+	printf 'y\n' | PATH="$bin:$PATH" TMUX=fake MP_PLUGIN_FILTER="fix-login" MP_PLUGIN_KEY="ctrl-x" \
+		bash "$SCRIPTS/switch.sh" >/dev/null 2>&1
+	assert_eq "switch flow: the abandon key abandons the selected piece" \
+		"$(cat "$log" 2>/dev/null)" "abandon --piece fix-login :: $tmp/repos/alpha"
+
+	rm -f "$log"
+	printf 'y\n' | PATH="$bin:$PATH" TMUX=fake MP_PLUGIN_FILTER="fix-login" MP_PLUGIN_KEY="ctrl-d" \
+		bash "$SCRIPTS/switch.sh" >/dev/null 2>&1
+	assert_eq "switch flow: the done key finishes the selected piece" \
+		"$(cat "$log" 2>/dev/null)" "done --piece fix-login :: $tmp/repos/alpha"
+
+	# `switch.sh rows` is the reload target the keys hang off; it must print
+	# the same rows the picker was built from.
+	assert_eq "switch flow: the rows subcommand feeds the reload" \
+		"$(PATH="$bin:$PATH" bash "$SCRIPTS/switch.sh" rows)" \
+		"$(build_rows <"$tmp/canned.json")"
+
+	rm -rf "$tmp"
+}
+integration_switch_finish_keys
 
 # ---- Integration: branch jump (paste a target) ------------------------------
 integration_branch() {
