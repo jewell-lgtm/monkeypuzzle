@@ -83,12 +83,13 @@ Ready-flip fires `before-pr-ready.sh` / `after-pr-ready.sh`.
 Both pass `MP_PR_NUMBER`, `MP_PR_URL`, `MP_PR_BASE_BRANCH` in env.
 
 **mp does not own the review gate.** Ready is a separate command so that
-whatever a project requires before review can happen between `pr create` and
-`pr ready`: a human's approval, a passing reviewer agent, green CI, two agents
-from different providers, or nothing at all. What that gate is belongs to the
-project's own workflow. A project that wants it enforced rather than remembered
-puts the check in `before-pr-ready.sh`, which aborts the flip on a non-zero
-exit.
+whatever a project requires before review happens between `pr create` and
+`pr ready`. Satisfy that gate, then flip. What it consists of belongs to the
+project's workflow docs: an approving human, a green CI run, a reviewer's
+verdict, or nothing at all. A project that wants it enforced rather than
+remembered puts the check in `before-pr-ready.sh`, which aborts the flip on a
+non-zero exit. mp never advances an existing draft by itself, though note that
+`mp pr create` opens a non-draft PR unless you pass `draft`.
 
 ## Hooks
 
@@ -140,9 +141,9 @@ mp go --json                         # switch across every project
 `mp wait --timeout 5m` blocks until no agent is working. It works per repo, so
 it fails outside a git repo and only sees the pieces of the one you are in.
 
-The inbox has its own commands for rank, notes, snooze, and the piece `id` an
-external system keys on. Those live in the `monkeypuzzle-inbox` skill. Use it
-rather than re-deriving the JSON shape here.
+The `monkeypuzzle-inbox` skill covers ranking, notes, snoozing, and keying an
+external system on a piece `id`. Use it rather than re-deriving the JSON shape
+here.
 
 ## Remote projects
 
@@ -168,10 +169,10 @@ refer back to a piece, since `project/piece` changes with a rename.
 1. `mp create` makes the worktree and session, then fires `on-piece-create.sh`
 2. Work in the worktree, commit normally
 3. `mp pr create --draft` pushes, opens the draft PR/MR, fires the pr-create hooks
-4. Whatever the project's gate before review is, run it here
+4. Satisfy whatever the project requires before review
 5. `mp pr ready` flips it to ready and fires the pr-ready hooks
 6. After merge, `mp done` or `mp cleanup`
 
-Step 4 belongs to the project. mp guarantees only that step 5 never fires on
-its own. Check the project's workflow docs and `.monkeypuzzle/hooks/` for the
-gate before you flip a draft.
+Step 4 belongs to the project. mp guarantees only that step 5 never fires by
+itself. Check the project's workflow docs and `.monkeypuzzle/hooks/` for what
+the gate is before you flip a draft.
