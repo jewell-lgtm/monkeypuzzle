@@ -364,7 +364,6 @@ func runNewCmd(cmd *cobra.Command, args []string) error {
 The repo ships two skills, canonically under `.agents/skills/`:
 
 - **`.agents/skills/managing-monkeypuzzle/SKILL.md`** — the piece/PR/stack workflow inside one repo.
-- **`.agents/skills/monkeypuzzle-inbox/SKILL.md`** — the cross-project inbox, agents, and history. Installed per-machine with `mp skill create monkeypuzzle-inbox --user`, since it works outside any project.
 - **`.claude/skills/<name>` is a symlink** to each, because Claude Code does not read `.agents/skills/`. Both symlinks are committed.
 
 Both documents are **generated** by `mp skill create <name>`. Do not hand-edit them — edit the source under `internal/core/skill/assets/`, then re-run the command.

@@ -19,7 +19,7 @@ loop — it runs mp with ` + "`" + EnvCwdFile + "`" + ` set, and cd's to whateve
 there. Nothing changes for any other caller, and mp's stdout is untouched, so
 pipes and ` + "`cd \"$(mp switch x)\"`" + ` keep working.
 
-Verbs that move you: switch, go, create, adopt, inbox next/prev, agent focus,
+Verbs that move you: switch, go, create, adopt, agent focus,
 and done/abandon/cleanup when they remove the worktree you're standing in.
 
 Add to your shell config:

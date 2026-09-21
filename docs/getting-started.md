@@ -70,7 +70,7 @@ plain-terminal setup this guide uses (`mp config set multiplexer …` changes it
 later). Then the wizard asks for a project name (defaults to the directory
 name) and a PR provider (`github` or `gitlab`). It creates `.monkeypuzzle/`
 with the project config and a `.gitignore` for the piece worktrees, and
-registers the project so `mp go` and `mp inbox` can find it.
+registers the project so `mp go` can find it.
 
 For scripts or CI, skip the wizards:
 

@@ -76,9 +76,9 @@ The user-facing domain model is specified in
 [Atoms and workflows](/docs/atoms/). Core packages own atom invariants; CLI
 workflows compose handlers and adapters. In particular, the `branch` package
 projects mp-managed stack layers, `piece` owns worktrees and lifecycle metadata,
-`stack` owns base→head topology, `worktree` reports piece storage and delegates
-managed culling to `piece`, and `inbox` owns only cross-project ordering
-annotations. Raw Git and terminal-session resources stay behind adapters.
+`stack` owns base→head topology, and `worktree` reports piece storage and
+delegates managed culling to `piece`. Raw Git and terminal-session resources
+stay behind adapters.
 
 ### Ports (Interfaces)
 
@@ -323,20 +323,6 @@ transition mp performs, global across repositories:
   `cleanup`, `switch`, `stack sync`) record explicitly in their handlers.
 - **Tests**: packages that emit use `historytest.Main` as their `TestMain`
   so test runs never touch the real log.
-
-## Inbox state
-
-`internal/core/inbox` keeps the user's global piece order in
-`$MP_CONFIG_DIR/inbox.json` (default `~/.config/monkeypuzzle/inbox.json`,
-beside the user config): `order` (ranked `project/piece` keys), `notes`,
-`snoozed`, and a droppable per-key `cache` of the last forge lookup. Every
-read-modify-write goes through `inbox.Update`, which takes an advisory
-`flock` on `inbox.json.lock` (via the FS's `core.FileLocker`) and writes
-atomically by rename, so concurrent mp processes never lose an edit. Rows
-are assembled from the same sources every other verb uses — `registry` for
-projects, `piece.ListPieces` for worktrees/agents, `stack.IndexPRsByHead`
-for PRs — and urgency is derived on each read, never persisted. `List`
-prunes keys whose piece is gone and saves only when something changed.
 
 ## Testing Strategy
 

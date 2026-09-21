@@ -14,8 +14,6 @@ func TestAtomicNounVocabulary(t *testing.T) {
 		{"pieces", "list"},
 		{"stacks", "show"},
 		{"stack", "list"},
-		{"inboxes", "show"},
-		{"inbox", "list"},
 		{"prs", "create"},
 		{"pr", "list"},
 		{"prs", "show"},
@@ -51,7 +49,7 @@ func TestPieceNounCommandsReuseWorkflowFlags(t *testing.T) {
 
 func TestBareCollectionAtomsHaveReadDefaults(t *testing.T) {
 	registerAtomCommands()
-	for _, name := range []string{"branch", "piece", "stack", "inbox", "project", "agent", "history", "worktree"} {
+	for _, name := range []string{"branch", "piece", "stack", "project", "agent", "history", "worktree"} {
 		cmd, _, err := rootCmd.Find([]string{name})
 		if err != nil {
 			t.Fatalf("find %s: %v", name, err)

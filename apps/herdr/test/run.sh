@@ -139,47 +139,6 @@ else
 	fail "source helpers.sh" "could not source $SCRIPTS/helpers.sh"
 fi
 
-# Canned `mp inbox --json` output, already in mp's order: a ranked blocked
-# row with a PR and note, a working row with no PR, and a snoozed row (draft
-# PR, no agent) that mp has put last.
-canned_inbox_json() {
-	cat <<'JSON'
-{
-  "rows": [
-    { "key": "alpha/fix-login", "project": "alpha", "piece": "fix-login", "rank": 1, "branch": "fix-login", "parent": "main",
-      "worktree_path": "/wt/alpha/fix-login", "session_name": "mp/alpha/fix-login", "has_session": true,
-      "agent_status": "blocked", "agent_counts": { "blocked": 1 },
-      "pr": { "number": 12, "url": "https://github.com/o/alpha/pull/12", "state": "open", "draft": false },
-      "merged": false, "urgency": "blocked", "note": "waiting on review", "updated_at": "2026-09-09T11:42:00Z" },
-    { "key": "beta/dark-mode", "project": "beta", "piece": "dark-mode", "rank": 2, "branch": "feat/dark-mode", "parent": "main",
-      "worktree_path": "/wt/beta/dark-mode", "session_name": "mp/beta/dark-mode", "has_session": true,
-      "agent_status": "working", "agent_counts": { "working": 1 },
-      "merged": false, "urgency": "working", "updated_at": "2026-09-09T11:40:00Z" },
-    { "key": "alpha/spike", "project": "alpha", "piece": "spike", "rank": 3, "branch": "spike", "parent": "main",
-      "worktree_path": "/wt/alpha/spike", "session_name": "mp/alpha/spike", "has_session": false,
-      "agent_status": "", "agent_counts": null,
-      "pr": { "number": 7, "url": "https://github.com/o/alpha/pull/7", "state": "open", "draft": true },
-      "merged": false, "urgency": "idle", "snoozed_until": "2099-01-01T09:00:00Z", "updated_at": "2026-09-09T11:00:00Z" }
-  ]
-}
-JSON
-}
-
-# ---- Unit: inbox.sh build_inbox_rows ---------------------------------------
-# shellcheck source=../scripts/inbox.sh
-if source "$SCRIPTS/inbox.sh" 2>/dev/null; then
-	got="$(canned_inbox_json | build_inbox_rows)"
-	want="$(printf '%s\n' \
-		$'1   ⚠ blocked  alpha/fix-login  blocked  #12 open    waiting on review\talpha/fix-login\talpha\tfix-login\t/wt/alpha/fix-login\twaiting on review\thttps://github.com/o/alpha/pull/12' \
-		$'2     working  beta/dark-mode   working\tbeta/dark-mode\tbeta\tdark-mode\t/wt/beta/dark-mode\t\t' \
-		$'\e[2mzz    idle     alpha/spike               #7 draft\e[0m\talpha/spike\talpha\tspike\t/wt/alpha/spike\t\thttps://github.com/o/alpha/pull/7')"
-	assert_eq "inbox build_inbox_rows: rank/urgency/key/agent/PR/note cells, snoozed dimmed as zz" "$got" "$want"
-	assert_eq "inbox build_inbox_rows: empty inbox yields no rows" \
-		"$(echo '{"rows":[]}' | build_inbox_rows)" ""
-else
-	fail "source inbox.sh" "could not source $SCRIPTS/inbox.sh"
-fi
-
 # ---- Integration: open happy path ------------------------------------------
 integration_open() {
 	if ! have jq || ! have fzf; then
@@ -514,125 +473,6 @@ EOF
 }
 integration_blocked
 
-# ---- Integration: inbox picker hands off to `mp switch` --------------------
-integration_inbox() {
-	if ! have jq || ! have fzf; then
-		skip "inbox integration" "needs jq + fzf"
-		return
-	fi
-	local tmp bin log
-	tmp="$(mktemp -d)"
-	bin="$tmp/bin"
-	log="$tmp/mp.log"
-	mkdir -p "$bin"
-
-	cat >"$bin/mp" <<EOF
-#!/usr/bin/env bash
-case "\$1" in
-  inbox) cat "$tmp/inbox.json" ;;
-  switch) printf '%s\n' "\$*" > "$log" ;;
-  *) exit 2 ;;
-esac
-EOF
-	chmod +x "$bin/mp"
-	canned_inbox_json >"$tmp/inbox.json"
-
-	# `inbox.sh rows` is the reload target of the key bindings.
-	assert_eq "inbox rows mode: prints the row list for fzf reload" \
-		"$(PATH="$bin:$PATH" bash "$SCRIPTS/inbox.sh" rows | cut -f2 | tr '\n' ' ')" \
-		"alpha/fix-login beta/dark-mode alpha/spike "
-
-	PATH="$bin:$PATH" HERDR_ENV=1 MP_PLUGIN_FILTER="dark-mode" \
-		bash "$SCRIPTS/inbox.sh" >/dev/null 2>&1
-	assert_eq "inbox flow: selection calls mp switch --project --piece" \
-		"$(cat "$log" 2>/dev/null)" "switch --project beta --piece dark-mode"
-
-	rm -f "$log"
-	echo '{"rows":[]}' >"$tmp/inbox.json"
-	PATH="$bin:$PATH" HERDR_ENV=1 MP_PLUGIN_FILTER="dark-mode" \
-		bash "$SCRIPTS/inbox.sh" >/dev/null 2>&1
-	assert_eq "inbox flow: empty inbox switches nothing" "$(cat "$log" 2>/dev/null)" ""
-
-	rm -rf "$tmp"
-}
-integration_inbox
-
-# ---- Integration: inbox next/prev --------------------------------------------
-integration_step() {
-	local tmp bin mplog err rc
-	tmp="$(mktemp -d)"
-	bin="$tmp/bin"
-	mplog="$tmp/mp.log"
-	mkdir -p "$bin"
-
-	# mp switched: quiet, exit 0, run from the given cwd (mp resolves the
-	# current piece from it).
-	cat >"$bin/mp" <<EOF
-#!/usr/bin/env bash
-printf '%s %s\n' "\$*" "\$PWD" >"$mplog"
-[[ "\$1 \$2" == "inbox next" || "\$1 \$2" == "inbox prev" ]] || exit 2
-exit 0
-EOF
-	chmod +x "$bin/mp"
-
-	err="$(PATH="$bin:$PATH" bash "$SCRIPTS/step.sh" next "$tmp" 2>&1 1>/dev/null)"
-	rc=$?
-	assert_eq "step flow: next invokes mp inbox next from the cwd" \
-		"$(cat "$mplog" 2>/dev/null)" "inbox next $tmp"
-	assert_eq "step flow: silent exit 0 when mp switched" "$rc:$err" "0:"
-
-	rm -f "$mplog"
-	PATH="$bin:$PATH" bash "$SCRIPTS/step.sh" prev "$tmp" >/dev/null 2>&1
-	assert_eq "step flow: prev invokes mp inbox prev" \
-		"$(cut -d' ' -f1-2 "$mplog" 2>/dev/null)" "inbox prev"
-
-	# Only piece: soft — message on stderr, exit 0.
-	cat >"$bin/mp" <<EOF
-#!/usr/bin/env bash
-echo "alpha/fix-login is the only piece in the inbox; staying put" >&2
-exit 0
-EOF
-	err="$(PATH="$bin:$PATH" bash "$SCRIPTS/step.sh" next "$tmp" 2>&1 1>/dev/null)"
-	rc=$?
-	assert_eq "step flow: only-piece is soft (exit 0)" "$rc" "0"
-	assert_eq "step flow: relays the only-piece message" \
-		"$err" "monkeypuzzle: alpha/fix-login is the only piece in the inbox; staying put"
-
-	# A genuine failure exits non-zero so herdr's action log shows it.
-	cat >"$bin/mp" <<EOF
-#!/usr/bin/env bash
-echo "inbox: no pieces" >&2
-exit 1
-EOF
-	err="$(PATH="$bin:$PATH" bash "$SCRIPTS/step.sh" next "$tmp" 2>&1 1>/dev/null)"
-	rc=$?
-	assert_eq "step flow: genuine failure exits non-zero" "$rc" "1"
-	assert_eq "step flow: relays a genuine failure verbatim" "$err" "monkeypuzzle: inbox: no pieces"
-
-	# A bad direction never reaches mp.
-	rm -f "$mplog"
-	PATH="$bin:$PATH" bash "$SCRIPTS/step.sh" sideways "$tmp" >/dev/null 2>&1
-	assert_eq "step flow: rejects an unknown direction" "$(cat "$mplog" 2>/dev/null)" ""
-
-	rm -rf "$tmp"
-}
-integration_step
-
-# Verify the popup command uses the installed CLI's explicit selectors.
-integration_show() {
- local tmp actual
- tmp="$(mktemp -d)"
- cat >"$tmp/herdr" <<'EOF'
-#!/usr/bin/env bash
-printf '%s\n' "$@"
-EOF
- chmod +x "$tmp/herdr"
- actual="$(HERDR_BIN_PATH="$tmp/herdr" bash "$SCRIPTS/show.sh" inbox)"
- assert_eq "show: uses plugin and entrypoint selectors" "$actual" $'plugin\npane\nopen\n--plugin\nmonkeypuzzle\n--entrypoint\ninbox'
- rm -rf "$tmp"
-}
-integration_show
-
 # ---- Startup environment and failure propagation ----------------------------
 integration_startup() {
 	local tmp err rc
@@ -647,7 +487,7 @@ integration_startup() {
 	assert_eq "PATH: preserves an existing command override" \
 		"$(HOME="$tmp" PATH="$tmp/first:/usr/bin:/bin" bash -c 'source "$1"; setup_path; command -v mp' _ "$SCRIPTS/helpers.sh")" \
 		"$tmp/first/mp"
-	err="$(HERDR_ENV=1 MP_PLUGIN_BIN="$tmp/missing-mp" bash "$SCRIPTS/pane.sh" inbox </dev/null 2>&1)"
+	err="$(HERDR_ENV=1 MP_PLUGIN_BIN="$tmp/missing-mp" bash "$SCRIPTS/pane.sh" open </dev/null 2>&1)"
 	rc=$?
 	assert_eq "pane: missing dependency retains failure status" "$rc" 1
 	case "$err" in

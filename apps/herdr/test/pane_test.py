@@ -9,7 +9,7 @@ import tempfile
 import time
 
 scripts = Path(__file__).resolve().parent.parent / "scripts"
-for picker in ['open', 'create', 'adopt', 'inbox']:
+for picker in ['open', 'create', 'adopt']:
     with tempfile.TemporaryDirectory() as tmp:
         master, slave = pty.openpty()
         env = dict(os.environ, HERDR_ENV="1", MP_PLUGIN_BIN=f"{tmp}/missing-mp")

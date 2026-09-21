@@ -71,8 +71,8 @@ mp shell-init fish | source       # ~/.config/fish/config.fish
 The function runs mp with `MP_CWD_FILE` pointing at a temp file. Verbs that
 end with "you should now be in this directory" write it there, and the
 function `cd`s into it after mp exits. Those verbs are `switch`, `go`,
-`create`, `adopt`, `inbox next`/`prev`, `agent focus`, and `done`, `abandon`
-and `cleanup` when they remove the worktree you're standing in (you land in
+`create`, `adopt`, `agent focus`, and `done`, `abandon` and `cleanup` when they
+remove the worktree you're standing in (you land in
 the main repo). mp's stdout and exit code are unchanged, so pipes and scripts
 behave the same.
 
@@ -144,9 +144,9 @@ The companion plugin in [`apps/tmux`](https://github.com/jewell-lgtm/monkeypuzzl
 `prefix m` chord table: an `fzf` popup for switching between pieces and
 branches — or creating one by typing a name nothing matches (`prefix m p`), a
 paste-a-branch jump scoped to the current repo
-(`prefix m g`), piece creation (`prefix m c`), the inbox (`prefix m i`), agent
-focus (`prefix m a` / `m b`), and more. It reads state with `mp go --json` and
-`mp inbox --json` and hands the session work back to mp.
+(`prefix m g`), piece creation (`prefix m c`), agent focus (`prefix m a` /
+`m b`), and more. It reads state with `mp go --json` and hands the session work
+back to mp.
 
 #### Tmux 101
 
@@ -225,8 +225,6 @@ where mp holds data herdr doesn't:
 | `monkeypuzzle.open` | picker over every piece and project main mp knows about, **including pieces that have a worktree but no live workspace** — which herdr's own switcher cannot show; a typed name that matches no row creates that piece |
 | `monkeypuzzle.create` | pick a project, then name the piece or describe it as a prompt |
 | `monkeypuzzle.adopt` | adopt an existing local or remote branch as a piece |
-| `monkeypuzzle.inbox` | the ranked [inbox](/docs/workflow/#the-inbox), with rank, snooze and refresh in the picker |
-| `monkeypuzzle.next` / `.prev` | step to the piece after or before the one you're standing in |
 | `monkeypuzzle.blocked` | jump straight to the most urgent blocked agent, across every project |
 
 Bind them yourself — the plugin ships no default keys:
@@ -237,12 +235,6 @@ key = "prefix+m"
 type = "plugin_action"
 command = "monkeypuzzle.open"
 description = "monkeypuzzle: open piece"
-
-[[keys.command]]
-key = "prefix+i"
-type = "plugin_action"
-command = "monkeypuzzle.inbox"
-description = "monkeypuzzle: inbox"
 
 [[keys.command]]
 key = "prefix+u"
@@ -281,8 +273,7 @@ echo '{"name":"my-feature","skip_switch":true}' | mp create
   links `.claude/skills/managing-monkeypuzzle` at it for Claude Code, which does
   not read `.agents/skills/`. `mp skill create` regenerates both; `mp skill
   create --user` installs outside any project. `mp skill list` shows what mp
-  ships; `monkeypuzzle-inbox` covers the cross-project inbox and is worth
-  installing at `--user` scope.
+  ships.
 - **Agent status.** `mp integration install claude` merges hooks into the
   repo's `.claude/settings.json` that report each agent's state to mp
   (`blocked`, `working`, `done`, `idle`). With tmux or herdr configured, mp
@@ -291,8 +282,7 @@ echo '{"name":"my-feature","skip_switch":true}' | mp create
 - **Watching agents.** `mp agent list`, `mp agent summary` (a status-line
   segment), `mp agent focus --blocked` (jump to the agent waiting on you), and
   `mp wait` (block until no agent is working). Agent state also feeds the
-  [inbox](/docs/workflow/#the-inbox) and the `agent-blocked.sh` / `agent-done.sh`
-  hooks.
+  `agent-blocked.sh` / `agent-done.sh` hooks.
 - **MCP.** [`mp-mcp`](https://github.com/jewell-lgtm/monkeypuzzle/blob/main/apps/mp-mcp/README.md) exposes the workflow as MCP
   tools for assistants that speak MCP.
 

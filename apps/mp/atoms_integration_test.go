@@ -26,7 +26,6 @@ func TestCLI_AtomicNounAliasesAndNoTTYDefaults(t *testing.T) {
 		{"pieces", "show", "noun-piece", "--json"},
 		{"piece", "list", "--json"},
 		{"stacks", "show", "--json"},
-		{"inboxes", "list", "--json"},
 		{"projects", "--json"},
 		{"agents", "--json"},
 	} {

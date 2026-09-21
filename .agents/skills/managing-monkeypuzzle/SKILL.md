@@ -1,6 +1,6 @@
 ---
 name: managing-monkeypuzzle
-description: Drives the mp CLI, a worktree-per-piece git flow with lifecycle hooks. Use when working in a .monkeypuzzle project: create pieces, switch between them, open draft PRs/MRs, flip them ready, merge and clean up.
+description: Drives the mp CLI — worktree-per-piece git-flow with lifecycle hooks. Use when working in a .monkeypuzzle project: create pieces, switch between them, open draft PRs/MRs, flip them ready, merge and clean up.
 ---
 
 # mp CLI
@@ -23,8 +23,8 @@ echo '{"prompt":"add dark mode"}' | mp create
 mp list
 echo '{"flat":true}' | mp list
 
-# Switch to anything by name: a piece, a branch (adopted on the fly), or a
-# brand-new piece with "create":true. Project defaults to the current repo.
+# Switch to anything by name: a piece, a branch (adopted on the fly), or —
+# with "create":true — a brand-new piece. Project defaults to the current repo.
 echo '{"target":"my-feature"}' | mp switch
 echo '{"target":"feat/new-thing","create":true}' | mp switch
 mp switch feat/new-thing --create
@@ -74,21 +74,13 @@ mp stack undo                        # restore every branch to the pre-sync snap
 echo '{}' | mp pr create
 echo '{"draft":true,"title":"WIP: ..."}' | mp pr create
 
-# Flip a draft to ready-for-review. Its own command; mp never flips one itself.
+# Flip a draft to ready-for-review (always a separate step — never auto)
 mp pr ready
 ```
 
 Draft creation fires `before-pr-create.sh` / `after-pr-create.sh`.
 Ready-flip fires `before-pr-ready.sh` / `after-pr-ready.sh`.
 Both pass `MP_PR_NUMBER`, `MP_PR_URL`, `MP_PR_BASE_BRANCH` in env.
-
-**mp does not own the review gate.** Ready is a separate command so that
-whatever a project requires before review can happen between `pr create` and
-`pr ready`: a human's approval, a passing reviewer agent, green CI, two agents
-from different providers, or nothing at all. What that gate is belongs to the
-project's own workflow. A project that wants it enforced rather than remembered
-puts the check in `before-pr-ready.sh`, which aborts the flip on a non-zero
-exit.
 
 ## Hooks
 
@@ -105,17 +97,16 @@ Drop executable scripts in `.monkeypuzzle/hooks/`:
 
 Piece basics always set: `MP_PIECE_NAME`, `MP_WORKTREE_PATH`, `MP_REPO_ROOT`.
 
-A non-zero exit aborts the calling operation. The `after-*` hooks warn instead,
-since their change already happened.
+Non-zero exit aborts the calling operation, except for `after-*` hooks which warn but don't fail (the side-effect already happened).
 
-## Init and config
+## Init & Config
 
 ```bash
 # One-time per repo
 echo '{"name":"project","pr_provider":"github"}' | mp init
 # pr_provider: github | gitlab
 
-# User-level multiplexer choice (takes args, not stdin)
+# User-level multiplexer choice (uses args, not stdin)
 mp config get multiplexer
 mp config set multiplexer tmux   # tmux, zellij, cmux, or none
 
@@ -130,48 +121,60 @@ The commands above act on the repo you are standing in. These span every
 registered project and work from anywhere:
 
 ```bash
-mp inbox --json                      # every piece in flight, ranked
+mp list --all --json                 # every piece in flight
+mp go --json                         # switch across every project
 mp agent list --json --all           # live agents across all projects
 mp history --json --event 'pr.*' --since 24h
 mp project list --json               # what mp knows about
-mp go --json                         # switch across every project
 ```
 
-`mp wait --timeout 5m` blocks until no agent is working. It works per repo, so
-it fails outside a git repo and only sees the pieces of the one you are in.
-
-The inbox has its own commands for rank, notes, snooze, and the piece `id` an
-external system keys on. Those live in the `monkeypuzzle-inbox` skill. Use it
-rather than re-deriving the JSON shape here.
+`mp wait --timeout 5m` blocks until no agent is working, but it is per-repo,
+not cross-project: it fails outside a git repo and only sees the pieces of the
+one you are in.
 
 ## Remote projects
 
 `--host`, `--dir` and `--project` go **before** the verb. `--host` proxies the
-whole command over ssh. `--project` proxies when that project is registered
-with a host, and otherwise runs the command in the project's local path. mp
-rejects `--dir` unless you pass `--host` or `--project` with it.
+whole command over ssh. `--project` proxies only when that project is
+registered with a host, and otherwise just runs it in the project's local
+path. `--dir` is rejected without one of the other two.
 
 ```bash
 mp --host build-box status
-mp --project api inbox --json        # proxied if that project has a host
+mp --project api list --json         # proxied if that project has a host
 ```
 
 ## Piece identity
 
 Every piece has an `id` that outlives its name, branch and worktree path.
 `mp create --json` returns it, and `mp piece show --ensure-id` mints one for a
-piece that predates ids. Record the `id` when something outside mp needs to
-refer back to a piece, since `project/piece` changes with a rename.
+piece that predates ids. Record that, not `project/piece`, when something
+outside mp needs to refer back to a piece.
+
+A piece created before ids existed reports no `id`. Reads never mint one,
+since writing metadata dirties the worktree and would make `mp cleanup`
+refuse the piece. Mint one explicitly:
+
+```bash
+mp --project api piece show --piece fix-auth --ensure-id --json | jq -r .id
+```
+
+`--piece` takes a bare piece name against the repo you are standing in (or
+the leading `--project`); it rejects a `project/piece` key. Split that form
+yourself rather than passing it whole.
+
+`mp history` events carry `piece_id` alongside `project`/`piece`, so a
+consumer can follow a piece across a rename. Useful events: `piece.created`,
+`piece.updated`, `piece.merged`, `piece.done`, `piece.abandoned`,
+`pr.created`, `pr.ready`, `agent.blocked`, `agent.done`.
 
 ## Typical flow
 
-1. `mp create` makes the worktree and session, then fires `on-piece-create.sh`
+1. `mp create` — worktree + session + on-piece-create hook
 2. Work in the worktree, commit normally
-3. `mp pr create --draft` pushes, opens the draft PR/MR, fires the pr-create hooks
-4. Whatever the project's gate before review is, run it here
-5. `mp pr ready` flips it to ready and fires the pr-ready hooks
-6. After merge, `mp done` or `mp cleanup`
+3. `mp pr create --draft` — push, open draft PR/MR, fires pr-create hooks
+4. Human reviews
+5. `mp pr ready` — flip to ready (separate command, never auto), fires pr-ready hooks
+6. After merge: `mp done` or `mp cleanup`
 
-Step 4 belongs to the project. mp guarantees only that step 5 never fires on
-its own. Check the project's workflow docs and `.monkeypuzzle/hooks/` for the
-gate before you flip a draft.
+Draft → ready is always a manual step. Don't call `mp pr ready` unless the human has approved the flip.

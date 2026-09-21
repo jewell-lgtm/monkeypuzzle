@@ -62,7 +62,7 @@ mp shell-init fish | source       # ~/.config/fish/config.fish
 The function runs `mp` with `MP_CWD_FILE` set to a temp file and `cd`s to the
 directory mp writes there. It also exports `MP_SHELL_INIT=1`, which
 [`mp doctor`](#mp-doctor) checks. Verbs that write the file: `switch`, `go`,
-`create`, `adopt`, `inbox next`/`prev`, `agent focus`, and
+`create`, `adopt`, `agent focus`, and
 `done`/`abandon`/`cleanup` when they remove the worktree you're standing in.
 mp's stdout and exit code are unchanged.
 
@@ -116,9 +116,9 @@ mp completion powershell | Out-String | Invoke-Expression
 ## Atomic noun commands
 
 mp exposes its object model as regular noun commands. Singular and plural are
-equivalent: `branch`/`branches`, `worktree`/`worktrees`, `piece`/`pieces`,
-`stack`/`stacks`, and `inbox`/`inboxes`. The established flat piece verbs remain
-supported as concise workflow entry points.
+equivalent: `branch`/`branches`, `worktree`/`worktrees`, `piece`/`pieces`, and
+`stack`/`stacks`. The established flat piece verbs remain supported as concise
+workflow entry points.
 
 See [Atoms and workflows](atoms.md) for ownership boundaries, invariants, and a
 table showing which atoms every workflow composes.
@@ -175,15 +175,17 @@ mp pr create
 mp pr ready
 ```
 
-`stack status` and `inbox --refresh` are the workflows that reconcile those
-records with live forge state.
+`stack status` is the workflow that reconciles those records with live forge
+state.
 
 ### `mp worktree` / `mp worktrees`
 
 Inspect storage used by the current project's piece worktrees. The main checkout
 and unmanaged worktrees are included for context, but unmanaged rows are only
-adoption candidates. JSON rows include `size_bytes`, `in_inbox`, lifecycle and
-agent state, and a recorded PR number when present.
+adoption candidates. JSON rows include `size_bytes`, `managed`, lifecycle and
+agent state, and a recorded PR number when present. Legacy rows also emit
+`in_inbox` when the checkout is mp-managed (same meaning as `managed` on that
+row).
 
 ```bash
 mp worktrees                         # terminal picker; non-TTY JSON list
@@ -203,22 +205,18 @@ delete anything. `worktree list` is always a direct list.
 
 Deletion is only available for an mp-managed piece. It keeps the branch unless
 `--delete-branch` is explicit, refuses a dirty worktree unless `--force` is
-explicit, and routes through piece abandonment so children and inbox state are
+explicit, and routes through piece abandonment so child lineage and metadata are
 updated. The TUI offers `piece done` for merged rows. Unmanaged, main, and the
 checkout containing the current process are never deletion targets.
 
 For a disk-space cull, run bare `mp worktrees`, sort your decision from the size
 and lifecycle columns, then finish merged work or explicitly abandon work you no
-longer need. Since the inbox is a projection over pieces, either lifecycle
-transition removes that row from the next `mp inbox`; inspect-only leaves its
-rank, note, snooze, PR, and agent context untouched.
+longer need. Inspect-only leaves PR and agent context untouched.
 
 ### Completed collection vocabulary
 
 - `mp stack` accepts the plural `mp stacks`; `show`, `list`, and `ls` alias
   `stack status`.
-- `mp inbox` accepts the plural `mp inboxes`; `inbox list`, `show`, and `ls`
-  run the same listing as bare `mp inbox`.
 - `mp project` already accepts `projects` and `proj`; its `list` accepts `ls`
   and `status`. It also accepts `add`/`create`, `remove`/`delete`, and
   `list`/`show` as equivalent CRUD vocabulary.
@@ -658,119 +656,6 @@ mp list --all     # across all registered projects
 ```
 
 Pieces placed on a box (`mp create --remote`, see [Remote development](remote-development.md)) are listed too: `host` names the box, `worktree_path` is a path **on the box**, and `state` is `unknown` until refreshed or `pending` while the remote create is in flight. Local pieces carry neither field.
-
----
-
-## mp inbox
-
-Your pieces across **every** registered project as one ordered list. Each row
-is a piece (`project/piece`) with the live state mp already knows — agent
-status, PR state, whether it merged — plus your own rank and note. Every
-picker and dashboard is a view over `mp inbox --json`.
-
-### Usage
-
-```bash
-mp inbox                     # table on a terminal (stderr); JSON when piped
-mp inbox --json | jq .rows   # {"rows":[…]}
-mp inbox --sort urgency      # blocked first, then review/working/idle/merged
-mp inbox --refresh           # re-fetch PR state instead of the 2-minute cache
-```
-
-Works from any directory. An init'd repo you are standing in is included
-even if it was never registered.
-
-### Ordering
-
-1. Rows you have ranked (the `order` list in the state file), in that order.
-2. Everything else by urgency — `blocked` > `review` > `working` > `idle` >
-   `merged` — newest first.
-3. Snoozed rows (`snoozed_until` in the future) sit at the bottom of every
-   sort mode; they keep their urgency.
-
-`--sort urgency` puts urgency ahead of your order. Urgency is derived, never
-stored: an agent waiting on you is `blocked`; an open non-draft PR or a
-finished agent is `review`; a running agent is `working`; a merged PR is
-`merged`; anything else is `idle`.
-
-### Flags
-
-| Flag        | Description                                             | Default |
-| ----------- | ------------------------------------------------------- | ------- |
-| `--sort`    | `rank` (your order, urgency breaks ties) or `urgency`   | `rank`  |
-| `--refresh` | Bypass the per-project PR cache                         | `false` |
-| `--json`    | Output JSON even on a terminal                          | `false` |
-
-### Output
-
-```json
-{
-  "rows": [
-    {
-      "key": "api/fix-auth", "project": "api", "piece": "fix-auth", "rank": 1,
-      "branch": "fix-auth", "parent": "main",
-      "worktree_path": "/code/api/.monkeypuzzle/pieces/fix-auth",
-      "session_name": "mp/api/fix-auth", "has_session": true,
-      "agent_status": "blocked", "agent_counts": { "blocked": 1 },
-      "pr": { "number": 12, "url": "https://github.com/o/api/pull/12", "state": "open", "draft": true },
-      "merged": false, "urgency": "blocked",
-      "note": "waiting on review", "snoozed_until": "2026-09-10T09:00:00Z",
-      "snoozed": true,
-      "updated_at": "2026-09-09T11:42:00Z"
-    }
-  ]
-}
-```
-
-`host`, `pr`, `note` and `snoozed_until` are omitted when empty. `snoozed` is
-`snoozed_until` evaluated at list time, so pickers never compare timestamps.
-
-### State file
-
-`$MP_CONFIG_DIR/inbox.json` (default `~/.config/monkeypuzzle/inbox.json`),
-next to the user config:
-
-```json
-{
-  "version": 1,
-  "order": ["monkeypuzzle/inbox-list", "api/fix-auth"],
-  "notes": { "api/fix-auth": "waiting on review" },
-  "snoozed": { "api/fix-auth": "2026-09-10T09:00:00Z" },
-  "cache": { "api/fix-auth": { "pr": { "number": 12, "…": "…" }, "fetched_at": "…" } }
-}
-```
-
-Keys are `project/piece`. Every list drops keys whose piece no longer exists
-and refreshes stale `cache` entries (one forge call per project, reused for
-120s). A forge that is unreachable warns on stderr and leaves `pr` empty; it
-never fails the list.
-
-### Subcommands
-
-Every subcommand takes flags or stdin JSON (`--schema` prints the shape),
-writes JSON to stdout and a one-liner to stderr on a terminal, and records a
-history event (`inbox.moved`, `inbox.noted`, `inbox.snoozed`).
-
-| Subcommand                                   | What it does                                                                                                     |
-| -------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `mp inbox move PIECE --top\|--bottom\|--up [N]\|--down [N]\|--before PIECE\|--after PIECE` | Re-rank; exactly one placement. The first move pins every row's current rank. Prints `{"key","rank","from_rank"}`. |
-| `mp inbox note PIECE [text]`                 | Set the note; empty text or `--clear` removes it. Prints `{"key","note"}`.                                       |
-| `mp inbox snooze PIECE --for 2d\|--until RFC3339\|--clear` | Park the row at the bottom (next/prev skip it) until then. Prints `{"key","snoozed_until"}` (`null` after `--clear`). |
-| `mp inbox next` / `mp inbox prev`            | Switch to the row after/before the piece you stand in, wrapping; snoozed rows skipped; `--sort urgency` respected. Same switch as `mp switch` (multiplexer, else the path on stdout); `--json` prints the switch result. Outside a piece `next` is rank 1, `prev` the last row. |
-| `mp inbox refresh`                           | `mp inbox --refresh`.                                                                                            |
-
-`PIECE` is `project/piece`, or a bare piece name: inside a repo that means
-this project's piece first; elsewhere it must be unique across projects, or
-the command fails naming the candidates.
-
-```bash
-mp inbox move fix-auth --top             # inside api/: api/fix-auth
-mp inbox move web/fix-auth --after nav   # explicit project; nav is unique
-mp inbox note fix-auth "waiting on review"
-mp inbox snooze fix-auth --for 2d
-echo '{"piece":"api/fix-auth","up":2}' | mp inbox move
-cd "$(mp inbox next)"                    # outside a multiplexer
-```
 
 ---
 
@@ -1726,7 +1611,7 @@ outside mp needs to refer back to a piece.
 mp piece show --json | jq -r .id
 mp piece show --ensure-id --json     # mint one for a piece that predates ids
 mp create --name auth --json | jq -r .id
-mp inbox --json | jq -r '.rows[] | "\(.id) \(.key)"'
+mp list --all --flat --json | jq -r '.projects[] | .name as $p | .pieces[]? | "\(.id) \($p)/\(.name)"'
 mp history --json --event piece.merged | jq -r .piece_id
 ```
 

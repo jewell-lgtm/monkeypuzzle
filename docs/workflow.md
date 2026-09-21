@@ -7,8 +7,7 @@ Monkeypuzzle gives each change its own branch, its own git worktree and, when yo
 The formal object model and the distinction between atomic noun commands and
 composed workflows lives in [Atoms and workflows](atoms.md). In short: a branch
 is a layer recorded by mp; a piece adds a worktree and lifecycle state; a stack
-records base→head relationships; and the inbox is a user-owned projection over
-pieces.
+records base→head relationships.
 
 ### Pieces
 
@@ -21,7 +20,7 @@ A **piece** is one change. Each piece:
 
 Git still owns refs and linked checkouts, and optional terminal integrations
 still own their sessions. mp owns neither abstraction: it owns the piece,
-lineage, inbox state, and lifecycle spanning them. See [Integrations](integrations.md#multiplexers).
+lineage, and lifecycle spanning them. See [Integrations](integrations.md#multiplexers).
 
 ### Why worktrees?
 
@@ -131,25 +130,19 @@ mp open feature-a                     # open the worktree in your editor
 
 Without a multiplexer, `mp switch` and `mp create` print the worktree path. Load [`mp shell-init`](integrations.md#follow-mp-into-the-worktree-mp-shell-init) and your shell follows mp into the worktree; without it, `cd "$(mp switch feature-a)"` does the same. [`mp open`](integrations.md#editor-and-terminal-mp-open) hands the worktree to your editor or a new terminal window. With a multiplexer configured, `mp switch` attaches the piece's session instead; see [Integrations](integrations.md#multiplexers).
 
-### The inbox
+### Across projects
 
-Pieces pile up across repositories, so mp keeps one list of them, in your order:
-
-```bash
-mp inbox                     # every piece in every registered project
-mp inbox --sort urgency      # what needs you first: blocked agents, then PRs in review
-```
-
-Rows you have ranked come first, in your order. mp breaks ties among the rest with what it already knows (an open PR, a merged branch, an agent waiting on you), and `--sort urgency` puts that ahead of your order. Snoozed rows drop to the bottom until their time comes. The tmux and herdr pickers and the dashboard are all views over `mp inbox --json`, so whatever you rearrange in one shows up in the others. See [`mp inbox`](./commands.md#mp-inbox).
-
-Rearrange it from anywhere (`mp inbox move fix-auth --top`, `mp inbox note fix-auth "waiting on review"`, `mp inbox snooze fix-auth --for 2d`) and step through it:
+Registered projects are addressable from anywhere:
 
 ```bash
-mp inbox next                # switch to the piece after this one (wraps)
-mp inbox prev                # and back
+mp go                                 # picker across every registered project
+mp list --all                         # every piece in every registered project
+mp agent list --all                   # live agents across all projects
+mp history --json --since 24h         # lifecycle events on this machine
 ```
 
-Each step is the same switch `mp switch` performs, so the shell wrapper follows it and `cd "$(mp inbox next)"` works too.
+The tmux and herdr plugins read `mp go --json` for their cross-project
+pickers. See [`mp go`](commands.md#mp-go).
 
 ## Hooks
 

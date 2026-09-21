@@ -273,8 +273,8 @@ func worktreeActionOptions(target worktreecmd.Info) []chooser.Option {
 		)
 	}
 	return append(options,
-		chooser.Option{Label: "Abandon piece and keep branch", Desc: "Remove it from the inbox and reclaim its worktree", Value: "delete"},
-		chooser.Option{Label: "Abandon piece and branch", Desc: "Remove it from the inbox and apply branch safety checks", Value: "delete-branch"},
+		chooser.Option{Label: "Abandon piece and keep branch", Desc: "Drop managed-piece state and reclaim its worktree", Value: "delete"},
+		chooser.Option{Label: "Abandon piece and branch", Desc: "Drop managed-piece state and apply branch safety checks", Value: "delete-branch"},
 		chooser.Option{Label: "Force-abandon piece", Desc: "Discard uncommitted changes; keep branch", Value: "force"},
 	)
 }

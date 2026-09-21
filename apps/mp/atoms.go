@@ -1,7 +1,6 @@
 package main
 
 import (
-	"github.com/jewell-lgtm/monkeypuzzle/internal/core/inbox"
 	"github.com/spf13/cobra"
 )
 
@@ -37,7 +36,7 @@ Optional terminal integrations may follow it. Flat workflow verbs such as 'mp cr
 	pieceCmd.AddCommand(
 		atomCommand(pieceStatusCmd, "show [piece]", []string{"status"}),
 		atomCommand(pieceListCmd, "list", []string{"ls"}),
-		atomCommand(pieceCreateCmd, "create", []string{"new"}),
+		atomCommand(pieceCreateCmd, "create", nil),
 		atomCommand(pieceAdoptCmd, "adopt [branch]", nil),
 		atomCommand(pieceSyncCmd, "sync", nil),
 		atomCommand(pieceUpdateCmd, "update", nil),
@@ -46,8 +45,8 @@ Optional terminal integrations may follow it. Flat workflow verbs such as 'mp cr
 		atomCommand(pieceAbandonCmd, "abandon [piece]", nil),
 	)
 
-	// Stack and inbox were already noun commands. Complete their vocabulary and
-	// plural aliases without changing their established default behaviour.
+	// Stack was already a noun command. Complete its vocabulary and plural
+	// aliases without changing its established default behaviour.
 	stackCmd.Aliases = appendAlias(stackCmd.Aliases, "stacks")
 	stackStatusCmd.Aliases = appendAlias(stackStatusCmd.Aliases, "show", "list", "ls")
 	stackCmd.Args = cobra.NoArgs
@@ -56,7 +55,6 @@ Optional terminal integrations may follow it. Flat workflow verbs such as 'mp cr
 	stackCmd.Flags().BoolVar(&flagStackFromRemote, "from-remote", false, "Rebuild local lineage from open PR/MR bases")
 	stackCmd.Flags().BoolVar(&flagStackApplyBases, "apply-bases", false, "Edit PR/MR bases on the forge to match local lineage")
 	stackCmd.Flags().BoolVar(&flagStackStatusJSON, "json", false, "Output JSON even on a terminal")
-	inboxCmd.Aliases = appendAlias(inboxCmd.Aliases, "inboxes")
 	prCmd.Aliases = appendAlias(prCmd.Aliases, "prs")
 	agentCmd.Aliases = appendAlias(agentCmd.Aliases, "agents")
 	agentReadCmd.Aliases = appendAlias(agentReadCmd.Aliases, "show")
@@ -72,18 +70,6 @@ Optional terminal integrations may follow it. Flat workflow verbs such as 'mp cr
 	agentCmd.RunE = runAgentList
 	agentCmd.Flags().BoolVar(&flagAgentListJSON, "json", false, "Output JSON instead of the table")
 	agentCmd.Flags().BoolVar(&flagAgentListAll, "all", false, "Span all registered projects (implied outside a git repo)")
-	inboxListCmd := &cobra.Command{
-		Use:     "list",
-		Aliases: []string{"show", "ls"},
-		Short:   "List the inbox",
-		Args:    cobra.NoArgs,
-		RunE:    runInbox,
-	}
-	inboxListCmd.Flags().StringVar(&flagInboxSort, "sort", inbox.SortRank, "Order: rank (your order, urgency breaks ties) or urgency")
-	inboxListCmd.Flags().BoolVar(&flagInboxRefresh, "refresh", false, "Re-fetch PR state instead of using the cache")
-	inboxListCmd.Flags().BoolVar(&flagInboxJSON, "json", false, "Output JSON even on a terminal")
-	_ = inboxListCmd.RegisterFlagCompletionFunc("sort", cobra.FixedCompletions([]string{inbox.SortRank, inbox.SortUrgency}, cobra.ShellCompDirectiveNoFileComp))
-	inboxCmd.AddCommand(inboxListCmd)
 
 	rootCmd.AddCommand(pieceCmd)
 }
