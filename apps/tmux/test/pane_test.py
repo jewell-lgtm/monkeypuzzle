@@ -9,7 +9,7 @@ import tempfile
 import time
 
 scripts = Path(__file__).resolve().parent.parent / "scripts"
-for picker in ['switch.sh', 'create.sh', 'branch.sh', 'agents.sh', 'inbox.sh']:
+for picker in ['switch.sh', 'create.sh', 'branch.sh', 'agents.sh']:
     with tempfile.TemporaryDirectory() as tmp:
         master, slave = pty.openpty()
         env = dict(os.environ, TMUX="test", MP_PLUGIN_BIN=f"{tmp}/missing-mp")

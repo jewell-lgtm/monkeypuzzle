@@ -3,7 +3,7 @@
 # child also catches failures from exec mp, set -e, and dependency checks.
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 case "${1:-}" in
-	switch.sh|create.sh|branch.sh|agents.sh|inbox.sh) ;;
+	switch.sh|create.sh|branch.sh|agents.sh) ;;
 	*) printf 'Unknown picker: %s\n' "${1:-}" >&2; exit 2 ;;
 esac
 bash "$DIR/$1"

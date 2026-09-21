@@ -61,7 +61,7 @@ func TestCLI_TrackingOptInAndRoundTrip(t *testing.T) {
 	if err != nil || json.Unmarshal([]byte(settleSchemaOut), &settleSchema) != nil || settleSchema["piece"] == "" {
 		t.Fatalf("settle schema: %v\n%s", err, settleSchemaOut)
 	}
-	for _, args := range [][]string{{"create", "--name", "feature", "--skip-switch"}, {"list", "--json"}, {"status", "--json"}, {"inbox", "--json"}, {"tracking", "--help"}} {
+	for _, args := range [][]string{{"create", "--name", "feature", "--skip-switch"}, {"list", "--json"}, {"status", "--json"}, {"tracking", "--help"}} {
 		if out, stderr, err := env.run(args...); err != nil {
 			t.Fatalf("%v: %v\n%s\n%s", args, err, out, stderr)
 		}

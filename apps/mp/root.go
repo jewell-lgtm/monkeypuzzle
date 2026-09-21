@@ -45,7 +45,7 @@ func organizeRootHelp() {
 			"pr": "workflow", "merge": "workflow", "done": "workflow",
 			"abandon": "workflow", "piece": "workflow", "stack": "workflow", "update": "workflow",
 			"switch": "navigate", "open": "navigate", "go": "navigate",
-			"branch": "navigate", "worktree": "navigate", "list": "navigate", "status": "navigate", "inbox": "navigate",
+			"branch": "navigate", "worktree": "navigate", "list": "navigate", "status": "navigate",
 			"history": "navigate",
 			"agent":   "collaborate", "wait": "collaborate", "tracking": "collaborate",
 			"settle": "collaborate",

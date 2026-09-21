@@ -121,20 +121,16 @@ The commands above act on the repo you are standing in. These span every
 registered project and work from anywhere:
 
 ```bash
-mp inbox --json                      # every piece in flight, ranked
+mp list --all --json                 # every piece in flight
+mp go --json                         # switch across every project
 mp agent list --json --all           # live agents across all projects
 mp history --json --event 'pr.*' --since 24h
 mp project list --json               # what mp knows about
-mp go --json                         # switch across every project
 ```
 
 `mp wait --timeout 5m` blocks until no agent is working, but it is per-repo,
 not cross-project: it fails outside a git repo and only sees the pieces of the
 one you are in.
-
-The inbox has its own surface — rank, notes, snooze, and the piece `id` an
-external system keys on. That is the `monkeypuzzle-inbox` skill; use it rather
-than re-deriving the JSON shape here.
 
 ## Remote projects
 
@@ -145,7 +141,7 @@ path. `--dir` is rejected without one of the other two.
 
 ```bash
 mp --host build-box status
-mp --project api inbox --json        # proxied if that project has a host
+mp --project api list --json         # proxied if that project has a host
 ```
 
 ## Piece identity
@@ -154,6 +150,23 @@ Every piece has an `id` that outlives its name, branch and worktree path.
 `mp create --json` returns it, and `mp piece show --ensure-id` mints one for a
 piece that predates ids. Record that, not `project/piece`, when something
 outside mp needs to refer back to a piece.
+
+A piece created before ids existed reports no `id`. Reads never mint one,
+since writing metadata dirties the worktree and would make `mp cleanup`
+refuse the piece. Mint one explicitly:
+
+```bash
+mp --project api piece show --piece fix-auth --ensure-id --json | jq -r .id
+```
+
+`--piece` takes a bare piece name against the repo you are standing in (or
+the leading `--project`); it rejects a `project/piece` key. Split that form
+yourself rather than passing it whole.
+
+`mp history` events carry `piece_id` alongside `project`/`piece`, so a
+consumer can follow a piece across a rename. Useful events: `piece.created`,
+`piece.updated`, `piece.merged`, `piece.done`, `piece.abandoned`,
+`pr.created`, `pr.ready`, `agent.blocked`, `agent.done`.
 
 ## Typical flow
 

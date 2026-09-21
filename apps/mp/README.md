@@ -11,7 +11,7 @@ mode.
 
 MIT. Build with `make build` (→ `bin/mp`). Fuller docs: [root README](../../README.md) and [docs/](../../docs).
 
-The formal noun surface (`branch`, `worktree`, `piece`, `stack`, `inbox`, and
+The formal noun surface (`branch`, `worktree`, `piece`, `stack`, and
 their plural aliases) and the workflows composed from it are specified in
 [Atoms and workflows](../../docs/atoms.md).
 

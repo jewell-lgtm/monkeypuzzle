@@ -27,8 +27,6 @@ And with `mp config set multiplexer herdr`, `mp agent list` / `mp wait` /
 | `create`                     | Popup: pick a project, name the piece (or leave blank and describe it as a prompt) → `mp create`. `ctrl-o` in the `open` picker with nothing typed lands here. |
 | `adopt`                      | Popup picker over adoptable local/remote branches → `mp switch --branch` adopts one as a piece. |
 | `blocked`                    | No popup: `mp agent focus --blocked --all` jumps straight to the most urgent blocked agent across every registered project. |
-| `inbox`                      | Popup picker over `mp inbox --json`: every piece across every project — rank, urgency, `project/piece`, agent status, PR, note — in mp's order (snoozed rows last, dimmed), with the git status/log preview plus note and PR URL. Enter → `mp switch`; `ctrl-k`/`ctrl-j` move the row up/down, `ctrl-t` to the top, `ctrl-s` snoozes 2h, `ctrl-u` un-snoozes, `ctrl-r` refreshes PR state — each one `mp inbox …` verb, then a reload. |
-| `next` / `prev`              | No popup: `mp inbox next` / `prev` switches to the piece after/before the one you stand in (wrapping; snoozed rows skipped). mp's stderr — "… is the only piece in the inbox; staying put" — lands in the action log. |
 
 The `open` picker is also how you start a piece: whatever you type is a
 name as much as a filter, so `alpha/new-thing` — or a bare `new-thing` from
@@ -102,23 +100,11 @@ key = "prefix+u"
 type = "plugin_action"
 command = "monkeypuzzle.blocked"
 description = "monkeypuzzle: jump to blocked agent"
-
-[[keys.command]]
-key = "prefix+i"
-type = "plugin_action"
-command = "monkeypuzzle.inbox"
-description = "monkeypuzzle: inbox"
-
-[[keys.command]]
-key = "prefix+f"
-type = "plugin_action"
-command = "monkeypuzzle.next"
-description = "monkeypuzzle: next piece in the inbox"
 ```
 
 The examples preserve herdr’s sidebar (`prefix+b`) and tab navigation
-(`prefix+c`, `prefix+n`). Use `prefix+a` for `monkeypuzzle.create`,
-`prefix+u` for blocked agents, and `prefix+f` for the next piece.
+(`prefix+c`, `prefix+n`). Use `prefix+a` for `monkeypuzzle.create` and
+`prefix+u` for blocked agents.
 
 ## Hook coexistence
 
