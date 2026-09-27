@@ -22,6 +22,14 @@ func page(title string, body ...g.Node) g.Node {
 		Head: g.Group{
 			Link(Rel("stylesheet"), Href("/static/app.css")),
 			Script(Src("/static/alpine.min.js"), Defer()),
+			Script(Src("/static/analytics.js"), Defer()),
+			Script(Src("https://analytics.wire.mattjewell.co.uk/script.js"), Defer(),
+				g.Attr("data-website-id", "6d751252-3af7-4fee-9e74-152a8d2704a4"),
+				g.Attr("data-domains", "monkeypuzzle.app"),
+				g.Attr("data-before-send", "sanitizeAnalytics"),
+				g.Attr("data-exclude-search", "true"),
+				g.Attr("data-exclude-hash", "true"),
+				g.Attr("data-do-not-track", "true")),
 		},
 		Body: g.Group(body),
 	})
